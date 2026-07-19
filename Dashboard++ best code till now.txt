@@ -1,0 +1,2393 @@
+#include <Arduino.h>
+#include <SPI.h>
+#include <algorithm>
+#include <utility>
+
+#define LGFX_USE_V1
+#include <LovyanGFX.hpp> // Libreria LovyanGFX Nativa
+
+#include <TinyGPS++.h>
+#include <HardwareSerial.h>
+#include <Preferences.h> 
+#include <cmath> 
+#include <esp_sleep.h> 
+
+#include "DS_DIGIT15pt7b.h"
+#include "DS_DIGIT50pt7b.h"
+#include "Conthrax_SemiBold4pt7b.h"
+#include "Conthrax_SemiBold7pt7b.h"
+#include "Conthrax_SemiBold12pt7b.h"
+
+// =========================================================================
+// SEZIONE CONFIGURAZIONE UTENTE
+// =========================================================================
+
+// --- CONFIGURAZIONE AMBIENTE E ROTAZIONE DISPLAY ---
+constexpr bool IS_WOKWI_SIMULATOR     = true; 
+
+// Gestione rotazione e specchiamento
+constexpr int BIG_DISPLAY_ROTATION   = 5; // 5 = Landscape non-specchiato su Wokwi (1 su hardware reale)
+constexpr int SMALL_DISPLAY_ROTATION = 4; // 4 = Portrait non-specchiato su Wokwi (0 su hardware reale)
+
+// --- FIRME PERSONALIZZATE ---
+const char* SPLASH_SIGNATURE          = "by @ale.finot";              // Firma schermata di avvio
+const char* REBOOT_SIGNATURE          = "Dashboard++ by @ale.finot"; // Firma schermata di riavvio
+const char* DASHBOARD_SIGNATURE       = "Dashboard++ by @ale.finot"; // Firma schermata principale
+
+constexpr int BIG_CENTER_X            = 160;     
+constexpr int BIG_CENTER_Y            = 120;     
+constexpr int SMALL_CENTER_X          = 120;     
+constexpr int SMALL_CENTER_Y          = 160;     
+
+constexpr uint32_t SPI_BUS_SPEED      = 40000000;
+constexpr int ARC_OUTER_RADIUS        = 123;     
+constexpr int ARC_INNER_RADIUS        = 115;     
+
+constexpr double INITIAL_ODOMETER_KM  = 19000.0; 
+constexpr float  WHEEL_CIRCUMFERENCE_MM   = 1650.0f; 
+constexpr int    HALL_SENSOR_PIN      = 33;      
+constexpr float  FUEL_FILTER_ALPHA    = 0.08f;   
+
+constexpr float NTC_R_BALANCE         = 10000.0f;
+constexpr float NTC_R_ROOM            = 10000.0f;
+constexpr float NTC_BETA              = 3950.0f; 
+
+constexpr int   MIN_SATELLITES        = 5;       // Satelliti minimi per considerare il GPS
+constexpr int   OPTIMAL_SATELLITES    = 8;       // Satelliti per fiducia 100% GPS
+constexpr float MAX_SPEED_DELTA_KMH   = 5.0f;    // Max scarto tollerato (km/h) tra GPS e ruota Hall
+constexpr float MIN_SPEED_THRESHOLD   = 1.0f;    // Soglia minima velocità attivazione sistema (1.0 km/h)
+constexpr float ACCEL_START_SPEED     = 1.0f;    // Soglia minima per far partire il timer (1.0 km/h)
+constexpr float ACCEL_TARGET_SPEED    = 50.0f;   // Velocità target (50 km/h)
+const char* ACCEL_BADGE_LINE1         = "0-50";  
+const char* ACCEL_BADGE_LINE2         = "km/h";  
+
+constexpr int OFFSET_BIG_TIME_DATE_X  = 0;       
+constexpr int OFFSET_BIG_TIME_DATE_Y  = -94;     
+
+constexpr int OFFSET_BIG_SIGNATURE_X  = 0;       
+constexpr int OFFSET_BIG_SIGNATURE_Y  = -45;     
+
+constexpr int OFFSET_BIG_SPEED_NUM_X  = 0;       
+constexpr int OFFSET_BIG_SPEED_NUM_Y  = -17;     
+
+constexpr int OFFSET_BIG_SPEED_UNIT_X = 0;       
+constexpr int OFFSET_BIG_SPEED_UNIT_Y = 60;      
+
+constexpr int OFFSET_BIG_ODO_X        = 0;       
+constexpr int OFFSET_BIG_ODO_Y        = 112;     
+
+constexpr int OFFSET_BIG_BOTTOM_ROW_X = 10;      
+constexpr int OFFSET_BIG_BOTTOM_ROW_Y = -78;     
+
+constexpr int OFFSET_HALL_ICON_X      = -115;    
+constexpr int OFFSET_HALL_ICON_Y      = 0;       
+
+constexpr int OFFSET_GPS_ICON_X       = 115;     
+constexpr int OFFSET_GPS_ICON_Y       = 0;       
+
+constexpr int OFFSET_SMALL_ARCS_CENTER_X  = 0;   
+constexpr int OFFSET_SMALL_ARCS_CENTER_Y  = 0;   
+
+constexpr int OFFSET_SMALL_FUEL_PCT_X     = 0;   
+constexpr int OFFSET_SMALL_FUEL_PCT_Y     = -100;
+
+constexpr int OFFSET_SMALL_FUEL_LITERS_X  = 0;   
+constexpr int OFFSET_SMALL_FUEL_LITERS_Y  = 0;   
+
+constexpr int OFFSET_SMALL_KML_AVG_X      = 0;   
+constexpr int OFFSET_SMALL_KML_AVG_Y      = -50; 
+
+constexpr int OFFSET_SMALL_KML_INST_X     = 0;   
+constexpr int OFFSET_SMALL_KML_INST_Y     = 69;  
+
+constexpr int OFFSET_SMALL_TEMP_X         = 0;   
+constexpr int OFFSET_SMALL_TEMP_Y         = 105; 
+
+constexpr bool SHOW_ELEMENT_BOUNDS    = false;   
+constexpr bool ENABLE_POWER_SENSE     = true;    
+constexpr bool ENABLE_CIRCLE_TEST     = true;    
+
+// --- CONFIGURAZIONE E POSIZIONAMENTO CONTATORE FPS (SOLO DISPLAY 1) ---
+constexpr bool SHOW_FPS_COUNTER_DEFAULT = true;  // Stato iniziale Contatore FPS
+constexpr int  OFFSET_BIG_FPS_X         = 210;   // Posizione X su Display Grande
+constexpr int  OFFSET_BIG_FPS_Y         = 150;   
+
+constexpr int  NIGHT_MODE_START_HOUR  = 20;      
+constexpr int  NIGHT_MODE_END_HOUR    = 6;       
+
+// --- TARGET FPS & CONFIGURAZIONE TELEMETRIA ---
+constexpr int  TARGET_FPS             = 0;   // 0 = Sbloccato al massimo senza limiti
+constexpr unsigned long DISPLAY_REFRESH_MS   = (TARGET_FPS > 0) ? (1000U / TARGET_FPS) : 0U; 
+
+// OPZIONE C: true = Abilitata (Debug), false = Disabilitata (Max Performance)
+constexpr bool ENABLE_SERIAL_TELEMETRY  = true;  
+constexpr unsigned long TELEMETRY_REFRESH_MS = 500; 
+
+// --- SCHERMATA DI AVVIO (SPLASH) ---
+constexpr int SPLASH_BIG_TITLE_Y      = 135;     
+constexpr int SPLASH_BIG_BAR_Y        = 165;     
+constexpr int SPLASH_BIG_BAR_W        = 160;     
+constexpr int SPLASH_BIG_BAR_H        = 6;       
+constexpr int SPLASH_BIG_SIG_Y        = 180;     
+
+constexpr int SPLASH_SMALL_TITLE1_Y   = 140;     
+constexpr int SPLASH_SMALL_TITLE2_Y   = 165;     
+constexpr int SPLASH_SMALL_BAR_Y      = 190;     
+constexpr int SPLASH_SMALL_BAR_W      = 120;     
+
+// --- POSIZIONAMENTO SCHERMATA DI RESET / REBOOT ---
+constexpr int REBOOT_BIG_TITLE_X      = 160;     
+constexpr int REBOOT_BIG_TITLE_Y      = 135;     
+constexpr int REBOOT_BIG_BAR_CENTER_X = 160;     
+constexpr int REBOOT_BIG_BAR_Y        = 165;     
+constexpr int REBOOT_BIG_BAR_W        = 160;     
+constexpr int REBOOT_BIG_BAR_H        = 6;       
+constexpr int REBOOT_BIG_SIG_X        = 160;     
+constexpr int REBOOT_BIG_SIG_Y        = 180;     
+
+constexpr int REBOOT_SMALL_TITLE1_X   = 120;     
+constexpr int REBOOT_SMALL_TITLE1_Y   = 140;     
+constexpr int REBOOT_SMALL_TITLE2_X   = 120;     
+constexpr int REBOOT_SMALL_TITLE2_Y   = 165;     
+constexpr int REBOOT_SMALL_BAR_CENTER_X = 120;   
+constexpr int REBOOT_SMALL_BAR_Y      = 190;     
+constexpr int REBOOT_SMALL_BAR_W      = 120;     
+constexpr int REBOOT_SMALL_BAR_H      = 6;       
+
+// =========================================================================
+// DEFINIZIONE PIN HARDWARE E COSTANTI PRE-CALCOLATE
+// =========================================================================
+#define SPI_DC 2 
+#define SPI_RST 14 
+#define CS_BIG_DISPLAY 5 
+#define CS_SMALL_DISPLAY 15 
+#define BL_BIG_DISPLAY 12 
+#define BL_SMALL_DISPLAY 27 
+#define FUEL_TOUCH_PIN 4 
+#define RXD2 16 
+#define TXD2 17 
+#define POWER_SENSE_PIN 34 
+#define BATTERY_SENSE_PIN 35 
+#define TEMP_SENSE_PIN 36 
+
+constexpr float WHEEL_SPEED_FACTOR   = WHEEL_CIRCUMFERENCE_MM * 3600.0f;
+constexpr double WHEEL_DIST_PER_PULSE_KM = (double)WHEEL_CIRCUMFERENCE_MM / 1000000.0;
+constexpr float NTC_INV_ROOM_KELVIN  = 1.0f / (25.0f + 273.15f); 
+constexpr float ADC_VOLTS_FACTOR     = 3.3f / 4095.0f;
+
+enum TimerState { READY, RUNNING, FINISHED };
+
+// =========================================================================
+// STRUTTURA THREAD-SAFE PER SCAMBIO CORE0 -> CORE1
+// =========================================================================
+struct SensorSnapshot {
+    float currentSpeed = 0.0f;
+    float fuelLiters = 0.0f;
+    int fuelPercentage = 0;
+    float batteryVoltage = 0.0f;
+    float engineTemperature = 0.0f;
+    int satellites = 0;
+    double totalDistanceKm = 0.0;
+    float accelResultTime = 0.0f;
+    TimerState accelState = READY;
+    float instantKml = 0.0f;
+    float averageKml = 0.0f;
+    int localHour = 0;
+    int minute = 0;
+    int day = 0;
+    int month = 0;
+    int year = 0;
+    bool timeValid = false;
+    bool dateValid = false;
+    bool isGpsSpeedValid = false;
+};
+
+static SensorSnapshot g_sensorData;
+static SemaphoreHandle_t g_stateMutex = NULL;
+
+// =========================================================================
+// CALCOLO BOUNDING BOX FONT OTTIMIZZATO PER ESP32
+// =========================================================================
+inline void calculateTextBounds(const GFXfont *font, const char *str, int16_t x, int16_t y,
+                                int16_t *x1, int16_t *y1, uint16_t *w, uint16_t *h) {
+    if (!font || !str || !*str) {
+        *x1 = 0; *y1 = 0; *w = 0; *h = 0;
+        return;
+    }
+
+    int16_t minx = 32767, miny = 32767, maxx = -32768, maxy = -32768;
+    int16_t cursor_x = x, cursor_y = y;
+    const uint8_t first = font->first;
+    const uint8_t last  = font->last;
+
+    char c;
+    while ((c = *str++)) {
+        if (c == '\n') {
+            cursor_x = x;
+            cursor_y += (int16_t)font->yAdvance;
+        } else if (c != '\r') {
+            uint8_t uc = (uint8_t)c;
+            if (uc >= first && uc <= last) {
+                const GFXglyph *glyph = &(font->glyph[uc - first]);
+                const uint8_t gw = glyph->width;
+                const uint8_t gh = glyph->height;
+
+                if (gw && gh) {
+                    int16_t gx1 = cursor_x + glyph->xOffset;
+                    int16_t gy1 = cursor_y + glyph->yOffset;
+                    int16_t gx2 = gx1 + gw - 1;
+                    int16_t gy2 = gy1 + gh - 1;
+
+                    if (gx1 < minx) minx = gx1;
+                    if (gy1 < miny) miny = gy1;
+                    if (gx2 > maxx) maxx = gx2;
+                    if (gy2 > maxy) maxy = gy2;
+                }
+                cursor_x += glyph->xAdvance;
+            }
+        }
+    }
+
+    if (maxx >= minx) {
+        *x1 = minx - x;
+        *w  = maxx - minx + 1;
+    } else {
+        *x1 = 0; *w = 0;
+    }
+
+    if (maxy >= miny) {
+        *y1 = miny - y;
+        *h  = maxy - miny + 1;
+    } else {
+        *y1 = 0; *h = 0;
+    }
+}
+
+// =========================================================================
+// DISPLAY CLASSES (LovyanGFX)
+// =========================================================================
+static lgfx::Bus_SPI shared_spi_bus;
+
+class LGFX_BigDisplay : public lgfx::LGFX_Device {
+    lgfx::Panel_ILI9341 _panel_instance;
+    const GFXfont*      _currentGfxFont = nullptr;
+
+public:
+    LGFX_BigDisplay() {
+        {
+            auto cfg = _panel_instance.config();
+            cfg.pin_cs           = CS_BIG_DISPLAY;
+            cfg.pin_rst          = SPI_RST;
+            cfg.pin_busy         = -1;
+            cfg.panel_width      = 240;
+            cfg.panel_height     = 320;
+            cfg.offset_x         = 0;
+            cfg.offset_y         = 0;
+            cfg.offset_rotation  = 0;
+            cfg.dummy_read_pixel = 8;
+            cfg.dummy_read_bits  = 1;
+            cfg.readable         = true;
+            cfg.invert           = false;
+            cfg.rgb_order        = false;
+            cfg.bus_shared       = true;
+            _panel_instance.config(cfg);
+        }
+        _panel_instance.setBus(&shared_spi_bus);
+        setPanel(&_panel_instance);
+    }
+
+    void setFont(const GFXfont* f) {
+        _currentGfxFont = f;
+        lgfx::LGFX_Device::setFont(f);
+        lgfx::LGFX_Device::setTextDatum(lgfx::textdatum_t::baseline_left);
+    }
+
+    void getTextBounds(const char *string, int16_t x, int16_t y, int16_t *x1, int16_t *y1, uint16_t *w, uint16_t *h) {
+        if (_currentGfxFont) {
+            calculateTextBounds(_currentGfxFont, string, x, y, x1, y1, w, h);
+        } else {
+            *x1 = 0; *y1 = 0;
+            *w = textWidth(string);
+            *h = fontHeight();
+        }
+    }
+
+    void getTextBounds(const String &str, int16_t x, int16_t y, int16_t *x1, int16_t *y1, uint16_t *w, uint16_t *h) {
+        getTextBounds(str.c_str(), x, y, x1, y1, w, h);
+    }
+};
+
+class LGFX_SmallDisplay : public lgfx::LGFX_Device {
+    lgfx::Panel_ILI9341 _panel_instance;
+    const GFXfont*      _currentGfxFont = nullptr;
+
+public:
+    LGFX_SmallDisplay() {
+        {
+            auto cfg = _panel_instance.config();
+            cfg.pin_cs           = CS_SMALL_DISPLAY;
+            cfg.pin_rst          = SPI_RST;
+            cfg.pin_busy         = -1;
+            cfg.panel_width      = 240;
+            cfg.panel_height     = 320;
+            cfg.offset_x         = 0;
+            cfg.offset_y         = 0;
+            cfg.offset_rotation  = 0;
+            cfg.dummy_read_pixel = 8;
+            cfg.dummy_read_bits  = 1;
+            cfg.readable         = true;
+            cfg.invert           = false;
+            cfg.rgb_order        = false;
+            cfg.bus_shared       = true;
+            _panel_instance.config(cfg);
+        }
+        _panel_instance.setBus(&shared_spi_bus);
+        setPanel(&_panel_instance);
+    }
+
+    void setFont(const GFXfont* f) {
+        _currentGfxFont = f;
+        lgfx::LGFX_Device::setFont(f);
+        lgfx::LGFX_Device::setTextDatum(lgfx::textdatum_t::baseline_left);
+    }
+
+    void getTextBounds(const char *string, int16_t x, int16_t y, int16_t *x1, int16_t *y1, uint16_t *w, uint16_t *h) {
+        if (_currentGfxFont) {
+            calculateTextBounds(_currentGfxFont, string, x, y, x1, y1, w, h);
+        } else {
+            *x1 = 0; *y1 = 0;
+            *w = textWidth(string);
+            *h = fontHeight();
+        }
+    }
+
+    void getTextBounds(const String &str, int16_t x, int16_t y, int16_t *x1, int16_t *y1, uint16_t *w, uint16_t *h) {
+        getTextBounds(str.c_str(), x, y, x1, y1, w, h);
+    }
+};
+
+LGFX_BigDisplay bigDisplay;
+LGFX_SmallDisplay smallDisplay;
+
+TinyGPSPlus gps;
+HardwareSerial gpsSerial(2); 
+Preferences preferences; 
+
+uint16_t DEBUG_BOX_COLOR = TFT_MAGENTA;
+constexpr int touchTable[] = { 950, 840, 750, 670, 600, 530, 460, 400 };
+constexpr int NUM_POINTS = sizeof(touchTable) / sizeof(touchTable[0]);
+
+// --- LOOKUP TABLE (LUT) ARCHI GRAFICI (241 PASSAGGI - PASSO DI 0.5°) ---
+struct ArcLinePoint {
+    int16_t xStart, yStart, xEnd, yEnd;
+    float angle;
+};
+
+constexpr int NUM_ARC_STEPS = 241; // Passo di 0.5° (120° / 0.5° + 1)
+ArcLinePoint fuelArcLUT[NUM_ARC_STEPS];
+ArcLinePoint tempArcLUT[NUM_ARC_STEPS];
+
+// --- GESTIONE FPS & POSIZIONE (SOLO DISPLAY GRANDE) ---
+bool showFpsCounter = SHOW_FPS_COUNTER_DEFAULT;
+float currentMeasuredFps = 0.0f;
+
+constexpr uint8_t FPS_AVG_SAMPLES = 5;
+float fpsHistory[FPS_AVG_SAMPLES] = {0.0f};
+uint8_t fpsHistoryIndex = 0;
+uint8_t fpsHistoryCount = 0;
+float currentAverageFps = 0.0f;
+
+int fpsBigX   = OFFSET_BIG_FPS_X;
+int fpsBigY   = OFFSET_BIG_FPS_Y;
+
+unsigned long lastDisplayUpdate = 0;
+float filteredReading = 950.0f; 
+float fuelLiters = 0.0f; 
+int fuelPercentage = 0;
+float batteryVoltage = 0.0f; 
+float engineTemperature = 0.0f; 
+int currentTimezoneOffset = 1; 
+double totalDistanceKm = 0.0;
+double lastSavedOdo = 0.0; 
+double lastLat = 0.0;
+double lastLon = 0.0;
+bool hasLastPos = false;
+int splashCurrentProgress = 0; 
+
+float currentCachedSpeed = 0.0f;
+
+// Variable ISR con spinlock portMUX
+static portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;
+volatile unsigned long lastHallPulseTimeUs = 0;
+volatile unsigned long hallPulseIntervalUs = 0;
+volatile unsigned long hallPulseCount = 0;
+
+double tripDistanceKm = 0.0;          
+float tripStartFuelLiters = -1.0f;    
+float tripFuelConsumedLiters = 0.0f;  
+float instantKml = 0.0f;              
+float averageKml = 0.0f;              
+
+bool isSelfTestActive = false;
+bool overrideTimeDateStr = false;
+int overrideSpeed = 188;        
+double overrideOdo = 888888.8;
+int overrideSat = 88;
+float overrideBat = 18.8f;      
+float overrideTimer = 18.88f;   
+int overrideFuelPct = 88;
+float overrideFuelLiters = 8.8f;
+float overrideInstKml = 88.8f;
+float overrideAvgKml = 88.8f;
+float overrideTemp = 188.0f;    
+
+TimerState accelState = READY;
+unsigned long accelStartTime = 0;
+float accelResultTime = 0.0f;
+
+void updateBigDisplay(const SensorSnapshot& snap);
+void updateSmallDisplay(const SensorSnapshot& snap);
+void processFuelSensor();
+void processBatterySensor();
+void processTemperatureSensor();
+void updateGPSOdometer();
+void processFuelConsumption();
+void updateAccelTimer();
+void checkNightMode(const SensorSnapshot& snap);
+void transmitTelemetry(const SensorSnapshot& snap);
+void handleSerialCommands();
+void showRebootScreen();
+void updateFilteredSpeed();
+void drawFpsOverlay();
+
+// =========================================================================
+// HELPER ANTIALIASING OTTIMIZZATI PER ESP32 E LOVYANGFX (SFONDO NERO)
+// =========================================================================
+
+inline uint16_t blendColorWithBlack(uint16_t color, float alpha) {
+    if (alpha <= 0.02f) return 0x0000; // TFT_BLACK
+    if (alpha >= 0.98f) return color;
+    
+    uint8_t r = (color >> 11) & 0x1F;
+    uint8_t g = (color >> 5) & 0x3F;
+    uint8_t b = color & 0x1F;
+    
+    r = (uint8_t)((float)r * alpha);
+    g = (uint8_t)((float)g * alpha);
+    b = (uint8_t)((float)b * alpha);
+    
+    return (r << 11) | (g << 5) | b;
+}
+
+// 1. LINEA ANTIALIAS (Algoritmo di Xiaolin Wu)
+template <typename T>
+void drawAALine(T &disp, float x0, float y0, float x1, float y1, uint16_t color) {
+    auto plot = [&](int x, int y, float c) {
+        if (c <= 0.0f) return;
+        uint16_t aaColor = blendColorWithBlack(color, c);
+        disp.drawPixel(x, y, aaColor);
+    };
+
+    bool steep = fabsf(y1 - y0) > fabsf(x1 - x0);
+    if (steep) { std::swap(x0, y0); std::swap(x1, y1); }
+    if (x0 > x1) { std::swap(x0, x1); std::swap(y0, y1); }
+
+    float dx = x1 - x0;
+    float dy = y1 - y0;
+    float gradient = (dx == 0.0f) ? 1.0f : dy / dx;
+
+    // Primo punto
+    int xend = (int)roundf(x0);
+    float yend = y0 + gradient * (xend - x0);
+    float xgap = 1.0f - (x0 + 0.5f - floorf(x0 + 0.5f));
+    int xpxl1 = xend;
+    int ypxl1 = (int)floorf(yend);
+
+    if (steep) {
+        plot(ypxl1,     xpxl1, (1.0f - (yend - floorf(yend))) * xgap);
+        plot(ypxl1 + 1, xpxl1, (yend - floorf(yend)) * xgap);
+    } else {
+        plot(xpxl1, ypxl1,     (1.0f - (yend - floorf(yend))) * xgap);
+        plot(xpxl1, ypxl1 + 1, (yend - floorf(yend)) * xgap);
+    }
+    float intery = yend + gradient;
+
+    // Secondo punto
+    int xend2 = (int)roundf(x1);
+    float yend2 = y1 + gradient * (xend2 - x1);
+    float xgap2 = x1 + 0.5f - floorf(x1 + 0.5f);
+    int xpxl2 = xend2;
+    int ypxl2 = (int)floorf(yend2);
+
+    if (steep) {
+        plot(ypxl2,     xpxl2, (1.0f - (yend2 - floorf(yend2))) * xgap2);
+        plot(ypxl2 + 1, xpxl2, (yend2 - floorf(yend2)) * xgap2);
+    } else {
+        plot(xpxl2, ypxl2,     (1.0f - (yend2 - floorf(yend2))) * xgap2);
+        plot(xpxl2, ypxl2 + 1, (yend2 - floorf(yend2)) * xgap2);
+    }
+
+    // Loop Principale
+    if (steep) {
+        for (int x = xpxl1 + 1; x <= xpxl2 - 1; x++) {
+            plot((int)floorf(intery),     x, 1.0f - (intery - floorf(intery)));
+            plot((int)floorf(intery) + 1, x, intery - floorf(intery));
+            intery += gradient;
+        }
+    } else {
+        for (int x = xpxl1 + 1; x <= xpxl2 - 1; x++) {
+            plot(x, (int)floorf(intery),     1.0f - (intery - floorf(intery)));
+            plot(x, (int)floorf(intery) + 1, intery - floorf(intery));
+            intery += gradient;
+        }
+    }
+}
+
+// 2. CERCHIO ANTIALIAS (Algoritmo di Wu)
+template <typename T>
+void drawAACircle(T &disp, int cx, int cy, int r, uint16_t color) {
+    if (r <= 0) return;
+    int x = r;
+    int y = 0;
+    
+    auto plot8 = [&](int px, int py, float alpha) {
+        if (alpha <= 0.0f) return;
+        uint16_t c = blendColorWithBlack(color, alpha);
+        disp.drawPixel(cx + px, cy + py, c);
+        disp.drawPixel(cx - px, cy + py, c);
+        disp.drawPixel(cx + px, cy - py, c);
+        disp.drawPixel(cx - px, cy - py, c);
+        disp.drawPixel(cx + py, cy + px, c);
+        disp.drawPixel(cx - py, cy + px, c);
+        disp.drawPixel(cx + py, cy - px, c);
+        disp.drawPixel(cx - py, cy - px, c);
+    };
+
+    plot8(r, 0, 1.0f);
+
+    float T_val = 0.0f;
+    while (x > y) {
+        y++;
+        float x_exact = sqrtf((float)(r * r - y * y));
+        x = (int)ceilf(x_exact);
+        T_val = (float)x - x_exact;
+        
+        plot8(x, y, 1.0f - T_val);
+        plot8(x - 1, y, T_val);
+    }
+}
+
+// 3. RETTANGOLO ARROTONDATO (BADGE) ANTIALIAS
+template <typename T>
+void drawAACornerArc(T &disp, int cx, int cy, int r, uint8_t corner, uint16_t color) {
+    if (r <= 0) return;
+    int x = r;
+    int y = 0;
+    
+    int signX = (corner == 0 || corner == 1) ? 1 : -1;
+    int signY = (corner == 1 || corner == 2) ? 1 : -1;
+
+    auto plotCorner = [&](int px, int py, float alpha) {
+        if (alpha <= 0.0f) return;
+        uint16_t c = blendColorWithBlack(color, alpha);
+        disp.drawPixel(cx + signX * px, cy + signY * py, c);
+        if (px != py) {
+            disp.drawPixel(cx + signX * py, cy + signY * px, c);
+        }
+    };
+
+    float T_val = 0.0f;
+    while (x >= y) {
+        float x_exact = sqrtf((float)(r * r - y * y));
+        x = (int)ceilf(x_exact);
+        T_val = (float)x - x_exact;
+        
+        plotCorner(x, y, 1.0f - T_val);
+        plotCorner(x - 1, y, T_val);
+        y++;
+    }
+}
+
+template <typename T>
+void drawAARoundRect(T &disp, int x, int y, int w, int h, int r, uint16_t color) {
+    if (w <= 0 || h <= 0) return;
+    if (r <= 0) {
+        drawAALine(disp, x, y, x + w - 1, y, color);
+        drawAALine(disp, x + w - 1, y, x + w - 1, y + h - 1, color);
+        drawAALine(disp, x + w - 1, y + h - 1, x, y + h - 1, color);
+        drawAALine(disp, x, y + h - 1, x, y, color);
+        return;
+    }
+    
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+
+    // Lati dritti
+    disp.drawFastHLine(x + r, y, w - 2 * r, color);
+    disp.drawFastHLine(x + r, y + h - 1, w - 2 * r, color);
+    disp.drawFastVLine(x, y + r, h - 2 * r, color);
+    disp.drawFastVLine(x + w - 1, y + r, h - 2 * r, color);
+
+    // 4 Angoli in Antialiasing
+    drawAACornerArc(disp, x + w - 1 - r, y + r, r, 0, color);         // Top-Right
+    drawAACornerArc(disp, x + w - 1 - r, y + h - 1 - r, r, 1, color);     // Bottom-Right
+    drawAACornerArc(disp, x + r, y + h - 1 - r, r, 2, color);         // Bottom-Left
+    drawAACornerArc(disp, x + r, y + r, r, 3, color);                 // Top-Left
+}
+
+void IRAM_ATTR hallSensorISR() {
+    constexpr unsigned long DEBOUNCE_US = 10000;
+    unsigned long now = micros();
+    if (now - lastHallPulseTimeUs > DEBOUNCE_US) { 
+        portENTER_CRITICAL_ISR(&hallMux);
+        hallPulseIntervalUs = now - lastHallPulseTimeUs;
+        lastHallPulseTimeUs = now;
+        hallPulseCount++;
+        portEXIT_CRITICAL_ISR(&hallMux);
+    }
+}
+
+inline float getHallSpeed() {
+    unsigned long lastTimeUs;
+    unsigned long intervalUs;
+
+    portENTER_CRITICAL(&hallMux);
+    lastTimeUs = lastHallPulseTimeUs;
+    intervalUs = hallPulseIntervalUs;
+    portEXIT_CRITICAL(&hallMux);
+
+    if (micros() - lastTimeUs > 2000000UL || intervalUs == 0) {
+        return 0.0f;
+    }
+
+    return WHEEL_SPEED_FACTOR / (float)intervalUs;
+}
+
+void updateFilteredSpeed() {
+    float hallSpeed = getHallSpeed();
+    int sats = gps.satellites.value();
+    bool isGpsValid = gps.speed.isValid() && (sats >= MIN_SATELLITES);
+
+    if (hallSpeed == 0.0f) {
+        currentCachedSpeed = 0.0f;
+        return;
+    }
+
+    if (!isGpsValid) {
+        currentCachedSpeed = (hallSpeed < MIN_SPEED_THRESHOLD) ? 0.0f : hallSpeed;
+        return;
+    }
+
+    float gpsSpeed = (float)gps.speed.kmph();
+
+    if (sats >= OPTIMAL_SATELLITES) {
+        currentCachedSpeed = (gpsSpeed < MIN_SPEED_THRESHOLD) ? 0.0f : gpsSpeed;
+        return;
+    }
+
+    float delta = fabsf(gpsSpeed - hallSpeed);
+
+    if (delta > MAX_SPEED_DELTA_KMH) {
+        currentCachedSpeed = (hallSpeed < MIN_SPEED_THRESHOLD) ? 0.0f : hallSpeed;
+        return;
+    }
+
+    float gpsWeight = (float)(sats - MIN_SATELLITES + 1) / (float)(OPTIMAL_SATELLITES - MIN_SATELLITES + 1);
+    float fusedSpeed = (gpsSpeed * gpsWeight) + (hallSpeed * (1.0f - gpsWeight));
+
+    currentCachedSpeed = (fusedSpeed < MIN_SPEED_THRESHOLD) ? 0.0f : fusedSpeed;
+}
+
+inline float getFilteredSpeed() {
+    return currentCachedSpeed;
+}
+
+template <typename T>
+inline void drawDebugBox(T &disp, int x, int y, int w, int h, uint16_t color = DEBUG_BOX_COLOR) {
+    if (SHOW_ELEMENT_BOUNDS) {
+        disp.drawRect(x, y, w, h, color);
+    }
+}
+
+void drawBatteryIcon(int x, int y, float voltage, uint16_t color) {
+    constexpr int iconW = 10, iconH = 16, nippleW = 4, nippleH = 2;
+    constexpr int innerX = 2, innerY = nippleH + 2;
+    constexpr int innerW = iconW - 4, innerH = iconH - 4;
+
+    bigDisplay.fillRect(x, y, iconW, iconH + nippleH, TFT_BLACK);
+    bigDisplay.fillRect(x + (iconW - nippleW) / 2, y, nippleW, nippleH, color);
+    bigDisplay.drawRect(x, y + nippleH, iconW, iconH, color);
+    
+    float pct = 0.0f;
+    if (voltage > 0.5f) {
+        pct = constrain((voltage - 10.5f) / 4.0f, 0.0f, 1.0f);
+    }
+    
+    int fillH = (int)(pct * innerH);
+    if (fillH > 0) {
+        int fillY = (y + innerY) + (innerH - fillH);
+        bigDisplay.fillRect(x + innerX, fillY, innerW, fillH, color);
+    }
+}
+
+inline int getDayOfWeek(int y, int m, int d) {
+    static const int t[] = { 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+    if (m < 3) y -= 1;
+    return (y + y/4 - y/100 + y/400 + t[m-1] + d) % 7;
+}
+
+int getEuropeanOffset(int year, int month, int day, int hour) {
+    if (month < 3 || month > 10) return 1;
+    if (month > 3 && month < 10) return 2; 
+    int lastSunday = 31 - getDayOfWeek(year, month, 31);
+    if (month == 3) { 
+        if (day > lastSunday) return 2;
+        if (day < lastSunday) return 1;
+        return (hour >= 1) ? 2 : 1;
+    }
+    if (month == 10) { 
+        if (day > lastSunday) return 1;
+        if (day < lastSunday) return 2;
+        return (hour >= 1) ? 1 : 2; 
+    }
+    return 1;
+}
+
+inline int getLocalHour() {
+    if (!gps.time.isValid()) return 0;
+    int h = gps.time.hour() + currentTimezoneOffset;
+    if (h >= 24) h -= 24;
+    else if (h < 0) h += 24;
+    return h;
+}
+
+void drawCalendarIcon(int x, int y, uint16_t color) {
+    bigDisplay.drawRect(x, y + 3, 16, 13, color);
+    bigDisplay.fillRect(x, y + 3, 16, 3, color); 
+    bigDisplay.fillRect(x + 3, y, 2, 4, color);
+    bigDisplay.fillRect(x + 11, y, 2, 4, color); 
+}
+
+void drawClockIcon(int x, int y, uint16_t color) {
+    drawAACircle(bigDisplay, x + 8, y + 8, 8, color);
+    bigDisplay.drawFastVLine(x + 8, y + 4, 5, color);
+    bigDisplay.drawFastHLine(x + 8, y + 8, 5, color);
+}
+
+void drawLocationIcon(int x, int y, uint16_t color) {
+    bigDisplay.fillCircle(x + 8, y + 5, 5, color);
+    bigDisplay.fillTriangle(x + 3, y + 5, x + 13, y + 5, x + 8, y + 15, color);
+    bigDisplay.fillCircle(x + 8, y + 5, 2, TFT_BLACK); 
+}
+
+void initArcLUTs() {
+    int cx = SMALL_CENTER_X + OFFSET_SMALL_ARCS_CENTER_X; 
+    int cy = SMALL_CENTER_Y + OFFSET_SMALL_ARCS_CENTER_Y; 
+
+    // Generazione LUT con passo di 0.5°
+    for (int i = 0; i < NUM_ARC_STEPS; i++) {
+        float a = 210.0f + (i * 0.5f); 
+        float rad = a * DEG_TO_RAD;
+        float cosR = cosf(rad);
+        float sinR = sinf(rad);
+
+        fuelArcLUT[i].angle = a;
+        fuelArcLUT[i].xStart = cx + (int16_t)(ARC_INNER_RADIUS * cosR);
+        fuelArcLUT[i].yStart = cy + (int16_t)(ARC_INNER_RADIUS * sinR);
+        fuelArcLUT[i].xEnd   = cx + (int16_t)(ARC_OUTER_RADIUS * cosR);
+        fuelArcLUT[i].yEnd   = cy + (int16_t)(ARC_OUTER_RADIUS * sinR);
+    }
+
+    for (int i = 0; i < NUM_ARC_STEPS; i++) {
+        float a = 30.0f + (i * 0.5f); 
+        float rad = a * DEG_TO_RAD;
+        float cosR = cosf(rad);
+        float sinR = sinf(rad);
+
+        tempArcLUT[i].angle = a;
+        tempArcLUT[i].xStart = cx + (int16_t)(ARC_INNER_RADIUS * cosR);
+        tempArcLUT[i].yStart = cy + (int16_t)(ARC_INNER_RADIUS * sinR);
+        tempArcLUT[i].xEnd   = cx + (int16_t)(ARC_OUTER_RADIUS * cosR);
+        tempArcLUT[i].yEnd   = cy + (int16_t)(ARC_OUTER_RADIUS * sinR);
+    }
+}
+
+void drawSplashBase() { 
+    splashCurrentProgress = 0;
+    
+    bigDisplay.startWrite();
+    bigDisplay.fillScreen(TFT_BLACK);
+
+    bigDisplay.setFont(&Conthrax_SemiBold12pt7b);
+    bigDisplay.setTextColor(TFT_WHITE);
+    int16_t x1, y1; uint16_t w, h;
+    bigDisplay.getTextBounds("DASHBOARD++", 0, 0, &x1, &y1, &w, &h);
+    bigDisplay.setCursor(BIG_CENTER_X - (w / 2) - x1, SPLASH_BIG_TITLE_Y - y1);
+    bigDisplay.print("DASHBOARD++");
+
+    int barX = BIG_CENTER_X - (SPLASH_BIG_BAR_W / 2); 
+    drawAARoundRect(bigDisplay, barX - 2, SPLASH_BIG_BAR_Y - 2, SPLASH_BIG_BAR_W + 4, SPLASH_BIG_BAR_H + 4, 3, TFT_CYAN);
+
+    bigDisplay.setFont(&Conthrax_SemiBold7pt7b);
+    bigDisplay.setTextColor(TFT_WHITE);
+    bigDisplay.getTextBounds(SPLASH_SIGNATURE, 0, 0, &x1, &y1, &w, &h);
+    bigDisplay.setCursor(BIG_CENTER_X - (w / 2) - x1, SPLASH_BIG_SIG_Y - y1);
+    bigDisplay.print(SPLASH_SIGNATURE);
+    bigDisplay.endWrite();
+
+    smallDisplay.startWrite();
+    smallDisplay.fillScreen(TFT_BLACK);
+    smallDisplay.setFont(&Conthrax_SemiBold12pt7b);
+    smallDisplay.setTextColor(TFT_WHITE);
+    smallDisplay.getTextBounds("SYSTEM", 0, 0, &x1, &y1, &w, &h);
+    smallDisplay.setCursor(SMALL_CENTER_X - (w / 2) - x1, SPLASH_SMALL_TITLE1_Y - y1);
+    smallDisplay.print("SYSTEM");
+
+    smallDisplay.getTextBounds("STARTUP", 0, 0, &x1, &y1, &w, &h);
+    smallDisplay.setCursor(SMALL_CENTER_X - (w / 2) - x1, SPLASH_SMALL_TITLE2_Y - y1);
+    smallDisplay.print("STARTUP");
+
+    int smallBarX = SMALL_CENTER_X - (SPLASH_SMALL_BAR_W / 2); 
+    drawAARoundRect(smallDisplay, smallBarX - 2, SPLASH_SMALL_BAR_Y - 2, SPLASH_SMALL_BAR_W + 4, SPLASH_BIG_BAR_H + 4, 3, TFT_CYAN);
+    smallDisplay.endWrite();
+}
+
+void updateSplashProgress(int targetProgress) { 
+    int barX = BIG_CENTER_X - (SPLASH_BIG_BAR_W / 2); 
+    int smallBarX = SMALL_CENTER_X - (SPLASH_SMALL_BAR_W / 2); 
+
+    while (splashCurrentProgress < targetProgress) {
+        splashCurrentProgress++;
+        int fillW = (SPLASH_BIG_BAR_W * splashCurrentProgress) / 100;
+        int smallFillW = (SPLASH_SMALL_BAR_W * splashCurrentProgress) / 100;
+
+        if (fillW > 0) {
+            bigDisplay.startWrite();
+            bigDisplay.fillRect(barX, SPLASH_BIG_BAR_Y, fillW, SPLASH_BIG_BAR_H, TFT_CYAN);
+            bigDisplay.endWrite();
+        }
+        if (smallFillW > 0) {
+            smallDisplay.startWrite();
+            smallDisplay.fillRect(smallBarX, SPLASH_SMALL_BAR_Y, smallFillW, SPLASH_BIG_BAR_H, TFT_CYAN);
+            smallDisplay.endWrite();
+        }
+        
+        delay(2);
+    }
+}
+
+void runDisplaySelfTest() { 
+    isSelfTestActive = true; 
+    overrideTimeDateStr = true;
+    overrideSpeed = 188;        
+    overrideOdo = 888888.8; 
+    overrideSat = 88; 
+    overrideBat = 18.8f;        
+    overrideTimer = 18.88f; 
+    overrideFuelPct = 88; 
+    overrideFuelLiters = 8.8f;
+    overrideInstKml = 88.8f; 
+    overrideAvgKml = 88.8f; 
+    overrideTemp = 188.0f;      
+
+    SensorSnapshot dummySnap;
+    updateBigDisplay(dummySnap);
+    updateSmallDisplay(dummySnap);
+
+    for (int b = 0; b <= 255; b += 25) {
+        analogWrite(BL_BIG_DISPLAY, b);
+        analogWrite(BL_SMALL_DISPLAY, b);
+        delay(2);
+    }
+    analogWrite(BL_BIG_DISPLAY, 255);
+    analogWrite(BL_SMALL_DISPLAY, 255);
+
+    delay(250); 
+
+    isSelfTestActive = false;
+    overrideTimeDateStr = false;
+
+    updateBigDisplay(dummySnap);
+    updateSmallDisplay(dummySnap);
+}
+
+void showRebootScreen() {
+    preferences.putDouble("odo", totalDistanceKm);
+    preferences.end();
+
+    bigDisplay.startWrite();
+    bigDisplay.fillScreen(TFT_BLACK);
+    bigDisplay.endWrite();
+
+    smallDisplay.startWrite();
+    smallDisplay.fillScreen(TFT_BLACK);
+    smallDisplay.endWrite();
+
+    analogWrite(BL_BIG_DISPLAY, 255);
+    analogWrite(BL_SMALL_DISPLAY, 255);
+
+    int16_t x1, y1; uint16_t w, h;
+
+    bigDisplay.startWrite();
+    bigDisplay.setFont(&Conthrax_SemiBold12pt7b);
+    bigDisplay.setTextColor(TFT_YELLOW);
+    bigDisplay.getTextBounds("REBOOTING...", 0, 0, &x1, &y1, &w, &h);
+    bigDisplay.setCursor(REBOOT_BIG_TITLE_X - (w / 2) - x1, REBOOT_BIG_TITLE_Y - y1);
+    bigDisplay.print("REBOOTING...");
+
+    int barX = REBOOT_BIG_BAR_CENTER_X - (REBOOT_BIG_BAR_W / 2); 
+    drawAARoundRect(bigDisplay, barX - 2, REBOOT_BIG_BAR_Y - 2, REBOOT_BIG_BAR_W + 4, REBOOT_BIG_BAR_H + 4, 3, TFT_YELLOW);
+
+    bigDisplay.setFont(&Conthrax_SemiBold7pt7b);
+    bigDisplay.setTextColor(TFT_WHITE);
+    bigDisplay.getTextBounds(REBOOT_SIGNATURE, 0, 0, &x1, &y1, &w, &h);
+    bigDisplay.setCursor(REBOOT_BIG_SIG_X - (w / 2) - x1, REBOOT_BIG_SIG_Y - y1);
+    bigDisplay.print(REBOOT_SIGNATURE);
+    bigDisplay.endWrite();
+
+    smallDisplay.startWrite();
+    smallDisplay.setFont(&Conthrax_SemiBold12pt7b);
+    smallDisplay.setTextColor(TFT_YELLOW);
+    smallDisplay.getTextBounds("SYSTEM", 0, 0, &x1, &y1, &w, &h);
+    smallDisplay.setCursor(REBOOT_SMALL_TITLE1_X - (w / 2) - x1, REBOOT_SMALL_TITLE1_Y - y1);
+    smallDisplay.print("SYSTEM");
+
+    smallDisplay.getTextBounds("RESTART", 0, 0, &x1, &y1, &w, &h);
+    smallDisplay.setCursor(REBOOT_SMALL_TITLE2_X - (w / 2) - x1, REBOOT_SMALL_TITLE2_Y - y1);
+    smallDisplay.print("RESTART");
+
+    int smallBarX = REBOOT_SMALL_BAR_CENTER_X - (REBOOT_SMALL_BAR_W / 2); 
+    drawAARoundRect(smallDisplay, smallBarX - 2, REBOOT_SMALL_BAR_Y - 2, REBOOT_SMALL_BAR_W + 4, REBOOT_SMALL_BAR_H + 4, 3, TFT_YELLOW);
+    smallDisplay.endWrite();
+
+    for (int p = 0; p <= 100; p += 4) {
+        int fillW = (REBOOT_BIG_BAR_W * p) / 100;
+        int smallFillW = (REBOOT_SMALL_BAR_W * p) / 100;
+
+        if (fillW > 0) {
+            bigDisplay.startWrite();
+            bigDisplay.fillRect(barX, REBOOT_BIG_BAR_Y, fillW, REBOOT_BIG_BAR_H, TFT_YELLOW);
+            bigDisplay.endWrite();
+        }
+        if (smallFillW > 0) {
+            smallDisplay.startWrite();
+            smallDisplay.fillRect(smallBarX, REBOOT_SMALL_BAR_Y, smallFillW, REBOOT_SMALL_BAR_H, TFT_YELLOW);
+            smallDisplay.endWrite();
+        }
+        
+        delay(6);
+    }
+
+    delay(50);
+    ESP.restart();
+}
+
+void handleSerialCommands() {
+    static char cmdBuf[32];
+    static uint8_t cmdIdx = 0;
+
+    while (Serial.available() > 0) {
+        char c = (char)Serial.read();
+        if (c == '\n' || c == '\r') {
+            if (cmdIdx > 0) {
+                cmdBuf[cmdIdx] = '\0';
+                for (uint8_t i = 0; i < cmdIdx; i++) {
+                    cmdBuf[i] = toupper((unsigned char)cmdBuf[i]);
+                }
+                if (strcmp(cmdBuf, "REBOOT") == 0 || strcmp(cmdBuf, "RESTART") == 0 || strcmp(cmdBuf, "R") == 0) {
+                    Serial.println("[LOG] Riavvio forzato da Serial Monitor ricevuto!");
+                    showRebootScreen();
+                } else if (strcmp(cmdBuf, "FPS") == 0 || strcmp(cmdBuf, "TOGGLE_FPS") == 0) {
+                    showFpsCounter = !showFpsCounter;
+                    Serial.printf("[LOG] Contatore FPS %s\n", showFpsCounter ? "ATTIVATO" : "DISATTIVATO");
+                } else if (strcmp(cmdBuf, "FPS_TL") == 0) { 
+                    fpsBigX = 5; fpsBigY = 0;
+                    Serial.println("[LOG] Posizione FPS impostata: TOP-LEFT");
+                } else if (strcmp(cmdBuf, "FPS_TR") == 0) { 
+                    fpsBigX = 210; fpsBigY = 0;
+                    Serial.println("[LOG] Posizione FPS impostata: TOP-RIGHT");
+                } else if (strcmp(cmdBuf, "FPS_BL") == 0) { 
+                    fpsBigX = 5; fpsBigY = 225;
+                    Serial.println("[LOG] Posizione FPS impostata: BOTTOM-LEFT");
+                } else if (strcmp(cmdBuf, "FPS_BR") == 0) { 
+                    fpsBigX = 210; fpsBigY = 225;
+                    Serial.println("[LOG] Posizione FPS impostata: BOTTOM-RIGHT");
+                } else if (strncmp(cmdBuf, "FPS_BIG ", 8) == 0) {
+                    int x, y;
+                    if (sscanf(cmdBuf + 8, "%d %d", &x, &y) == 2) {
+                        fpsBigX = constrain(x, 0, 215);
+                        fpsBigY = constrain(y, 0, 225);
+                        Serial.printf("[LOG] FPS Big Display spostato a X=%d, Y=%d\n", fpsBigX, fpsBigY);
+                    }
+                }
+                cmdIdx = 0;
+            }
+        } else if (cmdIdx < sizeof(cmdBuf) - 1) {
+            cmdBuf[cmdIdx++] = c;
+        }
+    }
+}
+
+void drawFpsOverlay() {
+    static float lastDrawnFpsBig = -1.0f;
+    static float lastDrawnAvgFpsBig = -1.0f;
+    static bool lastStateBig = false;
+
+    static int lastBigX = -1, lastBigY = -1;
+    static unsigned long lastFpsDrawTime = 0;
+
+    constexpr int BOX_WIDTH = 105;
+
+    unsigned long now = millis();
+    if (now - lastFpsDrawTime < 250 && lastStateBig) return;
+    lastFpsDrawTime = now;
+
+    if (!showFpsCounter || lastBigX != fpsBigX || lastBigY != fpsBigY) {
+        if (lastStateBig && lastBigX >= 0) {
+            bigDisplay.startWrite();
+            bigDisplay.fillRect(lastBigX, lastBigY, BOX_WIDTH, 12, TFT_BLACK);
+            bigDisplay.endWrite();
+            lastStateBig = false;
+            lastDrawnFpsBig = -1.0f;
+            lastDrawnAvgFpsBig = -1.0f;
+        }
+        lastBigX = fpsBigX;
+        lastBigY = fpsBigY;
+    }
+
+    if (!showFpsCounter) return;
+
+    char fpsBuf[24];
+    snprintf(fpsBuf, sizeof(fpsBuf), "%.1f | AVG %.1f", currentMeasuredFps, currentAverageFps);
+
+    if (fabsf(currentMeasuredFps - lastDrawnFpsBig) >= 0.3f || fabsf(currentAverageFps - lastDrawnAvgFpsBig) >= 0.3f || !lastStateBig) {
+        lastDrawnFpsBig = currentMeasuredFps;
+        lastDrawnAvgFpsBig = currentAverageFps;
+        lastStateBig = true;
+        bigDisplay.startWrite();
+        bigDisplay.fillRect(fpsBigX, fpsBigY, BOX_WIDTH, 12, TFT_BLACK);
+        bigDisplay.setFont(&Conthrax_SemiBold4pt7b);
+        bigDisplay.setTextColor(TFT_GREEN);
+        bigDisplay.setCursor(fpsBigX + 2, fpsBigY + 9);
+        bigDisplay.print(fpsBuf);
+        bigDisplay.endWrite();
+    }
+}
+
+// =========================================================================
+// TASK FREERTOS SU CORE 0: ACQUISIZIONE ED ELABORAZIONE SENSORE (50 Hz)
+// =========================================================================
+void sensorTask(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(20);
+
+    for (;;) {
+        while (gpsSerial.available() > 0) {
+            gps.encode(gpsSerial.read());
+        }
+        
+        updateFilteredSpeed();
+        processFuelSensor();
+        processBatterySensor(); 
+        processTemperatureSensor(); 
+        updateGPSOdometer();
+        processFuelConsumption();
+        updateAccelTimer();
+        
+        if (gps.date.isValid() && gps.time.isValid()) {
+            currentTimezoneOffset = getEuropeanOffset(gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour());
+        }
+
+        if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+            g_sensorData.currentSpeed = currentCachedSpeed;
+            g_sensorData.fuelLiters = fuelLiters;
+            g_sensorData.fuelPercentage = fuelPercentage;
+            g_sensorData.batteryVoltage = batteryVoltage;
+            g_sensorData.engineTemperature = engineTemperature;
+            g_sensorData.satellites = gps.satellites.value();
+            g_sensorData.totalDistanceKm = totalDistanceKm;
+            g_sensorData.accelResultTime = accelResultTime;
+            g_sensorData.accelState = accelState;
+            g_sensorData.instantKml = instantKml;
+            g_sensorData.averageKml = averageKml;
+            
+            g_sensorData.timeValid = gps.time.isValid();
+            g_sensorData.dateValid = gps.date.isValid();
+            g_sensorData.isGpsSpeedValid = gps.speed.isValid() && (g_sensorData.satellites >= MIN_SATELLITES);
+
+            if (g_sensorData.timeValid) {
+                g_sensorData.localHour = getLocalHour();
+                g_sensorData.minute = gps.time.minute();
+            }
+            if (g_sensorData.dateValid) {
+                g_sensorData.day = gps.date.day();
+                g_sensorData.month = gps.date.month();
+                g_sensorData.year = gps.date.year() % 100;
+            }
+
+            xSemaphoreGive(g_stateMutex);
+        }
+
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
+void setup() {
+    setCpuFrequencyMhz(240); 
+    
+    Serial.setTxBufferSize(256); 
+    Serial.begin(921600); 
+    
+    delay(20);
+    Serial.println("--- AVVIO SISTEMA DUAL-CORE OTTIMIZZATO (Core 0: Sensori | Core 1: Display) ---");
+
+    g_stateMutex = xSemaphoreCreateMutex();
+    
+    pinMode(CS_BIG_DISPLAY, OUTPUT);
+    pinMode(CS_SMALL_DISPLAY, OUTPUT);
+    digitalWrite(CS_BIG_DISPLAY, HIGH);
+    digitalWrite(CS_SMALL_DISPLAY, HIGH);
+    
+    pinMode(BL_BIG_DISPLAY, OUTPUT);
+    pinMode(BL_SMALL_DISPLAY, OUTPUT);
+    digitalWrite(BL_BIG_DISPLAY, LOW);
+    digitalWrite(BL_SMALL_DISPLAY, LOW);
+    
+    pinMode(SPI_RST, OUTPUT);
+    digitalWrite(SPI_RST, LOW);
+    delay(10);
+    digitalWrite(SPI_RST, HIGH);
+    delay(20);
+
+    {
+        auto cfg = shared_spi_bus.config();
+        cfg.spi_host    = SPI2_HOST; 
+        cfg.spi_mode    = 0;
+        cfg.freq_write  = SPI_BUS_SPEED;
+        cfg.freq_read   = 16000000;
+        cfg.spi_3wire   = false;
+        cfg.use_lock    = true;
+        cfg.dma_channel = SPI_DMA_CH_AUTO; 
+        cfg.pin_sclk    = 18;
+        cfg.pin_mosi    = 23;
+        cfg.pin_miso    = 19;
+        cfg.pin_dc      = SPI_DC;
+        shared_spi_bus.config(cfg);
+    }
+
+    pinMode(POWER_SENSE_PIN, INPUT);
+    pinMode(BATTERY_SENSE_PIN, INPUT);
+    pinMode(TEMP_SENSE_PIN, INPUT); 
+    analogSetAttenuation(ADC_11db);
+
+    pinMode(HALL_SENSOR_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(HALL_SENSOR_PIN), hallSensorISR, FALLING);
+    
+    initArcLUTs();
+
+    bigDisplay.init();
+    bigDisplay.setRotation(BIG_DISPLAY_ROTATION); 
+    
+    smallDisplay.init();
+    smallDisplay.setRotation(SMALL_DISPLAY_ROTATION);
+
+    drawSplashBase();
+    analogWrite(BL_BIG_DISPLAY, 255);
+    analogWrite(BL_SMALL_DISPLAY, 255);
+
+    updateSplashProgress(20); 
+
+    gpsSerial.begin(9600, SERIAL_8N1, RXD2, TXD2);
+    updateSplashProgress(40); 
+
+    preferences.begin("dashboard", false); 
+    if (!preferences.isKey("odo")) {
+        preferences.putDouble("odo", INITIAL_ODOMETER_KM);
+    }
+    totalDistanceKm = preferences.getDouble("odo", INITIAL_ODOMETER_KM); 
+    lastSavedOdo = totalDistanceKm; 
+
+    updateSplashProgress(60); 
+
+    for (int i = 0; i < 10; i++) {
+        processFuelSensor();
+        processBatterySensor();
+        processTemperatureSensor();
+        delay(10); 
+        updateSplashProgress(60 + (i * 3)); 
+    }
+
+    updateSplashProgress(100); 
+    delay(50);
+
+    for (int b = 255; b >= 0; b -= 15) {
+        analogWrite(BL_BIG_DISPLAY, b);
+        analogWrite(BL_SMALL_DISPLAY, b);
+        delay(2);
+    }
+    analogWrite(BL_BIG_DISPLAY, 0);
+    analogWrite(BL_SMALL_DISPLAY, 0);
+
+    bigDisplay.fillScreen(TFT_BLACK);
+    smallDisplay.fillScreen(TFT_BLACK);
+
+    runDisplaySelfTest();
+
+    xTaskCreatePinnedToCore(
+        sensorTask,
+        "SensorTaskCore0",
+        8192,
+        NULL,
+        2,
+        NULL,
+        0 
+    );
+
+    Serial.println("[LOG] Setup Terminato!");
+}
+
+void loop() {
+    handleSerialCommands(); 
+
+    unsigned long now = millis();
+
+    if (DISPLAY_REFRESH_MS == 0 || (now - lastDisplayUpdate >= DISPLAY_REFRESH_MS)) {
+        
+        static unsigned long lastFrameTime = 0;
+        static float filteredFrameTimeMs = 16.6f;
+
+        unsigned long frameDeltaMs = now - lastFrameTime;
+
+        if (frameDeltaMs > 0) {
+            lastFrameTime = now;
+            filteredFrameTimeMs = (filteredFrameTimeMs * 0.95f) + ((float)frameDeltaMs * 0.05f);
+            
+            if (filteredFrameTimeMs > 0.0f) {
+                currentMeasuredFps = 1000.0f / filteredFrameTimeMs;
+            }
+        }
+
+        static unsigned long lastFpsAvgCalcTime = 0;
+        if (now - lastFpsAvgCalcTime >= 250) { 
+            lastFpsAvgCalcTime = now;
+            
+            fpsHistory[fpsHistoryIndex] = currentMeasuredFps;
+            fpsHistoryIndex = (fpsHistoryIndex + 1) % FPS_AVG_SAMPLES;
+            if (fpsHistoryCount < FPS_AVG_SAMPLES) {
+                fpsHistoryCount++;
+            }
+
+            float fpsSum = 0.0f;
+            for (uint8_t i = 0; i < fpsHistoryCount; i++) {
+                fpsSum += fpsHistory[i];
+            }
+            currentAverageFps = fpsSum / (float)fpsHistoryCount;
+        }
+
+        lastDisplayUpdate = now;
+
+        SensorSnapshot snap;
+        if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+            snap = g_sensorData;
+            xSemaphoreGive(g_stateMutex);
+        }
+
+        updateBigDisplay(snap);
+        updateSmallDisplay(snap);
+        drawFpsOverlay(); 
+        checkNightMode(snap);
+    }
+
+    static unsigned long lastTelemetryUpdate = 0;
+    if (ENABLE_SERIAL_TELEMETRY && (now - lastTelemetryUpdate >= TELEMETRY_REFRESH_MS)) {
+        lastTelemetryUpdate = now;
+        SensorSnapshot snap;
+        if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+            snap = g_sensorData;
+            xSemaphoreGive(g_stateMutex);
+        }
+        transmitTelemetry(snap);
+    }
+
+    if (DISPLAY_REFRESH_MS > 0) {
+        vTaskDelay(pdMS_TO_TICKS(1));
+    } else {
+        yield(); 
+    }
+}
+
+void processBatterySensor() {
+    int rawADC = analogRead(BATTERY_SENSE_PIN);
+    float pinVoltage = (float)rawADC * ADC_VOLTS_FACTOR;
+    batteryVoltage = (pinVoltage * 5.7f) + 0.2f;
+    if (batteryVoltage < 2.0f) batteryVoltage = 0.0f;
+}
+
+void processTemperatureSensor() {
+    int rawADC = analogRead(TEMP_SENSE_PIN);
+    if (rawADC <= 100 || rawADC >= 4000) { 
+        engineTemperature = 0.0f;
+        return;
+    }
+    float vOut = (float)rawADC * ADC_VOLTS_FACTOR;
+    float resistance = NTC_R_BALANCE * (vOut / (3.3f - vOut));
+    float steinhart = logf(resistance / NTC_R_ROOM) / NTC_BETA + NTC_INV_ROOM_KELVIN; 
+    engineTemperature = (1.0f / steinhart) - 273.15f; 
+}
+
+void updateGPSOdometer() {
+    if (ENABLE_POWER_SENSE && digitalRead(POWER_SENSE_PIN) == LOW) {
+        preferences.putDouble("odo", totalDistanceKm);
+        preferences.end();
+        
+        analogWrite(BL_BIG_DISPLAY, 0);
+        analogWrite(BL_SMALL_DISPLAY, 0);
+        digitalWrite(BL_BIG_DISPLAY, LOW);
+        digitalWrite(BL_SMALL_DISPLAY, LOW);
+        
+        Serial.println("[LOG] Mancanza tensione quadro. Deep Sleep attivo.");
+        Serial.flush();
+        
+        esp_sleep_enable_ext0_wakeup((gpio_num_t)POWER_SENSE_PIN, 1);
+        esp_deep_sleep_start(); 
+    }
+
+    unsigned long pulses = 0;
+    portENTER_CRITICAL(&hallMux);
+    pulses = hallPulseCount;
+    hallPulseCount = 0;
+    portEXIT_CRITICAL(&hallMux);
+
+    bool isGpsValid = (gps.location.isValid() && gps.satellites.value() >= MIN_SATELLITES);
+
+    if (!isGpsValid && pulses > 0) {
+        double hallDistKm = (double)pulses * WHEEL_DIST_PER_PULSE_KM;
+        totalDistanceKm += hallDistKm;
+        tripDistanceKm += hallDistKm;
+        
+        if (totalDistanceKm - lastSavedOdo >= 1.0) {
+            preferences.putDouble("odo", totalDistanceKm);
+            lastSavedOdo = totalDistanceKm;
+            Serial.println("[LOG] Odo salvato periodicamente (+1 KM da Sensore Hall)");
+        }
+    }
+
+    if (isGpsValid && gps.location.isUpdated()) {
+        float currentSpeed = getFilteredSpeed();
+        
+        if (currentSpeed > 0.0f) { 
+            if (hasLastPos) {
+                double distanceMeters = TinyGPSPlus::distanceBetween(gps.location.lat(), gps.location.lng(), lastLat, lastLon);
+                if (distanceMeters < 500.0) { 
+                    double dKm = (distanceMeters / 1000.0);
+                    totalDistanceKm += dKm; 
+                    tripDistanceKm += dKm; 
+                    if (totalDistanceKm - lastSavedOdo >= 1.0) {
+                        preferences.putDouble("odo", totalDistanceKm);
+                        lastSavedOdo = totalDistanceKm;
+                        Serial.println("[LOG] Odo salvato periodicamente (+1 KM da GPS)");
+                    }
+                }
+            }
+            lastLat = gps.location.lat(); 
+            lastLon = gps.location.lng();
+            hasLastPos = true;
+        } else {
+            lastLat = gps.location.lat(); 
+            lastLon = gps.location.lng();
+            hasLastPos = true;
+        }
+    }
+}
+
+void processFuelConsumption() {
+    if (tripStartFuelLiters < 0.0f && fuelLiters > 0.0f) {
+        tripStartFuelLiters = fuelLiters;
+    }
+
+    if (tripStartFuelLiters > 0.0f) {
+        float consumed = tripStartFuelLiters - fuelLiters;
+        if (consumed > 0.0f) {
+            tripFuelConsumedLiters = consumed;
+        } else if (consumed < -0.5f) {
+            tripStartFuelLiters = fuelLiters;
+            tripFuelConsumedLiters = 0.0f;
+        }
+    }
+
+    if (tripDistanceKm > 0.05 && tripFuelConsumedLiters > 0.01f) {
+        averageKml = (float)(tripDistanceKm / tripFuelConsumedLiters);
+        if (averageKml > 99.9f) averageKml = 99.9f;
+    } else {
+        averageKml = 0.0f;
+    }
+
+    static unsigned long lastInstSampleTime = 0;
+    static double lastInstDistKm = 0.0;
+    static float lastInstFuelLiters = 0.0f;
+
+    if (millis() - lastInstSampleTime >= 3000) {
+        lastInstSampleTime = millis();
+
+        double dDist = tripDistanceKm - lastInstDistKm;
+        float dFuel = lastInstFuelLiters - fuelLiters;
+
+        lastInstDistKm = tripDistanceKm;
+        lastInstFuelLiters = fuelLiters;
+
+        float currentSpeed = getFilteredSpeed();
+
+        if (currentSpeed > 0.0f && dDist > 0.005 && dFuel > 0.001f) {
+            float rawInst = (float)(dDist / dFuel);
+            if (rawInst > 99.9f) rawInst = 99.9f;
+            instantKml = (rawInst * 0.4f) + (instantKml * 0.6f); 
+        } else if (currentSpeed == 0.0f) {
+            instantKml = 0.0f;
+        }
+    }
+}
+
+void updateAccelTimer() {
+    float currentSpeed = getFilteredSpeed();
+    static bool readyForNextRun = false;
+
+    switch (accelState) {
+        case READY:
+            accelResultTime = 0.0f; 
+            if (currentSpeed >= ACCEL_START_SPEED) { 
+                accelState = RUNNING; 
+                accelStartTime = millis(); 
+                accelResultTime = 0.0f; 
+                readyForNextRun = false;
+            }
+            break;
+
+        case RUNNING:
+            accelResultTime = (millis() - accelStartTime) / 1000.0f;
+            if (currentSpeed >= ACCEL_TARGET_SPEED) { 
+                accelState = FINISHED; 
+                readyForNextRun = false;
+            } else if (currentSpeed < ACCEL_START_SPEED) { 
+                accelState = READY; 
+                accelResultTime = 0.0f; 
+            }
+            break;
+
+        case FINISHED:
+            if (currentSpeed < ACCEL_START_SPEED) {
+                readyForNextRun = true;
+            }
+            
+            if (readyForNextRun && currentSpeed >= ACCEL_START_SPEED) {
+                accelState = RUNNING;
+                accelStartTime = millis();
+                accelResultTime = 0.0f;
+                readyForNextRun = false;
+            }
+            break;
+    }
+}
+
+void processFuelSensor() {
+    int instantReading;
+
+    if (IS_WOKWI_SIMULATOR) {
+        instantReading = analogRead(FUEL_TOUCH_PIN); 
+    } else {
+        instantReading = touchRead(FUEL_TOUCH_PIN); 
+    }
+
+    filteredReading = ((float)instantReading * FUEL_FILTER_ALPHA) + (filteredReading * (1.0f - FUEL_FILTER_ALPHA));
+    
+    if (filteredReading >= touchTable[0]) { fuelLiters = 0.0f; fuelPercentage = 0; return; }
+    if (filteredReading <= touchTable[NUM_POINTS - 1]) { fuelLiters = (float)(NUM_POINTS - 1); fuelPercentage = 100; return; }
+    
+    for (int i = 0; i < NUM_POINTS - 1; i++) {
+        int highPoint = touchTable[i];
+        int lowPoint = touchTable[i+1];
+        if (filteredReading <= highPoint && filteredReading >= lowPoint) {
+            float fraction = (filteredReading - highPoint) / (float)(lowPoint - highPoint);
+            fuelLiters = (float)i + fraction; 
+            fuelPercentage = constrain((int)((fuelLiters / (float)(NUM_POINTS - 1)) * 100.0f), 0, 100);
+            return;
+        }
+    }
+}
+
+void updateBigDisplay(const SensorSnapshot& snap) {
+    static int lastHour = -1;
+    static int lastMin = -1;
+    static int lastDay = -1;
+    static int lastSpeed = -1;
+    static double lastDispOdo = -1.0;
+    static int lastSat = -1;
+    static TimerState lastState = READY;
+    static bool firstRun = true;
+    static bool lastSelfTestState = false;
+    static int lastTimeDateStartX = -1;
+    static int lastTimeDateWidth = -1;
+    static int lastSpeedSourceState = -1;
+
+    bigDisplay.startWrite();
+
+    bool selfTestChanged = (lastSelfTestState != isSelfTestActive);
+    lastSelfTestState = isSelfTestActive;
+    
+    bool forceDraw = firstRun || isSelfTestActive || selfTestChanged;
+    bool componentUpdated = false;
+    int16_t x1, y1, tx1, ty1; 
+    uint16_t w, h;
+
+    if (firstRun || forceDraw) {
+        firstRun = false;
+        bigDisplay.setFont(&Conthrax_SemiBold7pt7b); 
+        bigDisplay.setTextColor(bigDisplay.color565(150, 150, 150)); 
+        bigDisplay.getTextBounds(DASHBOARD_SIGNATURE, 0, 0, &x1, &y1, &w, &h);
+        int sigX = BIG_CENTER_X + OFFSET_BIG_SIGNATURE_X;
+        int sigY = BIG_CENTER_Y + OFFSET_BIG_SIGNATURE_Y;
+        int sigDrawX = sigX - (w / 2);
+        bigDisplay.setCursor(sigDrawX - x1, sigY - y1); bigDisplay.print(DASHBOARD_SIGNATURE);
+        drawDebugBox(bigDisplay, sigDrawX - 2, sigY - 2, w + 4, h + 4);
+
+        bigDisplay.setFont(&Conthrax_SemiBold12pt7b);
+        const char* kmhLabel = "KM/H"; 
+        bigDisplay.setTextColor(TFT_WHITE);
+        bigDisplay.getTextBounds(kmhLabel, 0, 0, &x1, &y1, &w, &h);
+        int unitX = BIG_CENTER_X + OFFSET_BIG_SPEED_UNIT_X;
+        int unitY = BIG_CENTER_Y + OFFSET_BIG_SPEED_UNIT_Y;
+        int unitDrawX = unitX - (w / 2);
+        bigDisplay.setCursor(unitDrawX - x1, unitY - y1); bigDisplay.print(kmhLabel);
+        drawDebugBox(bigDisplay, unitDrawX - 2, unitY - 2, w + 4, h + 4);
+    }
+
+    bool isGpsActive = snap.isGpsSpeedValid;
+    int currentSourceState = isSelfTestActive ? 2 : (isGpsActive ? 1 : 0);
+
+    if (currentSourceState != lastSpeedSourceState || forceDraw) {
+        lastSpeedSourceState = currentSourceState;
+        componentUpdated = true;
+
+        uint16_t colorDarkGrey = bigDisplay.color565(70, 70, 70);
+        uint16_t hallColor, gpsColor;
+
+        if (isSelfTestActive) {
+            hallColor = TFT_YELLOW;
+            gpsColor  = TFT_GREEN;
+        } else if (isGpsActive) {
+            hallColor = colorDarkGrey;
+            gpsColor  = TFT_GREEN;
+        } else {
+            hallColor = TFT_YELLOW;
+            gpsColor  = colorDarkGrey;
+        }
+
+        bigDisplay.setFont(&Conthrax_SemiBold7pt7b);
+
+        // --- 1. ICONA HALL (con Antialiasing) ---
+        bigDisplay.getTextBounds("HALL", 0, 0, &tx1, &ty1, &w, &h);
+        int hallBadgeW = w + 16;
+        int hallBadgeH = h + 8;
+        int hallX = (BIG_CENTER_X + OFFSET_HALL_ICON_X) - (hallBadgeW / 2);
+        int hallY = (BIG_CENTER_Y + OFFSET_HALL_ICON_Y) - (hallBadgeH / 2);
+
+        bigDisplay.fillRect(hallX - 3, hallY - 3, hallBadgeW + 6, hallBadgeH + 6, TFT_BLACK);
+        drawAARoundRect(bigDisplay, hallX, hallY, hallBadgeW, hallBadgeH, 4, hallColor);
+        bigDisplay.setTextColor(hallColor);
+        bigDisplay.setCursor(hallX + (hallBadgeW - w) / 2 - tx1, hallY + (hallBadgeH - h) / 2 - ty1 + 1);
+        bigDisplay.print("HALL");
+        drawDebugBox(bigDisplay, hallX - 2, hallY - 2, hallBadgeW + 4, hallBadgeH + 4);
+
+        // --- 2. ICONA GPS (con Antialiasing) ---
+        bigDisplay.getTextBounds("GPS", 0, 0, &tx1, &ty1, &w, &h);
+        int gpsBadgeW = w + 16;
+        int gpsBadgeH = h + 8;
+        int gpsX = (BIG_CENTER_X + OFFSET_GPS_ICON_X) - (gpsBadgeW / 2);
+        int gpsY = (BIG_CENTER_Y + OFFSET_GPS_ICON_Y) - (gpsBadgeH / 2);
+
+        bigDisplay.fillRect(gpsX - 3, gpsY - 3, gpsBadgeW + 6, gpsBadgeH + 6, TFT_BLACK);
+        drawAARoundRect(bigDisplay, gpsX, gpsY, gpsBadgeW, gpsBadgeH, 4, gpsColor);
+        bigDisplay.setTextColor(gpsColor);
+        bigDisplay.setCursor(gpsX + (gpsBadgeW - w) / 2 - tx1, gpsY + (gpsBadgeH - h) / 2 - ty1 + 1);
+        bigDisplay.print("GPS");
+        drawDebugBox(bigDisplay, gpsX - 2, gpsY - 2, gpsBadgeW + 4, gpsBadgeH + 4);
+    }
+
+    if (snap.localHour != lastHour || snap.minute != lastMin || snap.day != lastDay || forceDraw) {
+        lastHour = snap.localHour;
+        lastMin = snap.minute;
+        lastDay = snap.day;
+        componentUpdated = true;
+        
+        int timeDateY = BIG_CENTER_Y + OFFSET_BIG_TIME_DATE_Y;
+        
+        char hourStr[4] = "--", minStr[4] = "--";
+        char dayStr[4] = "--", monthStr[4] = "--", yearStr[4] = "--";
+
+        if (overrideTimeDateStr) {
+            snprintf(hourStr, sizeof(hourStr), "88");
+            snprintf(minStr, sizeof(minStr), "88");
+            snprintf(dayStr, sizeof(dayStr), "88");
+            snprintf(monthStr, sizeof(monthStr), "88");
+            snprintf(yearStr, sizeof(yearStr), "88");
+        } else {
+            if (snap.timeValid) {
+                snprintf(hourStr, sizeof(hourStr), "%02d", snap.localHour);
+                snprintf(minStr, sizeof(minStr), "%02d", snap.minute);
+            }
+            if (snap.dateValid) {
+                snprintf(dayStr, sizeof(dayStr), "%02d", snap.day);
+                snprintf(monthStr, sizeof(monthStr), "%02d", snap.month);
+                snprintf(yearStr, sizeof(yearStr), "%02d", snap.year);
+            }
+        }
+
+        uint16_t w_h, h_h, w_m, h_m, w_sep_t, h_sep_t;
+        uint16_t w_d, h_d, w_mo, h_mo, w_y, h_y, w_sep_d, h_sep_d;
+        
+        bigDisplay.setFont(&DS_DIGIT15pt7b);
+        bigDisplay.getTextBounds(hourStr, 0, 0, &tx1, &ty1, &w_h, &h_h);
+        int16_t save_h_x1 = tx1;
+        bigDisplay.getTextBounds(minStr, 0, 0, &tx1, &ty1, &w_m, &h_m);
+        bigDisplay.getTextBounds(dayStr, 0, 0, &tx1, &ty1, &w_d, &h_d);
+        int16_t save_d_x1 = tx1;
+        bigDisplay.getTextBounds(monthStr, 0, 0, &tx1, &ty1, &w_mo, &h_mo);
+        bigDisplay.getTextBounds(yearStr, 0, 0, &tx1, &ty1, &w_y, &h_y);
+        
+        bigDisplay.setFont(&Conthrax_SemiBold12pt7b);
+        bigDisplay.getTextBounds(":", 0, 0, &tx1, &ty1, &w_sep_t, &h_sep_t);
+        bigDisplay.getTextBounds("/", 0, 0, &tx1, &ty1, &w_sep_d, &h_sep_d);
+        
+        int w_time = w_h + w_sep_t + w_m;
+        int w_date = w_d + w_sep_d + w_mo + w_sep_d + w_y;
+        int totalRowWidth = 16 + 6 + w_time + 16 + 16 + 6 + w_date;
+        int startX = (BIG_CENTER_X + OFFSET_BIG_TIME_DATE_X) - (totalRowWidth / 2);
+        
+        int clearX = startX - 4;
+        int clearW = totalRowWidth + 8;
+        if (lastTimeDateWidth > 0 && lastTimeDateStartX >= 0) {
+            int leftBound = min(startX, lastTimeDateStartX) - 4;
+            int rightBound = max(startX + totalRowWidth, lastTimeDateStartX + lastTimeDateWidth) + 4;
+            clearX = leftBound;
+            clearW = rightBound - leftBound;
+        }
+
+        bigDisplay.fillRect(clearX, timeDateY - 20, clearW, 26, TFT_BLACK); 
+
+        lastTimeDateStartX = startX;
+        lastTimeDateWidth = totalRowWidth;
+
+        drawClockIcon(startX, timeDateY - 18, TFT_WHITE);
+        int curX = startX + 16 + 6;
+        
+        bigDisplay.setTextColor(TFT_WHITE);
+        bigDisplay.setFont(&DS_DIGIT15pt7b);
+        bigDisplay.setCursor(curX - save_h_x1, timeDateY); bigDisplay.print(hourStr);
+        bigDisplay.setFont(&Conthrax_SemiBold12pt7b); bigDisplay.print(":");
+        bigDisplay.setFont(&DS_DIGIT15pt7b); bigDisplay.print(minStr);
+        
+        int dateBlockX = startX + 16 + 6 + w_time + 16;
+        drawCalendarIcon(dateBlockX, timeDateY - 18, TFT_WHITE);
+        curX = dateBlockX + 16 + 6;
+        
+        bigDisplay.setFont(&DS_DIGIT15pt7b);
+        bigDisplay.setCursor(curX - save_d_x1, timeDateY); bigDisplay.print(dayStr);
+        bigDisplay.setFont(&Conthrax_SemiBold12pt7b); bigDisplay.print("/");
+        bigDisplay.setFont(&DS_DIGIT15pt7b); bigDisplay.print(monthStr);
+        bigDisplay.setFont(&Conthrax_SemiBold12pt7b); bigDisplay.print("/");
+        bigDisplay.setFont(&DS_DIGIT15pt7b); bigDisplay.print(yearStr);
+
+        drawDebugBox(bigDisplay, startX - 2, timeDateY - 19, totalRowWidth + 4, 23);
+    }
+
+    int currentSpeed = isSelfTestActive ? overrideSpeed : (int)snap.currentSpeed;
+    if (currentSpeed != lastSpeed || forceDraw) {
+        lastSpeed = currentSpeed;
+        componentUpdated = true;
+        
+        int speedNumX = BIG_CENTER_X + OFFSET_BIG_SPEED_NUM_X;
+        int speedNumY = BIG_CENTER_Y + OFFSET_BIG_SPEED_NUM_Y;
+
+        static uint16_t w_speed3_max = 0;
+        static uint16_t h_speed_max = 0;
+        static bool speedLayoutInit = false;
+
+        bigDisplay.setFont(&DS_DIGIT50pt7b);
+
+        if (!speedLayoutInit) {
+            speedLayoutInit = true;
+            int16_t sx1, sy1;
+            bigDisplay.getTextBounds("999", 0, 0, &sx1, &sy1, &w_speed3_max, &h_speed_max);
+        }
+        
+        char speedStr[6];
+        snprintf(speedStr, sizeof(speedStr), "%d", currentSpeed);
+        bigDisplay.getTextBounds(speedStr, 0, 0, &x1, &y1, &w, &h);
+
+        uint16_t clearH = (h > h_speed_max) ? h : h_speed_max;
+        bigDisplay.fillRect(speedNumX - (w_speed3_max / 2) - 6, speedNumY - 2, w_speed3_max + 12, clearH + 6, TFT_BLACK); 
+
+        bigDisplay.setCursor(speedNumX - (w / 2) - x1, speedNumY - y1); 
+        bigDisplay.print(speedStr);
+        
+        drawDebugBox(bigDisplay, speedNumX - (w / 2) - 2, speedNumY - 2, w + 4, h + 4);
+    }
+
+    double displayOdo = isSelfTestActive ? overrideOdo : snap.totalDistanceKm;
+    if (fabs(displayOdo - lastDispOdo) >= 0.1 || forceDraw) {
+        lastDispOdo = displayOdo;
+        componentUpdated = true;
+        
+        static int refOdoX = 0;
+        static uint16_t w_odo_num_max = 0;
+        static uint16_t w_odo_unit_max = 0;
+        static bool odoLayoutInit = false;
+
+        if (!odoLayoutInit) {
+            odoLayoutInit = true;
+            int16_t tx1, ty1; uint16_t tw1, th1, tw2, th2;
+
+            bigDisplay.setFont(&DS_DIGIT15pt7b);
+            bigDisplay.getTextBounds("999999.9", 0, 0, &tx1, &ty1, &tw1, &th1);
+            w_odo_num_max = tw1;
+
+            bigDisplay.setFont(&Conthrax_SemiBold12pt7b);
+            bigDisplay.getTextBounds(" KM", 0, 0, &tx1, &ty1, &tw2, &th2);
+            w_odo_unit_max = tw2;
+
+            int odoX = BIG_CENTER_X + OFFSET_BIG_ODO_X;
+            uint16_t totalOdoW_max = w_odo_num_max + tw2;
+            int startOdoX = odoX - (totalOdoW_max / 2);
+            refOdoX = startOdoX + w_odo_num_max; 
+        }
+
+        char odoNumStr[12];
+        snprintf(odoNumStr, sizeof(odoNumStr), "%07.1f", displayOdo); 
+        const char* odoUnitStr = " KM"; 
+        
+        uint16_t w_num, h_num; int16_t tx15, ty15;
+        bigDisplay.setFont(&DS_DIGIT15pt7b); 
+        bigDisplay.getTextBounds(odoNumStr, 0, 0, &tx15, &ty15, &w_num, &h_num);
+
+        int16_t odoBottomY = BIG_CENTER_Y + OFFSET_BIG_ODO_Y; 
+        int16_t odoTopY = odoBottomY - h_num;
+
+        int clearOdoLeft = refOdoX - w_odo_num_max - 4;
+        int clearOdoWidth = w_odo_num_max + w_odo_unit_max + 8;
+        bigDisplay.fillRect(clearOdoLeft, odoTopY - 2, clearOdoWidth, h_num + 4, TFT_BLACK); 
+
+        bigDisplay.setFont(&DS_DIGIT15pt7b); 
+        bigDisplay.setCursor(refOdoX - w_num - tx15, odoTopY - ty15); 
+        bigDisplay.print(odoNumStr); 
+
+        bigDisplay.setFont(&Conthrax_SemiBold12pt7b); 
+        bigDisplay.setCursor(refOdoX, odoTopY - ty15);
+        bigDisplay.print(odoUnitStr);
+
+        drawDebugBox(bigDisplay, refOdoX - w_num - tx15 - 2, odoTopY - 2, w_num + tx15 + w_odo_unit_max + 4, h_num + 4);
+    }
+
+    int displaySat = isSelfTestActive ? overrideSat : snap.satellites;
+    float displayBat = isSelfTestActive ? overrideBat : snap.batteryVoltage;
+    float displayTmr = isSelfTestActive ? overrideTimer : snap.accelResultTime;
+    TimerState displayAccelState = isSelfTestActive ? RUNNING : snap.accelState;
+
+    int bottomY = BIG_CENTER_Y + OFFSET_BIG_BOTTOM_ROW_Y;
+    int bottomCenterX = BIG_CENTER_X + OFFSET_BIG_BOTTOM_ROW_X;
+
+    static int w_sat_max = 0, w_bat_max = 0, w_badge_max = 0, w_tmr_max = 0;
+    static uint16_t h_sat_max = 0, h_bat_max = 0, h_tmr_max = 0;
+    static uint16_t w_bat_num_max = 0;
+    static int totalRowW_fixed = 0;
+    static bool bottomRowLayoutInit = false;
+
+    if (!bottomRowLayoutInit) {
+        bottomRowLayoutInit = true;
+        int16_t bx1, by1; uint16_t bw, bh;
+        
+        bigDisplay.setFont(&DS_DIGIT15pt7b);
+        bigDisplay.getTextBounds("88", 0, 0, &bx1, &by1, &bw, &bh);
+        w_sat_max = 16 + 6 + bw;
+        h_sat_max = (bh > 15) ? bh : 15;
+
+        bigDisplay.setFont(&DS_DIGIT15pt7b);
+        bigDisplay.getTextBounds("88.8", 0, 0, &bx1, &by1, &bw, &bh);
+        w_bat_num_max = bw;
+        uint16_t w_v_unit, h_v_unit;
+        bigDisplay.setFont(&Conthrax_SemiBold7pt7b);
+        bigDisplay.getTextBounds(" V", 0, 0, &bx1, &by1, &w_v_unit, &h_v_unit);
+        
+        uint16_t batIconH = 18; 
+        w_bat_max = 10 + 4 + w_bat_num_max + w_v_unit; 
+        h_bat_max = (bh > batIconH) ? bh : batIconH;
+        if (h_v_unit > h_bat_max) h_bat_max = h_v_unit;
+
+        int16_t bx_b1, by_b1, bx_b2, by_b2;
+        uint16_t bw1, bh1, bw2, bh2;
+        bigDisplay.setFont(&Conthrax_SemiBold4pt7b);
+        bigDisplay.getTextBounds(ACCEL_BADGE_LINE1, 0, 0, &bx_b1, &by_b1, &bw1, &bh1);
+        bigDisplay.getTextBounds(ACCEL_BADGE_LINE2, 0, 0, &bx_b2, &by_b2, &bw2, &bh2);
+        uint16_t max_text_w = (bw1 > bw2) ? bw1 : bw2;
+        w_badge_max = max_text_w + 8; 
+
+        bigDisplay.setFont(&DS_DIGIT15pt7b);
+        bigDisplay.getTextBounds("88.88", 0, 0, &bx1, &by1, &bw, &bh);
+        uint16_t w_s_unit, h_s_unit;
+        bigDisplay.setFont(&Conthrax_SemiBold7pt7b);
+        bigDisplay.getTextBounds(" S", 0, 0, &bx1, &by1, &w_s_unit, &h_s_unit);
+        w_tmr_max = bw + w_s_unit;
+        h_tmr_max = (bh > h_s_unit) ? bh : h_s_unit;
+
+        int gapX = 14;
+        int badgeGapX = 5; 
+        int batGapX = 4;   
+        totalRowW_fixed = w_sat_max + gapX + w_badge_max + badgeGapX + w_tmr_max + batGapX + w_bat_max;
+    }
+
+    int gapX = 14;
+    int badgeGapX = 5;
+    int batGapX = 4; 
+    int bottomStartX = bottomCenterX - (totalRowW_fixed / 2);
+
+    int satX   = bottomStartX;
+    int badgeX = satX + w_sat_max + gapX;
+    int tmrX   = badgeX + w_badge_max + badgeGapX;
+    int batX   = tmrX + w_tmr_max + batGapX;
+
+    // --- 1. SATELLITI ---
+    if (displaySat != lastSat || forceDraw) {
+        lastSat = displaySat;
+        componentUpdated = true;
+
+        char satStr[8]; snprintf(satStr, sizeof(satStr), "%d", displaySat);
+        bigDisplay.setFont(&DS_DIGIT15pt7b);
+        bigDisplay.getTextBounds(satStr, 0, 0, &x1, &y1, &w, &h);
+
+        bigDisplay.fillRect(satX - 1, bottomY - 1, w_sat_max + 2, h_sat_max + 2, TFT_BLACK);
+        drawLocationIcon(satX, bottomY + 2, TFT_WHITE); 
+        bigDisplay.setFont(&DS_DIGIT15pt7b); bigDisplay.setTextColor(TFT_WHITE);
+        bigDisplay.setCursor(satX + 16 + 6 - x1, bottomY - y1); bigDisplay.print(satStr);
+        drawDebugBox(bigDisplay, satX - 1, bottomY - 1, w_sat_max + 2, h_sat_max + 2);
+    }
+
+    // --- 2. BADGE 0-50 (con Antialiasing) ---
+    if (displayAccelState != lastState || forceDraw) {
+        lastState = displayAccelState;
+        componentUpdated = true;
+
+        uint16_t timerColor = (displayAccelState == RUNNING) ? TFT_YELLOW : ((displayAccelState == FINISHED) ? TFT_GREEN : TFT_WHITE);
+        
+        int16_t bx1_b, by1_b, bx2_b, by2_b;
+        uint16_t bw1_b, bh1_b, bw2_b, bh2_b;
+        bigDisplay.setFont(&Conthrax_SemiBold4pt7b); 
+        bigDisplay.getTextBounds(ACCEL_BADGE_LINE1, 0, 0, &bx1_b, &by1_b, &bw1_b, &bh1_b);
+        bigDisplay.getTextBounds(ACCEL_BADGE_LINE2, 0, 0, &bx2_b, &by2_b, &bw2_b, &bh2_b);
+        
+        int badgeW = w_badge_max;
+        int badgeH = 20; 
+        int badgePosY = bottomY - 1;
+
+        bigDisplay.fillRect(badgeX - 1, badgePosY - 1, badgeW + 2, badgeH + 2, TFT_BLACK);
+        drawAARoundRect(bigDisplay, badgeX, badgePosY, badgeW, badgeH, 3, timerColor); 
+        bigDisplay.setFont(&Conthrax_SemiBold4pt7b); 
+        bigDisplay.setTextColor(timerColor);
+
+        bigDisplay.setCursor(badgeX + (badgeW - bw1_b) / 2 - bx1_b, badgePosY + 3 - by1_b); 
+        bigDisplay.print(ACCEL_BADGE_LINE1);
+
+        bigDisplay.setCursor(badgeX + (badgeW - bw2_b) / 2 - bx2_b, badgePosY + 3 + bh1_b + 2 - by2_b); 
+        bigDisplay.print(ACCEL_BADGE_LINE2);
+
+        drawDebugBox(bigDisplay, badgeX - 1, badgePosY - 1, badgeW + 2, badgeH + 2);
+    }
+
+    // --- 3. TIMER ---
+    char tmrStr[8]; snprintf(tmrStr, sizeof(tmrStr), "%.2f", displayTmr);
+    static char lastTmrStr[8] = "";
+    static TimerState lastStateTimer = READY;
+
+    if (strcmp(tmrStr, lastTmrStr) != 0 || displayAccelState != lastStateTimer || forceDraw) {
+        strcpy(lastTmrStr, tmrStr);
+        lastStateTimer = displayAccelState;
+        componentUpdated = true;
+
+        uint16_t timerColor = (displayAccelState == RUNNING) ? TFT_YELLOW : ((displayAccelState == FINISHED) ? TFT_GREEN : TFT_WHITE);
+        const char* tmrUnitStr = " S";
+        
+        bigDisplay.setFont(&DS_DIGIT15pt7b);
+        bigDisplay.getTextBounds(tmrStr, 0, 0, &x1, &y1, &w, &h);
+
+        bigDisplay.fillRect(tmrX - 1, bottomY - 1, w_tmr_max + 2, h_tmr_max + 2, TFT_BLACK);
+        bigDisplay.setFont(&DS_DIGIT15pt7b); 
+        bigDisplay.setCursor(tmrX - x1, bottomY - y1); 
+        bigDisplay.setTextColor(timerColor); 
+        bigDisplay.print(tmrStr);
+        bigDisplay.setFont(&Conthrax_SemiBold7pt7b); 
+        bigDisplay.print(tmrUnitStr);
+
+        drawDebugBox(bigDisplay, tmrX - 1, bottomY - 1, w_tmr_max + 2, h_tmr_max + 2);
+    }
+
+    // --- 4. BATTERIA ---
+    char batStr[8]; snprintf(batStr, sizeof(batStr), "%.1f", displayBat);
+    static char lastBatStr[8] = "";
+
+    if (strcmp(batStr, lastBatStr) != 0 || forceDraw) {
+        strcpy(lastBatStr, batStr);
+        componentUpdated = true;
+
+        uint16_t batColor = TFT_YELLOW;
+        if (displayBat > 0.5f && displayBat < 11.8f) batColor = TFT_RED;
+        else if (displayBat >= 13.1f) batColor = TFT_GREEN;
+        else if (displayBat <= 0.5f) batColor = TFT_WHITE;
+
+        bigDisplay.fillRect(batX - 1, bottomY - 1, w_bat_max + 2, h_bat_max + 3, TFT_BLACK);
+
+        int iconX = batX;
+        int iconY = bottomY + 1; 
+        drawBatteryIcon(iconX, iconY, displayBat, batColor);
+
+        int textStartX = batX + 10 + 4;
+
+        bigDisplay.setFont(&DS_DIGIT15pt7b); 
+        bigDisplay.getTextBounds(batStr, 0, 0, &x1, &y1, &w, &h);
+        bigDisplay.setTextColor(batColor);
+        bigDisplay.setCursor(textStartX - x1, bottomY - y1); 
+        bigDisplay.print(batStr);
+
+        bigDisplay.setFont(&Conthrax_SemiBold7pt7b); 
+        bigDisplay.print(" V");
+
+        drawDebugBox(bigDisplay, batX - 1, bottomY - 1, w_bat_max + 2, h_bat_max + 3);
+    }
+
+    // Cerchio di Test Esterno in Antialiasing
+    if ((componentUpdated || forceDraw) && ENABLE_CIRCLE_TEST) {
+        for (int i = 0; i < 4; i++) { drawAACircle(bigDisplay, BIG_CENTER_X, BIG_CENTER_Y, 173 - i, TFT_CYAN); }
+    }
+
+    bigDisplay.endWrite();
+}
+
+void updateSmallDisplay(const SensorSnapshot& snap) {
+    static int lastFuelPct = -1;
+    static char lastLitStr[8] = "";
+    static int lastTempInt = -999;
+    static float lastDispInstKml = -1.0f;
+    static float lastDispAvgKml = -1.0f;
+    static bool firstRunSmall = true;
+    static bool lastSelfTestStateSmall = false;
+
+    smallDisplay.startWrite();
+
+    bool selfTestChangedSmall = (lastSelfTestStateSmall != isSelfTestActive);
+    lastSelfTestStateSmall = isSelfTestActive;
+    
+    bool forceDraw = firstRunSmall || isSelfTestActive || selfTestChangedSmall;
+    if (firstRunSmall) firstRunSmall = false;
+
+    int16_t x15, y15, x50, y50; 
+    uint16_t w15, h15, w50, h50; 
+    
+    smallDisplay.setTextSize(1);
+
+    int displayFuelPct = isSelfTestActive ? overrideFuelPct : snap.fuelPercentage;
+    float displayFuelLiters = isSelfTestActive ? overrideFuelLiters : snap.fuelLiters;
+    float displayInstKml = isSelfTestActive ? overrideInstKml : snap.instantKml;
+    float displayAvgKml = isSelfTestActive ? overrideAvgKml : snap.averageKml;
+    float displayTemp = isSelfTestActive ? overrideTemp : snap.engineTemperature;
+
+    char litStr[6]; snprintf(litStr, sizeof(litStr), "%.1f", displayFuelLiters);
+
+    if (displayFuelPct != lastFuelPct || strcmp(litStr, lastLitStr) != 0 || forceDraw) {
+        lastFuelPct = displayFuelPct;
+        strcpy(lastLitStr, litStr);
+        
+        int fuelPctX = SMALL_CENTER_X + OFFSET_SMALL_FUEL_PCT_X;
+        int fuelPctY = SMALL_CENTER_Y + OFFSET_SMALL_FUEL_PCT_Y;
+        
+        int fuelLitX = SMALL_CENTER_X + OFFSET_SMALL_FUEL_LITERS_X;
+        int fuelLitY = SMALL_CENTER_Y + OFFSET_SMALL_FUEL_LITERS_Y;
+
+        static int refPctX = 0;
+        static uint16_t w_pct3_max = 0;
+        static uint16_t w_pct_unit_max = 0;
+        static bool fuelPctLayoutInit = false;
+
+        if (!fuelPctLayoutInit) {
+            fuelPctLayoutInit = true;
+            int16_t tx1, ty1; uint16_t tw1, th1, tw2, th2;
+
+            smallDisplay.setFont(&DS_DIGIT15pt7b);
+            smallDisplay.getTextBounds("00", 0, 0, &tx1, &ty1, &tw1, &th1);
+            smallDisplay.setFont(&Conthrax_SemiBold12pt7b);
+            smallDisplay.getTextBounds("%", 0, 0, &tx1, &ty1, &tw2, &th2);
+            w_pct_unit_max = tw2;
+
+            uint16_t total2W = tw1 + tw2;
+            int start2X = fuelPctX - (total2W / 2);
+            refPctX = start2X + tw1;
+
+            smallDisplay.setFont(&DS_DIGIT15pt7b);
+            smallDisplay.getTextBounds("100", 0, 0, &tx1, &ty1, &w_pct3_max, &th1);
+        }
+
+        static int refLitX = 0;
+        static uint16_t w_lit_num_max = 0;
+        static uint16_t w_lit_unit_max = 0;
+        static bool litLayoutInit = false;
+
+        if (!litLayoutInit) {
+            litLayoutInit = true;
+            int16_t tx1, ty1; uint16_t tw1, th1, tw2, th2;
+
+            smallDisplay.setFont(&DS_DIGIT50pt7b);
+            smallDisplay.getTextBounds("9.9", 0, 0, &tx1, &ty1, &tw1, &th1);
+            w_lit_num_max = tw1;
+
+            smallDisplay.setFont(&Conthrax_SemiBold12pt7b);
+            smallDisplay.getTextBounds("L", 0, 0, &tx1, &ty1, &tw2, &th2);
+            w_lit_unit_max = tw2;
+
+            uint16_t totalLitW_max = w_lit_num_max + 6 + tw2;
+            int startLitX = fuelLitX - (totalLitW_max / 2);
+            refLitX = startLitX + w_lit_num_max; 
+        }
+
+        char pctNumStr[6]; snprintf(pctNumStr, sizeof(pctNumStr), "%d", displayFuelPct);
+        uint16_t w_pnum, h_pnum; int16_t tx15, ty15;
+        smallDisplay.setFont(&DS_DIGIT15pt7b); smallDisplay.getTextBounds(pctNumStr, 0, 0, &tx15, &ty15, &w_pnum, &h_pnum);
+
+        smallDisplay.setFont(&DS_DIGIT50pt7b); smallDisplay.getTextBounds(litStr, 0, 0, &x50, &y50, &w50, &h50);
+
+        int fuelBaselineY = fuelLitY - y50 - (h50 / 2);
+
+        int clearPctLeft = refPctX - w_pct3_max - 4;
+        int clearPctWidth = w_pct3_max + w_pct_unit_max + 8;
+        smallDisplay.fillRect(clearPctLeft, fuelPctY - 2, clearPctWidth, h_pnum + 4, TFT_BLACK); 
+
+        int clearLitLeft = refLitX - w_lit_num_max - 4;
+        int clearLitWidth = w_lit_num_max + 6 + w_lit_unit_max + 8;
+        smallDisplay.fillRect(clearLitLeft, fuelLitY - (h50 / 2) - 4, clearLitWidth, h50 + 8, TFT_BLACK); 
+
+        // --- ARCO CARBURANTE (in Antialiasing a passo 0.5°) ---
+        int targetFuelIdx = (displayFuelPct * (NUM_ARC_STEPS - 1)) / 100;
+        static int lastFuelDrawnIdx = -1;
+
+        if (forceDraw || lastFuelDrawnIdx < 0) {
+            for (int i = 0; i < NUM_ARC_STEPS; i++) {
+                float a = fuelArcLUT[i].angle;
+                float p = (a - 210.0f) / 120.0f; 
+                uint16_t segmentColor;
+                if (i <= targetFuelIdx) {
+                    uint8_t r_comp = (p < 0.5f) ? 31 : (31 - (uint8_t)((p - 0.5f) * 62.0f));
+                    uint8_t g_comp = (p > 0.5f) ? 63 : (uint8_t)(p * 126.0f);
+                    segmentColor = (r_comp << 11) | (g_comp << 5);
+                } else { 
+                    segmentColor = smallDisplay.color565(35, 35, 35); 
+                }
+                drawAALine(smallDisplay, fuelArcLUT[i].xStart, fuelArcLUT[i].yStart, fuelArcLUT[i].xEnd, fuelArcLUT[i].yEnd, segmentColor);
+            }
+            lastFuelDrawnIdx = targetFuelIdx;
+        } else if (targetFuelIdx != lastFuelDrawnIdx) {
+            if (targetFuelIdx > lastFuelDrawnIdx) {
+                for (int i = lastFuelDrawnIdx + 1; i <= targetFuelIdx; i++) {
+                    float a = fuelArcLUT[i].angle;
+                    float p = (a - 210.0f) / 120.0f;
+                    uint8_t r_comp = (p < 0.5f) ? 31 : (31 - (uint8_t)((p - 0.5f) * 62.0f));
+                    uint8_t g_comp = (p > 0.5f) ? 63 : (uint8_t)(p * 126.0f);
+                    uint16_t segmentColor = (r_comp << 11) | (g_comp << 5);
+                    drawAALine(smallDisplay, fuelArcLUT[i].xStart, fuelArcLUT[i].yStart, fuelArcLUT[i].xEnd, fuelArcLUT[i].yEnd, segmentColor);
+                }
+            } else {
+                uint16_t offColor = smallDisplay.color565(35, 35, 35);
+                for (int i = targetFuelIdx + 1; i <= lastFuelDrawnIdx; i++) {
+                    drawAALine(smallDisplay, fuelArcLUT[i].xStart, fuelArcLUT[i].yStart, fuelArcLUT[i].xEnd, fuelArcLUT[i].yEnd, offColor);
+                }
+            }
+            lastFuelDrawnIdx = targetFuelIdx;
+        }
+
+        int pctBaselineY = fuelPctY - ty15; 
+        smallDisplay.setFont(&DS_DIGIT15pt7b); 
+        smallDisplay.setCursor(refPctX - w_pnum - tx15, pctBaselineY);
+        smallDisplay.setTextColor(TFT_WHITE); 
+        smallDisplay.print(pctNumStr);
+
+        smallDisplay.setFont(&Conthrax_SemiBold12pt7b); 
+        smallDisplay.setCursor(refPctX, pctBaselineY);
+        smallDisplay.print("%");
+
+        drawDebugBox(smallDisplay, refPctX - w_pnum - tx15 - 2, pctBaselineY + ty15 - 2, w_pnum + w_pct_unit_max + 6, h_pnum + 4);
+
+        smallDisplay.setFont(&DS_DIGIT50pt7b); 
+        smallDisplay.setCursor(refLitX - w50 - x50, fuelBaselineY);
+        smallDisplay.setTextColor(TFT_WHITE); 
+        smallDisplay.print(litStr);
+        
+        smallDisplay.setFont(&Conthrax_SemiBold12pt7b); 
+        smallDisplay.setCursor(refLitX + 6, fuelBaselineY); 
+        smallDisplay.print("L");
+
+        drawDebugBox(smallDisplay, refLitX - w50 - x50 - 2, fuelBaselineY + y50 - 2, w50 + x50 + w_lit_unit_max + 10, h50 + 4);
+    }
+
+    if (fabsf(displayInstKml - lastDispInstKml) >= 0.1f || fabsf(displayAvgKml - lastDispAvgKml) >= 0.1f || forceDraw) {
+        lastDispInstKml = displayInstKml;
+        lastDispAvgKml = displayAvgKml;
+
+        // --- BLOCCO ISTANTRANEO (IST) ---
+        int instCenterX = SMALL_CENTER_X + OFFSET_SMALL_KML_INST_X;
+        int instY = SMALL_CENTER_Y + OFFSET_SMALL_KML_INST_Y;
+
+        static int instBlockWidthMax = 0;
+        static uint16_t badgeW_ist = 0, badgeH_ist = 0;
+        static int16_t badgeBx_ist = 0, badgeBy_ist = 0;
+        static uint16_t w_kml_unit = 0;
+        static uint16_t w_num_max = 0;
+        static bool instLayoutInit = false;
+
+        if (!instLayoutInit) {
+            instLayoutInit = true;
+            int16_t tx1, ty1; uint16_t th1;
+
+            smallDisplay.setFont(&DS_DIGIT15pt7b);
+            smallDisplay.getTextBounds("00.0", 0, 0, &tx1, &ty1, &w_num_max, &th1);
+
+            smallDisplay.setFont(&Conthrax_SemiBold4pt7b);
+            smallDisplay.getTextBounds("KM/L", 0, 0, &tx1, &ty1, &w_kml_unit, &th1);
+
+            uint16_t bw, bh;
+            smallDisplay.getTextBounds("IST", 0, 0, &badgeBx_ist, &badgeBy_ist, &bw, &bh);
+            badgeW_ist = bw + 6;
+            badgeH_ist = bh + 4;
+
+            uint16_t w_right = (badgeW_ist > w_kml_unit) ? badgeW_ist : w_kml_unit;
+            instBlockWidthMax = w_num_max + 4 + w_right;
+        }
+
+        char instStr[8];
+        if (displayInstKml > 0.0f) snprintf(instStr, sizeof(instStr), "%.1f", displayInstKml);
+        else snprintf(instStr, sizeof(instStr), "0.0");
+
+        int16_t tx15, ty15; uint16_t w_num, h_num;
+        smallDisplay.setFont(&DS_DIGIT15pt7b);
+        smallDisplay.getTextBounds(instStr, 0, 0, &tx15, &ty15, &w_num, &h_num);
+
+        uint16_t w_right_ist = (badgeW_ist > w_kml_unit) ? badgeW_ist : w_kml_unit;
+        int currentInstWidth = w_num + 4 + w_right_ist;
+        int startInstX = instCenterX - (currentInstWidth / 2);
+
+        int clearInstX = instCenterX - (instBlockWidthMax / 2) - 4;
+        smallDisplay.fillRect(clearInstX, instY - 20, instBlockWidthMax + 8, 26, TFT_BLACK);
+
+        smallDisplay.setFont(&DS_DIGIT15pt7b);
+        smallDisplay.setCursor(startInstX - tx15, instY);
+        smallDisplay.setTextColor(TFT_CYAN);
+        smallDisplay.print(instStr);
+
+        int rightColInstX = startInstX + w_num + 4;
+
+        int instBadgeX = rightColInstX + (w_right_ist - badgeW_ist) / 2;
+        int instBadgeY = instY - 18;
+        drawAARoundRect(smallDisplay, instBadgeX, instBadgeY, badgeW_ist, badgeH_ist, 2, TFT_CYAN);
+        smallDisplay.setFont(&Conthrax_SemiBold4pt7b);
+        smallDisplay.setTextColor(TFT_CYAN);
+        smallDisplay.setCursor(instBadgeX + 3 - badgeBx_ist, instBadgeY - badgeBy_ist + 2);
+        smallDisplay.print("IST");
+
+        int kmlInstX = rightColInstX + (w_right_ist - w_kml_unit) / 2;
+        smallDisplay.setFont(&Conthrax_SemiBold4pt7b);
+        smallDisplay.setTextColor(TFT_CYAN);
+        smallDisplay.setCursor(kmlInstX, instY - 1);
+        smallDisplay.print("KM/L");
+
+        drawDebugBox(smallDisplay, startInstX - 2, instY - 20, currentInstWidth + 4, 24);
+
+        // --- BLOCCO MEDIO (AVG) ---
+        int avgCenterX = SMALL_CENTER_X + OFFSET_SMALL_KML_AVG_X;
+        int avgY = SMALL_CENTER_Y + OFFSET_SMALL_KML_AVG_Y;
+
+        static int avgBlockWidthMax = 0;
+        static uint16_t badgeW_avg = 0, badgeH_avg = 0;
+        static int16_t badgeBx_avg = 0, badgeBy_avg = 0;
+        static bool avgLayoutInit = false;
+
+        if (!avgLayoutInit) {
+            avgLayoutInit = true;
+            uint16_t bw, bh;
+
+            smallDisplay.setFont(&Conthrax_SemiBold4pt7b);
+            smallDisplay.getTextBounds("AVG", 0, 0, &badgeBx_avg, &badgeBy_avg, &bw, &bh);
+            badgeW_avg = bw + 6;
+            badgeH_avg = bh + 4;
+
+            uint16_t w_right = (badgeW_avg > w_kml_unit) ? badgeW_avg : w_kml_unit;
+            avgBlockWidthMax = w_num_max + 4 + w_right;
+        }
+
+        char avgStr[8];
+        if (displayAvgKml > 0.0f) snprintf(avgStr, sizeof(avgStr), "%.1f", displayAvgKml);
+        else snprintf(avgStr, sizeof(avgStr), "0.0");
+
+        smallDisplay.setFont(&DS_DIGIT15pt7b);
+        smallDisplay.getTextBounds(avgStr, 0, 0, &tx15, &ty15, &w_num, &h_num);
+
+        uint16_t w_right_avg = (badgeW_avg > w_kml_unit) ? badgeW_avg : w_kml_unit;
+        int currentAvgWidth = w_num + 4 + w_right_avg;
+        int startAvgX = avgCenterX - (currentAvgWidth / 2);
+
+        int clearAvgX = avgCenterX - (avgBlockWidthMax / 2) - 4;
+        smallDisplay.fillRect(clearAvgX, avgY - 20, avgBlockWidthMax + 8, 26, TFT_BLACK);
+
+        smallDisplay.setFont(&DS_DIGIT15pt7b);
+        smallDisplay.setCursor(startAvgX - tx15, avgY);
+        smallDisplay.setTextColor(TFT_YELLOW);
+        smallDisplay.print(avgStr);
+
+        int rightColAvgX = startAvgX + w_num + 4;
+
+        int avgBadgeX = rightColAvgX + (w_right_avg - badgeW_avg) / 2;
+        int avgBadgeY = avgY - 18;
+        drawAARoundRect(smallDisplay, avgBadgeX, avgBadgeY, badgeW_avg, badgeH_avg, 2, TFT_YELLOW);
+        smallDisplay.setFont(&Conthrax_SemiBold4pt7b);
+        smallDisplay.setTextColor(TFT_YELLOW);
+        smallDisplay.setCursor(avgBadgeX + 3 - badgeBx_avg, avgBadgeY - badgeBy_avg + 2);
+        smallDisplay.print("AVG");
+
+        int kmlAvgX = rightColAvgX + (w_right_avg - w_kml_unit) / 2;
+        smallDisplay.setFont(&Conthrax_SemiBold4pt7b);
+        smallDisplay.setTextColor(TFT_YELLOW);
+        smallDisplay.setCursor(kmlAvgX, avgY - 1);
+        smallDisplay.print("KM/L");
+
+        drawDebugBox(smallDisplay, startAvgX - 2, avgY - 20, currentAvgWidth + 4, 24);
+    }
+
+    int currentTempInt = (int)displayTemp;
+    if (currentTempInt != lastTempInt || forceDraw) {
+        lastTempInt = currentTempInt;
+        
+        int tempX = SMALL_CENTER_X + OFFSET_SMALL_TEMP_X;
+        int tempBottomY = SMALL_CENTER_Y + OFFSET_SMALL_TEMP_Y;
+
+        static int refX = 0;
+        static uint16_t w_num3_max = 0;
+        static uint16_t w_unit_max = 0;
+        static bool tempLayoutInit = false;
+
+        if (!tempLayoutInit) {
+            tempLayoutInit = true;
+            int16_t tx1, ty1; uint16_t tw1, th1, tw2, th2;
+            
+            smallDisplay.setFont(&DS_DIGIT15pt7b);
+            smallDisplay.getTextBounds("00", 0, 0, &tx1, &ty1, &tw1, &th1);
+
+            smallDisplay.setFont(&Conthrax_SemiBold7pt7b);
+            smallDisplay.getTextBounds("C", 0, 0, &tx1, &ty1, &tw2, &th2);
+            w_unit_max = 5 + 2 + tw2;
+
+            uint16_t total2W = tw1 + 3 + w_unit_max;
+            int start2X = tempX - (total2W / 2);
+            refX = start2X + tw1;
+
+            smallDisplay.setFont(&DS_DIGIT15pt7b);
+            smallDisplay.getTextBounds("188", 0, 0, &tx1, &ty1, &w_num3_max, &th1);
+        }
+
+        char tempNumStr[6]; snprintf(tempNumStr, sizeof(tempNumStr), "%d", currentTempInt);
+        
+        smallDisplay.setFont(&DS_DIGIT15pt7b); 
+        smallDisplay.getTextBounds(tempNumStr, 0, 0, &x15, &y15, &w15, &h15);
+        
+        int tempBaselineY = (tempBottomY - h15) - y15; 
+
+        int clearLeft = refX - w_num3_max - 4;
+        int clearWidth = w_num3_max + 4 + w_unit_max + 8;
+        smallDisplay.fillRect(clearLeft, tempBottomY - h15 - 2, clearWidth, h15 + 4, TFT_BLACK); 
+
+        // --- ARCO TEMPERATURA (in Antialiasing a passo 0.5°) ---
+        float tempFactor = constrain((displayTemp - 20.0f) / 100.0f, 0.0f, 1.0f);
+        int targetTempIdx = (int)(tempFactor * (NUM_ARC_STEPS - 1));
+
+        static int lastTempDrawnIdx = -1;
+        static uint16_t lastTempDrawnColor = 0;
+
+        uint16_t activeTempColor = TFT_GREEN;
+        if (displayTemp > 0.1f && displayTemp < 50.0f) activeTempColor = TFT_CYAN;
+        else if (displayTemp >= 95.0f) activeTempColor = TFT_RED;
+        else if (displayTemp >= 85.0f) activeTempColor = TFT_YELLOW;
+        else if (displayTemp <= 0.1f) activeTempColor = TFT_WHITE;
+
+        bool colorChanged = (activeTempColor != lastTempDrawnColor);
+
+        if (forceDraw || lastTempDrawnIdx < 0 || colorChanged) {
+            for (int i = 0; i < NUM_ARC_STEPS; i++) {
+                uint16_t segmentColor = (i <= targetTempIdx) ? activeTempColor : smallDisplay.color565(35, 35, 35);
+                drawAALine(smallDisplay, tempArcLUT[i].xStart, tempArcLUT[i].yStart, tempArcLUT[i].xEnd, tempArcLUT[i].yEnd, segmentColor);
+            }
+            lastTempDrawnIdx = targetTempIdx;
+            lastTempDrawnColor = activeTempColor;
+        } else if (targetTempIdx != lastTempDrawnIdx) {
+            if (targetTempIdx > lastTempDrawnIdx) {
+                for (int i = lastTempDrawnIdx + 1; i <= targetTempIdx; i++) {
+                    drawAALine(smallDisplay, tempArcLUT[i].xStart, tempArcLUT[i].yStart, tempArcLUT[i].xEnd, tempArcLUT[i].yEnd, activeTempColor);
+                }
+            } else {
+                uint16_t offColor = smallDisplay.color565(35, 35, 35);
+                for (int i = targetTempIdx + 1; i <= lastTempDrawnIdx; i++) {
+                    drawAALine(smallDisplay, tempArcLUT[i].xStart, tempArcLUT[i].yStart, tempArcLUT[i].xEnd, tempArcLUT[i].yEnd, offColor);
+                }
+            }
+            lastTempDrawnIdx = targetTempIdx;
+        }
+
+        smallDisplay.setFont(&DS_DIGIT15pt7b); 
+        smallDisplay.setCursor(refX - w15 - x15, tempBaselineY);
+        smallDisplay.setTextColor(activeTempColor); 
+        smallDisplay.print(tempNumStr);
+        
+        int degCenterX = refX + 4;
+        int degCenterY = tempBaselineY - h15 + 4;
+        drawAACircle(smallDisplay, degCenterX, degCenterY, 2, activeTempColor);
+
+        smallDisplay.setFont(&Conthrax_SemiBold7pt7b); 
+        smallDisplay.setTextColor(activeTempColor);
+        smallDisplay.setCursor(refX + 9, tempBaselineY);
+        smallDisplay.print("C");
+
+        drawDebugBox(smallDisplay, refX - w15 - x15 - 2, tempBaselineY + y15 - 2, w15 + x15 + w_unit_max + 8, h15 + 4);
+    }
+
+    smallDisplay.endWrite();
+}
+
+void checkNightMode(const SensorSnapshot& snap) {
+    static bool isNightModeActive = false; 
+    static bool firstCheck = true;
+    
+    if (snap.timeValid) {
+        int localHour = snap.localHour;
+        bool shouldBeNightMode = (localHour >= NIGHT_MODE_START_HOUR || localHour < NIGHT_MODE_END_HOUR);
+        
+        if (shouldBeNightMode != isNightModeActive || firstCheck) {
+            isNightModeActive = shouldBeNightMode;
+            firstCheck = false;
+            
+            uint8_t brightness = isNightModeActive ? 75 : 255;
+            analogWrite(BL_BIG_DISPLAY, brightness); 
+            analogWrite(BL_SMALL_DISPLAY, brightness);
+        }
+    }
+}
+
+void transmitTelemetry(const SensorSnapshot& snap) {
+    char telemetryData[256];
+    bool usingGps = snap.isGpsSpeedValid;
+    
+    snprintf(telemetryData, sizeof(telemetryData),
+    "Src: %s | Circ: %.0fmm | Volume: %.2f L (%d%%) | Bat: %.1f V | Temp: %.1f C | Speed: %d KM/H | Sats: %d | TotalDist: %.2f KM | 0-50: %.2f S | FPS: %.1f (AVG: %.1f)",
+    usingGps ? "GPS" : "HALL", WHEEL_CIRCUMFERENCE_MM, snap.fuelLiters, snap.fuelPercentage, snap.batteryVoltage, snap.engineTemperature,
+    (int)snap.currentSpeed, snap.satellites, snap.totalDistanceKm, snap.accelResultTime, currentMeasuredFps, currentAverageFps);
+    
+    Serial.println(telemetryData);
+}

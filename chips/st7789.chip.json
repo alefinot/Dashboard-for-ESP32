@@ -1,0 +1,18 @@
+{
+  "name": "ST7789",
+  "author": "Uri Shaked",
+  "pins": [
+    "DC",
+    "CS",
+    "SDA",
+    "SCL",
+    "GND",
+    "VCC",
+    "",
+    "RST"
+  ],
+  "display": {
+    "width": 480,
+    "height": 320
+  }
+}
