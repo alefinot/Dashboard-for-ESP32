@@ -103,6 +103,7 @@ const configMap = [
             { id: "DISPLAY_ROTATION", label: "Screen Rotation (0-3)" },
             { id: "DISPLAY_WIDTH", label: "Display Width (px)" },
             { id: "DISPLAY_HEIGHT", label: "Display Height (px)" },
+            { id: "SPI_BUS_SPEED", label: "SPI Bus Frequency (Hz)" },
             { id: "BACKLIGHT_BRIGHTNESS", label: "Backlight Brightness", type: "range", min: 0, max: 100, step: 1 },
             { id: "NIGHT_MODE_START_HOUR", label: "Night Mode Start Time (Hour)" },
             { id: "NIGHT_MODE_END_HOUR", label: "Night Mode End Time (Hour)" },
@@ -131,7 +132,7 @@ const configMap = [
             { id: "NTC_R_BALANCE", label: "Temperature NTC Balance Resistor (Ohms)" },
             { id: "NTC_BETA", label: "Temperature NTC Beta Value" },
             { id: "MIN_SATELLITES", label: "Minimum GPS Satellites Required" },
-            { id: "OPTIMAL_SATELLITES", label: "Optimal GPS Satellites Count" }
+            { id: "OPTIMAL_SATELLITES", label: "Optimal GPS Satellites Count" },
         ]
     },
     {
@@ -238,9 +239,13 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                     processedKeys.add(item.id);
                     let val = d[item.id];
                     groupHtml += `
-                    <div class="card">
-                        <label>${item.label}: <span id="${item.id}_val">${val}</span>%</label>
-                        <input type="range" id="${item.id}" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}_val').textContent = this.value">
+                    <div class="card xy-group">
+                        <h4>${item.label}</h4>
+                        <div class="xy-row">
+                            <label>%</label>
+                            <input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value">
+                            <input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value">
+                        </div>
                     </div>`;
                 }
             } else if (iType === 'touch-table') {
@@ -587,7 +592,6 @@ void webServerTask(void *pvParameters) {
 
     processConfig(2, &doc);
     server.send(200, "application/json", "{\"status\":\"ok\"}");
-
     forceFullRedraw = true;
     analogWrite(BL_DISPLAY, map(BACKLIGHT_BRIGHTNESS, 0, 100, 0, 255));
   });

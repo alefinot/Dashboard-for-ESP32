@@ -68,15 +68,15 @@ inline void calculateTextBounds(const GFXfont *font, const char *str, int16_t x,
 }
 
 // ----------------------------------------------------------------------------
-// Display device
+// Display device (ILI9488 4-inch TFT)
 // ----------------------------------------------------------------------------
-LGFX_RPi_35::LGFX_RPi_35() {
+LGFX_ST7789_4::LGFX_ST7789_4() {
   {
     auto cfg = _bus_instance.config();
     cfg.spi_host = SPI3_HOST;
     cfg.spi_mode = 0;
     cfg.freq_write = SPI_BUS_SPEED;
-    cfg.freq_read = 16000000;
+    cfg.freq_read = SPI_BUS_SPEED * 8 / 5;
     cfg.pin_sclk = 18;
     cfg.pin_mosi = 23;
     cfg.pin_miso = -1;
@@ -90,28 +90,32 @@ LGFX_RPi_35::LGFX_RPi_35() {
     cfg.pin_cs = CS_DISPLAY;
     cfg.pin_rst = SPI_RST;
     cfg.pin_busy = -1;
-    cfg.panel_width = 320;
-    cfg.panel_height = 480;
     cfg.offset_x = 0;
     cfg.offset_y = 0;
     cfg.offset_rotation = 0;
     cfg.readable = false;
-    cfg.invert = false;
+    cfg.invert = DISPLAY_INVERT_COLORS;
     cfg.rgb_order = false;
-    cfg.dlen_16bit = true;
     cfg.bus_shared = true;
     _panel_instance.config(cfg);
   }
   setPanel(&_panel_instance);
 }
 
-void LGFX_RPi_35::setFont(const GFXfont *f) {
+void LGFX_ST7789_4::applyBusConfig() {
+  auto cfg = _bus_instance.config();
+  cfg.freq_write = SPI_BUS_SPEED;
+  cfg.freq_read = SPI_BUS_SPEED * 8 / 5;
+  _bus_instance.config(cfg);
+}
+
+void LGFX_ST7789_4::setFont(const GFXfont *f) {
   _currentGfxFont = f;
   lgfx::LGFX_Device::setFont(f);
   lgfx::LGFX_Device::setTextDatum(lgfx::textdatum_t::baseline_left);
 }
 
-void LGFX_RPi_35::getTextBounds(const char *string, int16_t x, int16_t y,
+void LGFX_ST7789_4::getTextBounds(const char *string, int16_t x, int16_t y,
                                 int16_t *x1, int16_t *y1, uint16_t *w,
                                 uint16_t *h) {
   if (_currentGfxFont) {
@@ -124,13 +128,13 @@ void LGFX_RPi_35::getTextBounds(const char *string, int16_t x, int16_t y,
   }
 }
 
-void LGFX_RPi_35::getTextBounds(const String &str, int16_t x, int16_t y,
+void LGFX_ST7789_4::getTextBounds(const String &str, int16_t x, int16_t y,
                                 int16_t *x1, int16_t *y1, uint16_t *w,
                                 uint16_t *h) {
   getTextBounds(str.c_str(), x, y, x1, y1, w, h);
 }
 
-LGFX_RPi_35 display;
+LGFX_ST7789_4 display;
 
 // ----------------------------------------------------------------------------
 // Color blending helpers
@@ -363,11 +367,11 @@ void fillAARoundRect(T &disp, int x, int y, int w, int h, int r, uint16_t color,
 
 // Explicit instantiations so the templates are available across translation
 // units that include the header declarations.
-template void drawAALine(LGFX_RPi_35 &, float, float, float, float, uint16_t);
-template void drawAACircle(LGFX_RPi_35 &, int, int, int, uint16_t);
-template void drawAACornerArc(LGFX_RPi_35 &, int, int, int, uint8_t, uint16_t);
-template void drawAARoundRect(LGFX_RPi_35 &, int, int, int, int, int, uint16_t);
-template void fillAARoundRect(LGFX_RPi_35 &, int, int, int, int, int, uint16_t,
+template void drawAALine(LGFX_ST7789_4 &, float, float, float, float, uint16_t);
+template void drawAACircle(LGFX_ST7789_4 &, int, int, int, uint16_t);
+template void drawAACornerArc(LGFX_ST7789_4 &, int, int, int, uint8_t, uint16_t);
+template void drawAARoundRect(LGFX_ST7789_4 &, int, int, int, int, int, uint16_t);
+template void fillAARoundRect(LGFX_ST7789_4 &, int, int, int, int, int, uint16_t,
                               uint16_t, uint16_t);
 
 // ----------------------------------------------------------------------------

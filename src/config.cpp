@@ -28,6 +28,7 @@ String COLOR_FUEL_CRIT = "#ff0000";
 uint16_t c_temp_norm, c_temp_warn, c_temp_crit;
 uint16_t c_fuel_norm, c_fuel_warn, c_fuel_crit;
 
+uint32_t SPI_BUS_SPEED = 20000000;
 int DISPLAY_WIDTH = 480;
 int DISPLAY_HEIGHT = 320;
 int BOOT_TIME_MS = 5000;
@@ -95,13 +96,14 @@ bool ENABLE_POWER_SENSE = false;
 bool ENABLE_CIRCLE_TEST = false;
 bool ENABLE_DEMO_MODE = true;
 bool ENABLE_SLEEP_AFTER_REBOOT = false;
-
+ 
 bool SHOW_FPS_COUNTER_DEFAULT = true;
 int OFFSET_BIG_FPS_X = 5;
 int OFFSET_BIG_FPS_Y = 5;
 
 int NIGHT_MODE_START_HOUR = 20;
 int NIGHT_MODE_END_HOUR = 6;
+bool DISPLAY_INVERT_COLORS = false;
 
 int TARGET_FPS = 120;
 int BACKLIGHT_BRIGHTNESS = 100;
@@ -191,6 +193,7 @@ void processConfig(int mode, JsonDocument *doc) {
     pref.begin("cfg", false);
 
   CFG_INT(DISPLAY_ROTATION, "DISP_ROT", 1);
+  CFG_INT(SPI_BUS_SPEED, "SPI_FREQ", 20000000);
   CFG_INT(DISPLAY_WIDTH, "DISP_W", 480);
   CFG_INT(DISPLAY_HEIGHT, "DISP_H", 320);
   CFG_INT(TARGET_FPS, "TGT_FPS", 120);
@@ -279,6 +282,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(MANUAL_CPU_FREQ, "MAN_CPU", 240);
   CFG_INT(NIGHT_MODE_START_HOUR, "NGHT_SRT", 20);
   CFG_INT(NIGHT_MODE_END_HOUR, "NGHT_END", 6);
+  CFG_BOOL(DISPLAY_INVERT_COLORS, "INV_COLORS", false);
   CFG_INT(OFFSET_BIG_FPS_X, "O_FPS_X", 5);
   CFG_INT(OFFSET_BIG_FPS_Y, "O_FPS_Y", 5);
 

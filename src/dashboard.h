@@ -54,13 +54,18 @@ struct SensorSnapshot {
   bool isGpsSpeedValid = false;
 };
 
-class LGFX_RPi_35 : public lgfx::LGFX_Device {
-  lgfx::Panel_ILI9486 _panel_instance;
+class LGFX_ST7789_4 : public lgfx::LGFX_Device {
+  lgfx::Panel_ILI9488 _panel_instance;
   lgfx::Bus_SPI _bus_instance;
   const GFXfont *_currentGfxFont = nullptr;
 
 public:
-  LGFX_RPi_35();
+  LGFX_ST7789_4();
+
+  // Re-applies the SPI bus config (e.g. SPI_BUS_SPEED loaded from NVS by
+  // processConfig) after the global constructor has already run. Call this
+  // between processConfig() and display.init().
+  void applyBusConfig();
 
   void setFont(const GFXfont *f);
   void getTextBounds(const char *string, int16_t x, int16_t y, int16_t *x1,
@@ -72,7 +77,7 @@ public:
 // ----------------------------------------------------------------------------
 // Pin assignment (ESP32 WROOM compatible)
 // ----------------------------------------------------------------------------
-constexpr uint32_t SPI_BUS_SPEED = 20000000;
+extern uint32_t SPI_BUS_SPEED;
 constexpr int HALL_SENSOR_PIN = 33;
 #define SPI_DC 27
 #define SPI_RST 14
@@ -181,13 +186,14 @@ extern bool ENABLE_POWER_SENSE;
 extern bool ENABLE_CIRCLE_TEST;
 extern bool ENABLE_DEMO_MODE;
 extern bool ENABLE_SLEEP_AFTER_REBOOT;
-
+ 
 extern bool SHOW_FPS_COUNTER_DEFAULT;
 extern int OFFSET_BIG_FPS_X;
 extern int OFFSET_BIG_FPS_Y;
 
 extern int NIGHT_MODE_START_HOUR;
 extern int NIGHT_MODE_END_HOUR;
+extern bool DISPLAY_INVERT_COLORS;
 
 extern int TARGET_FPS;
 extern int BACKLIGHT_BRIGHTNESS;
@@ -232,7 +238,7 @@ extern bool forceFullRedraw;
 extern volatile bool pendingSleep;
 extern volatile bool pendingReboot;
 
-extern LGFX_RPi_35 display;
+extern LGFX_ST7789_4 display;
 extern TinyGPSPlus gps;
 extern HardwareSerial gpsSerial;
 
