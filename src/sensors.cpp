@@ -4,6 +4,53 @@ TinyGPSPlus gps;
 HardwareSerial gpsSerial(2);
 
 // ----------------------------------------------------------------------------
+// QMC5883L compass driver (I2C)
+// ----------------------------------------------------------------------------
+#define QMC5883L_ADDR   0x0D
+#define QMC5883L_X_LSB  0x00
+#define QMC5883L_STATUS 0x09
+#define QMC5883L_CTRL1  0x0B
+
+static bool compassReady = false;
+
+static void qmcWrite(uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(QMC5883L_ADDR);
+  Wire.write(reg); Wire.write(val);
+  Wire.endTransmission();
+}
+
+static bool qmcReadRaw(int16_t &x, int16_t &y, int16_t &z) {
+  Wire.beginTransmission(QMC5883L_ADDR);
+  Wire.write(QMC5883L_X_LSB);
+  if (Wire.endTransmission() != 0) return false;
+  if (Wire.requestFrom(QMC5883L_ADDR, 6) < 6) return false;
+  uint8_t b[6];
+  for (int i = 0; i < 6; i++) b[i] = Wire.read();
+  x = (int16_t)(b[1] << 8 | b[0]);
+  y = (int16_t)(b[3] << 8 | b[2]);
+  z = (int16_t)(b[5] << 8 | b[4]);
+  return true;
+}
+
+bool initCompass() {
+  Wire.beginTransmission(QMC5883L_ADDR);
+  if (Wire.endTransmission() != 0) return false;
+  qmcWrite(QMC5883L_CTRL1, 0x1D); // cont 200Hz 8G 512osr
+  delay(10);
+  compassReady = true;
+  return true;
+}
+
+void processCompassSensor() {
+  if (!compassReady) return;
+  int16_t x, y, z;
+  if (!qmcReadRaw(x, y, z)) return;
+  float h = atan2f((float)y, (float)x) * (180.0f / M_PI);
+  if (h < 0) h += 360.0f;
+  currentHeading = h;
+}
+
+// ----------------------------------------------------------------------------
 // Shared state (defined here)
 // ----------------------------------------------------------------------------
 uint16_t DEBUG_BOX_COLOR = TFT_MAGENTA;
@@ -27,6 +74,7 @@ double lastLon = 0.0;
 bool hasLastPos = false;
 int splashCurrentProgress = 0;
 float currentCachedSpeed = 0.0f;
+float currentHeading = 0.0f;
 
 portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;
 volatile unsigned long lastHallPulseTimeUs = 0;
@@ -289,6 +337,7 @@ void sensorTask(void *pvParameters) {
     while (gpsSerial.available() > 0)
       gps.encode(gpsSerial.read());
     updateFilteredSpeed();
+    processCompassSensor();
     processFuelSensor();
     processTemperatureSensor();
     updateGPSOdometer();
@@ -350,6 +399,7 @@ void sensorTask(void *pvParameters) {
         g_sensorData.timeValid = true;
         g_sensorData.dateValid = true;
         g_sensorData.isGpsSpeedValid = true;
+        g_sensorData.heading = 180.0f + 180.0f * sinf(t / 5000.0f);
         g_sensorData.localHour = 10;
         g_sensorData.minute = (t / 1000) % 60;
         g_sensorData.day = 16;
@@ -367,6 +417,7 @@ void sensorTask(void *pvParameters) {
         g_sensorData.accelState = accelState;
         g_sensorData.instantKml = instantKml;
         g_sensorData.averageKml = averageKml;
+        g_sensorData.heading = currentHeading;
 
         struct timeval tv;
         gettimeofday(&tv, NULL);

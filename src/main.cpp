@@ -77,62 +77,11 @@ void setup() {
   analogWrite(BL_DISPLAY, 255);
   updateSplashProgress(20);
 
-  gpsSerial.begin(9600, SERIAL_8N1, RXD2, TXD2);
+  gpsSerial.begin(115200, SERIAL_8N1, RXD2, TXD2);
   delay(100);
 
-  // Clear any corrupted saved config from the NEO-M8N's flash and restore
-  // factory defaults (all constellations, 9600 baud, continuous tracking,
-  // NMEA output).  No UBX tuning is applied afterwards — the factory config
-  // works reliably with TinyGPSPlus.
-  {
-    // UBX builder helper (local, used only during this one-shot reset).
-    auto sendUBX = [](uint8_t cls, uint8_t id, const uint8_t *p, uint16_t n) {
-      uint8_t buf[96];
-      buf[0] = 0xB5; buf[1] = 0x62; buf[2] = cls; buf[3] = id;
-      buf[4] = n & 0xFF; buf[5] = (n >> 8) & 0xFF;
-      memcpy(&buf[6], p, n);
-      uint8_t ckA = 0, ckB = 0;
-      for (uint16_t i = 2; i < 6 + n; i++) { ckA += buf[i]; ckB += ckA; }
-      gpsSerial.write(buf, 6 + n);
-      gpsSerial.write(ckA); gpsSerial.write(ckB);
-      gpsSerial.flush();
-    };
-
-    // Baud recovery — try to reach the module at every common rate and tell
-    // it to switch to 9600 (handles stale baud saves from prior sessions).
-    static const uint32_t rates[] = {9600, 38400, 57600, 115200};
-    for (uint8_t i = 0; i < 4; i++) {
-      gpsSerial.begin(rates[i], SERIAL_8N1, RXD2, TXD2);
-      delay(50);
-      uint8_t prt[20] = {0};
-      prt[0] = 1;            // UART1
-      prt[4] = 0xC0; prt[5] = 0x08;  // mode = 8N1
-      prt[8] = 0x80; prt[9] = 0x25;  // baud = 9600
-      prt[12] = 0x03;                 // inProtoMask = NMEA + UBX
-      prt[14] = 0x03;                 // outProtoMask = NMEA + UBX
-      sendUBX(0x06, 0x00, prt, 20);
-      delay(50);
-    }
-    gpsSerial.begin(9600, SERIAL_8N1, RXD2, TXD2);
-    delay(100);
-
-    // CFG-CFG (0x06 0x09): clear all config sections from BBR/flash.
-    // 12-byte payload: clearMask=0xFFFFFFFF, saveMask=0, loadMask=0.
-    logPrintf("GPS: Factory reset (clear all saved config)...\n");
-    uint8_t cfg[12];
-    memset(cfg, 0xFF, 4);      // clearMask = all bits
-    memset(cfg + 4, 0, 8);     // saveMask=0, loadMask=0
-    sendUBX(0x06, 0x09, cfg, 12);
-    delay(100);
-
-    // CFG-RST (0x06 0x04): cold reset with all nav data cleared.
-    // navBbrMask=0xFFFF, resetMode=0x02 (cold start).
-    uint8_t rst[4] = {0xFF, 0xFF, 0x02, 0x00};
-    sendUBX(0x06, 0x04, rst, 4);
-    logPrintf("GPS: Cold reset issued, waiting 3 s...\n");
-    delay(3000);
-    logPrintf("GPS: Ready (factory defaults, all constellations)\n");
-  }
+  Wire.begin(COMPASS_SDA, COMPASS_SCL);
+  initCompass();
 
   updateSplashProgress(40);
 
@@ -240,10 +189,11 @@ void loop() {
       xSemaphoreGive(g_stateMutex);
     }
     // Always log to ring buffer (read by web UI when WiFi is on)
-    logPrintf("%s|%.2fL(%d%%)|%.1fV|%.1fC|%dkmh|%dsat|%.1fkm|%.2fs|%.1ffps\n",
+    logPrintf("%s|%.2fL(%d%%)|%.1fV|%.1fC|%dkmh|%dsat|%.0fdeg|%.1fkm|%.2fs|%.1ffps\n",
               snap.isGpsSpeedValid ? "GPS" : "HALL",
               snap.fuelLiters, snap.fuelPercentage, snap.batteryVoltage,
               snap.engineTemperature, (int)snap.currentSpeed, snap.satellites,
+              snap.heading,
               snap.totalDistanceKm, snap.accelResultTime, currentMeasuredFps);
   }
   static unsigned long lastCpuScaleCheck = 0;

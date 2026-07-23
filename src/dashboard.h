@@ -10,6 +10,7 @@
 #include <LovyanGFX.hpp>
 
 #include <HardwareSerial.h>
+#include <Wire.h>
 #include <Preferences.h>
 #include <TinyGPS++.h>
 #include <cmath>
@@ -44,6 +45,7 @@ struct SensorSnapshot {
   TimerState accelState = READY;
   float instantKml = 0.0f;
   float averageKml = 0.0f;
+  float heading = 0.0f;
   int localHour = 0;
   int minute = 0;
   int day = 0;
@@ -89,6 +91,8 @@ constexpr int HALL_SENSOR_PIN = 33;
 #define FUEL_TOUCH_PIN 32
 #define RXD2 25
 #define TXD2 26
+#define COMPASS_SDA 21
+#define COMPASS_SCL 22
 #define POWER_SENSE_PIN 34
 #define BATTERY_SENSE_PIN 35
 #define TEMP_SENSE_PIN 36
@@ -264,6 +268,7 @@ extern double lastLon;
 extern bool hasLastPos;
 extern int splashCurrentProgress;
 extern float currentCachedSpeed;
+extern float currentHeading;
 
 extern portMUX_TYPE hallMux;
 extern volatile unsigned long lastHallPulseTimeUs;
@@ -325,6 +330,7 @@ int getEuropeanOffset(int year, int month, int day, int hour);
 void drawCalendarIcon(int x, int y, uint16_t color);
 void drawClockIcon(int x, int y, uint16_t color);
 void drawLocationIcon(int x, int y, uint16_t color);
+void drawCompassIcon(int x, int y, float heading, uint16_t color);
 void drawWifiIcon(int x, int y, uint16_t color);
 void drawWheelIcon(int x, int y, uint16_t color);
 void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color);
@@ -349,6 +355,8 @@ float getHallSpeed();
 void updateFilteredSpeed();
 inline float getFilteredSpeed() { return currentCachedSpeed; }
 
+bool initCompass();
+void processCompassSensor();
 void processBatterySensor();
 void processTemperatureSensor();
 void updateGPSOdometer();
