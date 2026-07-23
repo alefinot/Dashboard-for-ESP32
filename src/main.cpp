@@ -10,6 +10,9 @@ bool forceFullRedraw = false;
 volatile bool pendingSleep = false;
 volatile bool pendingReboot = false;
 
+bool pendingInvertDisplay = false;
+int pendingBacklightValue = -1;
+
 void logPrintf(const char *fmt, ...) {
   char tmp[256];
   va_list args;
@@ -108,18 +111,6 @@ void setup() {
   analogWrite(BL_DISPLAY, 0);
   display.fillScreen(TFT_BLACK);
 
-  if (ENABLE_SLEEP_AFTER_REBOOT) {
-    logPrintf("Sleep test, deep sleep\n");
-    ENABLE_SLEEP_AFTER_REBOOT = false;
-    {
-      Preferences pref;
-      pref.begin("cfg", false);
-      pref.putBool("SLP_RBT", false);
-      pref.end();
-    }
-    showGoodbyeScreen(true);
-  }
-
   runDisplaySelfTest();
 
   xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore0", 10240, NULL, 2, NULL,
@@ -136,7 +127,23 @@ void loop() {
   if (pendingReboot)
     showGoodbyeScreen(false);
 
+  if (pendingInvertDisplay) {
+    display.invertDisplay(DISPLAY_INVERT_COLORS);
+    pendingInvertDisplay = false;
+  }
+  if (pendingBacklightValue >= 0) {
+    analogWrite(BL_DISPLAY, map(pendingBacklightValue, 0, 100, 0, 255));
+    pendingBacklightValue = -1;
+  }
+
   unsigned long now = millis();
+
+  SensorSnapshot snap;
+  if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+    snap = g_sensorData;
+    xSemaphoreGive(g_stateMutex);
+  }
+
   if (DISPLAY_REFRESH_MS == 0 ||
       (now - lastDisplayUpdate >= DISPLAY_REFRESH_MS)) {
     static unsigned long lastFrameTime = 0;
@@ -169,12 +176,6 @@ void loop() {
       lastDisplayUpdate = now;
     }
 
-    SensorSnapshot snap;
-    if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-      snap = g_sensorData;
-      xSemaphoreGive(g_stateMutex);
-    }
-
     updateBigDisplay(snap);
     drawFpsOverlay();
     checkNightMode(snap);
@@ -183,12 +184,6 @@ void loop() {
   static unsigned long lastTelemetryUpdate = 0;
   if (now - lastTelemetryUpdate >= TELEMETRY_REFRESH_MS) {
     lastTelemetryUpdate = now;
-    SensorSnapshot snap;
-    if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-      snap = g_sensorData;
-      xSemaphoreGive(g_stateMutex);
-    }
-    // Always log to ring buffer (read by web UI when WiFi is on)
     logPrintf("%s|%.2fL(%d%%)|%.1fV|%.1fC|%dkmh|%dsat|%.0fdeg|%.1fkm|%.2fs|%.1ffps\n",
               snap.isGpsSpeedValid ? "GPS" : "HALL",
               snap.fuelLiters, snap.fuelPercentage, snap.batteryVoltage,
@@ -197,21 +192,35 @@ void loop() {
               snap.totalDistanceKm, snap.accelResultTime, currentMeasuredFps);
   }
   static unsigned long lastCpuScaleCheck = 0;
+  static uint32_t lastCpuCycleCount = 0;
+  static unsigned long lastCpuUsageCheck = 0;
+  if (now - lastCpuUsageCheck >= 1000) {
+    lastCpuUsageCheck = now;
+    uint32_t cycleCount;
+    __asm__ volatile("rsr %0, ccount" : "=a"(cycleCount));
+    uint32_t cycles = cycleCount - lastCpuCycleCount;
+    lastCpuCycleCount = cycleCount;
+    cpuUsagePct = (float)cycles / (getCpuFrequencyMhz() * 1000000.0f) * 100.0f;
+  }
   if (now - lastCpuScaleCheck >= 1000) {
     lastCpuScaleCheck = now;
     uint32_t targetFreq;
     if (ENABLE_DYNAMIC_CPU) {
-      if (currentAverageFps < (TARGET_FPS * 0.5f))
+      // Stay at 240 MHz for first 5s after boot to let WiFi AP init
+      if (now < 5000)
+        targetFreq = 240;
+      else if (currentAverageFps < (TARGET_FPS * 0.5f))
         targetFreq = 240;
       else if (currentAverageFps < (TARGET_FPS * 0.8f))
         targetFreq = 160;
       else
         targetFreq = 80;
-      if (WiFi.getMode() != WIFI_OFF && targetFreq < 240)
-        targetFreq = 240;
     } else {
       targetFreq = MANUAL_CPU_FREQ;
     }
+    // WiFi requires 240 MHz — applies regardless of dynamic/manual mode
+    if (WiFi.getMode() != WIFI_OFF && targetFreq < 240)
+      targetFreq = 240;
     if (getCpuFrequencyMhz() != targetFreq) {
       setCpuFrequencyMhz(targetFreq);
       logPrintf("CPU: %dMHz (%.1f FPS)\n", targetFreq, currentAverageFps);

@@ -54,6 +54,7 @@ void processCompassSensor() {
 // Shared state (defined here)
 // ----------------------------------------------------------------------------
 uint16_t DEBUG_BOX_COLOR = TFT_MAGENTA;
+float cpuUsagePct = 0.0f;
 float currentMeasuredFps = 0.0f;
 float fpsHistory[FPS_AVG_SAMPLES] = {0.0f};
 uint8_t fpsHistoryIndex = 0;

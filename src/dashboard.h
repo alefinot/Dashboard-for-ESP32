@@ -98,6 +98,13 @@ constexpr int HALL_SENSOR_PIN = 33;
 #define TEMP_SENSE_PIN 36
 
 // ----------------------------------------------------------------------------
+// Alignment constants
+// ----------------------------------------------------------------------------
+#define ALIGN_LEFT 0
+#define ALIGN_CENTER 1
+#define ALIGN_RIGHT 2
+
+// ----------------------------------------------------------------------------
 // Configuration constants & runtime variables
 // ----------------------------------------------------------------------------
 extern int DISPLAY_ROTATION;
@@ -184,12 +191,33 @@ extern int OFFSET_INST_KML_X;
 extern int OFFSET_INST_KML_Y;
 extern int OFFSET_AVG_KML_X;
 extern int OFFSET_AVG_KML_Y;
+extern int OFFSET_FUEL_LTRS_X;
+extern int OFFSET_FUEL_LTRS_Y;
+
+extern int ALIGN_BIG_TIME;
+extern int ALIGN_BIG_DATE;
+extern int ALIGN_BIG_SIGNATURE;
+extern int ALIGN_BIG_SPEED_NUM;
+extern int ALIGN_BIG_SPEED_UNIT;
+extern int ALIGN_BIG_ODO;
+extern int ALIGN_BIG_SAT;
+extern int ALIGN_BIG_TMR;
+extern int ALIGN_BIG_BAT;
+extern int ALIGN_SIDEBAR_LEFT;
+extern int ALIGN_SIDEBAR_RIGHT;
+extern int ALIGN_HALL_ICON;
+extern int ALIGN_GPS_ICON;
+extern int ALIGN_WHEEL_ICON;
+extern int ALIGN_WIFI_ICON;
+extern int ALIGN_INST_KML;
+extern int ALIGN_AVG_KML;
+extern int ALIGN_FUEL_LTRS;
 
 extern bool SHOW_ELEMENT_BOUNDS;
 extern bool ENABLE_POWER_SENSE;
 extern bool ENABLE_CIRCLE_TEST;
 extern bool ENABLE_DEMO_MODE;
-extern bool ENABLE_SLEEP_AFTER_REBOOT;
+extern bool ENABLE_ANTIALIASING;
  
 extern bool SHOW_FPS_COUNTER_DEFAULT;
 extern int OFFSET_BIG_FPS_X;
@@ -202,7 +230,17 @@ extern bool DISPLAY_INVERT_COLORS;
 extern int TARGET_FPS;
 extern int BACKLIGHT_BRIGHTNESS;
 
-
+extern int REFRESH_SPEED_MS;
+extern int REFRESH_SAT_MS;
+extern int REFRESH_TMR_MS;
+extern int REFRESH_BAT_MS;
+extern int REFRESH_INST_MS;
+extern int REFRESH_AVG_MS;
+extern int REFRESH_FUEL_MS;
+extern int REFRESH_ODO_MS;
+extern int REFRESH_TIME_MS;
+extern int REFRESH_SIDEBAR_TEMP_MS;
+extern int REFRESH_SIDEBAR_FUEL_MS;
 
 extern bool ENABLE_DYNAMIC_CPU;
 extern int MANUAL_CPU_FREQ;
@@ -242,11 +280,15 @@ extern bool forceFullRedraw;
 extern volatile bool pendingSleep;
 extern volatile bool pendingReboot;
 
+extern bool pendingInvertDisplay;
+extern int pendingBacklightValue;
+
 extern LGFX_ST7789_4 display;
 extern TinyGPSPlus gps;
 extern HardwareSerial gpsSerial;
 
 extern uint16_t DEBUG_BOX_COLOR;
+extern float cpuUsagePct;
 extern float currentMeasuredFps;
 constexpr uint8_t FPS_AVG_SAMPLES = 5;
 extern float fpsHistory[FPS_AVG_SAMPLES];
@@ -334,6 +376,12 @@ void drawCompassIcon(int x, int y, float heading, uint16_t color);
 void drawWifiIcon(int x, int y, uint16_t color);
 void drawWheelIcon(int x, int y, uint16_t color);
 void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color);
+
+inline int applyAlign(int anchorX, int elementW, int align) {
+  if (align == ALIGN_LEFT) return anchorX;
+  if (align == ALIGN_RIGHT) return anchorX - elementW;
+  return anchorX - (elementW / 2);
+}
 void drawSplashBase();
 void updateSplashProgress(int targetProgress);
 void runDisplaySelfTest();
