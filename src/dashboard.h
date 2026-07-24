@@ -253,6 +253,9 @@ extern float NTC_INV_ROOM_KELVIN;
 extern float ADC_VOLTS_FACTOR;
 extern bool showFpsCounter;
 
+extern String WIFI_SSID;
+extern String WIFI_PASSWORD;
+
 // ----------------------------------------------------------------------------
 // Fuel touch table
 // ----------------------------------------------------------------------------

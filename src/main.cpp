@@ -27,6 +27,7 @@ void logPrintf(const char *fmt, ...) {
         logTail = (logTail + 1) % LOG_BUF_SIZE;
     }
     logSequence++;
+    Serial.print(tmp);
   }
 }
 

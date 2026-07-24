@@ -145,8 +145,6 @@ uint16_t blendColor(uint16_t fg, uint16_t bg, float alpha) {
   if (alpha >= 0.98f)
     return fg;
 
-  alpha = sqrtf(alpha);
-
   uint8_t fg_r = (fg >> 11) & 0x1F;
   uint8_t fg_g = (fg >> 5) & 0x3F;
   uint8_t fg_b = fg & 0x1F;
@@ -184,6 +182,10 @@ uint16_t blendColorWithBlack(uint16_t color, float alpha) {
 template <typename T>
 void drawAALine(T &disp, float x0, float y0, float x1, float y1,
                 uint16_t color) {
+  if (!ENABLE_ANTIALIASING) {
+    disp.drawLine((int)roundf(x0), (int)roundf(y0), (int)roundf(x1), (int)roundf(y1), color);
+    return;
+  }
   auto plot = [&](int x, int y, float c) {
     if (c <= 0.0f)
       return;
@@ -244,6 +246,10 @@ void drawAALine(T &disp, float x0, float y0, float x1, float y1,
 
 template <typename T>
 void drawAACircle(T &disp, int cx, int cy, int r, uint16_t color) {
+  if (!ENABLE_ANTIALIASING) {
+    disp.drawCircle(cx, cy, r, color);
+    return;
+  }
   if (r <= 0)
     return;
   int x = r, y = 0;
@@ -302,6 +308,10 @@ void drawAACornerArc(T &disp, int cx, int cy, int r, uint8_t corner,
 template <typename T>
 void drawAARoundRect(T &disp, int x, int y, int w, int h, int r,
                      uint16_t color) {
+  if (!ENABLE_ANTIALIASING) {
+    disp.drawRoundRect(x, y, w, h, r, color);
+    return;
+  }
   if (w <= 0 || h <= 0)
     return;
   if (r <= 0) {
@@ -328,6 +338,10 @@ void drawAARoundRect(T &disp, int x, int y, int w, int h, int r,
 template <typename T>
 void fillAARoundRect(T &disp, int x, int y, int w, int h, int r, uint16_t color,
                      uint16_t bg_top, uint16_t bg_bottom) {
+  if (!ENABLE_ANTIALIASING) {
+    disp.fillRoundRect(x, y, w, h, r, color);
+    return;
+  }
   if (w <= 0 || h <= 0)
     return;
   if (r <= 0) {
@@ -432,8 +446,8 @@ void drawCalendarIcon(int x, int y, uint16_t color) {
 
 void drawClockIcon(int x, int y, uint16_t color) {
   drawAACircle(display, x + 8, y + 8, 8, color);
-  display.drawFastVLine(x + 8, y + 4, 5, color);
-  display.drawFastHLine(x + 8, y + 8, 5, color);
+  drawAALine(display, (float)(x + 8), (float)(y + 4), (float)(x + 8), (float)(y + 8), color);
+  drawAALine(display, (float)(x + 8), (float)(y + 8), (float)(x + 12), (float)(y + 8), color);
 }
 
 void drawLocationIcon(int x, int y, uint16_t color) {
@@ -457,10 +471,10 @@ void drawWifiIcon(int x, int y, uint16_t color) {
 void drawWheelIcon(int x, int y, uint16_t color) {
   drawAACircle(display, x + 8, y + 8, 7, color);
   drawAACircle(display, x + 8, y + 8, 2, color);
-  display.drawFastHLine(x + 3, y + 8, 3, color);
-  display.drawFastHLine(x + 10, y + 8, 3, color);
-  display.drawFastVLine(x + 8, y + 3, 3, color);
-  display.drawFastVLine(x + 8, y + 10, 3, color);
+  drawAALine(display, (float)(x + 3), (float)(y + 8), (float)(x + 5), (float)(y + 8), color);
+  drawAALine(display, (float)(x + 10), (float)(y + 8), (float)(x + 12), (float)(y + 8), color);
+  drawAALine(display, (float)(x + 8), (float)(y + 3), (float)(x + 8), (float)(y + 5), color);
+  drawAALine(display, (float)(x + 8), (float)(y + 10), (float)(x + 8), (float)(y + 12), color);
   display.drawPixel(x + 5, y + 5, color);
   display.drawPixel(x + 11, y + 5, color);
   display.drawPixel(x + 5, y + 11, color);
@@ -476,6 +490,7 @@ void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color) {
   int y = (BIG_CENTER_Y + offsetY) - (badgeH / 2);
   display.fillRect(x - 3, y - 3, badgeW + 6, badgeH + 6, TFT_BLACK);
   drawAARoundRect(display, x, y, badgeW, badgeH, 4, color);
+  drawDebugBox(display, x - 3, y - 3, badgeW + 6, badgeH + 6);
   display.setTextColor(color);
   display.setCursor(x + (badgeW - w) / 2 - tx1, y + (badgeH - h) / 2 - ty1 + 1);
   display.print(text);
@@ -682,9 +697,10 @@ void drawFpsOverlay() {
     display.print(fpsBuf);
     int cx = display.getCursorX();
     int cy = OFFSET_BIG_FPS_Y + 4;
-    display.drawCircle(cx + 1, cy, 1, TFT_GREEN);
+    drawAACircle(display, cx + 1, cy, 1, TFT_GREEN);
     display.setCursor(cx + 4, OFFSET_BIG_FPS_Y + 9);
     display.print("c");
+    drawDebugBox(display, OFFSET_BIG_FPS_X, OFFSET_BIG_FPS_Y, BOX_WIDTH, 12);
     display.endWrite();
   }
 }

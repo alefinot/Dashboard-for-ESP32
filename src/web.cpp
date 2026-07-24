@@ -1,6 +1,7 @@
 #include "dashboard.h"
 #include <ArduinoOTA.h>
 #include <Update.h>
+#include <ESPmDNS.h>
 
 Preferences preferences;
 WebServer server(80);
@@ -69,7 +70,7 @@ button:hover {background:linear-gradient(135deg, #0097a7, #005b6b); box-shadow:0
 <body>
 <div class="header">
     <h2>Dashboard++ Setup</h2>
-    <p class="subtitle">Device Configuration & UI Layout Manager</p>
+    <p class="subtitle">Device Configuration & UI Layout Manager — <span id="ip-info">Loading...</span></p>
 </div>
 <div id="msg"></div>
 <input type="text" id="searchBar" placeholder="🔍 Search settings..." oninput="filterConfig()" autocomplete="off">
@@ -122,7 +123,7 @@ const configMap = [
             { type: "subtitle", label: "⚙️ General" },
             { id: "ENABLE_DEMO_MODE", label: "Enable Sensor Demo Mode" },
             { id: "TARGET_FPS", label: "Target Refresh Rate (FPS)" },
-            { id: "ENABLE_POWER_SENSE", label: "Enable Power Sensing" },
+            { id: "ENABLE_POWER_SENSE", label: "Enable Power Sensing", onconfirm: "confirmPowerSense" },
             { type: "button", label: "🕒 Sync Device Time", action: "syncTime" },
             { id: "SHOW_FPS_COUNTER_DEFAULT", label: "Show FPS Counter" },
             { id: "SHOW_ELEMENT_BOUNDS", label: "Show UI Element Bounds (Debug)" },
@@ -141,6 +142,14 @@ const configMap = [
         ]
     },
     {
+        title: "📡 WiFi",
+        items: [
+            { type: "subtitle", label: "📡 Settings — reboot to apply" },
+            { id: "WIFI_SSID", label: "Network Name (SSID)" },
+            { id: "WIFI_PASSWORD", label: "Password" }
+        ]
+    },
+    {
         title: "🎨 Display & Colors",
         items: [
             { type: "subtitle", label: "🖥️ Display" },
@@ -149,11 +158,12 @@ const configMap = [
             { id: "DISPLAY_ROTATION", label: "Screen Rotation (0-3)" },
             { id: "DISPLAY_WIDTH", label: "Display Width (px)" },
             { id: "DISPLAY_HEIGHT", label: "Display Height (px)" },
-            { id: "SPI_BUS_SPEED", label: "SPI Bus Frequency (Hz)" },
-            { id: "BACKLIGHT_BRIGHTNESS", label: "Backlight Brightness", type: "range", min: 0, max: 100, step: 1 },
             { id: "ENABLE_ANTIALIASING", label: "Enable Anti-Aliased Rendering" },
             { id: "DISPLAY_INVERT_COLORS", label: "Invert Display Colors" },
-            { type: "subtitle", label: "🌙 Night Mode" },
+            { id: "SPI_BUS_SPEED", label: "SPI Bus Frequency (Hz)" },
+            { type: "subtitle", label: "💡 Brightness Control" },
+            { id: "ENABLE_NIGHT_MODE", label: "Enable Night Mode" },
+            { id: "BACKLIGHT_BRIGHTNESS", label: "Backlight Brightness", type: "range", min: 0, max: 100, step: 1 },
             { id: "NIGHT_MODE_START_HOUR", label: "Start Time (Hour)" },
             { id: "NIGHT_MODE_END_HOUR", label: "End Time (Hour)" },
             { type: "subtitle", label: "📊 Thresholds" },
@@ -164,12 +174,14 @@ const configMap = [
             { id: "FUEL_WARN_YEL", label: "Fuel Low Yellow Zone (%)" },
             { id: "FUEL_WARN_RED", label: "Fuel Low Red Zone (%)" },
             { type: "subtitle", label: "🎨 Colors" },
-            { id: "COLOR_TEMP_NORM", label: "Engine Temp Normal", type: "color" },
-            { id: "COLOR_TEMP_WARN", label: "Engine Temp Warning", type: "color" },
-            { id: "COLOR_TEMP_CRIT", label: "Engine Temp Critical", type: "color" },
-            { id: "COLOR_FUEL_NORM", label: "Fuel Level Normal", type: "color" },
-            { id: "COLOR_FUEL_WARN", label: "Fuel Level Warning", type: "color" },
-            { id: "COLOR_FUEL_CRIT", label: "Fuel Level Critical", type: "color" }
+            { type: "subtitle", label: "🌡️ Engine Temp" },
+            { id: "COLOR_TEMP_NORM", label: "Normal", type: "color" },
+            { id: "COLOR_TEMP_WARN", label: "Warning", type: "color" },
+            { id: "COLOR_TEMP_CRIT", label: "Critical", type: "color" },
+            { type: "subtitle", label: "⛽ Fuel Level" },
+            { id: "COLOR_FUEL_NORM", label: "Normal", type: "color" },
+            { id: "COLOR_FUEL_WARN", label: "Warning", type: "color" },
+            { id: "COLOR_FUEL_CRIT", label: "Critical", type: "color" }
         ]
     },
     {
@@ -284,15 +296,18 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                     </div>`;
                 }
             } else if (iType === 'color') {
-                closeSubCard();
                 if(d.hasOwnProperty(item.id)) {
                     hasItems = true;
                     processedKeys.add(item.id);
-                    groupHtml += `
+                    if (inSubCard) {
+                        groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;"><label style="font-size:13px;color:#ccc;">${item.label}</label><input type="color" id="${item.id}" value="${d[item.id]}" style="width:40px;height:30px;border:none;background:none;cursor:pointer;padding:0;"></div>`;
+                    } else {
+                        groupHtml += `
                     <div class="form-group">
                         <label>${item.label}</label>
                         <input type="color" id="${item.id}" value="${d[item.id]}">
                     </div>`;
+                    }
                 }
             } else if (iType === 'button') {
                 closeSubCard();
@@ -302,12 +317,14 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                     <button class="btn-secondary" onclick="${item.action}()" style="margin:0; font-size:14px; padding:10px;">${item.label}</button>
                 </div>`;
             } else if (iType === 'range') {
-                closeSubCard();
                 if(d.hasOwnProperty(item.id)) {
                     hasItems = true;
                     processedKeys.add(item.id);
                     let val = d[item.id];
-                    groupHtml += `
+                    if (inSubCard) {
+                        groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;"><label style="font-size:13px;color:#ccc;">${item.label}</label><input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value" style="flex-grow:1;accent-color:#00bcd4;padding:0;cursor:pointer;height:6px;"><input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value" style="width:75px;padding:6px;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:4px;text-align:center;margin-left:8px;"></div>`;
+                    } else {
+                        groupHtml += `
                     <div class="card xy-group">
                         <h4>${item.label}</h4>
                         <div class="xy-row">
@@ -316,6 +333,7 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                             <input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value">
                         </div>
                     </div>`;
+                    }
                 }
             } else if (iType === 'touch-table') {
                 closeSubCard();
@@ -461,7 +479,32 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
     document.getElementById('ENABLE_DYNAMIC_CPU')?.addEventListener('change', updateCpuMode);
     updateCpuMode();
 
+    document.getElementById('ENABLE_POWER_SENSE')?.addEventListener('change', function() {
+        if (this.checked && !confirm("Enabling power sensing will start monitoring vehicle power draw. Continue?")) {
+            this.checked = false;
+        }
+    });
+
     setTimeout(syncTime, 1000);
+
+    // Hide stored password behind asterisks
+    let pwEl = document.getElementById('WIFI_PASSWORD');
+    if (pwEl) {
+        pwEl.type = 'password';
+        pwEl.placeholder = 'Leave empty to keep current';
+    }
+
+    // Fetch LAN IP and update status
+    fetch('/api/perf').then(r=>r.json()).then(perf => {
+        let ipEl = document.getElementById('ip-info');
+        if (perf.lan_ip && perf.lan_ip.length > 0) {
+            ipEl.innerHTML = 'LAN: <a href="http://' + perf.lan_ip + '" target="_blank">' + perf.lan_ip + '</a>';
+        } else {
+            ipEl.textContent = 'AP mode only';
+        }
+    }).catch(() => {
+        document.getElementById('ip-info').textContent = 'unknown';
+    });
 });
 
 let autosaveTimer = null;
@@ -500,6 +543,9 @@ function save(){
         else if(el.type === 'number' || el.tagName.toLowerCase() === 'select') {
             let val = parseFloat(el.value);
             out[el.id] = isNaN(val) ? el.value : val;
+        }
+        else if (el.id === 'WIFI_PASSWORD' && el.value === '') {
+            // Skip — empty password means "keep current"
         }
         else out[el.id] = el.value;
     });
@@ -814,11 +860,36 @@ document.getElementById('perf-panel').addEventListener('toggle', function() {
 )rawliteral";
 
 void webServerTask(void *pvParameters) {
-  WiFi.mode(WIFI_AP);
-  WiFi.setTxPower(WIFI_POWER_MINUS_1dBm);
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setTxPower(WIFI_POWER_11dBm);
   WiFi.softAP("Dashboard_Config", "12345678");
   logPrintf("AP: Dashboard_Config\n");
-  logPrintf("IP: %s\n", WiFi.softAPIP().toString().c_str());
+  logPrintf("AP IP: %s\n", WiFi.softAPIP().toString().c_str());
+
+  delay(100);
+
+  if (WIFI_SSID.length() > 0) {
+    logPrintf("Connecting to WiFi: %s\n", WIFI_SSID.c_str());
+    WiFi.setHostname("dashboard-pp");
+    WiFi.begin(WIFI_SSID.c_str(), WIFI_PASSWORD.c_str());
+
+    unsigned long startAttempt = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
+      delay(100);
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      logPrintf("STA connected: %s\n", WiFi.localIP().toString().c_str());
+      logPrintf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
+
+      if (MDNS.begin("dashboard-pp")) {
+        MDNS.addService("http", "tcp", 80);
+        logPrintf("mDNS: http://dashboard-pp.local\n");
+      }
+    } else {
+      logPrintf("STA connection failed\n");
+    }
+  }
 
   ArduinoOTA.onStart([]() {
     logPrintf("OTA started\n");
@@ -989,6 +1060,7 @@ void webServerTask(void *pvParameters) {
     doc["refresh_ms"] = (unsigned long)DISPLAY_REFRESH_MS;
     doc["spi_speed"] = SPI_BUS_SPEED;
     doc["wifi_clients"] = WiFi.softAPgetStationNum();
+    doc["lan_ip"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "";
     doc["resolution"] = String(DISPLAY_WIDTH) + "x" + String(DISPLAY_HEIGHT);
 
     String out;
@@ -1006,7 +1078,14 @@ void webServerTask(void *pvParameters) {
 
     if (WiFi.softAPgetStationNum() > 0) {
       lastClientTime = millis();
-    } else if (millis() - lastClientTime > 60000) {
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      lastClientTime = millis();
+    }
+
+    // Allow 10 minutes before powering off (for testing)
+    if (millis() - lastClientTime > 600000) {
       logPrintf("WiFi timeout, disabled\n");
       WiFi.mode(WIFI_OFF);
       vTaskDelete(NULL);
