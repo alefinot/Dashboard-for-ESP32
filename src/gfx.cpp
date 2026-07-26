@@ -189,6 +189,7 @@ void drawAALine(T &disp, float x0, float y0, float x1, float y1,
   auto plot = [&](int x, int y, float c) {
     if (c <= 0.0f)
       return;
+    c = powf(c, AA_SHARPNESS);
     uint16_t aaColor = blendColorWithBlack(color, c);
     disp.drawPixel(x, y, aaColor);
   };
@@ -256,6 +257,7 @@ void drawAACircle(T &disp, int cx, int cy, int r, uint16_t color) {
   auto plot8 = [&](int px, int py, float alpha) {
     if (alpha <= 0.0f)
       return;
+    alpha = powf(alpha, AA_SHARPNESS);
     uint16_t c = blendColorWithBlack(color, alpha);
     disp.drawPixel(cx + px, cy + py, c);
     disp.drawPixel(cx - px, cy + py, c);
@@ -289,6 +291,7 @@ void drawAACornerArc(T &disp, int cx, int cy, int r, uint8_t corner,
   auto plotCorner = [&](int px, int py, float alpha) {
     if (alpha <= 0.0f)
       return;
+    alpha = powf(alpha, AA_SHARPNESS);
     uint16_t c = blendColorWithBlack(color, alpha);
     disp.drawPixel(cx + signX * px, cy + signY * py, c);
     if (px != py)
@@ -362,7 +365,9 @@ void fillAARoundRect(T &disp, int x, int y, int w, int h, int r, uint16_t color,
       int px = (int)ceilf(x_exact);
       float T_val = (float)px - x_exact;
       if (T_val < 1.0f) {
-        uint16_t c1 = blendColor(color, bgColor, 1.0f - T_val);
+        float aa = 1.0f - T_val;
+        aa = powf(aa, AA_SHARPNESS);
+        uint16_t c1 = blendColor(color, bgColor, aa);
         disp.drawPixel(cx + signX * px, cy + signY * py, c1);
       }
       if (px - 1 >= 0) {
@@ -451,21 +456,48 @@ void drawClockIcon(int x, int y, uint16_t color) {
 }
 
 void drawLocationIcon(int x, int y, uint16_t color) {
-  display.fillCircle(x + 8, y + 5, 5, color);
-  display.fillTriangle(x + 3, y + 5, x + 13, y + 5, x + 8, y + 15, color);
-  display.fillCircle(x + 8, y + 5, 2, TFT_BLACK);
+  int cx = x + 8, cy = y + 5, r = 6;
+  int px = r, py = 0;
+  auto plotUpper = [&](int dx, int dy, float a) {
+    if (a <= 0.0f) return;
+    uint16_t c = blendColorWithBlack(color, a);
+    display.drawPixel(cx + dx, cy - dy, c);
+    display.drawPixel(cx - dx, cy - dy, c);
+  };
+  plotUpper(r, 0, 1.0f);
+  plotUpper(0, r, 1.0f);
+  while (px > py) {
+    py++;
+    float x_exact = sqrtf((float)(r * r - py * py));
+    px = (int)ceilf(x_exact);
+    float T_val = (float)px - x_exact;
+    float a1 = powf(1.0f - T_val, AA_SHARPNESS);
+    float a2 = powf(T_val, AA_SHARPNESS);
+    plotUpper(px, py, a1);
+    if (px > 1) plotUpper(px - 1, py, a2);
+    plotUpper(py, px, a1);
+    if (px > 1) plotUpper(py, px - 1, a2);
+  }
+  drawAALine(display, (float)(x + 14), (float)(y + 5), (float)(x + 8), (float)(y + 16), color);
+  drawAALine(display, (float)(x + 8), (float)(y + 16), (float)(x + 2), (float)(y + 5), color);
+  drawAACircle(display, cx, cy, 2, color);
 }
 
-void drawWifiIcon(int x, int y, uint16_t color) {
-  int cx = x + 8, cy = y + 12;
-  display.fillCircle(cx, cy, 9, color);
-  display.fillCircle(cx, cy, 7, TFT_BLACK);
-  display.fillCircle(cx, cy, 6, color);
-  display.fillCircle(cx, cy, 4, TFT_BLACK);
-  display.fillCircle(cx, cy, 3, color);
-  display.fillRect(cx - 10, cy, 21, 12, TFT_BLACK);
-  display.fillTriangle(cx, cy, cx - 17, cy, cx - 17, cy - 10, TFT_BLACK);
-  display.fillTriangle(cx, cy, cx + 17, cy, cx + 17, cy - 10, TFT_BLACK);
+void drawWifiIcon(int x, int y, uint16_t color, bool filled) {
+  int cx = x + 8, cy = y + 8;
+  drawAALine(display, (float)cx, (float)(cy + 5), (float)(cx - 6), (float)(cy - 4), color);
+  drawAALine(display, (float)cx, (float)(cy + 5), (float)(cx + 6), (float)(cy - 4), color);
+  drawAALine(display, (float)(cx - 6), (float)(cy - 4), (float)(cx - 4), (float)(cy - 5), color);
+  drawAALine(display, (float)(cx - 4), (float)(cy - 5), (float)(cx - 2), (float)(cy - 5.5f), color);
+  drawAALine(display, (float)(cx - 2), (float)(cy - 5.5f), (float)cx, (float)(cy - 6), color);
+  drawAALine(display, (float)cx, (float)(cy - 6), (float)(cx + 2), (float)(cy - 5.5f), color);
+  drawAALine(display, (float)(cx + 2), (float)(cy - 5.5f), (float)(cx + 4), (float)(cy - 5), color);
+  drawAALine(display, (float)(cx + 4), (float)(cy - 5), (float)(cx + 6), (float)(cy - 4), color);
+  if (filled) {
+    display.fillTriangle(cx, cy + 5, cx - 6, cy - 4, cx + 6, cy - 4, color);
+    display.drawFastHLine(cx - 4, cy - 5, 9, color);
+    display.drawFastHLine(cx - 2, cy - 6, 5, color);
+  }
 }
 
 void drawWheelIcon(int x, int y, uint16_t color) {
@@ -499,6 +531,15 @@ void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color) {
 // ----------------------------------------------------------------------------
 // Splash / boot
 // ----------------------------------------------------------------------------
+static void drawBarFill(int barX, int barY, int progress) {
+  int fillW = (260 * progress) / 100;
+  if (fillW > 260) fillW = 260;
+  display.startWrite();
+  if (fillW > 0)
+    display.fillRect(barX, barY, fillW, 8, TFT_CYAN);
+  display.endWrite();
+}
+
 void drawSplashBase() {
   splashCurrentProgress = 0;
   display.startWrite();
@@ -510,64 +551,54 @@ void drawSplashBase() {
   display.getTextBounds("DASHBOARD++", 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 120 - y1);
   display.print("DASHBOARD++");
-  int barX = DISPLAY_WIDTH / 2 - (260 / 2);
-  drawAARoundRect(display, barX - 2, 160 - 2, 260 + 4, 8 + 4, 3, TFT_CYAN);
   display.setFont(&Conthrax_SemiBold7pt7b);
   display.setTextColor(TFT_WHITE);
   display.getTextBounds(SPLASH_SIGNATURE.c_str(), 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 185 - y1);
   display.print(SPLASH_SIGNATURE);
+  int barX = DISPLAY_WIDTH / 2 - (260 / 2);
+  drawAARoundRect(display, barX - 2, 160 - 2, 260 + 4, 8 + 4, 3, TFT_CYAN);
   display.endWrite();
 }
 
 void updateSplashProgress(int targetProgress) {
   int barX = DISPLAY_WIDTH / 2 - (260 / 2);
+  const int barY = 160;
+  if (targetProgress <= splashCurrentProgress) return;
+
+  int startProgress = splashCurrentProgress;
+  int range = targetProgress - startProgress;
+  unsigned long duration = range * random(18, 40);
+  if (duration < 80) duration = 80;
+
+  unsigned long animStart = millis();
   while (splashCurrentProgress < targetProgress) {
-    int step = random(1, 6);
-    if (splashCurrentProgress + step > targetProgress)
-      step = targetProgress - splashCurrentProgress;
-    splashCurrentProgress += step;
-
-    int fillW = (260 * splashCurrentProgress) / 100;
-    if (fillW > 0) {
-      display.startWrite();
-      display.fillRect(barX, 160, fillW, 8, TFT_CYAN);
-      display.endWrite();
+    unsigned long elapsed = millis() - animStart;
+    if (elapsed >= duration) {
+      splashCurrentProgress = targetProgress;
+    } else {
+      float t = (float)elapsed / (float)duration;
+      splashCurrentProgress = startProgress + (int)(range * (1.0f - powf(1.0f - t, 3.0f)) + 0.5f);
     }
-
-    int delayTime = step * (BOOT_TIME_MS / 100);
-    delayTime += random(-delayTime / 4, delayTime / 4);
-    if (delayTime < 0)
-      delayTime = 0;
-    delay(delayTime);
+    drawBarFill(barX, barY, splashCurrentProgress);
+    delay(16);
   }
-}
-
-void runDisplaySelfTest() {
-  isSelfTestActive = true;
-  overrideTimeDateStr = true;
-  overrideSpeed = 188;
-  overrideOdo = 888888.8;
-  overrideSat = 88;
-  overrideBat = 18.8f;
-  overrideTimer = 18.88f;
-  SensorSnapshot dummySnap;
-  updateBigDisplay(dummySnap);
-  for (int b = 0; b <= 255; b += 25) {
-    analogWrite(BL_DISPLAY, b);
-    delay(2);
-  }
-  analogWrite(BL_DISPLAY, 255);
-  delay(250);
-  isSelfTestActive = false;
-  overrideTimeDateStr = false;
-  updateBigDisplay(dummySnap);
 }
 
 void showGoodbyeScreen(bool isSleep) {
   preferences.begin("dashboard", false);
   preferences.putDouble("odo", totalDistanceKm);
   preferences.end();
+
+  int fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+  if (fadeTarget > 255) fadeTarget = 255;
+  logPrintf("goodbye fade-out: fadeTarget=%d BACKLIGHT_BRIGHTNESS=%d\n", fadeTarget, BACKLIGHT_BRIGHTNESS);
+  int fadeStepCount = (fadeTarget / 8) + 1;
+  for (int level = fadeTarget; level >= 0; level -= 8) {
+    ledcWrite(BACKLIGHT_CHANNEL, level);
+    delay(FADE_DURATION_MS / fadeStepCount);
+  }
+  ledcWrite(BACKLIGHT_CHANNEL, 0);
 
   display.startWrite();
   display.fillScreen(TFT_BLACK);
@@ -577,49 +608,56 @@ void showGoodbyeScreen(bool isSleep) {
   uint16_t w, h;
   String title = isSleep ? "SEE YOU SOON" : "REBOOTING...";
 
-  analogWrite(BL_DISPLAY, 30);
-
   display.startWrite();
   display.setFont(&Conthrax_SemiBold12pt7b);
   display.setTextColor(TFT_WHITE);
   display.getTextBounds(title.c_str(), 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 120 - y1);
   display.print(title);
-
-  int barX = DISPLAY_WIDTH / 2 - (260 / 2);
-  drawAARoundRect(display, barX - 2, 160 - 2, 260 + 4, 8 + 4, 3, TFT_CYAN);
-
   display.setFont(&Conthrax_SemiBold7pt7b);
   display.setTextColor(TFT_WHITE);
   display.getTextBounds(REBOOT_SIGNATURE.c_str(), 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 185 - y1);
   display.print(REBOOT_SIGNATURE);
+  int barX = DISPLAY_WIDTH / 2 - (260 / 2);
+  drawAARoundRect(display, barX - 2, 160 - 2, 260 + 4, 8 + 4, 3, TFT_CYAN);
   display.endWrite();
 
+  fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+  if (fadeTarget > 255) fadeTarget = 255;
+  fadeStepCount = (fadeTarget / 8) + 1;
+  for (int level = 0; level <= fadeTarget; level += 8) {
+    ledcWrite(BACKLIGHT_CHANNEL, level);
+    delay(FADE_DURATION_MS / fadeStepCount);
+  }
+  ledcWrite(BACKLIGHT_CHANNEL, fadeTarget);
+
   int currentProgress = 0;
+  unsigned long remainingDuration = SHUTDOWN_TIME_MS;
+  unsigned long animStart = millis();
   while (currentProgress < 100) {
-    int step = random(1, 8);
-    if (currentProgress + step > 100)
-      step = 100 - currentProgress;
-    currentProgress += step;
-
-    int fillW = (260 * currentProgress) / 100;
-    if (fillW > 0) {
-      display.startWrite();
-      display.fillRect(barX, 160, fillW, 8, TFT_CYAN);
-      display.endWrite();
+    unsigned long elapsed = millis() - animStart;
+    if (elapsed >= remainingDuration) {
+      currentProgress = 100;
+    } else {
+      float t = (float)elapsed / (float)remainingDuration;
+      currentProgress = (int)(100.0f * (1.0f - powf(1.0f - t, 3.0f)) + 0.5f);
     }
-
-    int delayTime = step * (SHUTDOWN_TIME_MS / 100);
-    delayTime += random(-delayTime / 4, delayTime / 4);
-    if (delayTime < 0)
-      delayTime = 0;
-    delay(delayTime);
+    drawBarFill(barX, 160, currentProgress);
+    delay(16);
   }
   delay(50);
 
+  fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+  if (fadeTarget > 255) fadeTarget = 255;
+  fadeStepCount = (fadeTarget / 8) + 1;
+  for (int level = fadeTarget; level >= 0; level -= 8) {
+    ledcWrite(BACKLIGHT_CHANNEL, level);
+    delay(FADE_DURATION_MS / fadeStepCount);
+  }
+  ledcWrite(BACKLIGHT_CHANNEL, 0);
+
   if (isSleep) {
-    analogWrite(BL_DISPLAY, 0);
     pinMode(SPI_RST, OUTPUT);
     digitalWrite(SPI_RST, LOW);
     pinMode(CS_DISPLAY, OUTPUT);
@@ -650,6 +688,65 @@ void showGoodbyeScreen(bool isSleep) {
   } else {
     ESP.restart();
   }
+}
+
+// ----------------------------------------------------------------------------
+// OTA updating screen
+// ----------------------------------------------------------------------------
+volatile int otaProgressFillW = 0;
+volatile int otaProgressTarget = 0;
+
+void showUpdatingScreen() {
+  otaProgressFillW = 0;
+  otaProgressTarget = 0;
+
+  int fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+  if (fadeTarget > 255) fadeTarget = 255;
+  int fadeStepCount = (fadeTarget / 8) + 1;
+  for (int level = fadeTarget; level >= 0; level -= 8) {
+    ledcWrite(BACKLIGHT_CHANNEL, level);
+    delay(FADE_DURATION_MS / fadeStepCount);
+  }
+  ledcWrite(BACKLIGHT_CHANNEL, 0);
+
+  int16_t x1, y1;
+  uint16_t w, h;
+
+  display.startWrite();
+  display.fillScreen(TFT_BLACK);
+
+  String title = "UPDATING...";
+  display.setFont(&Conthrax_SemiBold12pt7b);
+  display.setTextColor(TFT_WHITE);
+  display.getTextBounds(title.c_str(), 0, 0, &x1, &y1, &w, &h);
+  display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 120 - y1);
+  display.print(title);
+
+  display.setFont(&Conthrax_SemiBold7pt7b);
+  display.setTextColor(TFT_WHITE);
+  String msg = "DO NOT TURN OFF THE DEVICE";
+  display.getTextBounds(msg.c_str(), 0, 0, &x1, &y1, &w, &h);
+  display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 185 - y1);
+  display.print(msg);
+  int barX = DISPLAY_WIDTH / 2 - (260 / 2);
+  drawAARoundRect(display, barX - 2, 160 - 2, 260 + 4, 8 + 4, 3, TFT_CYAN);
+  display.endWrite();
+
+  fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+  if (fadeTarget > 255) fadeTarget = 255;
+  fadeStepCount = (fadeTarget / 8) + 1;
+  for (int level = 0; level <= fadeTarget; level += 8) {
+    ledcWrite(BACKLIGHT_CHANNEL, level);
+    delay(FADE_DURATION_MS / fadeStepCount);
+  }
+  ledcWrite(BACKLIGHT_CHANNEL, fadeTarget);
+}
+
+void updateOTAProgress(int progress, int total) {
+  int targetW = (260L * progress) / total;
+  if (targetW > 260) targetW = 260;
+  if (targetW > otaProgressTarget)
+    otaProgressTarget = targetW;
 }
 
 // ----------------------------------------------------------------------------

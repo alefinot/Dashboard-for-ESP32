@@ -14,90 +14,107 @@ const char *index_html = R"rawliteral(
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dashboard++ Config</title>
 <style>
-body {font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; background:#121212; color:#f0f0f0; padding:20px; margin:0; max-width: 900px; margin: auto;}
-.header {text-align:center; margin-bottom: 30px;}
-h2 {color:#00bcd4; margin:0 0 5px 0; font-size: 28px;}
-p.subtitle {color:#888; font-size: 14px; margin-top:0;}
-details {background:#0a0a0a; border-radius:10px; margin-bottom:15px; overflow:hidden;}
-summary {background:#1a1a1a; padding:12px 20px; font-weight:bold; font-size:14px; color:#00bcd4; cursor:pointer; user-select:none;}
+@keyframes fadeInUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+@keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+@keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
+body {font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; background:#121212; color:#f0f0f0; padding:12px; margin:0 auto; max-width:900px; animation:fadeIn .4s ease;}
+.header {text-align:center; margin-bottom:12px; animation:fadeInUp .5s ease;}
+h2 {color:#00bcd4; margin:0 0 4px 0; font-size:20px;}
+p.subtitle {color:#888; font-size:13px; margin-top:0;}
+details {background:#0a0a0a; border-radius:6px; margin-bottom:10px; animation:fadeInUp .4s ease both;}
+details > summary { border-radius:6px; }
+details[open] > summary { border-radius:6px 6px 0 0; }
+.details-content { border-radius:0 0 6px 6px; }
+details:nth-of-type(1) { animation-delay:.05s; }
+details:nth-of-type(2) { animation-delay:.1s; }
+details:nth-of-type(3) { animation-delay:.15s; }
+details:nth-of-type(4) { animation-delay:.2s; }
+details:nth-of-type(5) { animation-delay:.25s; }
+details:nth-of-type(6) { animation-delay:.3s; }
+details:nth-of-type(7) { animation-delay:.35s; }
+details:nth-of-type(8) { animation-delay:.4s; }
+details:nth-of-type(9) { animation-delay:.45s; }
+details:nth-of-type(10) { animation-delay:.5s; }
+summary {background:#1a1a1a; padding:8px 12px; font-weight:bold; font-size:12px; color:#00bcd4; cursor:pointer; user-select:none; transition:background .3s;}
 summary:hover {background:#222;}
-.details-content {padding: 20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:15px;}
-.card {display: flex; flex-direction: column; justify-content: center; background:#252525; padding:15px; border-radius:8px;}
-label {font-size:13px; color:#aaa; font-weight:600;}
-input {width:100%; padding:10px; margin-top:6px; background:#2c2c2c; color:#fff; border:1px solid #444; border-radius:6px; box-sizing:border-box; font-size:14px; transition: border 0.3s;}
-input:focus {border-color: #00bcd4; outline: none;}
-input[type="checkbox"] {width:22px; height:22px; margin-top:0; accent-color:#00bcd4; cursor:pointer;}
-.checkbox-card {flex-direction: row; align-items: center; justify-content: space-between;}
-.checkbox-card label {margin-bottom: 0;}
+summary::-webkit-details-marker {display:none;}
+summary::marker {content:'';}
+summary::before { content:'▶'; display:inline-flex; align-items:center; justify-content:center; width:12px; height:12px; font-size:8px; margin-right:5px; transition:transform .3s ease; }
+details[open] > summary::before { transform:rotate(90deg); }
+.details-content {padding:8px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:6px;}
+.card { display:flex; flex-direction:column; justify-content:center; background:#252525; padding:8px 10px; border-radius:5px; }
+label {font-size:11px; color:#aaa; font-weight:600;}
+input {width:100%; padding:5px 7px; margin-top:4px; background:#2c2c2c; color:#fff; border:1px solid #444; border-radius:4px; box-sizing:border-box; font-size:12px;}
+input:focus {border-color:#00bcd4; outline:none; background:#333;}
+input[type="checkbox"] {width:18px; height:18px; margin-top:0; accent-color:#00bcd4; cursor:pointer;}
+.checkbox-card {flex-direction:row; align-items:center; justify-content:space-between;}
+.checkbox-card label {margin-bottom:0;}
 
-.xy-group h4 { margin: 0 0 12px 0; color: #fff; font-size: 14px; font-weight: bold; border-bottom: 1px solid #333; padding-bottom: 6px;}
-.xy-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.xy-row:last-child { margin-bottom: 0; }
-.xy-row label { width: 15px; color: #00bcd4; font-weight: bold; text-align: center; font-size: 15px;}
-.xy-row input[type="range"] { flex-grow: 1; accent-color: #00bcd4; padding: 0; cursor: pointer; height: 6px; }
-.xy-row input[type="number"] { width: 75px; padding: 6px; margin: 0; text-align: center; font-weight: bold;}
+.xy-group h4 { margin:0 0 6px 0; color:#fff; font-size:12px; font-weight:bold; border-bottom:1px solid #333; padding-bottom:3px; }
+.xy-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+.xy-row:last-child { margin-bottom:0; }
+.xy-row label { width:12px; color:#00bcd4; font-weight:bold; text-align:center; font-size:12px; }
+.xy-row input[type="range"] { flex-grow:1; accent-color:#00bcd4; padding:0; cursor:pointer; height:4px; }
+.xy-row input[type="number"] { width:60px; padding:3px 5px; margin:0; text-align:center; font-weight:bold;}
 
-button {background:linear-gradient(135deg, #00bcd4, #007c91); color:#fff; padding:15px; border:none; border-radius:8px; cursor:pointer; width:100%; font-size:18px; font-weight:bold; transition:0.3s;}
-button:hover {background:linear-gradient(135deg, #0097a7, #005b6b); box-shadow:0 4px 10px rgba(0,188,212,0.4);}
+button { background:linear-gradient(135deg,#00bcd4,#007c91); color:#fff; padding:10px; border:none; border-radius:5px; cursor:pointer; width:100%; font-size:14px; font-weight:bold; transition:transform .2s, box-shadow .3s, background .3s; position:relative; overflow:hidden; }
+button:hover { background:linear-gradient(135deg,#0097a7,#005b6b); box-shadow:0 4px 14px rgba(0,188,212,.35); transform:translateY(-1px); }
+button:active { transform:translateY(0) scale(.98); }
 
-.perf-grid {display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px;}
-.perf-card {background:#1e1e1e; padding:14px; border-radius:8px;}
-.perf-card h4 {margin:0 0 8px 0; color:#00bcd4; font-size:13px; font-weight:bold;}
-.perf-row {display:flex; justify-content:space-between; align-items:center; padding:2px 0; font-size:13px;}
+.perf-grid {display:grid; grid-template-columns:1fr 1fr; gap:6px;}
+.perf-card {background:#1e1e1e; padding:8px; border-radius:5px; transition:transform .2s ease, box-shadow .2s ease;}
+.perf-card:hover { transform:translateY(-1px); box-shadow:0 4px 14px rgba(0,0,0,.25); }
+.perf-card h4 {margin:0 0 4px 0; color:#00bcd4; font-size:11px; font-weight:bold;}
+.perf-row {display:flex; justify-content:space-between; align-items:center; padding:0; font-size:11px; line-height:1.5;}
 .perf-label {color:#888;}
 .perf-value {color:#fff; font-weight:bold; font-family:'Consolas','Courier New',monospace;}
-.perf-bar {height:6px; background:#333; border-radius:3px; margin-top:6px; overflow:hidden;}
-.perf-bar-fill {height:100%; border-radius:3px; transition:width 0.8s ease;}
+.perf-bar {height:4px; background:#333; border-radius:2px; margin-top:3px; overflow:hidden;}
+.perf-bar-fill {height:100%; border-radius:2px; transition:width .8s ease;}
 
-/* Contenitore per i pulsanti */
-.btn-group { display: flex; gap: 15px; margin-top: 15px; }
-.btn-group button { flex: 1; margin-top: 0; }
+.btn-group { display:flex; gap:8px; margin-top:8px; animation:fadeInUp .4s ease both; }
+.btn-group button { flex:1; margin-top:0; }
+.btn-group:nth-of-type(1) { animation-delay:.6s; }
+.btn-group:nth-of-type(2) { animation-delay:.65s; }
 
-.btn-secondary {background:linear-gradient(135deg, #455a64, #263238); font-size: 16px;}
-.btn-secondary:hover {background:linear-gradient(135deg, #546e7a, #37474f); box-shadow:0 4px 10px rgba(69,90,100,0.4);}
+.btn-secondary {background:linear-gradient(135deg,#455a64,#263238); font-size:13px;}
+.btn-secondary:hover {background:linear-gradient(135deg,#546e7a,#37474f); box-shadow:0 4px 14px rgba(69,90,100,.35);}
 
-.btn-reset {background:linear-gradient(135deg, #e53935, #b71c1c); margin-top: 15px;}
-.btn-reset:hover {background:linear-gradient(135deg, #ef5350, #c62828); box-shadow:0 4px 10px rgba(229,57,53,0.4);}
+.btn-reset {background:linear-gradient(135deg,#e53935,#b71c1c); margin-top:8px; animation:fadeInUp .4s ease .7s both;}
+.btn-reset:hover {background:linear-gradient(135deg,#ef5350,#c62828); box-shadow:0 4px 14px rgba(229,57,53,.35);}
 
-#msg {text-align:center; font-weight:bold; margin-bottom:15px; min-height:20px;}
-.msg-success {color: #4caf50;} .msg-error {color: #f44336;}
-#serial-out { background:#0d0d0d; color:#00ff88; font-family:'Consolas','Courier New',monospace; font-size:10px; padding:8px; height:200px; overflow-y:auto; white-space:pre; }
-#searchBar {width:100%; padding:14px 16px; margin-bottom:20px; background:#1e1e1e; color:#fff; border:2px solid #333; border-radius:10px; box-sizing:border-box; font-size:16px; transition: border 0.3s;}
-#searchBar:focus {border-color: #00bcd4; outline: none;}
+
+
+#msg {text-align:center; font-weight:bold; margin-bottom:10px; min-height:16px; animation:fadeIn .3s ease;}
+.msg-success {color:#4caf50;} .msg-error {color:#f44336;}
+#serial-out { background:#0d0d0d; color:#00ff88; font-family:'Consolas','Courier New',monospace; font-size:10px; padding:5px; height:140px; overflow-y:auto; white-space:pre; }
+#searchBar { width:100%; padding:8px 12px; margin-bottom:10px; background:#1e1e1e; color:#fff; border:2px solid #333; border-radius:6px; box-sizing:border-box; font-size:13px; animation:fadeInUp .5s ease .1s both; }
+#searchBar:focus { border-color:#00bcd4; outline:none; background:#252525; }
 #searchBar::placeholder {color:#666;}
+#scrollTopBtn { position:fixed; bottom:16px; right:16px; width:36px; height:36px; border-radius:50%; background:#00bcd4; color:#fff; border:none; font-size:16px; cursor:pointer; box-shadow:0 3px 10px rgba(0,0,0,.4); display:none; z-index:999; align-items:center; justify-content:center; transition:opacity .3s, transform .3s, box-shadow .3s; animation:fadeInUp .35s ease; }
+#scrollTopBtn:hover { transform:scale(1.1); background:#0097a7; box-shadow:0 4px 14px rgba(0,188,212,.35); }
+#scrollTopBtn:active { transform:scale(.95); }
+.btn-group button { animation:fadeIn .35s ease both; }
+.btn-group:nth-of-type(1) button { animation-delay:.6s; }
+.btn-group:nth-of-type(1) button:nth-child(2) { animation-delay:.63s; }
+.btn-group:nth-of-type(1) button:nth-child(3) { animation-delay:.66s; }
+.btn-group:nth-of-type(2) button { animation-delay:.7s; }
+.btn-group:nth-of-type(2) button:nth-child(2) { animation-delay:.73s; }
 </style>
 </head>
 <body>
 <div class="header">
     <h2>Dashboard++ Setup</h2>
-    <p class="subtitle">Device Configuration & UI Layout Manager — <span id="ip-info">Loading...</span></p>
+    <p class="subtitle">Device Configuration & UI Layout Manager</p>
+    <p style="margin:-10px 0 14px 0; font-size:11px; color:#666;"><span id="ip-info">AP: 192.168.4.1</span></p>
 </div>
 <div id="msg"></div>
 <input type="text" id="searchBar" placeholder="🔍 Search settings..." oninput="filterConfig()" autocomplete="off">
-<div id="form-container">Loading settings...</div>
+<div id="form-container"><div id="loading-text" style="text-align:center; padding:40px; color:#888; animation: pulse 1.5s ease infinite;">Loading settings...</div></div>
 
-<details id="perf-panel" style="margin-top:15px; background:#0a0a0a; border-radius:10px; overflow:hidden;">
-    <summary style="background:#1a1a1a; padding:12px 20px; font-weight:bold; font-size:14px; color:#00bcd4; cursor:pointer; user-select:none;">📊 Performance Monitor</summary>
-    <div class="details-content" id="perf-content" style="display:block; padding:20px;">
+<details id="perf-panel">
+    <summary>📊 Performance Monitor</summary>
+    <div class="details-content" id="perf-content" style="display:block;">
         <div class="perf-grid" id="perf-grid"></div>
-    </div>
-</details>
-
-<details style="margin-top:15px; background:#0a0a0a; border-radius:10px; overflow:hidden;">
-    <summary style="background:#1a1a1a; padding:12px 20px; font-weight:bold; font-size:14px; color:#ff5722; cursor:pointer; user-select:none;">🔄 Firmware Update (OTA)</summary>
-    <div style="padding:20px;">
-        <div class="card" style="grid-column:1/-1;">
-            <label>Upload firmware binary (.bin)</label>
-            <input type="file" id="fwFile" accept=".bin" style="color:#fff;">
-            <button onclick="doOta()" style="margin-top:10px; background:linear-gradient(135deg,#ff5722,#bf360c);">📤 Upload & Update</button>
-            <div id="otaMsg" style="margin-top:10px; font-weight:bold; min-height:20px;"></div>
-            <div style="margin-top:10px; padding:10px; background:#1a1a1a; border-radius:6px; font-size:12px; color:#888;">
-                <strong>CLI alternative:</strong><br>
-                <code style="display:block; margin-top:5px; padding:8px; background:#0a0a0a; border-radius:4px; color:#00ff88;">
-pio run -t upload --upload-port &lt;ESP_IP&gt;
-                </code>
-            </div>
-        </div>
     </div>
 </details>
 
@@ -113,22 +130,24 @@ pio run -t upload --upload-port &lt;ESP_IP&gt;
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importBackup(event)">
 </div>
 
+<button id="otaBtn" onclick="doOta()" class="btn-reset" style="margin-top:6px;">📤 Select Firmware</button>
+
 <button class="btn-reset" onclick="factoryReset()">⚠️ Factory Reset</button>
+
+<button id="scrollTopBtn" onclick="window.scrollTo({top:0,behavior:'smooth'})">▲</button>
 
 <script>
 const configMap = [
     {
         title: "⚙️ System & General",
         items: [
-            { type: "subtitle", label: "⚙️ General" },
-            { id: "ENABLE_DEMO_MODE", label: "Enable Sensor Demo Mode" },
+            { type: "card_header", label: "⚙️ General" },
             { id: "TARGET_FPS", label: "Target Refresh Rate (FPS)" },
-            { id: "ENABLE_POWER_SENSE", label: "Enable Power Sensing", onconfirm: "confirmPowerSense" },
-            { type: "button", label: "🕒 Sync Device Time", action: "syncTime" },
             { id: "SHOW_FPS_COUNTER_DEFAULT", label: "Show FPS Counter" },
+            { id: "ENABLE_DEMO_MODE", label: "Enable Sensor Demo Mode" },
+            { id: "ENABLE_POWER_SENSE", label: "Enable Power Sensing", onconfirm: "confirmPowerSense" },
             { id: "SHOW_ELEMENT_BOUNDS", label: "Show UI Element Bounds (Debug)" },
-            { type: "subtitle", label: "⚡ CPU" },
-            { id: "ENABLE_DYNAMIC_CPU", label: "Enable Dynamic CPU Frequency" },
+            { type: "card_header", label: "⚡ CPU" },
             { 
                 id: "MANUAL_CPU_FREQ", 
                 label: "Manual CPU Frequency", 
@@ -138,15 +157,37 @@ const configMap = [
                     { value: 160, label: "160 MHz" },
                     { value: 240, label: "240 MHz" }
                 ]
-            }
+            },
+            { id: "ENABLE_DYNAMIC_CPU", label: "Enable Dynamic CPU Frequency" },
+            { id: "ENABLE_CPU_THROTTLE", label: "Enable Thermal Throttling" },
+            { id: "CPU_THROTTLE_TEMP_WARN", label: "Throttle to 160 MHz At (°C)" },
+            { id: "CPU_THROTTLE_TEMP_CRIT", label: "Throttle to 80 MHz At (°C)" },
+            { type: "card_header", label: "✍️ Custom Signatures" },
+            { id: "SPLASH_SIGNATURE", label: "Boot Screen Signature" },
+            { id: "REBOOT_SIGNATURE", label: "Reboot Screen Signature" },
+            { id: "DASHBOARD_SIGNATURE", label: "Main Dashboard Watermark" }
         ]
     },
     {
         title: "📡 WiFi",
         items: [
-            { type: "subtitle", label: "📡 Settings — reboot to apply" },
+            { type: "card_header", label: "📶 Network Settings" },
+            { id: "WIFI_TX_POWER_DBM", label: "TX Power (dBm)", type: "range", min: -1, max: 20, step: 1 },
+            { type: "heading", label: "📡 Primary Network" },
             { id: "WIFI_SSID", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD", label: "Password" }
+            { id: "WIFI_PASSWORD", label: "Password" },
+            { type: "heading", label: "🔄 Fallback Network 1" },
+            { id: "WIFI_SSID_1", label: "Network Name (SSID)" },
+            { id: "WIFI_PASSWORD_1", label: "Password" },
+            { type: "heading", label: "🔄 Fallback Network 2" },
+            { id: "WIFI_SSID_2", label: "Network Name (SSID)" },
+            { id: "WIFI_PASSWORD_2", label: "Password" },
+            { type: "heading", label: "🔄 Fallback Network 3" },
+            { id: "WIFI_SSID_3", label: "Network Name (SSID)" },
+            { id: "WIFI_PASSWORD_3", label: "Password" },
+            { type: "heading", label: "🔄 Fallback Network 4" },
+            { id: "WIFI_SSID_4", label: "Network Name (SSID)" },
+            { id: "WIFI_PASSWORD_4", label: "Password" }
         ]
     },
     {
@@ -158,12 +199,14 @@ const configMap = [
             { id: "DISPLAY_ROTATION", label: "Screen Rotation (0-3)" },
             { id: "DISPLAY_WIDTH", label: "Display Width (px)" },
             { id: "DISPLAY_HEIGHT", label: "Display Height (px)" },
-            { id: "ENABLE_ANTIALIASING", label: "Enable Anti-Aliased Rendering" },
-            { id: "DISPLAY_INVERT_COLORS", label: "Invert Display Colors" },
             { id: "SPI_BUS_SPEED", label: "SPI Bus Frequency (Hz)" },
+            { id: "DISPLAY_INVERT_COLORS", label: "Invert Display Colors" },
+            { id: "ENABLE_ANTIALIASING", label: "Enable Anti-Aliased Rendering" },
+            { id: "AA_SHARPNESS", label: "AA Sharpness", type: "range", min: 0.2, max: 1.0, step: 0.1 },
             { type: "subtitle", label: "💡 Brightness Control" },
-            { id: "ENABLE_NIGHT_MODE", label: "Enable Night Mode" },
             { id: "BACKLIGHT_BRIGHTNESS", label: "Backlight Brightness", type: "range", min: 0, max: 100, step: 1 },
+            { id: "FADE_DURATION_MS", label: "Fade Duration (ms)", type: "range", min: 100, max: 5000, step: 100 },
+            { id: "ENABLE_NIGHT_MODE", label: "Enable Night Mode" },
             { id: "NIGHT_MODE_START_HOUR", label: "Start Time (Hour)" },
             { id: "NIGHT_MODE_END_HOUR", label: "End Time (Hour)" },
             { type: "subtitle", label: "📊 Thresholds" },
@@ -173,15 +216,17 @@ const configMap = [
             { id: "TEMP_WARN_YEL", label: "Engine Temp Yellow Zone (°C)" },
             { id: "FUEL_WARN_YEL", label: "Fuel Low Yellow Zone (%)" },
             { id: "FUEL_WARN_RED", label: "Fuel Low Red Zone (%)" },
-            { type: "subtitle", label: "🎨 Colors" },
-            { type: "subtitle", label: "🌡️ Engine Temp" },
-            { id: "COLOR_TEMP_NORM", label: "Normal", type: "color" },
-            { id: "COLOR_TEMP_WARN", label: "Warning", type: "color" },
-            { id: "COLOR_TEMP_CRIT", label: "Critical", type: "color" },
-            { type: "subtitle", label: "⛽ Fuel Level" },
-            { id: "COLOR_FUEL_NORM", label: "Normal", type: "color" },
-            { id: "COLOR_FUEL_WARN", label: "Warning", type: "color" },
-            { id: "COLOR_FUEL_CRIT", label: "Critical", type: "color" }
+            { type: "card_header", label: "🎨 Colors" },
+            { type: "inline-colors", label: "🌡️ Engine Temp", colors: [
+                { id: "COLOR_TEMP_NORM", label: "Normal" },
+                { id: "COLOR_TEMP_WARN", label: "Warning" },
+                { id: "COLOR_TEMP_CRIT", label: "Critical" }
+            ] },
+            { type: "inline-colors", label: "⛽ Fuel Level", colors: [
+                { id: "COLOR_FUEL_NORM", label: "Normal" },
+                { id: "COLOR_FUEL_WARN", label: "Warning" },
+                { id: "COLOR_FUEL_CRIT", label: "Critical" }
+            ] }
         ]
     },
     {
@@ -191,40 +236,29 @@ const configMap = [
             { type: "subtitle", label: "🌡️ Temperature Sensor" },
             { id: "NTC_R_BALANCE", label: "NTC Balance Resistor (Ohms)" },
             { id: "NTC_BETA", label: "NTC Beta Value" },
+            { type: "card_header", label: "⏱️ Acceleration Timer" },
+            { id: "ACCEL_START_SPEED", label: "Timer Start Speed (km/h)" },
+            { id: "ACCEL_TARGET_SPEED", label: "Timer Target Speed (km/h)" },
+            { id: "ACCEL_BADGE_LINE1", label: "Badge Top Text (e.g., '0-50')" },
+            { id: "ACCEL_BADGE_LINE2", label: "Badge Bottom Text (e.g., 'km/h')" },
+            { type: "subtitle", label: "📦 Miscellaneous" },
+            { id: "WHEEL_CIRCUMFERENCE_MM", label: "Wheel Circumference (mm)" },
+            { id: "MIN_SPEED_THRESHOLD", label: "Minimum Speed Threshold (km/h)" },
+            { id: "FUEL_FILTER_ALPHA", label: "Fuel Sensor Smoothing Alpha" },
             { type: "subtitle", label: "⏱️ Polling Rate" },
             { id: "REFRESH_SPEED_MS", label: "Speed (ms)", type: "number" },
             { id: "REFRESH_SAT_MS", label: "Satellites (ms)", type: "number" },
             { id: "REFRESH_TMR_MS", label: "Accel Timer (ms)", type: "number" },
-            { id: "REFRESH_BAT_MS", label: "Battery Voltage (ms)", type: "number" },
-            { type: "subtitle", label: "📦 Miscellaneous" },
-            { id: "WHEEL_CIRCUMFERENCE_MM", label: "Wheel Circumference (mm)" },
-            { id: "MIN_SPEED_THRESHOLD", label: "Minimum Speed Threshold (km/h)" },
-            { id: "FUEL_FILTER_ALPHA", label: "Fuel Sensor Smoothing Alpha" }
+            { id: "REFRESH_BAT_MS", label: "Battery Voltage (ms)", type: "number" }
         ]
     },
     {
         title: "🛰️ GNSS",
         items: [
+            { type: "card_header", label: "🛰️ GNSS Settings" },
             { id: "MIN_SATELLITES", label: "Minimum Satellites Required" },
             { id: "OPTIMAL_SATELLITES", label: "Optimal Satellites Count" },
             { id: "MAX_SPEED_DELTA_KMH", label: "Max Deviation Hall vs GPS (km/h)" },
-        ]
-    },
-    {
-        title: "⏱️ Acceleration Timer",
-        items: [
-            { id: "ACCEL_START_SPEED", label: "Timer Start Speed (km/h)" },
-            { id: "ACCEL_TARGET_SPEED", label: "Timer Target Speed (km/h)" },
-            { id: "ACCEL_BADGE_LINE1", label: "Badge Top Text (e.g., '0-50')" },
-            { id: "ACCEL_BADGE_LINE2", label: "Badge Bottom Text (e.g., 'km/h')" }
-        ]
-    },
-    {
-        title: "✍️ Custom Signatures",
-        items: [
-            { id: "SPLASH_SIGNATURE", label: "Boot Screen Signature" },
-            { id: "REBOOT_SIGNATURE", label: "Reboot Screen Signature" },
-            { id: "DASHBOARD_SIGNATURE", label: "Main Dashboard Watermark" }
         ]
     },
     {
@@ -265,9 +299,13 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
         let groupHtml = `<div class="details-content">`;
         let hasItems = false;
         let inSubCard = false;
+        let inCardSubCard = false;
 
         function closeSubCard() {
-            if (inSubCard) {
+            if (inCardSubCard) {
+                groupHtml += `</div></div>`;
+                inCardSubCard = false;
+            } else if (inSubCard) {
                 groupHtml += `</div></div>`;
                 inSubCard = false;
             }
@@ -277,30 +315,65 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
             let iType = item.type || 'standard';
             
             if (iType === 'select') {
-                closeSubCard();
-                if(d.hasOwnProperty(item.id)) {
-                    hasItems = true;
-                    processedKeys.add(item.id);
-                    let val = d[item.id];
-                    let opts = '';
-                    item.options.forEach(o => {
-                        let sel = (o.value == val) ? 'selected' : '';
-                        opts += `<option value="${o.value}" ${sel}>${o.label}</option>`;
-                    });
-                    groupHtml += `
-                    <div class="card">
-                        <label>${item.label}</label>
-                        <select id="${item.id}" style="width:100%; padding:10px; margin-top:6px; background:#2c2c2c; color:#fff; border:1px solid #444; border-radius:6px; box-sizing:border-box; font-size:14px; transition: border 0.3s;">
-                            ${opts}
-                        </select>
-                    </div>`;
+                if (inCardSubCard) {
+                    if(d.hasOwnProperty(item.id)) {
+                        hasItems = true;
+                        processedKeys.add(item.id);
+                        let val = d[item.id];
+                        let opts = '';
+                        item.options.forEach(o => {
+                            let sel = (o.value == val) ? 'selected' : '';
+                            opts += `<option value="${o.value}" ${sel}>${o.label}</option>`;
+                        });
+                        groupHtml += `
+                        <div class="card">
+                            <label>${item.label}</label>
+                            <select id="${item.id}" style="width:100%; padding:6px 8px; margin-top:4px; background:#2c2c2c; color:#fff; border:1px solid #444; border-radius:4px; box-sizing:border-box; font-size:12px;">
+                                ${opts}
+                            </select>
+                        </div>`;
+                    }
+                } else {
+                    closeSubCard();
+                    if(d.hasOwnProperty(item.id)) {
+                        hasItems = true;
+                        processedKeys.add(item.id);
+                        let val = d[item.id];
+                        let opts = '';
+                        item.options.forEach(o => {
+                            let sel = (o.value == val) ? 'selected' : '';
+                            opts += `<option value="${o.value}" ${sel}>${o.label}</option>`;
+                        });
+                        groupHtml += `
+                        <div class="card">
+                            <label>${item.label}</label>
+                            <select id="${item.id}" style="width:100%; padding:6px 8px; margin-top:4px; background:#2c2c2c; color:#fff; border:1px solid #444; border-radius:4px; box-sizing:border-box; font-size:12px;">
+                                ${opts}
+                            </select>
+                        </div>`;
+                    }
                 }
+            } else if (iType === 'inline-colors') {
+                hasItems = true;
+                let rowHtml = `<div style="display:flex;gap:8px;">`;
+                item.colors.forEach(c => {
+                    processedKeys.add(c.id);
+                    rowHtml += `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;"><label style="font-size:10px;color:#aaa;text-align:center;">${c.label}</label><input type="color" id="${c.id}" value="${d[c.id]}" style="width:36px;height:36px;border:none;background:none;cursor:pointer;padding:0;"></div>`;
+                });
+                rowHtml += `</div>`;
+                groupHtml += rowHtml;
             } else if (iType === 'color') {
                 if(d.hasOwnProperty(item.id)) {
                     hasItems = true;
                     processedKeys.add(item.id);
-                    if (inSubCard) {
-                        groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;"><label style="font-size:13px;color:#ccc;">${item.label}</label><input type="color" id="${item.id}" value="${d[item.id]}" style="width:40px;height:30px;border:none;background:none;cursor:pointer;padding:0;"></div>`;
+                    if (inCardSubCard) {
+                        groupHtml += `
+                        <div class="card">
+                            <label>${item.label}</label>
+                            <input type="color" id="${item.id}" value="${d[item.id]}" style="width:32px;height:32px;border:none;background:none;cursor:pointer;padding:0;">
+                        </div>`;
+                    } else if (inSubCard) {
+                        groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label style="font-size:12px;color:#ccc;">${item.label}</label><input type="color" id="${item.id}" value="${d[item.id]}" style="width:35px;height:26px;border:none;background:none;cursor:pointer;padding:0;"></div>`;
                     } else {
                         groupHtml += `
                     <div class="form-group">
@@ -313,15 +386,22 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                 closeSubCard();
                 hasItems = true;
                 groupHtml += `
-                <div class="card" style="grid-column: 1 / -1; padding: 8px;">
-                    <button class="btn-secondary" onclick="${item.action}()" style="margin:0; font-size:14px; padding:10px;">${item.label}</button>
+                <div class="card" style="grid-column: 1 / -1; padding: 6px;">
+                    <button class="btn-secondary" onclick="${item.action}()" style="margin:0; font-size:12px; padding:8px;">${item.label}</button>
                 </div>`;
             } else if (iType === 'range') {
                 if(d.hasOwnProperty(item.id)) {
                     hasItems = true;
                     processedKeys.add(item.id);
                     let val = d[item.id];
-                    if (inSubCard) {
+                    if (inCardSubCard) {
+                        groupHtml += `
+                        <div class="card">
+                            <label>${item.label}</label>
+                            <input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value" style="width:100%;accent-color:#00bcd4;padding:0;cursor:pointer;height:6px;">
+                            <input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value" style="width:100%;padding:6px;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:4px;text-align:center;margin-top:6px;">
+                        </div>`;
+                    } else if (inSubCard) {
                         groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;"><label style="font-size:13px;color:#ccc;">${item.label}</label><input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value" style="flex-grow:1;accent-color:#00bcd4;padding:0;cursor:pointer;height:6px;"><input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value" style="width:75px;padding:6px;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:4px;text-align:center;margin-left:8px;"></div>`;
                     } else {
                         groupHtml += `
@@ -343,12 +423,12 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                 processedKeys.add(item.arrayId);
                 let arr = d[item.arrayId] || [];
                 let tableHtml = `
-                <div class="card" style="grid-column:1/-1; padding:16px;">
-                    <h4 style="margin:0 0 8px 0;color:#fff;font-size:14px;">${item.label}</h4>
-                    <label style="font-size:13px;color:#aaa;">Number of points (tank capacity + 1):</label>
-                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
-                        <input type="number" id="${item.pointCount}" value="${count}" min="2" max="20" style="width:80px;">
-                        <button onclick="save();setTimeout(function(){location.reload()},500)" style="padding:6px 12px; font-size:12px; background:#455a64; color:#fff; border:none; border-radius:4px; cursor:pointer;">↻ Refresh</button>
+                <div class="card" style="grid-column:1/-1; padding:8px 10px;">
+                    <h4 style="margin:0 0 4px 0;color:#fff;font-size:12px;">${item.label}</h4>
+                    <label style="font-size:11px;color:#aaa;">Number of points (tank capacity + 1):</label>
+                    <div style="display:flex; align-items:center; gap:5px; margin-bottom:6px;">
+                        <input type="number" id="${item.pointCount}" value="${count}" min="2" max="20" style="width:65px;">
+                        <button onclick="save();setTimeout(function(){location.reload()},500)" style="padding:4px 8px; font-size:10px; background:#455a64; color:#fff; border:none; border-radius:3px; cursor:pointer;">↻ Refresh</button>
                     </div>
                     <div style="display:grid; grid-template-columns:60px 1fr 60px 1fr; gap:4px 8px; align-items:center;">
                         <div style="font-weight:bold;color:#00bcd4;font-size:12px;">#</div>
@@ -363,11 +443,19 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                 }
                 tableHtml += `</div></div>`;
                 groupHtml += tableHtml;
+            } else if (iType === 'heading') {
+                hasItems = true;
+                groupHtml += `<h4 style="margin:6px 0 2px 0;color:#00bcd4;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">${item.label}</h4>`;
             } else if (iType === 'subtitle') {
                 hasItems = true;
                 closeSubCard();
-                groupHtml += `<div class="card" style="grid-column:1/-1; padding:12px 16px;"><h4 style="margin:0 0 8px 0;color:#fff;font-size:14px;">${item.label}</h4><div style="display:flex;flex-direction:column;gap:6px;">`;
+                groupHtml += `<div class="card" style="grid-column:1/-1; padding:8px 10px;"><h4 style="margin:0 0 4px 0;color:#fff;font-size:12px;">${item.label}</h4><div style="display:flex;flex-direction:column;gap:4px;">`;
                 inSubCard = true;
+            } else if (iType === 'card_header') {
+                hasItems = true;
+                closeSubCard();
+                groupHtml += `<div class="card" style="grid-column:1/-1; padding:8px 10px;"><h4 style="margin:0 0 4px 0;color:#fff;font-size:12px;">${item.label}</h4><div style="display:flex;flex-direction:column;gap:4px;">`;
+                inCardSubCard = true;
             } else if (iType === 'xy') {
                 closeSubCard();
                 if(d.hasOwnProperty(item.idX) && d.hasOwnProperty(item.idY)) {
@@ -414,13 +502,13 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                     if(isBool) { type = 'checkbox'; checked = val ? 'checked' : ''; val = 'true'; }
                     else if(typeof val === 'number') type = 'number';
                     
-                    if (inSubCard) {
+                    if (inCardSubCard) {
                         if(isBool) {
-                            groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;"><label style="font-size:13px;color:#ccc;">${item.label}</label><input type="${type}" id="${item.id}" ${checked}></div>`;
+                            groupHtml += `<div class="card checkbox-card"><label>${item.label}</label><input type="${type}" id="${item.id}" ${checked}></div>`;
                         } else {
-                            groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;"><label style="font-size:13px;color:#ccc;">${item.label}</label><input type="${type}" id="${item.id}" value="${val}" step="any" style="width:100px;padding:6px;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:4px;text-align:center;"></div>`;
+                            groupHtml += `<div class="card"><label>${item.label}</label><input type="${type}" id="${item.id}" value="${val}" step="any"></div>`;
                         }
-                    } else {
+                    } else if (inSubCard) {
                         if(isBool) {
                             groupHtml += `<div class="card checkbox-card"><label>${item.label}</label><input type="${type}" id="${item.id}" ${checked}></div>`;
                         } else {
@@ -436,39 +524,20 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
         if(hasItems) html += `<details><summary>${group.title}</summary>${groupHtml}</details>`;
     });
 
-    html = `<details id="serial-panel">
-    <summary>📟 Serial Monitor</summary>
-    <div id="serial-out">Waiting for data...</div>
-    </details>` + html;
     document.getElementById('form-container').innerHTML = html;
 
+    initDetailsAnim();
+
     document.querySelectorAll('#form-container details').forEach(el => {
-      if(el.id === 'serial-panel' || el.id === 'perf-panel') return;
       el.addEventListener('toggle', function accordionHandler() {
         if(this.open) {
           document.querySelectorAll('#form-container details').forEach(other => {
-            if(other !== this && other.id !== 'serial-panel' && other.id !== 'perf-panel') other.open = false;
+            if(other !== this && other.open) {
+              closeDetails(other);
+            }
           });
         }
       });
-    });
-
-    document.getElementById('serial-panel').addEventListener('toggle', function() {
-      if (this.open) {
-        serialPollTimer = setInterval(pollSerial, 200);
-        pollSerial();
-      } else {
-        clearInterval(serialPollTimer);
-        serialPollTimer = null;
-      }
-    });
-
-    document.getElementById('serial-out').addEventListener('wheel', function() {
-      let el = this;
-      clearTimeout(el._scrollTimer);
-      el._scrollTimer = setTimeout(function() {
-        serialAutoScroll = (el.scrollTop + el.clientHeight >= el.scrollHeight - 30);
-      }, 200);
     });
 
     function updateCpuMode() {
@@ -485,26 +554,25 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
         }
     });
 
-    setTimeout(syncTime, 1000);
-
-    // Hide stored password behind asterisks
-    let pwEl = document.getElementById('WIFI_PASSWORD');
-    if (pwEl) {
-        pwEl.type = 'password';
-        pwEl.placeholder = 'Leave empty to keep current';
-    }
+    // Automatically sync time from browser clock on WebUI connection
+    syncTime();
 
     // Fetch LAN IP and update status
     fetch('/api/perf').then(r=>r.json()).then(perf => {
         let ipEl = document.getElementById('ip-info');
+        let parts = ['<a href="http://192.168.4.1" target="_blank">AP: 192.168.4.1</a>'];
         if (perf.lan_ip && perf.lan_ip.length > 0) {
-            ipEl.innerHTML = 'LAN: <a href="http://' + perf.lan_ip + '" target="_blank">' + perf.lan_ip + '</a>';
+            parts.unshift('LAN: <a href="http://' + perf.lan_ip + '" target="_blank">' + perf.lan_ip + '</a>');
         } else {
-            ipEl.textContent = 'AP mode only';
+            let wifiStatus = (perf.wifi_clients > 0) ? '(WiFi connected, no LAN IP)' : '(not connected to WiFi)';
+            parts.push('<span style="color:#888;">' + wifiStatus + '</span>');
         }
-    }).catch(() => {
-        document.getElementById('ip-info').textContent = 'unknown';
-    });
+        ipEl.innerHTML = parts.join(' &nbsp;|&nbsp; ');
+    }).catch(() => {});
+});
+
+window.addEventListener('scroll', function() {
+    document.getElementById('scrollTopBtn').style.display = window.scrollY > 400 ? 'flex' : 'none';
 });
 
 let autosaveTimer = null;
@@ -517,7 +585,7 @@ document.getElementById('form-container').addEventListener('input', function(e) 
 function filterConfig(){
     const q = document.getElementById('searchBar').value.toLowerCase().trim();
     document.querySelectorAll('#form-container details').forEach(d => {
-        if(d.id === 'serial-panel' || d.id === 'perf-panel') return;
+        if(d.id === 'perf-panel') return;
         const cards = d.querySelectorAll('.details-content > .card, .details-content > .form-group, .details-content > .xy-group');
         let visible = 0;
         cards.forEach(c => {
@@ -544,8 +612,12 @@ function save(){
             let val = parseFloat(el.value);
             out[el.id] = isNaN(val) ? el.value : val;
         }
-        else if (el.id === 'WIFI_PASSWORD' && el.value === '') {
-            // Skip — empty password means "keep current"
+        else if (el.id.match(/^WIFI_PASSWORD(_\d+)?$/)) {
+            if (el.value === '' && el.hasAttribute('data-orig')) {
+                out[el.id] = el.getAttribute('data-orig');
+            } else {
+                out[el.id] = el.value;
+            }
         }
         else out[el.id] = el.value;
     });
@@ -659,6 +731,97 @@ function sendConfigToDevice(jsonPayload, startMsg, successMsg) {
     });
 }
 
+// ─── Smooth details open/close animation ─────────────────────────────
+function initDetailsAnim() {
+    document.querySelectorAll('details').forEach(function(el) {
+        if (el._animReady) return;
+        el._animReady = true;
+        var content = el.querySelector(':scope > .details-content, :scope > div');
+        if (!content) return;
+        el._c = content;
+        el.querySelector('summary').addEventListener('click', function(e) {
+            e.preventDefault();
+            if (el.open) {
+                if (el.id === 'perf-panel') {
+                    clearInterval(perfTimer); perfTimer = null;
+                    clearInterval(serialPollTimer); serialPollTimer = null;
+                }
+                animateSlideUp(el);
+            } else {
+                if (el.id === 'perf-panel') buildPerfPanel();
+                animateSlideDown(el);
+            }
+        });
+    });
+}
+
+function animateSlideDown(el) {
+    el.setAttribute('open', '');
+    var c = el._c;
+    c.style.maxHeight = '0';
+    c.style.overflow = 'hidden';
+    void c.offsetHeight;
+    var sh = c.scrollHeight;
+    c.style.transition = 'max-height 0.35s ease, opacity 0.3s ease';
+    c.style.opacity = '1';
+    c.style.maxHeight = sh + 'px';
+    var tid;
+    var onEnd = function(e) {
+        if (e.propertyName !== 'max-height') return;
+        clearTimeout(tid);
+        c.removeEventListener('transitionend', onEnd);
+        c.style.transition = '';
+        c.style.overflow = '';
+        c.style.maxHeight = '';
+        c.style.opacity = '';
+    };
+    c.addEventListener('transitionend', onEnd);
+    tid = setTimeout(function() {
+        c.removeEventListener('transitionend', onEnd);
+        c.style.transition = '';
+        c.style.overflow = '';
+        c.style.maxHeight = '';
+        c.style.opacity = '';
+    }, 450);
+}
+
+function animateSlideUp(el) {
+    var c = el._c;
+    var sh = c.scrollHeight;
+    c.style.transition = 'max-height 0.35s ease, opacity 0.25s ease';
+    c.style.overflow = 'hidden';
+    c.style.maxHeight = sh + 'px';
+    c.style.opacity = '1';
+    void c.offsetHeight;
+    c.style.maxHeight = '0';
+    c.style.opacity = '0';
+    var tid;
+    var onEnd = function(e) {
+        if (e.propertyName !== 'max-height') return;
+        clearTimeout(tid);
+        c.removeEventListener('transitionend', onEnd);
+        c.style.transition = '';
+        c.style.overflow = '';
+        c.style.maxHeight = '';
+        c.style.opacity = '';
+        el.removeAttribute('open');
+    };
+    c.addEventListener('transitionend', onEnd);
+    tid = setTimeout(function() {
+        c.removeEventListener('transitionend', onEnd);
+        c.style.transition = '';
+        c.style.overflow = '';
+        c.style.maxHeight = '';
+        c.style.opacity = '';
+        el.removeAttribute('open');
+    }, 450);
+}
+
+function closeDetails(el) {
+    if (!el || !el._c) { el.removeAttribute('open'); return; }
+    animateSlideUp(el);
+}
+
 let serialPollTimer = null;
 let serialAutoScroll = true;
 
@@ -682,8 +845,13 @@ function pollSerial() {
       .replace(/>/g, '&gt;')
       .replace(/\n/g, '<br>');
     
-    el.innerHTML += html;
-    if (serialAutoScroll) el.scrollTop = el.scrollHeight;
+    let atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+
+    el.insertAdjacentHTML('beforeend', html);
+
+    if (atBottom) {
+        el.scrollTop = el.scrollHeight;
+    }
   }).catch(() => {});
 }
 
@@ -707,24 +875,41 @@ function factoryReset() {
     });
 }
 
+var _otaFile = null;
+
 function doOta() {
-    const f = document.getElementById('fwFile').files[0];
-    const msg = document.getElementById('otaMsg');
-    if (!f) { msg.innerHTML = '<span style="color:#f44336;">Select a .bin file first</span>'; return; }
-    if (!confirm('Upload this firmware and reboot the device?')) return;
+    const btn = document.getElementById('otaBtn');
+    if (!_otaFile) {
+        var inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = '.bin';
+        inp.onchange = function() {
+            if (!inp.files || !inp.files[0]) return;
+            _otaFile = inp.files[0];
+            btn.textContent = '📤 Upload ' + _otaFile.name;
+            btn.style.background = '';
+        };
+        inp.click();
+        return;
+    }
+    if (!confirm('Upload ' + _otaFile.name + ' and reboot the device?')) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ Uploading...';
+    btn.style.background = 'linear-gradient(135deg,#777,#555)';
     const fd = new FormData();
-    fd.append('firmware', f);
-    msg.innerHTML = '<span style="color:#ff9800;">Uploading... Do not power off!</span>';
+    fd.append('firmware', _otaFile);
     fetch('/api/ota', {method:'POST', body:fd})
     .then(r => r.json()).then(d => {
         if (d.status === 'ok') {
-            msg.innerHTML = '<span style="color:#4caf50;">Update successful! Rebooting...</span>';
+            btn.textContent = '✅ Done';
+            btn.style.background = 'linear-gradient(135deg,#4caf50,#2e7d32)';
             setTimeout(() => location.reload(), 10000);
         } else {
-            msg.innerHTML = '<span style="color:#f44336;">Update failed. You may need to reflash via serial.</span>';
+            btn.disabled = false;
+            btn.textContent = '🔄 Retry';
+            btn.style.background = '';
         }
     }).catch(() => {
-        msg.innerHTML = '<span style="color:#f44336;">Connection lost (rebooting). Refresh after 30s.</span>';
+        btn.textContent = '⏳ Rebooting...';
         setTimeout(() => location.reload(), 30000);
     });
 }
@@ -736,7 +921,21 @@ function buildPerfPanel() {
     let grid = document.getElementById('perf-grid');
     if (!grid || grid.children.length > 0) return;
     grid.innerHTML = `
-        <div class="perf-card">
+        <div class="perf-card" style="grid-column:span 1;">
+            <h4>🖥️ Display</h4>
+            <div class="perf-row"><span class="perf-label">Current FPS</span><span class="perf-value" id="p-fps-cur">--</span></div>
+            <div class="perf-row"><span class="perf-label">Average FPS</span><span class="perf-value" id="p-fps-avg">--</span></div>
+            <div class="perf-row"><span class="perf-label">Target FPS</span><span class="perf-value" id="p-fps-tgt">--</span></div>
+            <div class="perf-row"><span class="perf-label">Refresh</span><span class="perf-value" id="p-refresh">--</span></div>
+            <div class="perf-row"><span class="perf-label">Resolution</span><span class="perf-value" id="p-resolution">--</span></div>
+        </div>
+        <div class="perf-card" style="grid-column:span 1;">
+            <h4>🔧 System</h4>
+            <div class="perf-row"><span class="perf-label">Uptime</span><span class="perf-value" id="p-uptime">--</span></div>
+            <div class="perf-row"><span class="perf-label">WiFi Clients</span><span class="perf-value" id="p-wifi">--</span></div>
+            <div class="perf-row"><span class="perf-label">SPI Bus</span><span class="perf-value" id="p-spi">--</span></div>
+        </div>
+        <div class="perf-card" style="grid-column:1/-1;">
             <h4>⚡ CPU</h4>
             <div class="perf-row"><span class="perf-label">Frequency</span><span class="perf-value" id="p-cpu-freq">--</span></div>
             <div class="perf-row"><span class="perf-label">Mode</span><span class="perf-value" id="p-cpu-mode">--</span></div>
@@ -746,53 +945,45 @@ function buildPerfPanel() {
                     <span>Usage</span>
                     <span><strong style="color:#fff" id="cpu-pct">--</strong>%</span>
                 </div>
-                <div style="height:20px;background:#333;border-radius:6px;overflow:hidden;">
-                    <div id="cpu-used-bar" style="height:100%;width:0;background:#4caf50;border-radius:6px;transition:width 0.8s ease;"></div>
+                <div style="height:16px;background:#333;border-radius:4px;overflow:hidden;">
+                    <div id="cpu-used-bar" style="height:100%;width:0;background:#4caf50;border-radius:4px;transition:width 0.8s ease;"></div>
                 </div>
             </div>
         </div>
-        <div class="perf-card">
-            <h4>🖥️ Display</h4>
-            <div class="perf-row"><span class="perf-label">Current FPS</span><span class="perf-value" id="p-fps-cur">--</span></div>
-            <div class="perf-row"><span class="perf-label">Average FPS</span><span class="perf-value" id="p-fps-avg">--</span></div>
-            <div class="perf-row"><span class="perf-label">Target FPS</span><span class="perf-value" id="p-fps-tgt">--</span></div>
-            <div class="perf-row"><span class="perf-label">Refresh</span><span class="perf-value" id="p-refresh">--</span></div>
-            <div class="perf-row"><span class="perf-label">Resolution</span><span class="perf-value" id="p-resolution">--</span></div>
-        </div>
-        <div class="perf-card">
-            <h4>🔧 System</h4>
-            <div class="perf-row"><span class="perf-label">Uptime</span><span class="perf-value" id="p-uptime">--</span></div>
-            <div class="perf-row"><span class="perf-label">WiFi Clients</span><span class="perf-value" id="p-wifi">--</span></div>
-            <div class="perf-row"><span class="perf-label">SPI Bus</span><span class="perf-value" id="p-spi">--</span></div>
-        </div>
         <div class="perf-card" style="grid-column:1/-1;">
-            <h4>💾 Memory (RAM)</h4>
-            <div style="display:flex;justify-content:space-between;font-size:13px;color:#aaa;margin-bottom:4px;">
+            <h4>💾 Memory & Storage</h4>
+            <h5 style="margin:0 0 6px 0;color:#aaa;font-size:11px;">RAM</h5>
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:#aaa;margin-bottom:3px;">
                 <span>Used: <strong style="color:#fff" id="mem-used">--</strong> KB</span>
                 <span>Free: <strong style="color:#fff" id="mem-free">--</strong> KB</span>
                 <span>Total: <strong style="color:#fff" id="mem-total">--</strong> KB</span>
                 <span><strong style="color:#fff" id="mem-pct">--</strong>%</span>
             </div>
-            <div style="height:24px;background:#333;border-radius:6px;overflow:hidden;margin-bottom:8px;">
-                <div id="mem-used-bar" style="height:100%;width:0;background:#4caf50;border-radius:6px;transition:width 0.8s ease;"></div>
+            <div style="height:18px;background:#333;border-radius:4px;overflow:hidden;margin-bottom:8px;">
+                <div id="mem-used-bar" style="height:100%;width:0;background:#4caf50;border-radius:4px;transition:width 0.8s ease;"></div>
             </div>
-            <div style="display:flex;gap:16px;font-size:13px;">
+            <div style="display:flex;gap:12px;font-size:12px;margin-bottom:8px;">
                 <span style="color:#888;">Min Free (peak): <strong style="color:#fff" id="mem-minfree">--</strong></span>
                 <span id="mem-psram-row" style="display:none;color:#888;">PSRAM Used: <strong style="color:#fff" id="mem-psram">--</strong></span>
             </div>
-        </div>
-        <div class="perf-card" style="grid-column:1/-1;">
-            <h4>💿 Flash Storage</h4>
-            <div style="display:flex;justify-content:space-between;font-size:13px;color:#aaa;margin-bottom:4px;">
+            <h5 style="margin:0 0 6px 0;color:#aaa;font-size:11px;">Flash Storage</h5>
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:#aaa;margin-bottom:3px;">
                 <span>Used: <strong style="color:#fff" id="fl-used">--</strong> KB</span>
                 <span>Free: <strong style="color:#fff" id="fl-free">--</strong> KB</span>
                 <span>Total: <strong style="color:#fff" id="fl-total">--</strong> KB</span>
                 <span><strong style="color:#fff" id="fl-pct">--</strong>%</span>
             </div>
-            <div style="height:24px;background:#333;border-radius:6px;overflow:hidden;">
-                <div id="fl-used-bar" style="height:100%;width:0;background:#2196f3;border-radius:6px;transition:width 0.8s ease;"></div>
+            <div style="height:18px;background:#333;border-radius:4px;overflow:hidden;">
+                <div id="fl-used-bar" style="height:100%;width:0;background:#2196f3;border-radius:4px;transition:width 0.8s ease;"></div>
             </div>
+        </div>
+        <div class="perf-card" style="grid-column:1/-1;">
+            <h4>📟 Serial Monitor</h4>
+            <div id="serial-out" style="background:#0d0d0d;color:#00ff88;font-family:'Consolas','Courier New',monospace;font-size:10px;padding:5px;height:140px;overflow-y:auto;white-space:pre;">Waiting for data...</div>
         </div>`;
+    document.getElementById('serial-out').addEventListener('scroll', function() {
+        serialAutoScroll = (this.scrollTop + this.clientHeight >= this.scrollHeight - 30);
+    });
 }
 
 function updatePerf() {
@@ -851,8 +1042,16 @@ function updatePerf() {
 }
 
 document.getElementById('perf-panel').addEventListener('toggle', function() {
-    if (this.open) { buildPerfPanel(); updatePerf(); perfTimer = setInterval(updatePerf, 1000); }
-    else { clearInterval(perfTimer); perfTimer = null; }
+    if (this.open) {
+        buildPerfPanel();
+        updatePerf();
+        perfTimer = setInterval(updatePerf, 1000);
+        serialPollTimer = setInterval(pollSerial, 200);
+        pollSerial();
+    } else {
+        clearInterval(perfTimer); perfTimer = null;
+        clearInterval(serialPollTimer); serialPollTimer = null;
+    }
 });
 </script>
 </body>
@@ -861,47 +1060,79 @@ document.getElementById('perf-panel').addEventListener('toggle', function() {
 
 void webServerTask(void *pvParameters) {
   WiFi.mode(WIFI_AP_STA);
-  WiFi.setTxPower(WIFI_POWER_11dBm);
+  int txPower = WIFI_TX_POWER_DBM;
+  if (txPower < -1) txPower = -1;
+  if (txPower > 20) txPower = 20;
+  WiFi.setTxPower((wifi_power_t)txPower);
   WiFi.softAP("Dashboard_Config", "12345678");
   logPrintf("AP: Dashboard_Config\n");
   logPrintf("AP IP: %s\n", WiFi.softAPIP().toString().c_str());
 
   delay(100);
 
-  if (WIFI_SSID.length() > 0) {
-    logPrintf("Connecting to WiFi: %s\n", WIFI_SSID.c_str());
-    WiFi.setHostname("dashboard-pp");
-    WiFi.begin(WIFI_SSID.c_str(), WIFI_PASSWORD.c_str());
+  struct WifiNetwork { const char *ssid; const char *pass; };
+  const int MAX_WIFI_NETS = 5;
+  WifiNetwork wifiNets[MAX_WIFI_NETS];
+  int wifiNetCount = 0;
+
+  wifiNets[wifiNetCount++] = {WIFI_SSID.c_str(), WIFI_PASSWORD.c_str()};
+  if (WIFI_SSID_1.length() > 0) wifiNets[wifiNetCount++] = {WIFI_SSID_1.c_str(), WIFI_PASSWORD_1.c_str()};
+  if (WIFI_SSID_2.length() > 0) wifiNets[wifiNetCount++] = {WIFI_SSID_2.c_str(), WIFI_PASSWORD_2.c_str()};
+  if (WIFI_SSID_3.length() > 0) wifiNets[wifiNetCount++] = {WIFI_SSID_3.c_str(), WIFI_PASSWORD_3.c_str()};
+  if (WIFI_SSID_4.length() > 0) wifiNets[wifiNetCount++] = {WIFI_SSID_4.c_str(), WIFI_PASSWORD_4.c_str()};
+
+  bool connected = false;
+  WiFi.setHostname("dashboard-pp");
+
+  for (int i = 0; i < wifiNetCount && !connected; i++) {
+    if (strlen(wifiNets[i].ssid) == 0) continue;
+
+    logPrintf("Trying WiFi[%d]: %s\n", i, wifiNets[i].ssid);
+    WiFi.begin(wifiNets[i].ssid, wifiNets[i].pass);
 
     unsigned long startAttempt = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 5000) {
       delay(100);
     }
 
     if (WiFi.status() == WL_CONNECTED) {
+      connected = true;
       logPrintf("STA connected: %s\n", WiFi.localIP().toString().c_str());
       logPrintf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
-
-      if (MDNS.begin("dashboard-pp")) {
-        MDNS.addService("http", "tcp", 80);
-        logPrintf("mDNS: http://dashboard-pp.local\n");
-      }
     } else {
-      logPrintf("STA connection failed\n");
+      logPrintf("WiFi[%d] failed, trying next...\n", i);
+      WiFi.disconnect(false);
+      delay(200);
     }
+  }
+
+  if (connected) {
+    if (MDNS.begin("dashboard-pp")) {
+      MDNS.addService("http", "tcp", 80);
+      logPrintf("mDNS: http://dashboard-pp.local\n");
+    }
+  } else {
+    logPrintf("All WiFi networks failed, using AP only\n");
   }
 
   ArduinoOTA.onStart([]() {
     logPrintf("OTA started\n");
+    otaUpdateInProgress = true;
+    showUpdatingScreen();
   });
   ArduinoOTA.onEnd([]() {
     logPrintf("OTA finished\n");
+    otaUpdateSuccess = true;
+    otaProgressTarget = 258;
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    updateOTAProgress(progress, total);
     logPrintf("OTA: %u%%\n", (progress * 100) / total);
   });
   ArduinoOTA.onError([](ota_error_t error) {
     logPrintf("OTA error: %d\n", error);
+    otaUpdateInProgress = false;
+    forceFullRedraw = true;
   });
   ArduinoOTA.begin();
   logPrintf("ArduinoOTA ready\n");
@@ -927,11 +1158,9 @@ void webServerTask(void *pvParameters) {
     processConfig(2, &doc);
     recalculateDerivedParams();
     display.applyBusConfig();
-    // Apply CPU frequency immediately. Never go below 240 MHz when WiFi is active.
+    // Apply CPU frequency immediately
     {
       uint32_t freq = ENABLE_DYNAMIC_CPU ? 240 : MANUAL_CPU_FREQ;
-      if (WiFi.getMode() != WIFI_OFF && freq < 240)
-        freq = 240;
       setCpuFrequencyMhz(freq);
       logPrintf("CPU: %dMHz (config change)\n", freq);
     }
@@ -993,11 +1222,15 @@ void webServerTask(void *pvParameters) {
       ESP.restart();
     } else {
       server.send(500, "application/json", "{\"status\":\"error\",\"msg\":\"Update failed\"}");
+      otaUpdateInProgress = false;
+      forceFullRedraw = true;
     }
   }, []() {
     HTTPUpload &upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       otaUpdateSuccess = false;
+      otaUpdateInProgress = true;
+      showUpdatingScreen();
       logPrintf("OTA web: start %s\n", upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
         Update.printError(Serial);
@@ -1005,6 +1238,9 @@ void webServerTask(void *pvParameters) {
     } else if (upload.status == UPLOAD_FILE_WRITE) {
       if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
         Update.printError(Serial);
+      }
+      if (upload.totalSize > 0) {
+        updateOTAProgress(Update.progress(), upload.totalSize);
       }
     } else if (upload.status == UPLOAD_FILE_END) {
       if (Update.end(true)) {
@@ -1060,7 +1296,16 @@ void webServerTask(void *pvParameters) {
     doc["refresh_ms"] = (unsigned long)DISPLAY_REFRESH_MS;
     doc["spi_speed"] = SPI_BUS_SPEED;
     doc["wifi_clients"] = WiFi.softAPgetStationNum();
-    doc["lan_ip"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "";
+    String lanIp = "";
+    if (WiFi.status() == WL_CONNECTED) {
+      lanIp = WiFi.localIP().toString();
+      // Only set if it's a valid LAN IP (not the AP address)
+      if (lanIp.length() > 0 && !lanIp.equals("192.168.4.1")) {
+        doc["lan_ip"] = lanIp;
+      } else {
+        doc["lan_ip"] = "";
+      }
+    }
     doc["resolution"] = String(DISPLAY_WIDTH) + "x" + String(DISPLAY_HEIGHT);
 
     String out;

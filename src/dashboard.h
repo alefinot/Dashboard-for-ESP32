@@ -2,6 +2,7 @@
 #define DASHBOARD_H
 
 #include <Arduino.h>
+#include <esp32-hal-ledc.h>
 #include <SPI.h>
 #include <algorithm>
 #include <utility>
@@ -85,6 +86,7 @@ constexpr int HALL_SENSOR_PIN = 33;
 #define SPI_RST 14
 #define CS_DISPLAY 5
 #define BL_DISPLAY 12
+#define BACKLIGHT_CHANNEL 0
 // NOTE: Fuel sensor must NOT share the Hall sensor pin. The original code used
 // pin 33 for both, which made analog fuel readings unreliable because the Hall
 // interrupt also fires on that line. It is now assigned to a dedicated ADC pin.
@@ -218,17 +220,20 @@ extern bool ENABLE_POWER_SENSE;
 extern bool ENABLE_CIRCLE_TEST;
 extern bool ENABLE_DEMO_MODE;
 extern bool ENABLE_ANTIALIASING;
+extern float AA_SHARPNESS;
  
 extern bool SHOW_FPS_COUNTER_DEFAULT;
 extern int OFFSET_BIG_FPS_X;
 extern int OFFSET_BIG_FPS_Y;
 
+extern bool ENABLE_NIGHT_MODE;
 extern int NIGHT_MODE_START_HOUR;
 extern int NIGHT_MODE_END_HOUR;
 extern bool DISPLAY_INVERT_COLORS;
 
 extern int TARGET_FPS;
 extern int BACKLIGHT_BRIGHTNESS;
+extern int FADE_DURATION_MS;
 
 extern int REFRESH_SPEED_MS;
 extern int REFRESH_SAT_MS;
@@ -244,6 +249,9 @@ extern int REFRESH_SIDEBAR_FUEL_MS;
 
 extern bool ENABLE_DYNAMIC_CPU;
 extern int MANUAL_CPU_FREQ;
+extern bool ENABLE_CPU_THROTTLE;
+extern int CPU_THROTTLE_TEMP_WARN;
+extern int CPU_THROTTLE_TEMP_CRIT;
 
 extern unsigned long DISPLAY_REFRESH_MS;
 extern unsigned long TELEMETRY_REFRESH_MS;
@@ -255,6 +263,15 @@ extern bool showFpsCounter;
 
 extern String WIFI_SSID;
 extern String WIFI_PASSWORD;
+extern String WIFI_SSID_1;
+extern String WIFI_PASSWORD_1;
+extern String WIFI_SSID_2;
+extern String WIFI_PASSWORD_2;
+extern String WIFI_SSID_3;
+extern String WIFI_PASSWORD_3;
+extern String WIFI_SSID_4;
+extern String WIFI_PASSWORD_4;
+extern int WIFI_TX_POWER_DBM;
 
 // ----------------------------------------------------------------------------
 // Fuel touch table
@@ -282,6 +299,9 @@ extern WebServer server;
 extern bool forceFullRedraw;
 extern volatile bool pendingSleep;
 extern volatile bool pendingReboot;
+extern volatile bool otaUpdateInProgress;
+extern volatile int otaProgressFillW;
+extern volatile int otaProgressTarget;
 
 extern bool pendingInvertDisplay;
 extern int pendingBacklightValue;
@@ -313,6 +333,7 @@ extern double lastLon;
 extern bool hasLastPos;
 extern int splashCurrentProgress;
 extern float currentCachedSpeed;
+extern unsigned long g_startupTime;
 extern float currentHeading;
 
 extern portMUX_TYPE hallMux;
@@ -325,14 +346,6 @@ extern float tripStartFuelLiters;
 extern float tripFuelConsumedLiters;
 extern float instantKml;
 extern float averageKml;
-
-extern bool isSelfTestActive;
-extern bool overrideTimeDateStr;
-extern int overrideSpeed;
-extern double overrideOdo;
-extern int overrideSat;
-extern float overrideBat;
-extern float overrideTimer;
 
 extern TimerState accelState;
 extern unsigned long accelStartTime;
@@ -376,7 +389,7 @@ void drawCalendarIcon(int x, int y, uint16_t color);
 void drawClockIcon(int x, int y, uint16_t color);
 void drawLocationIcon(int x, int y, uint16_t color);
 void drawCompassIcon(int x, int y, float heading, uint16_t color);
-void drawWifiIcon(int x, int y, uint16_t color);
+void drawWifiIcon(int x, int y, uint16_t color, bool filled = false);
 void drawWheelIcon(int x, int y, uint16_t color);
 void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color);
 
@@ -387,8 +400,9 @@ inline int applyAlign(int anchorX, int elementW, int align) {
 }
 void drawSplashBase();
 void updateSplashProgress(int targetProgress);
-void runDisplaySelfTest();
 void showGoodbyeScreen(bool isSleep);
+void showUpdatingScreen();
+void updateOTAProgress(int progress, int total);
 void drawFpsOverlay();
 
 template <typename T>

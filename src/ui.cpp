@@ -1,6 +1,7 @@
 #include "dashboard.h"
 
 static constexpr uint16_t GHOST_COLOR = 0x2104;
+static constexpr unsigned long STARTUP_RAMP_DURATION_MS = 3000;
 
 // ----------------------------------------------------------------------------
 // Main dashboard renderer
@@ -12,13 +13,27 @@ void updateBigDisplay(const SensorSnapshot &snap) {
              lastDateY = -1, lastSpeedSourceState = -1;
   static double lastDispOdo = -1.0;
   static TimerState lastState = READY;
-  static bool firstRun = true, lastSelfTestState = false;
+  static bool firstRun = true;
+
+  // Startup ramp: smoothly scale display values from 0 to actual over ~3s
+  SensorSnapshot displaySnap = snap;
+  unsigned long rampElapsed = millis() - g_startupTime;
+  if (rampElapsed < STARTUP_RAMP_DURATION_MS) {
+    float t = (float)rampElapsed / (float)STARTUP_RAMP_DURATION_MS;
+    float rampFactor = t * (2.0f - t);
+    displaySnap.currentSpeed *= rampFactor;
+    displaySnap.fuelLiters *= rampFactor;
+    displaySnap.fuelPercentage = (int)(displaySnap.fuelPercentage * rampFactor);
+    displaySnap.batteryVoltage *= rampFactor;
+    displaySnap.engineTemperature *= rampFactor;
+    displaySnap.satellites = (int)(displaySnap.satellites * rampFactor);
+    displaySnap.instantKml *= rampFactor;
+    displaySnap.averageKml *= rampFactor;
+  }
   display.startWrite();
 
-  bool selfTestChanged = (lastSelfTestState != isSelfTestActive);
-  lastSelfTestState = isSelfTestActive;
   bool forceDraw =
-      firstRun || isSelfTestActive || selfTestChanged || forceFullRedraw;
+      firstRun || forceFullRedraw;
   if (forceFullRedraw) {
     display.fillScreen(TFT_BLACK);
     forceFullRedraw = false;
@@ -50,16 +65,13 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     drawDebugBox(display, sigX - (w / 2) - 2, sigY - 2, w + 4, h + 4);
   }
 
-  bool isGpsActive = snap.isGpsSpeedValid;
-  int currentSourceState = isSelfTestActive ? 2 : (isGpsActive ? 1 : 0);
+  bool isGpsActive = displaySnap.isGpsSpeedValid;
+  int currentSourceState = isGpsActive ? 1 : 0;
   if (currentSourceState != lastSpeedSourceState || forceDraw) {
     lastSpeedSourceState = currentSourceState;
     componentUpdated = true;
     uint16_t colorDarkGrey = display.color565(70, 70, 70), hallColor, gpsColor;
-    if (isSelfTestActive) {
-      hallColor = TFT_YELLOW;
-      gpsColor = TFT_GREEN;
-    } else if (isGpsActive) {
+    if (isGpsActive) {
       hallColor = colorDarkGrey;
       gpsColor = TFT_GREEN;
     } else {
@@ -73,14 +85,15 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   }
 
   static int lastWifiState = -1;
+  int hasClients = WiFi.softAPgetStationNum() > 0;
+  bool isStation = WiFi.status() == WL_CONNECTED;
+  bool isAP = WiFi.getMode() != WIFI_OFF;
   int currentWifiState = 0;
-  if (isSelfTestActive) {
+  if (hasClients) {
     currentWifiState = 2;
-  } else if (WiFi.getMode() == WIFI_OFF) {
-    currentWifiState = 0;
-  } else if (WiFi.softAPgetStationNum() > 0) {
-    currentWifiState = 2;
-  } else {
+  } else if (isStation) {
+    currentWifiState = 3;
+  } else if (isAP) {
     currentWifiState = 1;
   }
 
@@ -90,40 +103,42 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     int wifiY = BIG_CENTER_Y + OFFSET_WIFI_ICON_Y;
     display.fillRect(wifiX - 4, wifiY, 24, 16, TFT_BLACK);
     if (currentWifiState == 1) {
-      drawWifiIcon(wifiX, wifiY, TFT_WHITE);
+      drawWifiIcon(wifiX, wifiY, TFT_WHITE, false);
     } else if (currentWifiState == 2) {
-      drawWifiIcon(wifiX, wifiY, TFT_GREEN);
+      drawWifiIcon(wifiX, wifiY, TFT_WHITE, true);
+      if (isStation) {
+        int px = wifiX + 16, py = wifiY + 1;
+        drawAALine(display, (float)(px - 3), (float)py, (float)(px + 3), (float)py, TFT_WHITE);
+        drawAALine(display, (float)px, (float)(py - 3), (float)px, (float)(py + 3), TFT_WHITE);
+      }
+    } else if (currentWifiState == 3) {
+      drawWifiIcon(wifiX, wifiY, TFT_WHITE, false);
+      int px = wifiX + 16, py = wifiY + 1;
+      drawAALine(display, (float)(px - 3), (float)py, (float)(px + 3), (float)py, TFT_WHITE);
+      drawAALine(display, (float)px, (float)(py - 3), (float)px, (float)(py + 3), TFT_WHITE);
     }
     drawDebugBox(display, wifiX - 4, wifiY, 24, 16);
   }
 
   unsigned long now = millis();
   static unsigned long lastTimeUpdate = 0;
-  if ((snap.localHour != lastHour || snap.minute != lastMin ||
-       snap.day != lastDay) && (REFRESH_TIME_MS == 0 || now - lastTimeUpdate >= (unsigned long)REFRESH_TIME_MS) || forceDraw) {
+  if ((displaySnap.localHour != lastHour || displaySnap.minute != lastMin ||
+       displaySnap.day != lastDay) && (REFRESH_TIME_MS == 0 || now - lastTimeUpdate >= (unsigned long)REFRESH_TIME_MS) || forceDraw) {
     lastTimeUpdate = now;
-    lastHour = snap.localHour;
-    lastMin = snap.minute;
-    lastDay = snap.day;
+    lastHour = displaySnap.localHour;
+    lastMin = displaySnap.minute;
+    lastDay = displaySnap.day;
     componentUpdated = true;
     char hourStr[4] = "--", minStr[4] = "--", dayStr[4] = "--",
          monthStr[4] = "--", yearStr[4] = "--";
-    if (overrideTimeDateStr) {
-      strcpy(hourStr, "88");
-      strcpy(minStr, "88");
-      strcpy(dayStr, "88");
-      strcpy(monthStr, "88");
-      strcpy(yearStr, "88");
-    } else {
-      if (snap.timeValid) {
-        snprintf(hourStr, 4, "%02d", snap.localHour);
-        snprintf(minStr, 4, "%02d", snap.minute);
-      }
-      if (snap.dateValid) {
-        snprintf(dayStr, 4, "%02d", snap.day);
-        snprintf(monthStr, 4, "%02d", snap.month);
-        snprintf(yearStr, 4, "%02d", snap.year);
-      }
+    if (displaySnap.timeValid) {
+      snprintf(hourStr, 4, "%02d", displaySnap.localHour);
+      snprintf(minStr, 4, "%02d", displaySnap.minute);
+    }
+    if (displaySnap.dateValid) {
+      snprintf(dayStr, 4, "%02d", displaySnap.day);
+      snprintf(monthStr, 4, "%02d", displaySnap.month);
+      snprintf(yearStr, 4, "%02d", displaySnap.year);
     }
     uint16_t w_h, h_h, w_m, h_m, w_d, h_d, w_mo, h_mo, w_y, h_y;
     static uint16_t w_sep_t = 0, h_sep_t = 0, w_sep_d = 0, h_sep_d = 0;
@@ -255,7 +270,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     cellR5_w = cumX - G;
   }
 
-  int currentSpeed = isSelfTestActive ? overrideSpeed : (int)snap.currentSpeed;
+  int currentSpeed = (int)displaySnap.currentSpeed;
   static unsigned long lastSpeedUpdate = 0;
   if ((currentSpeed != lastSpeed && (REFRESH_SPEED_MS == 0 || now - lastSpeedUpdate >= (unsigned long)REFRESH_SPEED_MS)) || forceDraw) {
     lastSpeed = currentSpeed;
@@ -346,7 +361,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     drawDebugBox(display, boxLeft - 1, speedNumY - 1, w_speed3_max + 2, h_speed_max + 2);
   }
 
-  double displayOdo = isSelfTestActive ? overrideOdo : snap.totalDistanceKm;
+  double displayOdo = displaySnap.totalDistanceKm;
   static unsigned long lastOdoUpdate = 0;
   if ((fabs(displayOdo - lastDispOdo) >= 0.1 && (REFRESH_ODO_MS == 0 || now - lastOdoUpdate >= (unsigned long)REFRESH_ODO_MS)) || forceDraw) {
     lastOdoUpdate = now;
@@ -397,25 +412,43 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   // --- SIDEBARS: Engine Temp & Fuel ---
   static int lastFuelPct = -1;
   static int lastEngineTemp = -999;
+  static float animTempFill = 0.0f;
+  static float animFuelFill = 0.0f;
+  static int lastTempFillH = 0;
+  static int lastFuelFillH = 0;
+  static constexpr float SIDEBAR_SMOOTH = 0.08f;
 
-  int currentFuel = snap.fuelPercentage;
-  int currentTemp = (int)snap.engineTemperature;
+  int currentFuel = displaySnap.fuelPercentage;
+  int currentTemp = (int)displaySnap.engineTemperature;
+
+  float targetTempPct = 0.0f;
+  {
+    float tClamped = (float)constrain(currentTemp, TEMP_BAR_MIN, TEMP_BAR_MAX);
+    float tRange = (float)(TEMP_BAR_MAX - TEMP_BAR_MIN);
+    targetTempPct = (tRange > 0.0f) ? ((tClamped - (float)TEMP_BAR_MIN) / tRange) : 0.0f;
+  }
+  float targetFuelPct = constrain(currentFuel / 100.0f, 0.0f, 1.0f);
 
   if (forceDraw) {
     lastFuelPct = -1;
     lastEngineTemp = -999;
+    animTempFill = targetTempPct;
+    animFuelFill = targetFuelPct;
+    lastTempFillH = 0;
+    lastFuelFillH = 0;
   }
+
+  animTempFill += (targetTempPct - animTempFill) * SIDEBAR_SMOOTH;
+  animFuelFill += (targetFuelPct - animFuelFill) * SIDEBAR_SMOOTH;
 
   // Left Sidebar: Engine Temp
   static unsigned long lastSideTempUpdate = 0;
-  if ((currentTemp != lastEngineTemp && (REFRESH_SIDEBAR_TEMP_MS == 0 || now - lastSideTempUpdate >= (unsigned long)REFRESH_SIDEBAR_TEMP_MS)) || forceDraw) {
+  bool tempMoving = fabsf(animTempFill - targetTempPct) > 0.001f;
+  if (((currentTemp != lastEngineTemp || tempMoving) && (tempMoving || REFRESH_SIDEBAR_TEMP_MS == 0 || now - lastSideTempUpdate >= (unsigned long)REFRESH_SIDEBAR_TEMP_MS)) || forceDraw) {
     lastSideTempUpdate = now;
     lastEngineTemp = currentTemp;
 
     int barX = SIDEBAR_LEFT_X, barY = SIDEBAR_LEFT_Y, barW = 8, barH = 200;
-    uint16_t trackColor = display.color565(40, 40, 40);
-    fillAARoundRect(display, barX, barY, barW, barH, 4, trackColor, TFT_BLACK,
-                    TFT_BLACK);
 
     uint16_t tempColor;
     if (currentTemp <= TEMP_WARN_GRN) {
@@ -432,17 +465,18 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       tempColor = c_temp_crit;
     }
 
-    float tClamped = (float)constrain(currentTemp, TEMP_BAR_MIN, TEMP_BAR_MAX);
-    float tRange = (float)(TEMP_BAR_MAX - TEMP_BAR_MIN);
-    float pTemp = (tRange > 0.0f) ? ((tClamped - (float)TEMP_BAR_MIN) / tRange) : 0.0f;
-    int fillH = (int)(barH * pTemp);
+    drawAARoundRect(display, barX - 2, barY - 2, barW + 4, barH + 4, 4, tempColor);
+
+    int fillH = (int)(barH * animTempFill);
     if (fillH > barH)
       fillH = barH;
+    if (fillH < lastTempFillH) {
+      display.fillRect(barX, barY + barH - lastTempFillH, barW, lastTempFillH - fillH, TFT_BLACK);
+    }
+    lastTempFillH = fillH;
     if (fillH > 0) {
-      if (fillH < 8)
-        fillH = 8;
-      fillAARoundRect(display, barX, barY + barH - fillH, barW, fillH, 4,
-                      tempColor, trackColor, TFT_BLACK);
+      fillAARoundRect(display, barX, barY + barH - fillH, barW, fillH, 0,
+                      tempColor, TFT_BLACK, TFT_BLACK);
     }
 
     display.fillRect(barX + barW + 2, barY + barH - 18, 55, 20, TFT_BLACK);
@@ -466,14 +500,12 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
   // Right Sidebar: Fuel
   static unsigned long lastSideFuelUpdate = 0;
-  if ((currentFuel != lastFuelPct && (REFRESH_SIDEBAR_FUEL_MS == 0 || now - lastSideFuelUpdate >= (unsigned long)REFRESH_SIDEBAR_FUEL_MS)) || forceDraw) {
+  bool fuelMoving = fabsf(animFuelFill - targetFuelPct) > 0.001f;
+  if (((currentFuel != lastFuelPct || fuelMoving) && (fuelMoving || REFRESH_SIDEBAR_FUEL_MS == 0 || now - lastSideFuelUpdate >= (unsigned long)REFRESH_SIDEBAR_FUEL_MS)) || forceDraw) {
     lastSideFuelUpdate = now;
     lastFuelPct = currentFuel;
 
     int barX = SIDEBAR_RIGHT_X, barY = SIDEBAR_RIGHT_Y, barW = 8, barH = 200;
-    uint16_t trackColor = display.color565(40, 40, 40);
-    fillAARoundRect(display, barX, barY, barW, barH, 4, trackColor, TFT_BLACK,
-                    TFT_BLACK);
 
     uint16_t fuelColor;
     if (currentFuel >= 100) {
@@ -490,16 +522,20 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       fuelColor = c_fuel_crit;
     }
 
-    int fillH = (int)(barH * (currentFuel / 100.0f));
+    drawAARoundRect(display, barX - 2, barY - 2, barW + 4, barH + 4, 4, fuelColor);
+
+    int fillH = (int)(barH * animFuelFill);
     if (fillH > barH)
       fillH = barH;
     if (fillH < 0)
       fillH = 0;
+    if (fillH < lastFuelFillH) {
+      display.fillRect(barX, barY + barH - lastFuelFillH, barW, lastFuelFillH - fillH, TFT_BLACK);
+    }
+    lastFuelFillH = fillH;
     if (fillH > 0) {
-      if (fillH < 8)
-        fillH = 8;
-      fillAARoundRect(display, barX, barY + barH - fillH, barW, fillH, 4,
-                      fuelColor, trackColor, TFT_BLACK);
+      fillAARoundRect(display, barX, barY + barH - fillH, barW, fillH, 0,
+                      fuelColor, TFT_BLACK, TFT_BLACK);
     }
 
     char fBuf[10];
@@ -514,10 +550,10 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     drawDebugBox(display, barX - 2, barY - 2, barW + 4, barH + 4);
   }
 
-  int displaySat = isSelfTestActive ? overrideSat : snap.satellites;
-  float displayBat = isSelfTestActive ? overrideBat : snap.batteryVoltage;
-  float displayTmr = isSelfTestActive ? overrideTimer : snap.accelResultTime;
-  TimerState displayAccelState = isSelfTestActive ? RUNNING : snap.accelState;
+  int displaySat = displaySnap.satellites;
+  float displayBat = displaySnap.batteryVoltage;
+  float displayTmr = displaySnap.accelResultTime;
+  TimerState displayAccelState = displaySnap.accelState;
   static int w_sat_max = 0, w_bat_max = 0, w_badge_max = 0, w_tmr_max = 0;
   static uint16_t h_sat_max = 0, h_bat_max = 0, h_tmr_max = 0,
                   w_bat_num_max = 0;
@@ -778,8 +814,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     drawDebugBox(display, batX, batClearTop, w_bat_max, batClearH);
   }
 
-  float displayInstKml = isSelfTestActive ? 18.8f : snap.instantKml;
-  float displayAvgKml = isSelfTestActive ? 18.8f : snap.averageKml;
+  float displayInstKml = displaySnap.instantKml;
+  float displayAvgKml = displaySnap.averageKml;
   static float lastDispInstKml = -1.0f;
   static float lastDispAvgKml = -1.0f;
 
@@ -970,7 +1006,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   }
 
   // --- Fuel Liters (4 fixed cells: tens, ones, dot, tenths) ---
-  float displayFuelLtrs = isSelfTestActive ? 5.0f : snap.fuelLiters;
+  float displayFuelLtrs = displaySnap.fuelLiters;
   static float lastDispFuelLtrs = -1.0f;
   static unsigned long lastFuelUpdate = 0;
   if ((fabsf(displayFuelLtrs - lastDispFuelLtrs) >= 0.1f && (REFRESH_FUEL_MS == 0 || now - lastFuelUpdate >= (unsigned long)REFRESH_FUEL_MS)) || forceDraw) {
@@ -1052,7 +1088,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
 void checkNightMode(const SensorSnapshot &snap) {
   static bool isNightModeActive = false, firstCheck = true;
-  if (snap.timeValid) {
+  if (snap.timeValid && ENABLE_NIGHT_MODE) {
     bool shouldBeNightMode = (snap.localHour >= NIGHT_MODE_START_HOUR ||
                               snap.localHour < NIGHT_MODE_END_HOUR);
     if (shouldBeNightMode != isNightModeActive || firstCheck) {
@@ -1060,8 +1096,8 @@ void checkNightMode(const SensorSnapshot &snap) {
       firstCheck = false;
       int level = isNightModeActive
                       ? 75
-                      : map(BACKLIGHT_BRIGHTNESS, 0, 100, 0, 255);
-      analogWrite(BL_DISPLAY, level);
+                      : (BACKLIGHT_BRIGHTNESS * 255) / 100;
+      ledcWrite(BACKLIGHT_CHANNEL, level);
     }
   }
 }

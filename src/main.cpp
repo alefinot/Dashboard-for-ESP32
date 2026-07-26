@@ -6,9 +6,11 @@ volatile int logHead = 0;
 volatile int logTail = 0;
 volatile unsigned long logSequence = 0;
 
+unsigned long g_startupTime = 0;
 bool forceFullRedraw = false;
 volatile bool pendingSleep = false;
 volatile bool pendingReboot = false;
+volatile bool otaUpdateInProgress = false;
 
 bool pendingInvertDisplay = false;
 int pendingBacklightValue = -1;
@@ -54,8 +56,11 @@ void setup() {
   g_stateMutex = xSemaphoreCreateMutex();
   pinMode(CS_DISPLAY, OUTPUT);
   digitalWrite(CS_DISPLAY, HIGH);
-  pinMode(BL_DISPLAY, OUTPUT);
-  digitalWrite(BL_DISPLAY, LOW);
+  uint32_t _lc = ledcSetup(BACKLIGHT_CHANNEL, 1000, 8);
+  logPrintf("ledcSetup ch=%d freq=%u\n", BACKLIGHT_CHANNEL, _lc);
+  if (_lc == 0) logPrintf("*** LEDC SETUP FAILED ***\n");
+  ledcAttachPin(BL_DISPLAY, BACKLIGHT_CHANNEL);
+  ledcWrite(BACKLIGHT_CHANNEL, 0);
   pinMode(SPI_RST, OUTPUT);
   digitalWrite(SPI_RST, LOW);
   delay(10);
@@ -78,7 +83,17 @@ void setup() {
   logPrintf("setRotation done\n");
   drawSplashBase();
   logPrintf("drawSplashBase done\n");
-  analogWrite(BL_DISPLAY, 255);
+  int fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+  if (fadeTarget > 255) fadeTarget = 255;
+  logPrintf("splash fade: fadeTarget=%d BRIGHTNESS=%d\n", fadeTarget, BACKLIGHT_BRIGHTNESS);
+  int fadeStepCount = (fadeTarget / 8) + 1;
+  for (int level = 0; level <= fadeTarget; level += 8) {
+    ledcWrite(BACKLIGHT_CHANNEL, level);
+    logPrintf("  fade step: level=%d\n", level);
+    delay(FADE_DURATION_MS / fadeStepCount);
+  }
+  ledcWrite(BACKLIGHT_CHANNEL, fadeTarget);
+  logPrintf("  fade final: value=%d\n", fadeTarget);
   updateSplashProgress(20);
 
   gpsSerial.begin(115200, SERIAL_8N1, RXD2, TXD2);
@@ -105,14 +120,28 @@ void setup() {
   }
   updateSplashProgress(100);
   delay(50);
-  for (int b = 255; b >= 0; b -= 15) {
-    analogWrite(BL_DISPLAY, b);
-    delay(2);
+  fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+  if (fadeTarget > 255) fadeTarget = 255;
+  fadeStepCount = (fadeTarget / 8) + 1;
+  for (int level = fadeTarget; level >= 0; level -= 8) {
+    ledcWrite(BACKLIGHT_CHANNEL, level);
+    delay(FADE_DURATION_MS / fadeStepCount);
   }
-  analogWrite(BL_DISPLAY, 0);
+  ledcWrite(BACKLIGHT_CHANNEL, 0);
   display.fillScreen(TFT_BLACK);
 
-  runDisplaySelfTest();
+  SensorSnapshot emptySnap;
+  updateBigDisplay(emptySnap);
+  fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+  if (fadeTarget > 255) fadeTarget = 255;
+  fadeStepCount = (fadeTarget / 8) + 1;
+  for (int level = 0; level <= fadeTarget; level += 8) {
+    ledcWrite(BACKLIGHT_CHANNEL, level);
+    delay(FADE_DURATION_MS / fadeStepCount);
+  }
+  ledcWrite(BACKLIGHT_CHANNEL, fadeTarget);
+  logPrintf("post-fade confirm: ledcWrite(%d, %d)\n", BACKLIGHT_CHANNEL, fadeTarget);
+  g_startupTime = millis();
 
   xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore0", 10240, NULL, 2, NULL,
                            0);
@@ -133,7 +162,7 @@ void loop() {
     pendingInvertDisplay = false;
   }
   if (pendingBacklightValue >= 0) {
-    analogWrite(BL_DISPLAY, map(pendingBacklightValue, 0, 100, 0, 255));
+    ledcWrite(BACKLIGHT_CHANNEL, (pendingBacklightValue * 255) / 100);
     pendingBacklightValue = -1;
   }
 
@@ -177,9 +206,46 @@ void loop() {
       lastDisplayUpdate = now;
     }
 
-    updateBigDisplay(snap);
-    drawFpsOverlay();
-    checkNightMode(snap);
+    if (!otaUpdateInProgress) {
+      updateBigDisplay(snap);
+      drawFpsOverlay();
+      checkNightMode(snap);
+    } else {
+      static unsigned long lastOtaAdvance = 0;
+      static bool otaRebootShown = false;
+      static float otaSmoothedW = 0.0f;
+      unsigned long now = millis();
+      if (otaProgressFillW < otaProgressTarget && now - lastOtaAdvance >= 40) {
+        lastOtaAdvance = now;
+        int remaining = otaProgressTarget - otaProgressFillW;
+        int step;
+        if (remaining > 50)
+          step = random(10, 25);
+        else if (remaining > 20)
+          step = random(8, 18);
+        else
+          step = random(5, 12);
+        if (otaProgressFillW + step > otaProgressTarget)
+          step = otaProgressTarget - otaProgressFillW;
+        otaProgressFillW += step;
+      }
+      float diff = (float)otaProgressFillW - otaSmoothedW;
+      otaSmoothedW += diff * 0.08f;
+      if (fabsf(diff) < 1.0f) otaSmoothedW = (float)otaProgressFillW;
+      int fillW = (int)(otaSmoothedW + 0.5f);
+      if (fillW > 260) fillW = 260;
+      if (fillW > 0) {
+        int barX = DISPLAY_WIDTH / 2 - (260 / 2);
+        display.startWrite();
+        display.fillRect(barX, 160, fillW, 8, TFT_CYAN);
+        display.endWrite();
+      }
+      if (fillW >= 258 && !otaRebootShown) {
+        otaRebootShown = true;
+        delay(100);
+        ESP.restart();
+      }
+    }
   }
 
   static unsigned long lastTelemetryUpdate = 0;
@@ -193,19 +259,26 @@ void loop() {
               snap.totalDistanceKm, snap.accelResultTime, currentMeasuredFps);
   }
   static unsigned long lastCpuScaleCheck = 0;
-  static uint32_t lastCpuCycleCount = 0;
-  static unsigned long lastCpuUsageCheck = 0;
-  if (now - lastCpuUsageCheck >= 1000) {
-    lastCpuUsageCheck = now;
-    uint32_t cycleCount;
-    __asm__ volatile("rsr %0, ccount" : "=a"(cycleCount));
-    uint32_t cycles = cycleCount - lastCpuCycleCount;
-    lastCpuCycleCount = cycleCount;
-    cpuUsagePct = (float)cycles / (getCpuFrequencyMhz() * 1000000.0f) * 100.0f;
-  }
+    static uint32_t lastCpuCycleCount = 0;
+    static unsigned long lastCpuUsageCheck = 0;
+    if (now - lastCpuUsageCheck >= 1000) {
+      if (lastCpuUsageCheck == 0) {
+        lastCpuCycleCount = 0;
+        lastCpuUsageCheck = now;
+      } else {
+        uint32_t endCount;
+        __asm__ volatile("rsr %0, ccount" : "=a"(endCount));
+        uint32_t cycles = endCount - lastCpuCycleCount;
+        // ccount ticks at APB_CLK (80 MHz on ESP32), normalize to 240 MHz baseline
+        cpuUsagePct = (float)cycles / (240.0f * 1000000.0f) * 100.0f;
+        lastCpuCycleCount = endCount;
+        lastCpuUsageCheck = now;
+      }
+    }
   if (now - lastCpuScaleCheck >= 1000) {
     lastCpuScaleCheck = now;
     uint32_t targetFreq;
+    float cpuTemp = temperatureRead();
     if (ENABLE_DYNAMIC_CPU) {
       // Stay at 240 MHz for first 5s after boot to let WiFi AP init
       if (now < 5000)
@@ -216,15 +289,20 @@ void loop() {
         targetFreq = 160;
       else
         targetFreq = 80;
+
+      // Thermal throttling: cap frequency based on die temperature
+      if (ENABLE_CPU_THROTTLE) {
+        if (cpuTemp >= CPU_THROTTLE_TEMP_CRIT)
+          targetFreq = 80;
+        else if (cpuTemp >= CPU_THROTTLE_TEMP_WARN && targetFreq > 160)
+          targetFreq = 160;
+      }
     } else {
       targetFreq = MANUAL_CPU_FREQ;
     }
-    // WiFi requires 240 MHz — applies regardless of dynamic/manual mode
-    if (WiFi.getMode() != WIFI_OFF && targetFreq < 240)
-      targetFreq = 240;
     if (getCpuFrequencyMhz() != targetFreq) {
       setCpuFrequencyMhz(targetFreq);
-      logPrintf("CPU: %dMHz (%.1f FPS)\n", targetFreq, currentAverageFps);
+      logPrintf("CPU: %dMHz (%.1f FPS, %.1fC)\n", targetFreq, currentAverageFps, cpuTemp);
     }
   }
   vTaskDelay(pdMS_TO_TICKS(1));

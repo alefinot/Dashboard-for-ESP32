@@ -88,14 +88,6 @@ float tripFuelConsumedLiters = 0.0f;
 float instantKml = 0.0f;
 float averageKml = 0.0f;
 
-bool isSelfTestActive = false;
-bool overrideTimeDateStr = false;
-int overrideSpeed = 188;
-double overrideOdo = 888888.8;
-int overrideSat = 88;
-float overrideBat = 18.8f;
-float overrideTimer = 18.88f;
-
 TimerState accelState = READY;
 unsigned long accelStartTime = 0;
 float accelResultTime = 0.0f;
