@@ -85,20 +85,19 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   }
 
   static int lastWifiState = -1;
+  static bool lastShowPlus = false;
   int hasClients = WiFi.softAPgetStationNum() > 0;
   bool isStation = WiFi.status() == WL_CONNECTED;
   bool isAP = WiFi.getMode() != WIFI_OFF;
   int currentWifiState = 0;
-  if (hasClients) {
-    currentWifiState = 2;
-  } else if (isStation) {
-    currentWifiState = 3;
-  } else if (isAP) {
-    currentWifiState = 1;
+  if (isAP) {
+    currentWifiState = hasClients ? 2 : 1;
   }
+  bool showPlus = isStation;
 
-  if (currentWifiState != lastWifiState || forceDraw) {
+  if (currentWifiState != lastWifiState || showPlus != lastShowPlus || forceDraw) {
     lastWifiState = currentWifiState;
+    lastShowPlus = showPlus;
     int wifiX = BIG_CENTER_X + OFFSET_WIFI_ICON_X;
     int wifiY = BIG_CENTER_Y + OFFSET_WIFI_ICON_Y;
     display.fillRect(wifiX - 4, wifiY, 24, 16, TFT_BLACK);
@@ -106,13 +105,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       drawWifiIcon(wifiX, wifiY, TFT_WHITE, false);
     } else if (currentWifiState == 2) {
       drawWifiIcon(wifiX, wifiY, TFT_WHITE, true);
-      if (isStation) {
-        int px = wifiX + 16, py = wifiY + 1;
-        drawAALine(display, (float)(px - 3), (float)py, (float)(px + 3), (float)py, TFT_WHITE);
-        drawAALine(display, (float)px, (float)(py - 3), (float)px, (float)(py + 3), TFT_WHITE);
-      }
-    } else if (currentWifiState == 3) {
-      drawWifiIcon(wifiX, wifiY, TFT_WHITE, false);
+    }
+    if (showPlus) {
       int px = wifiX + 16, py = wifiY + 1;
       drawAALine(display, (float)(px - 3), (float)py, (float)(px + 3), (float)py, TFT_WHITE);
       drawAALine(display, (float)px, (float)(py - 3), (float)px, (float)(py + 3), TFT_WHITE);
