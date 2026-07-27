@@ -176,16 +176,17 @@ const configMap = [
             { type: "heading", label: "📡 Primary Network" },
             { id: "WIFI_SSID", label: "Network Name (SSID)" },
             { id: "WIFI_PASSWORD", label: "Password" },
-            { type: "heading", label: "🔄 Fallback Network 1" },
+            { type: "card_header", label: "🔄 Fallback Networks" },
+            { type: "section_header", label: "Network 1" },
             { id: "WIFI_SSID_1", label: "Network Name (SSID)" },
             { id: "WIFI_PASSWORD_1", label: "Password" },
-            { type: "heading", label: "🔄 Fallback Network 2" },
+            { type: "section_header", label: "Network 2" },
             { id: "WIFI_SSID_2", label: "Network Name (SSID)" },
             { id: "WIFI_PASSWORD_2", label: "Password" },
-            { type: "heading", label: "🔄 Fallback Network 3" },
+            { type: "section_header", label: "Network 3" },
             { id: "WIFI_SSID_3", label: "Network Name (SSID)" },
             { id: "WIFI_PASSWORD_3", label: "Password" },
-            { type: "heading", label: "🔄 Fallback Network 4" },
+            { type: "section_header", label: "Network 4" },
             { id: "WIFI_SSID_4", label: "Network Name (SSID)" },
             { id: "WIFI_PASSWORD_4", label: "Password" }
         ]
@@ -208,31 +209,23 @@ const configMap = [
             { id: "ENABLE_NIGHT_MODE", label: "Enable Night Mode" },
             { id: "NIGHT_MODE_START_HOUR", label: "Start Time (Hour)" },
             { id: "NIGHT_MODE_END_HOUR", label: "End Time (Hour)" },
-            { type: "subtitle", label: "📊 Thresholds" },
-            { id: "TEMP_BAR_MIN", label: "Temp Bar Minimum (°C)" },
-            { id: "TEMP_BAR_MAX", label: "Temp Bar Maximum (°C)" },
-            { id: "TEMP_WARN_RED", label: "Engine Temp Red Zone (°C)" },
-            { id: "TEMP_WARN_YEL", label: "Engine Temp Yellow Zone (°C)" },
-            { id: "FUEL_WARN_YEL", label: "Fuel Low Yellow Zone (%)" },
-            { id: "FUEL_WARN_RED", label: "Fuel Low Red Zone (%)" },
-            { type: "card_header", label: "🎨 Colors" },
-            { type: "inline-colors", label: "🌡️ Engine Temp", colors: [
-                { id: "COLOR_TEMP_NORM", label: "Normal" },
-                { id: "COLOR_TEMP_WARN", label: "Warning" },
-                { id: "COLOR_TEMP_CRIT", label: "Critical" }
-            ] },
-            { type: "inline-colors", label: "⛽ Fuel Level", colors: [
-                { id: "COLOR_FUEL_NORM", label: "Normal" },
-                { id: "COLOR_FUEL_WARN", label: "Warning" },
-                { id: "COLOR_FUEL_CRIT", label: "Critical" }
-            ] },
+            { type: "card_header", label: "📊 Thresholds & Colors" },
+            { type: "section_header", label: "Engine Temperature" },
+            { type: "threshold-row", label: "Low", colorId: "COLOR_TEMP_NORM", valueId: "TEMP_BAR_MIN", unit: "°C" },
+            { type: "threshold-row", label: "Normal", colorId: "COLOR_TEMP_WARN", valueId: "TEMP_WARN_YEL", unit: "°C" },
+            { type: "threshold-row", label: "Critical", colorId: "COLOR_TEMP_CRIT", valueId: "TEMP_WARN_RED", unit: "°C" },
+            { id: "TEMP_BAR_MAX", label: "Max (°C)" },
+            { type: "section_header", label: "Fuel Level" },
+            { type: "threshold-row", label: "Normal", colorId: "COLOR_FUEL_NORM" },
+            { type: "threshold-row", label: "Warning", colorId: "COLOR_FUEL_WARN", valueId: "FUEL_WARN_YEL", unit: "%" },
+            { type: "threshold-row", label: "Critical", colorId: "COLOR_FUEL_CRIT", valueId: "FUEL_WARN_RED", unit: "%" },
             { id: "GHOST_COLOR_STR", label: "Ghost Digit Color", type: "color" }
         ]
     },
     {
-        title: "🏍️ Sensors & Vehicle Tuning",
+        title: "🏍️ Sensors Tuning",
         items: [
-            { type: "touch-table", label: "Fuel Level Mapping Table", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable" },
+            { type: "touch-table", label: "⛽ Fuel Level Mapping Table", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable" },
             { type: "subtitle", label: "🌡️ Temperature Sensor" },
             { id: "NTC_R_BALANCE", label: "NTC Balance Resistor (Ohms)" },
             { id: "NTC_BETA", label: "NTC Beta Value" },
@@ -245,7 +238,7 @@ const configMap = [
             { id: "WHEEL_CIRCUMFERENCE_MM", label: "Wheel Circumference (mm)" },
             { id: "MIN_SPEED_THRESHOLD", label: "Minimum Speed Threshold (km/h)" },
             { id: "FUEL_FILTER_ALPHA", label: "Fuel Sensor Smoothing Alpha" },
-            { type: "subtitle", label: "⏱️ Polling Rate" },
+            { type: "subtitle", label: "⏱️ Polling Rates" },
             { id: "REFRESH_SPEED_MS", label: "Speed (ms)", type: "number" },
             { id: "REFRESH_SAT_MS", label: "Satellites (ms)", type: "number" },
             { id: "REFRESH_TMR_MS", label: "Accel Timer (ms)", type: "number" },
@@ -279,28 +272,52 @@ const configMap = [
     {
         title: "📐 UI Layout",
         items: [
-            { type: 'xy', idX: "OFFSET_BIG_TMR_X", idY: "OFFSET_BIG_TMR_Y", label: "Acceleration Timer Offset" },
-            { type: 'xy', idX: "OFFSET_AVG_KML_X", idY: "OFFSET_AVG_KML_Y", label: "Average KM/L Offset" },
-            { type: 'xy', idX: "OFFSET_BIG_BAT_X", idY: "OFFSET_BIG_BAT_Y", label: "Battery Offset" },
-            { type: 'xy', idX: "OFFSET_BIG_TIME_X", idY: "OFFSET_BIG_TIME_Y", label: "Clock Offset" },
-            { type: 'xy', idX: "OFFSET_BIG_DATE_X", idY: "OFFSET_BIG_DATE_Y", label: "Date Offset" },
-            { type: 'xy', idX: "OFFSET_BIG_FPS_X", idY: "OFFSET_BIG_FPS_Y", label: "FPS Counter Offset" },
-            { type: 'xy', idX: "OFFSET_FUEL_LTRS_X", idY: "OFFSET_FUEL_LTRS_Y", label: "Fuel Liters Offset" },
-            { type: 'xy', idX: "OFFSET_HALL_ICON_X", idY: "OFFSET_HALL_ICON_Y", label: "Speed Source Icon Offset" },
-            { type: 'xy', idX: "OFFSET_INST_KML_X", idY: "OFFSET_INST_KML_Y", label: "Instant KM/L Offset" },
-            { type: 'xy', idX: "SIDEBAR_LEFT_X", idY: "SIDEBAR_LEFT_Y", label: "Left Sidebar (Temp) Pos" },
-            { type: 'xy', idX: "OFFSET_BIG_SPEED_NUM_X", idY: "OFFSET_BIG_SPEED_NUM_Y", label: "Main Speed Number Offset" },
-            { type: 'xy', idX: "OFFSET_BIG_ODO_X", idY: "OFFSET_BIG_ODO_Y", label: "Odometer Offset" },
-            { type: 'xy', idX: "SIDEBAR_RIGHT_X", idY: "SIDEBAR_RIGHT_Y", label: "Right Sidebar (Fuel) Pos" },
-            { type: "card_header", label: "Sidebar Dimensions" },
-            { id: "SIDEBAR_BAR_WIDTH", label: "Bar Width (px)" },
-            { id: "SIDEBAR_BAR_HEIGHT", label: "Bar Height (px)" },
-            { type: 'xy', idX: "OFFSET_BIG_SAT_X", idY: "OFFSET_BIG_SAT_Y", label: "Satellites Offset" },
-            { type: 'xy', idX: "OFFSET_BIG_SIGNATURE_X", idY: "OFFSET_BIG_SIGNATURE_Y", label: "Signature Offset" },
-            { type: 'xy', idX: "OFFSET_BIG_SPEED_UNIT_X", idY: "OFFSET_BIG_SPEED_UNIT_Y", label: "Speed Unit (KM/H) Offset" },
-            { type: 'xy', idX: "BIG_CENTER_X", idY: "BIG_CENTER_Y", label: "Viewport Center" },
-            { type: 'xy', idX: "OFFSET_WIFI_ICON_X", idY: "OFFSET_WIFI_ICON_Y", label: "WiFi Icon Offset" }
-        ]
+            { type: "card_header", label: "📊 System" },
+            { type: "section_header", label: "Viewport Center" },
+            { type: 'xy', idX: "BIG_CENTER_X", idY: "BIG_CENTER_Y", label: "Position" },
+            { type: "section_header", label: "FPS Counter" },
+            { type: 'xy', idX: "OFFSET_BIG_FPS_X", idY: "OFFSET_BIG_FPS_Y", label: "Position" },
+            { type: "section_header", label: "Signature" },
+            { type: 'xy', idX: "OFFSET_BIG_SIGNATURE_X", idY: "OFFSET_BIG_SIGNATURE_Y", label: "Position" },
+            { type: "card_header", label: "📊 Speed & Odo" },
+            { type: "section_header", label: "Acceleration Timer" },
+            { type: 'xy', idX: "OFFSET_BIG_TMR_X", idY: "OFFSET_BIG_TMR_Y", label: "Position" },
+            { type: "section_header", label: "Speed Source Icon" },
+            { type: 'xy', idX: "OFFSET_HALL_ICON_X", idY: "OFFSET_HALL_ICON_Y", label: "Position" },
+            { type: "section_header", label: "Main Speed Number" },
+            { type: 'xy', idX: "OFFSET_BIG_SPEED_NUM_X", idY: "OFFSET_BIG_SPEED_NUM_Y", label: "Position" },
+            { type: "section_header", label: "Speed Unit" },
+            { type: 'xy', idX: "OFFSET_BIG_SPEED_UNIT_X", idY: "OFFSET_BIG_SPEED_UNIT_Y", label: "Position" },
+            { type: "section_header", label: "Odometer" },
+            { type: 'xy', idX: "OFFSET_BIG_ODO_X", idY: "OFFSET_BIG_ODO_Y", label: "Position" },
+            { type: "card_header", label: "📊 Fuel & Battery" },
+            { type: "section_header", label: "Average KM/L" },
+            { type: 'xy', idX: "OFFSET_AVG_KML_X", idY: "OFFSET_AVG_KML_Y", label: "Position" },
+            { type: "section_header", label: "Instant KM/L" },
+            { type: 'xy', idX: "OFFSET_INST_KML_X", idY: "OFFSET_INST_KML_Y", label: "Position" },
+            { type: "section_header", label: "Fuel Liters" },
+            { type: 'xy', idX: "OFFSET_FUEL_LTRS_X", idY: "OFFSET_FUEL_LTRS_Y", label: "Position" },
+            { type: "section_header", label: "Battery" },
+            { type: 'xy', idX: "OFFSET_BIG_BAT_X", idY: "OFFSET_BIG_BAT_Y", label: "Position" },
+            { type: "card_header", label: "📊 Clock & Date" },
+            { type: "section_header", label: "Clock" },
+            { type: 'xy', idX: "OFFSET_BIG_TIME_X", idY: "OFFSET_BIG_TIME_Y", label: "Position" },
+            { type: "section_header", label: "Date" },
+            { type: 'xy', idX: "OFFSET_BIG_DATE_X", idY: "OFFSET_BIG_DATE_Y", label: "Position" },
+            { type: "card_header", label: "📊 WiFi & Satellites" },
+            { type: "section_header", label: "Satellites" },
+            { type: 'xy', idX: "OFFSET_BIG_SAT_X", idY: "OFFSET_BIG_SAT_Y", label: "Position" },
+            { type: "section_header", label: "WiFi Icon" },
+            { type: 'xy', idX: "OFFSET_WIFI_ICON_X", idY: "OFFSET_WIFI_ICON_Y", label: "Position" },
+            { type: "card_header", label: "📊 Sidebars" },
+            { type: "section_header", label: "Left Bar (Engine Temp)" },
+            { type: 'xy', idX: "SIDEBAR_LEFT_X", idY: "SIDEBAR_LEFT_Y", label: "Position" },
+            { type: "section_header", label: "Right Bar (Fuel)" },
+            { type: 'xy', idX: "SIDEBAR_RIGHT_X", idY: "SIDEBAR_RIGHT_Y", label: "Position" },
+            { type: "section_header", label: "Bar Dimensions" },
+            { id: "SIDEBAR_BAR_WIDTH", label: "Width (px)" },
+            { id: "SIDEBAR_BAR_HEIGHT", label: "Height (px)" }
+        ],
     },
 ];
 
@@ -331,7 +348,7 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
             let iType = item.type || 'standard';
             
             if (iType === 'select') {
-                if (inCardSubCard) {
+                if (inCardSubCard || inSubCard) {
                     if(d.hasOwnProperty(item.id)) {
                         hasItems = true;
                         processedKeys.add(item.id);
@@ -341,13 +358,7 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                             let sel = (o.value == val) ? 'selected' : '';
                             opts += `<option value="${o.value}" ${sel}>${o.label}</option>`;
                         });
-                        groupHtml += `
-                        <div class="card">
-                            <label>${item.label}</label>
-                            <select id="${item.id}" style="width:100%; padding:6px 8px; margin-top:4px; background:#2c2c2c; color:#fff; border:1px solid #444; border-radius:4px; box-sizing:border-box; font-size:12px;">
-                                ${opts}
-                            </select>
-                        </div>`;
+                        groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label style="font-size:12px;color:#ccc;">${item.label}</label><select id="${item.id}" style="width:auto;min-width:120px;padding:4px 6px;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:4px;font-size:12px;">${opts}</select></div>`;
                     }
                 } else {
                     closeSubCard();
@@ -369,6 +380,18 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                         </div>`;
                     }
                 }
+            } else if (iType === 'threshold-row') {
+                if(d.hasOwnProperty(item.colorId)) {
+                    hasItems = true;
+                    processedKeys.add(item.colorId);
+                    let valueHtml = '';
+                    if(item.valueId && d.hasOwnProperty(item.valueId)) {
+                        processedKeys.add(item.valueId);
+                        let unitHtml = item.unit ? ` <span style="font-size:11px;color:#888;">${item.unit}</span>` : '';
+                        valueHtml = `<input type="number" id="${item.valueId}" value="${d[item.valueId]}" step="any" style="width:70px;padding:4px 6px;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:4px;text-align:center;">${unitHtml}`;
+                    }
+                    groupHtml += `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;"><label style="font-size:12px;color:#ccc;min-width:60px;">${item.label}</label><input type="color" id="${item.colorId}" value="${d[item.colorId]}" style="width:30px;height:24px;border:none;background:none;cursor:pointer;padding:0;">${valueHtml}</div>`;
+                }
             } else if (iType === 'inline-colors') {
                 hasItems = true;
                 let rowHtml = `<div style="display:flex;gap:8px;">`;
@@ -382,13 +405,7 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                 if(d.hasOwnProperty(item.id)) {
                     hasItems = true;
                     processedKeys.add(item.id);
-                    if (inCardSubCard) {
-                        groupHtml += `
-                        <div class="card">
-                            <label>${item.label}</label>
-                            <input type="color" id="${item.id}" value="${d[item.id]}" style="width:32px;height:32px;border:none;background:none;cursor:pointer;padding:0;">
-                        </div>`;
-                    } else if (inSubCard) {
+                    if (inCardSubCard || inSubCard) {
                         groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label style="font-size:12px;color:#ccc;">${item.label}</label><input type="color" id="${item.id}" value="${d[item.id]}" style="width:35px;height:26px;border:none;background:none;cursor:pointer;padding:0;"></div>`;
                     } else {
                         groupHtml += `
@@ -412,13 +429,22 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                     let val = d[item.id];
                     if (inCardSubCard) {
                         groupHtml += `
-                        <div class="card">
-                            <label>${item.label}</label>
-                            <input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value" style="width:100%;accent-color:#00bcd4;padding:0;cursor:pointer;height:6px;">
-                            <input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value" style="width:100%;padding:6px;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:4px;text-align:center;margin-top:6px;">
+                        <div style="padding:6px 0;">
+                            <label style="font-size:12px;color:#ccc;display:block;margin-bottom:4px;">${item.label}</label>
+                            <div class="xy-row">
+                                <input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value">
+                                <input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value">
+                            </div>
                         </div>`;
                     } else if (inSubCard) {
-                        groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;"><label style="font-size:13px;color:#ccc;">${item.label}</label><input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value" style="flex-grow:1;accent-color:#00bcd4;padding:0;cursor:pointer;height:6px;"><input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value" style="width:75px;padding:6px;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:4px;text-align:center;margin-left:8px;"></div>`;
+                        groupHtml += `
+                        <div style="padding:6px 0;">
+                            <label style="font-size:12px;color:#ccc;display:block;margin-bottom:4px;">${item.label}</label>
+                            <div class="xy-row">
+                                <input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value">
+                                <input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value">
+                            </div>
+                        </div>`;
                     } else {
                         groupHtml += `
                     <div class="card xy-group">
@@ -472,8 +498,11 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                 closeSubCard();
                 groupHtml += `<div class="card" style="grid-column:1/-1; padding:8px 10px;"><h4 style="margin:0 0 4px 0;color:#fff;font-size:12px;">${item.label}</h4><div style="display:flex;flex-direction:column;gap:4px;">`;
                 inCardSubCard = true;
+            } else if (iType === 'section_header') {
+                hasItems = true;
+                // Close inner flex div and reopen with new header, keeping outer card wrapper
+                groupHtml += `</div><h4 style="margin:10px 0 4px 0;color:#00bcd4;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">${item.label}</h4><div style="display:flex;flex-direction:column;gap:4px;">`;
             } else if (iType === 'xy') {
-                closeSubCard();
                 if(d.hasOwnProperty(item.idX) && d.hasOwnProperty(item.idY)) {
                     hasItems = true;
                     processedKeys.add(item.idX);
@@ -491,20 +520,38 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                         minY = 0; maxY = maxH;
                     }
                     
-                    groupHtml += `
-                    <div class="card xy-group">
-                        <h4>${item.label}</h4>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="${item.idX}_slider" min="${minX}" max="${maxX}" value="${valX}" oninput="document.getElementById('${item.idX}').value = this.value">
-                            <input type="number" id="${item.idX}" value="${valX}" step="1" oninput="document.getElementById('${item.idX}_slider').value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="${item.idY}_slider" min="${minY}" max="${maxY}" value="${valY}" oninput="document.getElementById('${item.idY}').value = this.value">
-                            <input type="number" id="${item.idY}" value="${valY}" step="1" oninput="document.getElementById('${item.idY}_slider').value = this.value">
-                        </div>
-                    </div>`;
+                    if (inCardSubCard) {
+                        groupHtml += `
+                        <div style="padding:6px 0;">
+                            <h4 style="margin:0 0 4px 0;font-size:12px;color:#ccc;">${item.label}</h4>
+                            <div class="xy-row">
+                                <label>X</label>
+                                <input type="range" id="${item.idX}_slider" min="${minX}" max="${maxX}" value="${valX}" oninput="document.getElementById('${item.idX}').value = this.value">
+                                <input type="number" id="${item.idX}" value="${valX}" step="1" oninput="document.getElementById('${item.idX}_slider').value = this.value">
+                            </div>
+                            <div class="xy-row">
+                                <label>Y</label>
+                                <input type="range" id="${item.idY}_slider" min="${minY}" max="${maxY}" value="${valY}" oninput="document.getElementById('${item.idY}').value = this.value">
+                                <input type="number" id="${item.idY}" value="${valY}" step="1" oninput="document.getElementById('${item.idY}_slider').value = this.value">
+                            </div>
+                        </div>`;
+                    } else {
+                        closeSubCard();
+                        groupHtml += `
+                        <div class="card xy-group">
+                            <h4>${item.label}</h4>
+                            <div class="xy-row">
+                                <label>X</label>
+                                <input type="range" id="${item.idX}_slider" min="${minX}" max="${maxX}" value="${valX}" oninput="document.getElementById('${item.idX}').value = this.value">
+                                <input type="number" id="${item.idX}" value="${valX}" step="1" oninput="document.getElementById('${item.idX}_slider').value = this.value">
+                            </div>
+                            <div class="xy-row">
+                                <label>Y</label>
+                                <input type="range" id="${item.idY}_slider" min="${minY}" max="${maxY}" value="${valY}" oninput="document.getElementById('${item.idY}').value = this.value">
+                                <input type="number" id="${item.idY}" value="${valY}" step="1" oninput="document.getElementById('${item.idY}_slider').value = this.value">
+                            </div>
+                        </div>`;
+                    }
                 }
             } else {
                 if(d.hasOwnProperty(item.id)) {
@@ -520,15 +567,15 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
                     
                     if (inCardSubCard) {
                         if(isBool) {
-                            groupHtml += `<div class="card checkbox-card"><label>${item.label}</label><input type="${type}" id="${item.id}" ${checked}></div>`;
+                            groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label style="font-size:12px;color:#ccc;">${item.label}</label><input type="${type}" id="${item.id}" ${checked}></div>`;
                         } else {
-                            groupHtml += `<div class="card"><label>${item.label}</label><input type="${type}" id="${item.id}" value="${val}" step="any"></div>`;
+                            groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label style="font-size:12px;color:#ccc;">${item.label}</label><input type="${type}" id="${item.id}" value="${val}" step="any" style="width:80px;padding:4px 6px;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:4px;text-align:center;"></div>`;
                         }
                     } else if (inSubCard) {
                         if(isBool) {
-                            groupHtml += `<div class="card checkbox-card"><label>${item.label}</label><input type="${type}" id="${item.id}" ${checked}></div>`;
+                            groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label style="font-size:12px;color:#ccc;">${item.label}</label><input type="${type}" id="${item.id}" ${checked}></div>`;
                         } else {
-                            groupHtml += `<div class="card"><label>${item.label}</label><input type="${type}" id="${item.id}" value="${val}" step="any"></div>`;
+                            groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label style="font-size:12px;color:#ccc;">${item.label}</label><input type="${type}" id="${item.id}" value="${val}" step="any" style="width:80px;padding:4px 6px;background:#2c2c2c;color:#fff;border:1px solid #444;border-radius:4px;text-align:center;"></div>`;
                         }
                     }
                 }
