@@ -194,7 +194,6 @@ const configMap = [
         title: "🎨 Display & Colors",
         items: [
             { type: "subtitle", label: "🖥️ Display" },
-            { id: "BOOT_TIME_MS", label: "Boot Loading Duration (ms)", type: "number" },
             { id: "SHUTDOWN_TIME_MS", label: "Shutdown Loading Duration (ms)", type: "number" },
             { id: "DISPLAY_ROTATION", label: "Screen Rotation (0-3)" },
             { id: "DISPLAY_WIDTH", label: "Display Width (px)" },
@@ -226,7 +225,8 @@ const configMap = [
                 { id: "COLOR_FUEL_NORM", label: "Normal" },
                 { id: "COLOR_FUEL_WARN", label: "Warning" },
                 { id: "COLOR_FUEL_CRIT", label: "Critical" }
-            ] }
+            ] },
+            { id: "GHOST_COLOR_STR", label: "Ghost Digit Color", type: "color" }
         ]
     },
     {
@@ -249,7 +249,22 @@ const configMap = [
             { id: "REFRESH_SPEED_MS", label: "Speed (ms)", type: "number" },
             { id: "REFRESH_SAT_MS", label: "Satellites (ms)", type: "number" },
             { id: "REFRESH_TMR_MS", label: "Accel Timer (ms)", type: "number" },
-            { id: "REFRESH_BAT_MS", label: "Battery Voltage (ms)", type: "number" }
+            { id: "REFRESH_BAT_MS", label: "Battery Voltage (ms)", type: "number" },
+            { type: "card_header", label: "🔢 Digit Count Configuration" },
+            { id: "SPEED_DIGITS", label: "Speed Digits" },
+            { id: "SAT_DIGITS", label: "Satellites Digits" },
+            { id: "TMR_INT_DIGITS", label: "Timer Integer Digits" },
+            { id: "TMR_DEC_DIGITS", label: "Timer Decimal Digits" },
+            { id: "BAT_INT_DIGITS", label: "Battery Integer Digits" },
+            { id: "BAT_DEC_DIGITS", label: "Battery Decimal Digits" },
+            { id: "INST_INT_DIGITS", label: "Instant KM/L Integer Digits" },
+            { id: "INST_DEC_DIGITS", label: "Instant KM/L Decimal Digits" },
+            { id: "AVG_INT_DIGITS", label: "Average KM/L Integer Digits" },
+            { id: "AVG_DEC_DIGITS", label: "Average KM/L Decimal Digits" },
+            { id: "FUEL_INT_DIGITS", label: "Fuel Integer Digits" },
+            { id: "FUEL_DEC_DIGITS", label: "Fuel Decimal Digits" },
+            { id: "ODO_INT_DIGITS", label: "Odometer Integer Digits" },
+            { id: "ODO_DEC_DIGITS", label: "Odometer Decimal Digits" }
         ]
     },
     {
@@ -271,18 +286,19 @@ const configMap = [
             { type: 'xy', idX: "OFFSET_BIG_DATE_X", idY: "OFFSET_BIG_DATE_Y", label: "Date Offset" },
             { type: 'xy', idX: "OFFSET_BIG_FPS_X", idY: "OFFSET_BIG_FPS_Y", label: "FPS Counter Offset" },
             { type: 'xy', idX: "OFFSET_FUEL_LTRS_X", idY: "OFFSET_FUEL_LTRS_Y", label: "Fuel Liters Offset" },
-            { type: 'xy', idX: "OFFSET_GPS_ICON_X", idY: "OFFSET_GPS_ICON_Y", label: "GPS Sensor Icon Offset" },
-            { type: 'xy', idX: "OFFSET_HALL_ICON_X", idY: "OFFSET_HALL_ICON_Y", label: "Hall Sensor Icon Offset" },
+            { type: 'xy', idX: "OFFSET_HALL_ICON_X", idY: "OFFSET_HALL_ICON_Y", label: "Speed Source Icon Offset" },
             { type: 'xy', idX: "OFFSET_INST_KML_X", idY: "OFFSET_INST_KML_Y", label: "Instant KM/L Offset" },
             { type: 'xy', idX: "SIDEBAR_LEFT_X", idY: "SIDEBAR_LEFT_Y", label: "Left Sidebar (Temp) Pos" },
             { type: 'xy', idX: "OFFSET_BIG_SPEED_NUM_X", idY: "OFFSET_BIG_SPEED_NUM_Y", label: "Main Speed Number Offset" },
             { type: 'xy', idX: "OFFSET_BIG_ODO_X", idY: "OFFSET_BIG_ODO_Y", label: "Odometer Offset" },
             { type: 'xy', idX: "SIDEBAR_RIGHT_X", idY: "SIDEBAR_RIGHT_Y", label: "Right Sidebar (Fuel) Pos" },
+            { type: "card_header", label: "Sidebar Dimensions" },
+            { id: "SIDEBAR_BAR_WIDTH", label: "Bar Width (px)" },
+            { id: "SIDEBAR_BAR_HEIGHT", label: "Bar Height (px)" },
             { type: 'xy', idX: "OFFSET_BIG_SAT_X", idY: "OFFSET_BIG_SAT_Y", label: "Satellites Offset" },
             { type: 'xy', idX: "OFFSET_BIG_SIGNATURE_X", idY: "OFFSET_BIG_SIGNATURE_Y", label: "Signature Offset" },
             { type: 'xy', idX: "OFFSET_BIG_SPEED_UNIT_X", idY: "OFFSET_BIG_SPEED_UNIT_Y", label: "Speed Unit (KM/H) Offset" },
             { type: 'xy', idX: "BIG_CENTER_X", idY: "BIG_CENTER_Y", label: "Viewport Center" },
-            { type: 'xy', idX: "OFFSET_WHEEL_ICON_X", idY: "OFFSET_WHEEL_ICON_Y", label: "Wheel Sensor Icon Offset" },
             { type: 'xy', idX: "OFFSET_WIFI_ICON_X", idY: "OFFSET_WIFI_ICON_Y", label: "WiFi Icon Offset" }
         ]
     },

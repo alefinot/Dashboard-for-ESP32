@@ -500,19 +500,6 @@ void drawWifiIcon(int x, int y, uint16_t color, bool filled) {
   }
 }
 
-void drawWheelIcon(int x, int y, uint16_t color) {
-  drawAACircle(display, x + 8, y + 8, 7, color);
-  drawAACircle(display, x + 8, y + 8, 2, color);
-  drawAALine(display, (float)(x + 3), (float)(y + 8), (float)(x + 5), (float)(y + 8), color);
-  drawAALine(display, (float)(x + 10), (float)(y + 8), (float)(x + 12), (float)(y + 8), color);
-  drawAALine(display, (float)(x + 8), (float)(y + 3), (float)(x + 8), (float)(y + 5), color);
-  drawAALine(display, (float)(x + 8), (float)(y + 10), (float)(x + 8), (float)(y + 12), color);
-  display.drawPixel(x + 5, y + 5, color);
-  display.drawPixel(x + 11, y + 5, color);
-  display.drawPixel(x + 5, y + 11, color);
-  display.drawPixel(x + 11, y + 11, color);
-}
-
 void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color) {
   int16_t tx1, ty1;
   uint16_t w, h;
@@ -755,25 +742,28 @@ void updateOTAProgress(int progress, int total) {
 void drawFpsOverlay() {
   static float lastDrawnFpsBig = -1.0f, lastDrawnAvgFpsBig = -1.0f;
   static bool lastStateBig = false;
-  static int lastBigX = -1, lastBigY = -1;
+  static int lastAnchorX = -1, lastAnchorY = -1;
+  static int lastBoxW = 0, lastBoxH = 0;
   static unsigned long lastFpsDrawTime = 0;
-  constexpr int BOX_WIDTH = 145;
+  int anchorX = BIG_CENTER_X + OFFSET_BIG_FPS_X;
+  int anchorY = BIG_CENTER_Y + OFFSET_BIG_FPS_Y;
   unsigned long now = millis();
   if (now - lastFpsDrawTime < 250 && lastStateBig)
     return;
   lastFpsDrawTime = now;
-  if (!showFpsCounter || lastBigX != OFFSET_BIG_FPS_X ||
-      lastBigY != OFFSET_BIG_FPS_Y) {
-    if (lastStateBig && lastBigX >= 0) {
+  if (!showFpsCounter || lastAnchorX != anchorX || lastAnchorY != anchorY) {
+    if (lastStateBig && lastAnchorX >= 0) {
       display.startWrite();
-      display.fillRect(lastBigX, lastBigY, BOX_WIDTH, 12, TFT_BLACK);
+      display.fillRect(lastAnchorX - (lastBoxW / 2), lastAnchorY - (lastBoxH / 2),
+                       lastBoxW, lastBoxH, TFT_BLACK);
       display.endWrite();
       lastStateBig = false;
       lastDrawnFpsBig = -1.0f;
       lastDrawnAvgFpsBig = -1.0f;
     }
-    lastBigX = OFFSET_BIG_FPS_X;
-    lastBigY = OFFSET_BIG_FPS_Y;
+    lastAnchorX = anchorX;
+    lastAnchorY = anchorY;
+    lastBoxW = 0;
   }
   if (!showFpsCounter)
     return;
@@ -786,18 +776,29 @@ void drawFpsOverlay() {
     lastDrawnAvgFpsBig = currentAverageFps;
     lastStateBig = true;
     display.startWrite();
-    display.fillRect(OFFSET_BIG_FPS_X, OFFSET_BIG_FPS_Y, BOX_WIDTH, 12,
-                     TFT_BLACK);
     display.setFont(&Conthrax_SemiBold4pt7b);
     display.setTextColor(TFT_GREEN);
-    display.setCursor(OFFSET_BIG_FPS_X + 2, OFFSET_BIG_FPS_Y + 9);
+    int16_t tx1, ty1;
+    uint16_t tw, th;
+    display.getTextBounds(fpsBuf, 0, 0, &tx1, &ty1, &tw, &th);
+    int boxW = tw + 3 + 4 + 2;
+    int boxH = th + 6;
+    if (lastBoxW > 0)
+      display.fillRect(lastAnchorX - (lastBoxW / 2), lastAnchorY - (lastBoxH / 2),
+                       lastBoxW, lastBoxH, TFT_BLACK);
+    int boxLeft = anchorX - (boxW / 2);
+    int boxTop = anchorY - (boxH / 2);
+    display.fillRect(boxLeft, boxTop, boxW, boxH, TFT_BLACK);
+    display.setCursor(boxLeft + 2, boxTop + boxH - 3);
     display.print(fpsBuf);
     int cx = display.getCursorX();
-    int cy = OFFSET_BIG_FPS_Y + 4;
+    int cy = boxTop + (boxH / 2) - 1;
     drawAACircle(display, cx + 1, cy, 1, TFT_GREEN);
-    display.setCursor(cx + 4, OFFSET_BIG_FPS_Y + 9);
+    display.setCursor(cx + 4, boxTop + boxH - 3);
     display.print("c");
-    drawDebugBox(display, OFFSET_BIG_FPS_X, OFFSET_BIG_FPS_Y, BOX_WIDTH, 12);
+    drawDebugBox(display, boxLeft, boxTop, boxW, boxH);
+    lastBoxW = boxW;
+    lastBoxH = boxH;
     display.endWrite();
   }
 }

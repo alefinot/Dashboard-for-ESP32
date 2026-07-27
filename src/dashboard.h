@@ -55,6 +55,7 @@ struct SensorSnapshot {
   bool timeValid = false;
   bool dateValid = false;
   bool isGpsSpeedValid = false;
+  int speedSourceMode = 0; // 0=Hall, 1=GPS, 2=G+H
 };
 
 class LGFX_ST7789_4 : public lgfx::LGFX_Device {
@@ -131,10 +132,11 @@ extern String COLOR_FUEL_CRIT;
 
 extern uint16_t c_temp_norm, c_temp_warn, c_temp_crit;
 extern uint16_t c_fuel_norm, c_fuel_warn, c_fuel_crit;
+extern uint16_t ghost_color;
+extern String GHOST_COLOR_STR;
 
 extern int DISPLAY_WIDTH;
 extern int DISPLAY_HEIGHT;
-extern int BOOT_TIME_MS;
 extern int SHUTDOWN_TIME_MS;
 
 extern int BIG_CENTER_X;
@@ -180,13 +182,11 @@ extern int SIDEBAR_LEFT_X;
 extern int SIDEBAR_LEFT_Y;
 extern int SIDEBAR_RIGHT_X;
 extern int SIDEBAR_RIGHT_Y;
+extern int SIDEBAR_BAR_WIDTH;
+extern int SIDEBAR_BAR_HEIGHT;
 
 extern int OFFSET_HALL_ICON_X;
 extern int OFFSET_HALL_ICON_Y;
-extern int OFFSET_GPS_ICON_X;
-extern int OFFSET_GPS_ICON_Y;
-extern int OFFSET_WHEEL_ICON_X;
-extern int OFFSET_WHEEL_ICON_Y;
 extern int OFFSET_WIFI_ICON_X;
 extern int OFFSET_WIFI_ICON_Y;
 extern int OFFSET_INST_KML_X;
@@ -196,21 +196,10 @@ extern int OFFSET_AVG_KML_Y;
 extern int OFFSET_FUEL_LTRS_X;
 extern int OFFSET_FUEL_LTRS_Y;
 
-extern int ALIGN_BIG_TIME;
-extern int ALIGN_BIG_DATE;
-extern int ALIGN_BIG_SIGNATURE;
 extern int ALIGN_BIG_SPEED_NUM;
-extern int ALIGN_BIG_SPEED_UNIT;
-extern int ALIGN_BIG_ODO;
 extern int ALIGN_BIG_SAT;
 extern int ALIGN_BIG_TMR;
 extern int ALIGN_BIG_BAT;
-extern int ALIGN_SIDEBAR_LEFT;
-extern int ALIGN_SIDEBAR_RIGHT;
-extern int ALIGN_HALL_ICON;
-extern int ALIGN_GPS_ICON;
-extern int ALIGN_WHEEL_ICON;
-extern int ALIGN_WIFI_ICON;
 extern int ALIGN_INST_KML;
 extern int ALIGN_AVG_KML;
 extern int ALIGN_FUEL_LTRS;
@@ -246,6 +235,21 @@ extern int REFRESH_ODO_MS;
 extern int REFRESH_TIME_MS;
 extern int REFRESH_SIDEBAR_TEMP_MS;
 extern int REFRESH_SIDEBAR_FUEL_MS;
+
+extern int SPEED_DIGITS;
+extern int SAT_DIGITS;
+extern int TMR_INT_DIGITS;
+extern int TMR_DEC_DIGITS;
+extern int BAT_INT_DIGITS;
+extern int BAT_DEC_DIGITS;
+extern int INST_INT_DIGITS;
+extern int INST_DEC_DIGITS;
+extern int AVG_INT_DIGITS;
+extern int AVG_DEC_DIGITS;
+extern int FUEL_INT_DIGITS;
+extern int FUEL_DEC_DIGITS;
+extern int ODO_INT_DIGITS;
+extern int ODO_DEC_DIGITS;
 
 extern bool ENABLE_DYNAMIC_CPU;
 extern int MANUAL_CPU_FREQ;
@@ -325,7 +329,6 @@ extern float fuelLiters;
 extern int fuelPercentage;
 extern float batteryVoltage;
 extern float engineTemperature;
-extern int currentTimezoneOffset;
 extern double totalDistanceKm;
 extern double lastSavedOdo;
 extern double lastLat;
@@ -388,9 +391,7 @@ int getEuropeanOffset(int year, int month, int day, int hour);
 void drawCalendarIcon(int x, int y, uint16_t color);
 void drawClockIcon(int x, int y, uint16_t color);
 void drawLocationIcon(int x, int y, uint16_t color);
-void drawCompassIcon(int x, int y, float heading, uint16_t color);
 void drawWifiIcon(int x, int y, uint16_t color, bool filled = false);
-void drawWheelIcon(int x, int y, uint16_t color);
 void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color);
 
 inline int applyAlign(int anchorX, int elementW, int align) {

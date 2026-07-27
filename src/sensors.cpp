@@ -8,7 +8,6 @@ HardwareSerial gpsSerial(2);
 // ----------------------------------------------------------------------------
 #define QMC5883L_ADDR   0x0D
 #define QMC5883L_X_LSB  0x00
-#define QMC5883L_STATUS 0x09
 #define QMC5883L_CTRL1  0x0B
 
 static bool compassReady = false;
@@ -67,7 +66,6 @@ float fuelLiters = 0.0f;
 int fuelPercentage = 0;
 float batteryVoltage = 0.0f;
 float engineTemperature = 0.0f;
-int currentTimezoneOffset = 1;
 double totalDistanceKm = 0.0;
 double lastSavedOdo = 0.0;
 double lastLat = 0.0;
@@ -392,6 +390,7 @@ void sensorTask(void *pvParameters) {
         g_sensorData.timeValid = true;
         g_sensorData.dateValid = true;
         g_sensorData.isGpsSpeedValid = true;
+        g_sensorData.speedSourceMode = 1;
         g_sensorData.heading = 180.0f + 180.0f * sinf(t / 5000.0f);
         g_sensorData.localHour = 10;
         g_sensorData.minute = (t / 1000) % 60;
@@ -437,6 +436,16 @@ void sensorTask(void *pvParameters) {
 
         g_sensorData.isGpsSpeedValid =
             gps.speed.isValid() && (g_sensorData.satellites >= MIN_SATELLITES);
+        if (g_sensorData.isGpsSpeedValid) {
+          if (g_sensorData.satellites >= OPTIMAL_SATELLITES)
+            g_sensorData.speedSourceMode = 1;
+          else if (fabsf((float)gps.speed.kmph() - getHallSpeed()) <= MAX_SPEED_DELTA_KMH)
+            g_sensorData.speedSourceMode = 2;
+          else
+            g_sensorData.speedSourceMode = 0;
+        } else {
+          g_sensorData.speedSourceMode = 0;
+        }
       }
       xSemaphoreGive(g_stateMutex);
     }

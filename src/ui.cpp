@@ -1,7 +1,23 @@
 #include "dashboard.h"
 
-static constexpr uint16_t GHOST_COLOR = 0x2104;
+#define MAX_CELLS 16
+
 static constexpr unsigned long STARTUP_RAMP_DURATION_MS = 3000;
+
+static void measureDs15Cells(int *cells, int &totalW, int count, int decimalPos) {
+  constexpr int G = 3;
+  int16_t bx1, by1;
+  uint16_t bw, bh;
+  int cumX = 0;
+  display.setFont(&DS_DIGIT15pt7b);
+  for (int i = 0; i < count; i++) {
+    char cb[2] = {(i == decimalPos) ? '.' : '8', 0};
+    display.getTextBounds(cb, cumX, 0, &bx1, &by1, &bw, &bh);
+    cells[i] = cumX + bw;
+    cumX += bw + G;
+  }
+  totalW = cumX - G;
+}
 
 // ----------------------------------------------------------------------------
 // Main dashboard renderer
@@ -14,6 +30,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   static double lastDispOdo = -1.0;
   static TimerState lastState = READY;
   static bool firstRun = true;
+  static int ds15_fontH = 0;
 
   // Startup ramp: smoothly scale display values from 0 to actual over ~3s
   SensorSnapshot displaySnap = snap;
@@ -54,34 +71,35 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     drawDebugBox(display, unitX - (w / 2) - 2, unitY - 2, w + 4, h + 4);
   }
   if (forceDraw) {
-    display.fillRect(BIG_CENTER_X - 125, 48, 240, 74, TFT_BLACK);
     display.setFont(&Conthrax_SemiBold7pt7b);
     display.setTextColor(display.color565(150, 150, 150));
     display.getTextBounds(DASHBOARD_SIGNATURE.c_str(), 0, 0, &x1, &y1, &w, &h);
     int sigX = BIG_CENTER_X + OFFSET_BIG_SIGNATURE_X,
         sigY = BIG_CENTER_Y + OFFSET_BIG_SIGNATURE_Y;
+    display.fillRect(sigX - (w / 2) - 6, sigY - 6, w + 12, h + 12, TFT_BLACK);
     display.setCursor(sigX - (w / 2) - x1, sigY - y1);
     display.print(DASHBOARD_SIGNATURE);
     drawDebugBox(display, sigX - (w / 2) - 2, sigY - 2, w + 4, h + 4);
   }
 
-  bool isGpsActive = displaySnap.isGpsSpeedValid;
-  int currentSourceState = isGpsActive ? 1 : 0;
+  int currentSourceState = displaySnap.speedSourceMode;
+  if (ENABLE_DEMO_MODE) {
+    currentSourceState = (millis() / 2000) % 3;
+  }
   if (currentSourceState != lastSpeedSourceState || forceDraw) {
     lastSpeedSourceState = currentSourceState;
     componentUpdated = true;
-    uint16_t colorDarkGrey = display.color565(70, 70, 70), hallColor, gpsColor;
-    if (isGpsActive) {
-      hallColor = colorDarkGrey;
-      gpsColor = TFT_GREEN;
-    } else {
-      hallColor = TFT_YELLOW;
-      gpsColor = colorDarkGrey;
+    const char *label = "HAL";
+    uint16_t color = TFT_CYAN;
+    if (currentSourceState == 1) {
+      label = "GPS";
+      color = TFT_YELLOW;
+    } else if (currentSourceState == 2) {
+      label = "G+H";
+      color = TFT_GREEN;
     }
     display.setFont(&Conthrax_SemiBold12pt7b);
-
-    drawBadge("HALL", OFFSET_HALL_ICON_X, OFFSET_HALL_ICON_Y, hallColor);
-    drawBadge("GPS", OFFSET_GPS_ICON_X, OFFSET_GPS_ICON_Y, gpsColor);
+    drawBadge(label, OFFSET_HALL_ICON_X, OFFSET_HALL_ICON_Y, color);
   }
 
   static int lastWifiState = -1;
@@ -100,7 +118,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     lastShowPlus = showPlus;
     int wifiX = BIG_CENTER_X + OFFSET_WIFI_ICON_X;
     int wifiY = BIG_CENTER_Y + OFFSET_WIFI_ICON_Y;
-    display.fillRect(wifiX - 4, wifiY, 24, 16, TFT_BLACK);
+    display.fillRect(wifiX - 4, wifiY - 3, 24, 19, TFT_BLACK);
     if (currentWifiState == 1) {
       drawWifiIcon(wifiX, wifiY, TFT_WHITE, false);
     } else if (currentWifiState == 2) {
@@ -144,6 +162,12 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     }
     display.setFont(&DS_DIGIT15pt7b);
     display.getTextBounds(hourStr, 0, 0, &tx1, &ty1, &w_h, &h_h);
+    static int timeBlockH = 0, dateBlockH = 0;
+    if (timeBlockH == 0) {
+      timeBlockH = max((int)h_h, 16) + 8;
+      display.getTextBounds(dayStr, 0, 0, &tx1, &ty1, &w_d, &h_d);
+      dateBlockH = max((int)h_d, 16) + 8;
+    }
     int16_t save_h_x1 = tx1;
     display.getTextBounds(minStr, 0, 0, &tx1, &ty1, &w_m, &h_m);
     display.getTextBounds(dayStr, 0, 0, &tx1, &ty1, &w_d, &h_d);
@@ -161,7 +185,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
     if (lastTimeStartX >= 0 && lastTimeY >= 0 && lastTimeY != timeY) {
       display.fillRect(lastTimeStartX - 8, lastTimeY - 22, lastTimeWidth + 16,
-                       32, TFT_BLACK);
+                        timeBlockH, TFT_BLACK);
     }
     int clearTimeX = timeX - 4, clearTimeW = timeW + 8;
     if (lastTimeWidth > 0 && lastTimeStartX >= 0 && lastTimeY == timeY) {
@@ -169,7 +193,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       clearTimeW = std::max(timeX + timeW, lastTimeStartX + lastTimeWidth) + 4 -
                    clearTimeX;
     }
-    display.fillRect(clearTimeX - 4, timeY - 22, clearTimeW + 12, 32,
+    display.fillRect(clearTimeX - 4, timeY - 22, clearTimeW + 12, timeBlockH,
                      TFT_BLACK);
     lastTimeStartX = timeX;
     lastTimeWidth = timeW;
@@ -177,7 +201,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
     if (lastDateStartX >= 0 && lastDateY >= 0 && lastDateY != dateY) {
       display.fillRect(lastDateStartX - 8, lastDateY - 22, lastDateWidth + 16,
-                       32, TFT_BLACK);
+                        dateBlockH, TFT_BLACK);
     }
     int clearDateX = dateX - 4, clearDateW = dateW + 8;
     if (lastDateWidth > 0 && lastDateStartX >= 0 && lastDateY == dateY) {
@@ -185,7 +209,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       clearDateW = std::max(dateX + dateW, lastDateStartX + lastDateWidth) + 4 -
                    clearDateX;
     }
-    display.fillRect(clearDateX - 4, dateY - 22, clearDateW + 12, 32,
+    display.fillRect(clearDateX - 4, dateY - 22, clearDateW + 12, dateBlockH,
                      TFT_BLACK);
     lastDateStartX = dateX;
     lastDateWidth = dateW;
@@ -200,7 +224,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.print(":");
     display.setFont(&DS_DIGIT15pt7b);
     display.print(minStr);
-    drawDebugBox(display, timeX - 2, timeY - 22, timeW + 4, 32);
+    drawDebugBox(display, timeX - 2, timeY - 22, timeW + 4, timeBlockH);
 
     drawCalendarIcon(dateX, dateY - 18, TFT_WHITE);
     display.setFont(&DS_DIGIT15pt7b);
@@ -214,17 +238,15 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.print("/");
     display.setFont(&DS_DIGIT15pt7b);
     display.print(yearStr);
-    drawDebugBox(display, dateX - 2, dateY - 22, dateW + 4, 32);
+    drawDebugBox(display, dateX - 2, dateY - 22, dateW + 4, dateBlockH);
   }
 
-  // --- DS_DIGIT15pt7b digit metrics & cell positions (measured once) ---
+  // --- DS_DIGIT15pt7b digit metrics (measured once) ---
   static bool ds15Measured = false;
   static int ds15_digitWidth[10] = {0}, ds15_digitXOff[10] = {0};
   static int16_t ds15_refY1 = 0;
   static uint16_t ds15_dotWidth = 0;
   static int16_t ds15_dotXOff = 0;
-  static int cellR4[4] = {0}, cellR5[5] = {0};
-  static int cellR4_w = 0, cellR5_w = 0;
 
   if (!ds15Measured) {
     ds15Measured = true;
@@ -241,27 +263,6 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.getTextBounds("0", 0, 0, &bx1, &ds15_refY1, &bw, &bh);
     display.getTextBounds(".", 0, 0, &bx1, &by1, &ds15_dotWidth, &bh);
     ds15_dotXOff = bx1;
-
-    constexpr int G = 3;
-    char s4[] = "88.8";
-    int cumX = 0;
-    for (int i = 0; i < 4; i++) {
-      char cb[2] = {s4[i], 0};
-      display.getTextBounds(cb, cumX, 0, &bx1, &by1, &bw, &bh);
-      cellR4[i] = cumX + bw;
-      cumX += bw + G;
-    }
-    cellR4_w = cumX - G;
-
-    char s5[] = "88.88";
-    cumX = 0;
-    for (int i = 0; i < 5; i++) {
-      char cb[2] = {s5[i], 0};
-      display.getTextBounds(cb, cumX, 0, &bx1, &by1, &bw, &bh);
-      cellR5[i] = cumX + bw;
-      cumX += bw + G;
-    }
-    cellR5_w = cumX - G;
   }
 
   int currentSpeed = (int)displaySnap.currentSpeed;
@@ -275,8 +276,9 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     static uint16_t w_speed3_max = 0, h_speed_max = 0;
     static int16_t refY1 = 0;
     static int digitWidth[10] = {0}, digitXOff[10] = {0};
-    static int spdCellR[3] = {0};
+    static int spdCellR[MAX_CELLS] = {0};
     static bool speedLayoutInit = false;
+    int spdCount = SPEED_DIGITS;
     display.setFont(&DS_DIGIT50pt7b);
     if (!speedLayoutInit) {
       speedLayoutInit = true;
@@ -291,10 +293,9 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       }
       display.getTextBounds("0", 0, 0, &sx1, &refY1, &tw, &th);
       constexpr int SG = 4;
-      char s3[] = "888";
       int cumX = 0;
-      for (int i = 0; i < 3; i++) {
-        char cb[2] = {s3[i], 0};
+      for (int i = 0; i < spdCount; i++) {
+        char cb[2] = {'8', 0};
         display.getTextBounds(cb, cumX, 0, &sx1, &sy1, &tw, &th);
         spdCellR[i] = cumX + tw;
         cumX += tw + SG;
@@ -302,7 +303,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       w_speed3_max = cumX - SG;
       h_speed_max = th;
     }
-    char speedStr[6];
+    char speedStr[12];
     snprintf(speedStr, sizeof(speedStr), "%d", currentSpeed);
     int len = strlen(speedStr);
 
@@ -311,13 +312,13 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setFont(&DS_DIGIT50pt7b);
     display.setTextColor(TFT_WHITE);
 
-    static char lastCellChar[3] = {0};
+    static char lastCellChar[MAX_CELLS] = {0};
 
     if (forceDraw) {
       display.fillRect(boxLeft - 6, speedNumY - 2, w_speed3_max + 12,
                        h_speed_max + 6, TFT_BLACK);
     } else {
-      for (int ci = 0; ci < 3; ci++) {
+      for (int ci = 0; ci < spdCount; ci++) {
         if (lastCellChar[ci] != 0) {
           int cellRight = boxLeft + spdCellR[ci];
           int d = lastCellChar[ci] - '0';
@@ -329,23 +330,20 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       }
     }
 
-    display.setTextColor(GHOST_COLOR);
-    {
-      const char ghostDigits[] = {'1', '8', '8'};
-      for (int ci = 0; ci < 3; ci++) {
-        int cellRight = boxLeft + spdCellR[ci];
-        int d = ghostDigits[ci] - '0';
-        int cx = cellRight - 2 - digitXOff[d] - digitWidth[d];
-        display.setCursor(cx, speedNumY - refY1);
-        display.print(ghostDigits[ci]);
-        lastCellChar[ci] = ghostDigits[ci];
-      }
+    display.setTextColor(ghost_color);
+    for (int ci = 0; ci < spdCount; ci++) {
+      int cellRight = boxLeft + spdCellR[ci];
+      int d = 8;
+      int cx = cellRight - 2 - digitXOff[d] - digitWidth[d];
+      display.setCursor(cx, speedNumY - refY1);
+      display.print('8');
+      lastCellChar[ci] = '8';
     }
 
     display.setTextColor(TFT_WHITE);
     for (int i = 0; i < len; i++) {
       int d = speedStr[i] - '0';
-      int cellIdx = (3 - len) + i;
+      int cellIdx = (spdCount - len) + i;
       int cellRight = boxLeft + spdCellR[cellIdx];
       int cx = cellRight - 2 - digitXOff[d] - digitWidth[d];
       display.setCursor(cx, speedNumY - refY1);
@@ -361,8 +359,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     lastOdoUpdate = now;
     lastDispOdo = displayOdo;
     componentUpdated = true;
-    static int refOdoX = 0;
-    static uint16_t w_odo_num_max = 0, w_odo_unit_max = 0;
+    static uint16_t w_odo_unit_max = 0, h_odo_max = 0;
     static bool odoLayoutInit = false;
     if (!odoLayoutInit) {
       odoLayoutInit = true;
@@ -370,37 +367,64 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       uint16_t tw1, th1, tw2, th2;
       display.setFont(&DS_DIGIT15pt7b);
       display.getTextBounds("999999.9", 0, 0, &tx1, &ty1, &tw1, &th1);
-      w_odo_num_max = tw1;
-      display.setFont(&Conthrax_SemiBold12pt7b);
+      h_odo_max = th1;
+      display.setFont(&Conthrax_SemiBold7pt7b);
       display.getTextBounds(" KM", 0, 0, &tx1, &ty1, &tw2, &th2);
       w_odo_unit_max = tw2;
-      refOdoX = BIG_CENTER_X + OFFSET_BIG_ODO_X - ((w_odo_num_max + tw2) / 2) +
-                w_odo_num_max;
+      if (th2 > h_odo_max) h_odo_max = th2;
     }
-    char odoNumStr[12];
-    snprintf(odoNumStr, sizeof(odoNumStr), "%07.1f", displayOdo);
-    uint16_t w_num, h_num;
-    int16_t tx15, ty15;
+    static int odoCells[MAX_CELLS] = {0};
+    static int odoCellW = 0, odoCellsCount = 0;
+    if (odoCellsCount == 0) {
+      odoCellsCount = ODO_INT_DIGITS + 1 + ODO_DEC_DIGITS;
+      measureDs15Cells(odoCells, odoCellW, odoCellsCount, ODO_INT_DIGITS);
+    }
+    int odoCellX = BIG_CENTER_X + OFFSET_BIG_ODO_X - ((odoCellW + 4 + w_odo_unit_max) / 2);
+    int odoUnitX = odoCellX + odoCellW + 4;
+
+    char odoNumStr[20];
+    snprintf(odoNumStr, sizeof(odoNumStr), "%.*f", ODO_DEC_DIGITS, displayOdo);
+    int len = strlen(odoNumStr);
+
+    int16_t odoY = (BIG_CENTER_Y + OFFSET_BIG_ODO_Y) - h_odo_max - ds15_refY1;
+    int odoClearY = odoY + ds15_refY1 - 2;
+    int odoClearW = odoCellW + 4 + w_odo_unit_max + 4;
+    display.fillRect(odoCellX - 2, odoClearY, odoClearW, h_odo_max + 4, TFT_BLACK);
+
     display.setFont(&DS_DIGIT15pt7b);
-    display.getTextBounds(odoNumStr, 0, 0, &tx15, &ty15, &w_num, &h_num);
-    int16_t odoTopY = (BIG_CENTER_Y + OFFSET_BIG_ODO_Y) - h_num;
+    display.setTextColor(ghost_color);
+    for (int ci = 0; ci < odoCellsCount; ci++) {
+      int cellRight = odoCellX + odoCells[ci];
+      char gc = (ci == ODO_INT_DIGITS) ? '.' : '8';
+      int cx;
+      if (gc == '.') {
+        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+      } else {
+        cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+      }
+      display.setCursor(cx, odoY);
+      display.print(gc);
+    }
+    display.setTextColor(TFT_WHITE);
+    for (int i = 0; i < len; i++) {
+      char c = odoNumStr[i];
+      int cellIdx = (odoCellsCount - len) + i;
+      int cellRight = odoCellX + odoCells[cellIdx];
+      int cx;
+      if (c == '.') {
+        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+      } else {
+        int d = c - '0';
+        cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
+      }
+      display.setCursor(cx, odoY);
+      display.print(c);
+    }
 
-    display.setTextColor(TFT_WHITE, TFT_BLACK);
-    int targetX = refOdoX - w_num - tx15;
-    int boxLeft = refOdoX - w_odo_num_max - 4;
-
-    if (targetX > boxLeft)
-      display.fillRect(boxLeft, odoTopY - 2, targetX - boxLeft, h_num + 4,
-                       TFT_BLACK);
-
-    display.setFont(&DS_DIGIT15pt7b);
-    display.setCursor(targetX, odoTopY - ty15);
-    display.print(odoNumStr);
-
-    display.setFont(&Conthrax_SemiBold12pt7b);
-    display.setCursor(refOdoX, odoTopY - ty15);
+    display.setFont(&Conthrax_SemiBold7pt7b);
+    display.setCursor(odoUnitX, odoY);
     display.print(" KM");
-    drawDebugBox(display, boxLeft, odoTopY - 2, refOdoX - boxLeft + w_odo_unit_max + 4, h_num + 4);
+    drawDebugBox(display, odoCellX - 2, odoClearY, odoClearW, h_odo_max + 4);
   }
 
   // --- SIDEBARS: Engine Temp & Fuel ---
@@ -410,7 +434,17 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   static float animFuelFill = 0.0f;
   static int lastTempFillH = 0;
   static int lastFuelFillH = 0;
-  static constexpr float SIDEBAR_SMOOTH = 0.08f;
+  static constexpr unsigned long SIDEBAR_EASE_MS = 400;
+
+  // Per-sidebar ease state
+  static float easeTempFrom = 0.0f, easeTempTo = 0.0f;
+  static float easeFuelFrom = 0.0f, easeFuelTo = 0.0f;
+  static unsigned long easeTempStart = 0, easeFuelStart = 0;
+
+  auto easeOutCubic = [](float t) -> float {
+    float inv = 1.0f - t;
+    return 1.0f - inv * inv * inv;
+  };
 
   int currentFuel = displaySnap.fuelPercentage;
   int currentTemp = (int)displaySnap.engineTemperature;
@@ -428,21 +462,46 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     lastEngineTemp = -999;
     animTempFill = targetTempPct;
     animFuelFill = targetFuelPct;
+    easeTempFrom = targetTempPct;
+    easeTempTo = targetTempPct;
+    easeFuelFrom = targetFuelPct;
+    easeFuelTo = targetFuelPct;
     lastTempFillH = 0;
     lastFuelFillH = 0;
   }
 
-  animTempFill += (targetTempPct - animTempFill) * SIDEBAR_SMOOTH;
-  animFuelFill += (targetFuelPct - animFuelFill) * SIDEBAR_SMOOTH;
+  // Start a new ease when the target changes
+  if (fabsf(targetTempPct - easeTempTo) > 0.001f) {
+    easeTempFrom = animTempFill;
+    easeTempTo = targetTempPct;
+    easeTempStart = now;
+  }
+  if (fabsf(targetFuelPct - easeFuelTo) > 0.001f) {
+    easeFuelFrom = animFuelFill;
+    easeFuelTo = targetFuelPct;
+    easeFuelStart = now;
+  }
+
+  // Compute eased fill values
+  {
+    float elapsed = (float)(now - easeTempStart);
+    float t = constrain(elapsed / (float)SIDEBAR_EASE_MS, 0.0f, 1.0f);
+    animTempFill = easeTempFrom + (easeTempTo - easeTempFrom) * easeOutCubic(t);
+  }
+  {
+    float elapsed = (float)(now - easeFuelStart);
+    float t = constrain(elapsed / (float)SIDEBAR_EASE_MS, 0.0f, 1.0f);
+    animFuelFill = easeFuelFrom + (easeFuelTo - easeFuelFrom) * easeOutCubic(t);
+  }
 
   // Left Sidebar: Engine Temp
   static unsigned long lastSideTempUpdate = 0;
-  bool tempMoving = fabsf(animTempFill - targetTempPct) > 0.001f;
+  bool tempMoving = (now - easeTempStart) < SIDEBAR_EASE_MS;
   if (((currentTemp != lastEngineTemp || tempMoving) && (tempMoving || REFRESH_SIDEBAR_TEMP_MS == 0 || now - lastSideTempUpdate >= (unsigned long)REFRESH_SIDEBAR_TEMP_MS)) || forceDraw) {
     lastSideTempUpdate = now;
     lastEngineTemp = currentTemp;
 
-    int barX = SIDEBAR_LEFT_X, barY = SIDEBAR_LEFT_Y, barW = 8, barH = 200;
+    int barX = SIDEBAR_LEFT_X, barY = SIDEBAR_LEFT_Y, barW = SIDEBAR_BAR_WIDTH, barH = SIDEBAR_BAR_HEIGHT;
 
     uint16_t tempColor;
     if (currentTemp <= TEMP_WARN_GRN) {
@@ -473,19 +532,23 @@ void updateBigDisplay(const SensorSnapshot &snap) {
                       tempColor, TFT_BLACK, TFT_BLACK);
     }
 
-    display.fillRect(barX + barW + 2, barY + barH - 18, 55, 20, TFT_BLACK);
-
     char tBuf[16];
     snprintf(tBuf, sizeof(tBuf), "%d", currentTemp);
     display.setFont(&Conthrax_SemiBold7pt7b);
-    display.setTextColor(tempColor);
+    int tempTextW = display.textWidth(tBuf);
+    int tempH = display.fontHeight();
+    int cTextW = display.textWidth("c");
+    int totalW = tempTextW + 1 + 3 + 6 + cTextW;
 
     int numStartX = barX + barW + 6;
+    display.fillRect(numStartX - 4, barY + barH - 2 - tempH - 4, totalW + 8,
+                     tempH + 8, TFT_BLACK);
+
+    display.setTextColor(tempColor);
     display.setTextDatum(BL_DATUM);
     display.drawString(tBuf, numStartX, barY + barH);
 
-    int textW = display.textWidth(tBuf);
-    int cStartX = numStartX + textW + 1;
+    int cStartX = numStartX + tempTextW + 1;
 
     drawAACircle(display, cStartX + 3, barY + barH - 10, 2, tempColor);
     display.drawString("c", cStartX + 6, barY + barH);
@@ -494,12 +557,12 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
   // Right Sidebar: Fuel
   static unsigned long lastSideFuelUpdate = 0;
-  bool fuelMoving = fabsf(animFuelFill - targetFuelPct) > 0.001f;
+  bool fuelMoving = (now - easeFuelStart) < SIDEBAR_EASE_MS;
   if (((currentFuel != lastFuelPct || fuelMoving) && (fuelMoving || REFRESH_SIDEBAR_FUEL_MS == 0 || now - lastSideFuelUpdate >= (unsigned long)REFRESH_SIDEBAR_FUEL_MS)) || forceDraw) {
     lastSideFuelUpdate = now;
     lastFuelPct = currentFuel;
 
-    int barX = SIDEBAR_RIGHT_X, barY = SIDEBAR_RIGHT_Y, barW = 8, barH = 200;
+    int barX = SIDEBAR_RIGHT_X, barY = SIDEBAR_RIGHT_Y, barW = SIDEBAR_BAR_WIDTH, barH = SIDEBAR_BAR_HEIGHT;
 
     uint16_t fuelColor;
     if (currentFuel >= 100) {
@@ -550,7 +613,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   TimerState displayAccelState = displaySnap.accelState;
   static int w_sat_max = 0, w_bat_max = 0, w_badge_max = 0, w_tmr_max = 0;
   static uint16_t h_sat_max = 0, h_bat_max = 0, h_tmr_max = 0,
-                  w_bat_num_max = 0;
+                  h_badge_max = 0, w_bat_num_max = 0;
   static bool bottomRowLayoutInit = false;
 
   if (!bottomRowLayoutInit) {
@@ -558,10 +621,19 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     int16_t bx1, by1;
     uint16_t bw, bh;
     display.setFont(&DS_DIGIT15pt7b);
-    display.getTextBounds("88", 0, 0, &bx1, &by1, &bw, &bh);
+    int satCells = SAT_DIGITS;
+    char satPat[16];
+    for (int i = 0; i < satCells; i++) satPat[i] = '8';
+    satPat[satCells] = 0;
+    display.getTextBounds(satPat, 0, 0, &bx1, &by1, &bw, &bh);
     w_sat_max = 16 + 6 + bw;
     h_sat_max = (bh > 15) ? bh : 15;
-    display.getTextBounds("88.8", 0, 0, &bx1, &by1, &bw, &bh);
+
+    int batCells = BAT_INT_DIGITS + 1 + BAT_DEC_DIGITS;
+    char batPat[16];
+    for (int i = 0; i < batCells; i++) batPat[i] = (i == BAT_INT_DIGITS) ? '.' : '8';
+    batPat[batCells] = 0;
+    display.getTextBounds(batPat, 0, 0, &bx1, &by1, &bw, &bh);
     w_bat_num_max = bw;
     uint16_t w_v_unit, h_v_unit;
     display.setFont(&Conthrax_SemiBold7pt7b);
@@ -577,8 +649,14 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.getTextBounds(ACCEL_BADGE_LINE2.c_str(), 0, 0, &bx1, &by1, &bw2,
                           &bh2);
     w_badge_max = ((bw1 > bw2) ? bw1 : bw2) + 8;
+    h_badge_max = bh1 + 2 + bh2 + 4 + 2;
     display.setFont(&DS_DIGIT15pt7b);
-    display.getTextBounds("88.88", 0, 0, &bx1, &by1, &bw, &bh);
+
+    int tmrCells = TMR_INT_DIGITS + 1 + TMR_DEC_DIGITS;
+    char tmrPat[16];
+    for (int i = 0; i < tmrCells; i++) tmrPat[i] = (i == TMR_INT_DIGITS) ? '.' : '8';
+    tmrPat[tmrCells] = 0;
+    display.getTextBounds(tmrPat, 0, 0, &bx1, &by1, &bw, &bh);
     uint16_t w_s_unit, h_s_unit;
     display.setFont(&Conthrax_SemiBold7pt7b);
     display.getTextBounds(" S", 0, 0, &bx1, &by1, &w_s_unit, &h_s_unit);
@@ -614,7 +692,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   if (lastTmrX >= 0 && lastTmrY >= 0 &&
       (lastTmrX != badgeX || lastTmrY != tmrY)) {
     display.fillRect(lastTmrX - 1, lastTmrY - 2, tmrTotalW + 2,
-                     ((22 > h_tmr_max) ? 22 : h_tmr_max) + 2, TFT_BLACK);
+                     ((h_badge_max > h_tmr_max) ? h_badge_max : h_tmr_max) + 3, TFT_BLACK);
     forceDrawTmr = true;
   }
   lastTmrX = badgeX;
@@ -629,7 +707,13 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   lastBatX = batX;
   lastBatY = batY;
 
-  // -- Satellite count (2 fixed digit cells) --
+  // -- Satellite count --
+  static int satCells[MAX_CELLS] = {0};
+  static int satCellW = 0, satCellsCount = 0;
+  if (satCellsCount == 0) {
+    satCellsCount = SAT_DIGITS;
+    measureDs15Cells(satCells, satCellW, satCellsCount, -1);
+  }
   static unsigned long lastSatUpdate = 0;
   if ((displaySat != lastSat && (REFRESH_SAT_MS == 0 || now - lastSatUpdate >= (unsigned long)REFRESH_SAT_MS)) || forceDrawSat) {
     lastSatUpdate = now;
@@ -646,9 +730,9 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     drawLocationIcon(satX, iconCY - 7, TFT_WHITE);
     display.setFont(&DS_DIGIT15pt7b);
 
-    display.setTextColor(GHOST_COLOR);
-    for (int ci = 0; ci < 2; ci++) {
-      int cellRight = satX + 22 + cellR4[ci];
+    display.setTextColor(ghost_color);
+    for (int ci = 0; ci < satCellsCount; ci++) {
+      int cellRight = satX + 22 + satCells[ci];
       int cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
       display.setCursor(cx, satY);
       display.print('8');
@@ -656,8 +740,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setTextColor(TFT_WHITE);
     for (int i = 0; i < len; i++) {
       int d = satStr[i] - '0';
-      int cellIdx = (2 - len) + i;
-      int cellRight = satX + 22 + cellR4[cellIdx];
+      int cellIdx = (satCellsCount - len) + i;
+      int cellRight = satX + 22 + satCells[cellIdx];
       int cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
       display.setCursor(cx, satY);
       display.print(satStr[i]);
@@ -682,8 +766,9 @@ void updateBigDisplay(const SensorSnapshot &snap) {
                           &bw1_b, &bh1_b);
     display.getTextBounds(ACCEL_BADGE_LINE2.c_str(), 0, 0, &bx2_b, &by2_b,
                           &bw2_b, &bh2_b);
-    display.fillRect(badgeX - 1, tmrY - 2, w_badge_max + 2, 22, TFT_BLACK);
-    drawAARoundRect(display, badgeX, tmrY - 1, w_badge_max, 20, 3, timerColor);
+    int badgeH = bh1_b + 2 + bh2_b + 4;
+    display.fillRect(badgeX - 1, tmrY - 2, w_badge_max + 2, badgeH + 2, TFT_BLACK);
+    drawAARoundRect(display, badgeX, tmrY - 1, w_badge_max, badgeH, 3, timerColor);
     display.setTextColor(timerColor);
     display.setCursor(badgeX + (w_badge_max - bw1_b) / 2 - bx1_b,
                       tmrY + 2 - by1_b);
@@ -693,10 +778,16 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.print(ACCEL_BADGE_LINE2);
   }
 
-  // -- Timer (5 fixed cells: tens, ones, dot, tenths, hundredths) --
-  char tmrStr[8];
-  snprintf(tmrStr, sizeof(tmrStr), "%.2f", displayTmr);
-  static char lastTmrStr[8] = "";
+  // -- Timer --
+  static int tmrCells[MAX_CELLS] = {0};
+  static int tmrCellW = 0, tmrCellsCount = 0;
+  if (tmrCellsCount == 0) {
+    tmrCellsCount = TMR_INT_DIGITS + 1 + TMR_DEC_DIGITS;
+    measureDs15Cells(tmrCells, tmrCellW, tmrCellsCount, TMR_INT_DIGITS);
+  }
+  char tmrStr[12];
+  snprintf(tmrStr, sizeof(tmrStr), "%.*f", TMR_DEC_DIGITS, displayTmr);
+  static char lastTmrStr[12] = "";
   static TimerState lastStateTimer = READY;
   static unsigned long lastTmrUpdate = 0;
   bool tmrChanged = strcmp(tmrStr, lastTmrStr) != 0 || displayAccelState != lastStateTimer;
@@ -713,10 +804,10 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.fillRect(tmrX - 1, tmrY - 1, w_tmr_max + 2, h_tmr_max + 2,
                      TFT_BLACK);
 
-    display.setTextColor(GHOST_COLOR);
-    for (int ci = 0; ci < 5; ci++) {
-      int cellRight = tmrX + cellR5[ci];
-      char gc = (ci == 2) ? '.' : '8';
+    display.setTextColor(ghost_color);
+    for (int ci = 0; ci < tmrCellsCount; ci++) {
+      int cellRight = tmrX + tmrCells[ci];
+      char gc = (ci == TMR_INT_DIGITS) ? '.' : '8';
       int cx;
       if (gc == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -730,8 +821,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setTextColor(timerColor);
     for (int i = 0; i < len; i++) {
       char c = tmrStr[i];
-      int cellIdx = (5 - len) + i;
-      int cellRight = tmrX + cellR5[cellIdx];
+      int cellIdx = (tmrCellsCount - len) + i;
+      int cellRight = tmrX + tmrCells[cellIdx];
       int cx;
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -743,17 +834,23 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       display.print(c);
     }
     display.setFont(&Conthrax_SemiBold7pt7b);
-    int sRight = tmrX + cellR5[4];
+    int sRight = tmrX + tmrCells[tmrCellsCount - 1];
     int sCx = sRight - 2;
     display.setCursor(sCx, tmrY - ds15_refY1);
     display.print(" S");
-    drawDebugBox(display, badgeX - 1, tmrY - 2, tmrTotalW + 2, ((22 > h_tmr_max) ? 22 : h_tmr_max) + 2);
+    drawDebugBox(display, badgeX - 1, tmrY - 2, tmrTotalW + 2, ((h_badge_max > h_tmr_max) ? h_badge_max : h_tmr_max) + 3);
   }
 
-  // -- Battery voltage (4 fixed cells: tens, ones, dot, tenths) --
-  char batStr[8];
-  snprintf(batStr, sizeof(batStr), "%.1f", displayBat);
-  static char lastBatStr[8] = "";
+  // -- Battery voltage --
+  static int batCells[MAX_CELLS] = {0};
+  static int batCellW = 0, batCellsCount = 0;
+  if (batCellsCount == 0) {
+    batCellsCount = BAT_INT_DIGITS + 1 + BAT_DEC_DIGITS;
+    measureDs15Cells(batCells, batCellW, batCellsCount, BAT_INT_DIGITS);
+  }
+  char batStr[12];
+  snprintf(batStr, sizeof(batStr), "%.*f", BAT_DEC_DIGITS, displayBat);
+  static char lastBatStr[12] = "";
   static unsigned long lastBatUpdate = 0;
   if ((strcmp(batStr, lastBatStr) != 0 && (REFRESH_BAT_MS == 0 || now - lastBatUpdate >= (unsigned long)REFRESH_BAT_MS)) || forceDrawBat) {
     lastBatUpdate = now;
@@ -766,18 +863,18 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       batColor = TFT_GREEN;
     else if (displayBat <= 0.5f)
       batColor = TFT_WHITE;
-    int batClearTop = batY + ds15_refY1 - 1;
-    int batClearH = h_bat_max + 2;
+    int batClearTop = batY + ds15_refY1 - 3;
+    int batClearH = h_bat_max + 6;
     display.fillRect(batX, batClearTop, w_bat_max, batClearH,
                      TFT_BLACK);
     int iconCY = batY + ds15_refY1 + (h_bat_max / 2);
     drawBatteryIcon(batX, iconCY - 9, displayBat, batColor);
     display.setFont(&DS_DIGIT15pt7b);
 
-    display.setTextColor(GHOST_COLOR);
-    for (int ci = 0; ci < 4; ci++) {
-      int cellRight = (batX + 14) + cellR4[ci];
-      char gc = (ci == 2) ? '.' : '8';
+    display.setTextColor(ghost_color);
+    for (int ci = 0; ci < batCellsCount; ci++) {
+      int cellRight = (batX + 14) + batCells[ci];
+      char gc = (ci == BAT_INT_DIGITS) ? '.' : '8';
       int cx;
       if (gc == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -791,8 +888,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setTextColor(batColor);
     for (int i = 0; i < len; i++) {
       char c = batStr[i];
-      int cellIdx = (4 - len) + i;
-      int cellRight = (batX + 14) + cellR4[cellIdx];
+      int cellIdx = (batCellsCount - len) + i;
+      int cellRight = (batX + 14) + batCells[cellIdx];
       int cx;
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -804,6 +901,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       display.print(c);
     }
     display.setFont(&Conthrax_SemiBold7pt7b);
+    display.setTextColor(batColor);
     display.print(" V");
     drawDebugBox(display, batX, batClearTop, w_bat_max, batClearH);
   }
@@ -828,47 +926,52 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     int instCenterX = BIG_CENTER_X + OFFSET_INST_KML_X;
     int instY = BIG_CENTER_Y + OFFSET_INST_KML_Y;
 
-    static int instBlockWidthMax = 0;
     static uint16_t badgeW_ist = 0, badgeH_ist = 0;
     static int16_t badgeBx_ist = 0, badgeBy_ist = 0;
-    static uint16_t w_kml_unit = 0, w_num_max = 0;
+    static uint16_t w_kml_unit = 0;
     static bool instLayoutInit = false;
 
     if (!instLayoutInit) {
       instLayoutInit = true;
       int16_t tl1, tl2;
-      uint16_t th1;
+      uint16_t th1, bw, bh;
       display.setFont(&DS_DIGIT15pt7b);
-      display.getTextBounds("88.8", 0, 0, &tl1, &tl2, &w_num_max, &th1);
+      display.getTextBounds("88.8", 0, 0, &tl1, &tl2, &bw, &th1);
+      ds15_fontH = th1;
       display.setFont(&Conthrax_SemiBold4pt7b);
       display.getTextBounds("KM/L", 0, 0, &tl1, &tl2, &w_kml_unit, &th1);
-      uint16_t bw, bh;
       display.getTextBounds("IST", 0, 0, &badgeBx_ist, &badgeBy_ist, &bw, &bh);
       badgeW_ist = bw + 6;
       badgeH_ist = bh + 4;
-      uint16_t w_right = (badgeW_ist > w_kml_unit) ? badgeW_ist : w_kml_unit;
-      instBlockWidthMax = w_num_max + 4 + w_right;
+    }
+    static int instCells[MAX_CELLS] = {0};
+    static int instCellW = 0, instCellsCount = 0;
+    if (instCellsCount == 0) {
+      instCellsCount = INST_INT_DIGITS + 1 + INST_DEC_DIGITS;
+      measureDs15Cells(instCells, instCellW, instCellsCount, INST_INT_DIGITS);
     }
 
-    char instStr[8];
+    char instStr[12];
     if (displayInstKml > 0.0f)
-      snprintf(instStr, sizeof(instStr), "%.1f", displayInstKml);
+      snprintf(instStr, sizeof(instStr), "%.*f", INST_DEC_DIGITS, displayInstKml);
     else
       snprintf(instStr, sizeof(instStr), "0.0");
 
     uint16_t w_right_ist = (badgeW_ist > w_kml_unit) ? badgeW_ist : w_kml_unit;
-    int currentInstWidth = w_num_max + 4 + w_right_ist;
+    int currentInstWidth = instCellW + 4 + w_right_ist;
     int instNumAreaX = applyAlign(instCenterX, currentInstWidth, ALIGN_INST_KML);
 
-    int clearInstX = instCenterX - (instBlockWidthMax / 2) - 4;
-    display.fillRect(clearInstX, instY - 20, instBlockWidthMax + 8, 26,
+    int clearInstH = ds15_fontH + 8;
+    int clearInstW = instCellW + 4 + w_right_ist;
+    int clearInstX = instCenterX - (clearInstW / 2) - 4;
+    display.fillRect(clearInstX, instY - clearInstH + 4, clearInstW + 8, clearInstH,
                      TFT_BLACK);
 
     display.setFont(&DS_DIGIT15pt7b);
-    display.setTextColor(GHOST_COLOR);
-    for (int ci = 0; ci < 4; ci++) {
-      int cellRight = instNumAreaX + cellR4[ci];
-      char gc = (ci == 2) ? '.' : '8';
+    display.setTextColor(ghost_color);
+    for (int ci = 0; ci < instCellsCount; ci++) {
+      int cellRight = instNumAreaX + instCells[ci];
+      char gc = (ci == INST_INT_DIGITS) ? '.' : '8';
       int cx;
       if (gc == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -882,8 +985,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setTextColor(TFT_CYAN);
     for (int i = 0; i < instLen; i++) {
       char c = instStr[i];
-      int cellIdx = (4 - instLen) + i;
-      int cellRight = instNumAreaX + cellR4[cellIdx];
+      int cellIdx = (instCellsCount - instLen) + i;
+      int cellRight = instNumAreaX + instCells[cellIdx];
       int cx;
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -895,7 +998,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       display.print(c);
     }
 
-    int rightColInstX = instNumAreaX + w_num_max + 4;
+    int rightColInstX = instNumAreaX + instCellW + 4;
     int instBadgeX = rightColInstX + (w_right_ist - badgeW_ist) / 2;
     int instBadgeY = instY - 18;
     drawAARoundRect(display, instBadgeX, instBadgeY, badgeW_ist, badgeH_ist, 2,
@@ -919,7 +1022,6 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     int avgCenterX = BIG_CENTER_X + OFFSET_AVG_KML_X;
     int avgY = BIG_CENTER_Y + OFFSET_AVG_KML_Y;
 
-    static int avgBlockWidthMax = 0;
     static uint16_t badgeW_avg = 0, badgeH_avg = 0;
     static int16_t badgeBx_avg = 0, badgeBy_avg = 0;
     static bool avgLayoutInit = false;
@@ -931,28 +1033,34 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       display.getTextBounds("AVG", 0, 0, &badgeBx_avg, &badgeBy_avg, &bw, &bh);
       badgeW_avg = bw + 6;
       badgeH_avg = bh + 4;
-      uint16_t w_right = (badgeW_avg > w_kml_unit) ? badgeW_avg : w_kml_unit;
-      avgBlockWidthMax = w_num_max + 4 + w_right;
+    }
+    static int avgCells[MAX_CELLS] = {0};
+    static int avgCellW = 0, avgCellsCount = 0;
+    if (avgCellsCount == 0) {
+      avgCellsCount = AVG_INT_DIGITS + 1 + AVG_DEC_DIGITS;
+      measureDs15Cells(avgCells, avgCellW, avgCellsCount, AVG_INT_DIGITS);
     }
 
-    char avgStr[8];
+    char avgStr[12];
     if (displayAvgKml > 0.0f)
-      snprintf(avgStr, sizeof(avgStr), "%.1f", displayAvgKml);
+      snprintf(avgStr, sizeof(avgStr), "%.*f", AVG_DEC_DIGITS, displayAvgKml);
     else
       snprintf(avgStr, sizeof(avgStr), "0.0");
 
     uint16_t w_right_avg = (badgeW_avg > w_kml_unit) ? badgeW_avg : w_kml_unit;
-    int currentAvgWidth = w_num_max + 4 + w_right_avg;
+    int currentAvgWidth = avgCellW + 4 + w_right_avg;
     int avgNumAreaX = applyAlign(avgCenterX, currentAvgWidth, ALIGN_AVG_KML);
 
-    int clearAvgX = avgCenterX - (avgBlockWidthMax / 2) - 4;
-    display.fillRect(clearAvgX, avgY - 20, avgBlockWidthMax + 8, 26, TFT_BLACK);
+    int clearAvgH = ds15_fontH + 8;
+    int clearAvgW = avgCellW + 4 + w_right_avg;
+    int clearAvgX = avgCenterX - (clearAvgW / 2) - 4;
+    display.fillRect(clearAvgX, avgY - clearAvgH + 4, clearAvgW + 8, clearAvgH, TFT_BLACK);
 
     display.setFont(&DS_DIGIT15pt7b);
-    display.setTextColor(GHOST_COLOR);
-    for (int ci = 0; ci < 4; ci++) {
-      int cellRight = avgNumAreaX + cellR4[ci];
-      char gc = (ci == 2) ? '.' : '8';
+    display.setTextColor(ghost_color);
+    for (int ci = 0; ci < avgCellsCount; ci++) {
+      int cellRight = avgNumAreaX + avgCells[ci];
+      char gc = (ci == AVG_INT_DIGITS) ? '.' : '8';
       int cx;
       if (gc == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -966,8 +1074,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setTextColor(TFT_YELLOW);
     for (int i = 0; i < avgLen; i++) {
       char c = avgStr[i];
-      int cellIdx = (4 - avgLen) + i;
-      int cellRight = avgNumAreaX + cellR4[cellIdx];
+      int cellIdx = (avgCellsCount - avgLen) + i;
+      int cellRight = avgNumAreaX + avgCells[cellIdx];
       int cx;
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -979,7 +1087,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       display.print(c);
     }
 
-    int rightColAvgX = avgNumAreaX + w_num_max + 4;
+    int rightColAvgX = avgNumAreaX + avgCellW + 4;
     int avgBadgeX = rightColAvgX + (w_right_avg - badgeW_avg) / 2;
     int avgBadgeY = avgY - 18;
     drawAARoundRect(display, avgBadgeX, avgBadgeY, badgeW_avg, badgeH_avg, 2,
@@ -1011,35 +1119,39 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     int fuelCenterX = BIG_CENTER_X + OFFSET_FUEL_LTRS_X;
     int fuelY = BIG_CENTER_Y + OFFSET_FUEL_LTRS_Y;
 
-    char fuelStr[8];
-    snprintf(fuelStr, sizeof(fuelStr), "%.1f", displayFuelLtrs);
-
-    static uint16_t w_fuel_max = 0, w_fuel_unit = 0, fuelBlockWidthMax = 0;
+    static uint16_t w_fuel_unit = 0;
     static bool fuelLayoutInit = false;
     if (!fuelLayoutInit) {
       fuelLayoutInit = true;
       int16_t tfx1, tfx2;
       uint16_t tfth;
-      display.setFont(&DS_DIGIT15pt7b);
-      display.getTextBounds("88.8", 0, 0, &tfx1, &tfx2, &w_fuel_max, &tfth);
       display.setFont(&Conthrax_SemiBold7pt7b);
       display.getTextBounds("L", 0, 0, &tfx1, &tfx2, &w_fuel_unit, &tfth);
-      fuelBlockWidthMax = w_fuel_max + 4 + w_fuel_unit;
+    }
+    static int fuelCells[MAX_CELLS] = {0};
+    static int fuelCellW = 0, fuelCellsCount = 0;
+    if (fuelCellsCount == 0) {
+      fuelCellsCount = FUEL_INT_DIGITS + 1 + FUEL_DEC_DIGITS;
+      measureDs15Cells(fuelCells, fuelCellW, fuelCellsCount, FUEL_INT_DIGITS);
     }
 
-    int totalW = fuelBlockWidthMax;
+    char fuelStr[12];
+    snprintf(fuelStr, sizeof(fuelStr), "%.*f", FUEL_DEC_DIGITS, displayFuelLtrs);
+
+    int totalW = fuelCellW + 4 + w_fuel_unit;
     int fuelNumAreaX = applyAlign(fuelCenterX, totalW, ALIGN_FUEL_LTRS);
-    int unitX = fuelNumAreaX + w_fuel_max + 4;
+    int unitX = fuelNumAreaX + fuelCellW + 4;
 
     int clearY = fuelY - 20;
-    int clearX = fuelCenterX - (fuelBlockWidthMax / 2) - 4;
-    display.fillRect(clearX, clearY, fuelBlockWidthMax + 8, 32, TFT_BLACK);
+    int clearW = fuelCellW + 4 + w_fuel_unit;
+    int clearX = fuelCenterX - (clearW / 2) - 4;
+    display.fillRect(clearX, clearY, clearW + 8, ds15_fontH + 12, TFT_BLACK);
 
     display.setFont(&DS_DIGIT15pt7b);
-    display.setTextColor(GHOST_COLOR);
-    for (int ci = 0; ci < 4; ci++) {
-      int cellRight = fuelNumAreaX + cellR4[ci];
-      char gc = (ci == 2) ? '.' : '8';
+    display.setTextColor(ghost_color);
+    for (int ci = 0; ci < fuelCellsCount; ci++) {
+      int cellRight = fuelNumAreaX + fuelCells[ci];
+      char gc = (ci == FUEL_INT_DIGITS) ? '.' : '8';
       int cx;
       if (gc == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -1053,8 +1165,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setTextColor(TFT_CYAN);
     for (int i = 0; i < fuelLen; i++) {
       char c = fuelStr[i];
-      int cellIdx = (4 - fuelLen) + i;
-      int cellRight = fuelNumAreaX + cellR4[cellIdx];
+      int cellIdx = (fuelCellsCount - fuelLen) + i;
+      int cellRight = fuelNumAreaX + fuelCells[cellIdx];
       int cx;
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;

@@ -56,7 +56,8 @@ A real-time motorcycle dashboard running on the ESP32 WROOM, displaying speed, o
 
 ### UI (ILI9488 480×320, LovyanGFX)
 - **Dashboard:** Large speed (50 pt DS_DIGIT font), odometer, clock/date, satellite count, battery icon + voltage, acceleration timer, instant/average KM/L.
-- **Sidebars:** Left = engine temp vertical bar (gradient, ~10–110°C), Right = fuel level bar (gradient, 0–100%).
+- **Configurable digit counts** — Every 7-segment numeric section (speed, odometer, timer, satellite, battery, instant/average KM/L, fuel) has independently configurable integer/decimal digit counts via NVS/web UI.
+- **Sidebars:** Left = engine temp vertical bar (gradient, ~10–110°C, cubic ease-out animation), Right = fuel level bar (gradient, 0–100%, cubic ease-out).
 - **Badges:** HALL, GPS, WiFi status indicators.
 - **Icons:** Battery, calendar, clock, map pin, WiFi, wheel — all procedurally drawn.
 - **Anti-aliased primitives:** Lines, circles, arcs, rounded rects, color blending utilities.
@@ -76,7 +77,7 @@ A real-time motorcycle dashboard running on the ESP32 WROOM, displaying speed, o
 - **CPU scaling** — Dynamic 80/160/240 MHz based on FPS vs target; WiFi forces 240 MHz.
 - **Power management** — GPIO34 ignition sense → deep sleep with EXT0 wakeup, reboot.
 - **Deep sleep / reboot** screens with progress animation.
-- **Demo mode** — Full sensor simulation (oscillating values for all fields).
+- **Demo mode** — Full sensor simulation (oscillating values for all fields); speed source badge cycles through HAL/GPS/G+H every 2 seconds.
 - **Telemetry logging** — 4096-byte ring buffer, 500 ms output, web serial monitor.
 - **2-core task architecture** — Sensors on Core 0, display/loop on Core 1.
 
@@ -192,6 +193,7 @@ The web interface is embedded as a raw HTML string (`index_html`) and served at 
 | Display | `DISPLAY_ROTATION`, `SPI_BUS_SPEED`, `ENABLE_ANTIALIASING` | Screen rotation, SPI frequency, anti-alienation toggle |
 | Colors | `COLOR_TEMP_NORM/WARN/CRIT`, `COLOR_FUEL_NORM/WARN/CRIT` | Hex color strings for gradient bars |
 | Sensors | `WHEEL_CIRCUMFERENCE_MM`, `NTC_R_BALANCE`, `NTC_BETA` | Vehicle and thermistor tuning parameters |
+| Digit Count | `SPEED_DIGITS`, `SAT_DIGITS`, `TMR_INT/DEC_DIGITS`, `BAT_INT/DEC_DIGITS`, `INST_INT/DEC_DIGITS`, `AVG_INT/DEC_DIGITS`, `FUEL_INT/DEC_DIGITS`, `ODO_INT/DEC_DIGITS` | Configurable integer/decimal digits for every 7-segment section |
 | Layout | `OFFSET_BIG_*_X/Y`, `BIG_CENTER_X/Y` | Pixel offsets for every UI element |
 
 ## License
