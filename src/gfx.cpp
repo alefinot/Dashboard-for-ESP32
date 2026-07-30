@@ -558,9 +558,8 @@ void showGoodbyeScreen(bool isSleep) {
   preferences.putDouble("odo", totalDistanceKm);
   preferences.end();
 
-  int fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
-  if (fadeTarget > 255) fadeTarget = 255;
-  logPrintf("goodbye fade-out: fadeTarget=%d BACKLIGHT_BRIGHTNESS=%d\n", fadeTarget, BACKLIGHT_BRIGHTNESS);
+  int fadeTarget = currentBrightnessTarget;
+  logPrintf("goodbye fade-out: fadeTarget=%d\n", fadeTarget);
   int fadeStepCount = (fadeTarget / 8) + 1;
   for (int level = fadeTarget; level >= 0; level -= 8) {
     ledcWrite(BACKLIGHT_CHANNEL, level);
@@ -591,8 +590,7 @@ void showGoodbyeScreen(bool isSleep) {
   drawAARoundRect(display, barX - 2, 160 - 2, 260 + 4, 8 + 4, 3, TFT_CYAN);
   display.endWrite();
 
-  fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
-  if (fadeTarget > 255) fadeTarget = 255;
+  fadeTarget = currentBrightnessTarget;
   fadeStepCount = (fadeTarget / 8) + 1;
   for (int level = 0; level <= fadeTarget; level += 8) {
     ledcWrite(BACKLIGHT_CHANNEL, level);
@@ -616,8 +614,7 @@ void showGoodbyeScreen(bool isSleep) {
   }
   delay(50);
 
-  fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
-  if (fadeTarget > 255) fadeTarget = 255;
+  fadeTarget = currentBrightnessTarget;
   fadeStepCount = (fadeTarget / 8) + 1;
   for (int level = fadeTarget; level >= 0; level -= 8) {
     ledcWrite(BACKLIGHT_CHANNEL, level);
@@ -668,8 +665,7 @@ void showUpdatingScreen() {
   otaProgressFillW = 0;
   otaProgressTarget = 0;
 
-  int fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
-  if (fadeTarget > 255) fadeTarget = 255;
+  int fadeTarget = currentBrightnessTarget;
   int fadeStepCount = (fadeTarget / 8) + 1;
   for (int level = fadeTarget; level >= 0; level -= 8) {
     ledcWrite(BACKLIGHT_CHANNEL, level);
@@ -700,8 +696,7 @@ void showUpdatingScreen() {
   drawAARoundRect(display, barX - 2, 160 - 2, 260 + 4, 8 + 4, 3, TFT_CYAN);
   display.endWrite();
 
-  fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
-  if (fadeTarget > 255) fadeTarget = 255;
+  fadeTarget = currentBrightnessTarget;
   fadeStepCount = (fadeTarget / 8) + 1;
   for (int level = 0; level <= fadeTarget; level += 8) {
     ledcWrite(BACKLIGHT_CHANNEL, level);

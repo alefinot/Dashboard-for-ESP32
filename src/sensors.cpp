@@ -86,6 +86,7 @@ float tripFuelConsumedLiters = 0.0f;
 float instantKml = 0.0f;
 float averageKml = 0.0f;
 float averageSpeed = 0.0f;
+unsigned long movingTimeMs = 0;
 
 TimerState accelState = READY;
 unsigned long accelStartTime = 0;
@@ -171,8 +172,23 @@ void processTemperatureSensor() {
                       273.15f;
 }
 
+void processLightSensor() {
+  static const float alpha = 0.15f;
+  analogRead(LIGHT_SENSOR_PIN);
+  int raw = analogRead(LIGHT_SENSOR_PIN);
+  ambientLightValue = raw;
+  if (filteredAmbientValue < 1.0f)
+    filteredAmbientValue = (float)raw;
+  else
+    filteredAmbientValue = ((float)raw * alpha) + (filteredAmbientValue * (1.0f - alpha));
+}
+
 void processFuelSensor() {
-  int instantReading = analogRead(FUEL_TOUCH_PIN);
+  int sum = 0;
+  for (int i = 0; i < 64; i++) {
+    sum += analogRead(FUEL_TOUCH_PIN);
+  }
+  int instantReading = sum / 64;
   filteredReading = ((float)instantReading * FUEL_FILTER_ALPHA) +
                     (filteredReading * (1.0f - FUEL_FILTER_ALPHA));
   if (filteredReading >= touchTable[0]) {
@@ -267,13 +283,6 @@ void processFuelConsumption() {
   if (averageKml > 99.9f)
     averageKml = 99.9f;
 
-  float elapsedHours = (millis() - g_startupTime) / 3600000.0f;
-  averageSpeed = (tripDistanceKm > 0.05 && elapsedHours > 0.001f)
-                     ? (float)(tripDistanceKm / elapsedHours)
-                     : 0.0f;
-  if (averageSpeed > 299.9f)
-    averageSpeed = 299.9f;
-
   static unsigned long lastInstSampleTime = 0;
   static double lastInstDistKm = 0.0;
   static float lastInstFuelLiters = 0.0f;
@@ -291,6 +300,26 @@ void processFuelConsumption() {
     } else if (getFilteredSpeed() == 0.0f)
       instantKml = 0.0f;
   }
+}
+
+// ----------------------------------------------------------------------------
+// Average speed (moving time)
+// ----------------------------------------------------------------------------
+void updateAverageSpeed() {
+  static unsigned long lastMovingTimeCheck = 0;
+  unsigned long nowMs = millis();
+  if (getFilteredSpeed() > 0.0f) {
+    if (lastMovingTimeCheck != 0)
+      movingTimeMs += (nowMs - lastMovingTimeCheck);
+  }
+  lastMovingTimeCheck = nowMs;
+
+  float movingHours = movingTimeMs / 3600000.0f;
+  averageSpeed = (tripDistanceKm > 0.05 && movingHours > 0.001f)
+                     ? (float)(tripDistanceKm / movingHours)
+                     : 0.0f;
+  if (averageSpeed > 299.9f)
+    averageSpeed = 299.9f;
 }
 
 void updateAccelTimer() {
@@ -340,6 +369,7 @@ void sensorTask(void *pvParameters) {
       gps.encode(gpsSerial.read());
     updateFilteredSpeed();
     processCompassSensor();
+    processLightSensor();
     processFuelSensor();
     processTemperatureSensor();
     updateGPSOdometer();
@@ -355,6 +385,7 @@ void sensorTask(void *pvParameters) {
     if (nowSensor - lastVerySlowRead >= 1000) {
       lastVerySlowRead = nowSensor;
       processFuelConsumption();
+      updateAverageSpeed();
     }
     if (gps.date.isValid() && gps.time.isValid()) {
       struct tm t = {0};
@@ -404,6 +435,7 @@ void sensorTask(void *pvParameters) {
         g_sensorData.isGpsSpeedValid = true;
         g_sensorData.speedSourceMode = 1;
         g_sensorData.heading = 180.0f + 180.0f * sinf(t / 5000.0f);
+        ambientLightValue = 500 + (int)(2500.0f * (0.5f + 0.5f * sinf(t / 3000.0f)));
         g_sensorData.localHour = 10;
         g_sensorData.minute = (t / 1000) % 60;
         g_sensorData.day = 16;

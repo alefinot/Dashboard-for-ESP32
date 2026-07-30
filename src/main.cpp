@@ -14,6 +14,7 @@ volatile bool otaUpdateInProgress = false;
 
 bool pendingInvertDisplay = false;
 int pendingBacklightValue = -1;
+int currentBrightnessTarget = 0;
 
 void logPrintf(const char *fmt, ...) {
   char tmp[256];
@@ -87,6 +88,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(HALL_SENSOR_PIN), hallSensorISR,
                   FALLING);
   pinMode(FUEL_TOUCH_PIN, INPUT);
+  pinMode(LIGHT_SENSOR_PIN, INPUT);
 
   logPrintf("display.init() start\n");
   bool initOk = display.init();
@@ -96,19 +98,38 @@ void setup() {
 
   initFilesystem();
 
+  for (int i = 0; i < 5; i++) {
+    processLightSensor();
+    delay(5);
+  }
+  if (ENABLE_AUTO_BRIGHTNESS) {
+    int dVal = LIGHT_SENSOR_DARK_VAL;
+    int bVal = LIGHT_SENSOR_BRIGHT_VAL;
+    if (bVal != dVal) {
+      float t = (filteredAmbientValue - (float)dVal) / (float)(bVal - dVal);
+      t = constrain(t, 0.0f, 1.0f);
+      int pct = AUTO_BRIGHT_DARK + (int)((AUTO_BRIGHT_LIGHT - AUTO_BRIGHT_DARK) * t);
+      pct = constrain(pct, 0, 100);
+      currentBrightnessTarget = (pct * 255) / 100;
+    } else {
+      currentBrightnessTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+    }
+  } else {
+    currentBrightnessTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+  }
+  if (currentBrightnessTarget > 255) currentBrightnessTarget = 255;
+
   drawSplashBase();
   logPrintf("drawSplashBase done\n");
-  int fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
-  if (fadeTarget > 255) fadeTarget = 255;
-  logPrintf("splash fade: fadeTarget=%d BRIGHTNESS=%d\n", fadeTarget, BACKLIGHT_BRIGHTNESS);
-  int fadeStepCount = (fadeTarget / 8) + 1;
-  for (int level = 0; level <= fadeTarget; level += 8) {
+  logPrintf("splash fade: currentBrightnessTarget=%d\n", currentBrightnessTarget);
+  int fadeStepCount = (currentBrightnessTarget / 8) + 1;
+  for (int level = 0; level <= currentBrightnessTarget; level += 8) {
     ledcWrite(BACKLIGHT_CHANNEL, level);
     logPrintf("  fade step: level=%d\n", level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
-  ledcWrite(BACKLIGHT_CHANNEL, fadeTarget);
-  logPrintf("  fade final: value=%d\n", fadeTarget);
+  ledcWrite(BACKLIGHT_CHANNEL, currentBrightnessTarget);
+  logPrintf("  fade final: value=%d\n", currentBrightnessTarget);
   updateSplashProgress(20);
 
   gpsSerial.begin(115200, SERIAL_8N1, RXD2, TXD2);
@@ -136,10 +157,8 @@ void setup() {
   updateSplashProgress(100);
   delay(50);
 
-  fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
-  if (fadeTarget > 255) fadeTarget = 255;
-  fadeStepCount = (fadeTarget / 8) + 1;
-  for (int level = fadeTarget; level >= 0; level -= 8) {
+  fadeStepCount = (currentBrightnessTarget / 8) + 1;
+  for (int level = currentBrightnessTarget; level >= 0; level -= 8) {
     ledcWrite(BACKLIGHT_CHANNEL, level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
@@ -148,15 +167,13 @@ void setup() {
 
   SensorSnapshot emptySnap;
   updateBigDisplay(emptySnap);
-  fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
-  if (fadeTarget > 255) fadeTarget = 255;
-  fadeStepCount = (fadeTarget / 8) + 1;
-  for (int level = 0; level <= fadeTarget; level += 8) {
+  fadeStepCount = (currentBrightnessTarget / 8) + 1;
+  for (int level = 0; level <= currentBrightnessTarget; level += 8) {
     ledcWrite(BACKLIGHT_CHANNEL, level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
-  ledcWrite(BACKLIGHT_CHANNEL, fadeTarget);
-  logPrintf("post-fade confirm: ledcWrite(%d, %d)\n", BACKLIGHT_CHANNEL, fadeTarget);
+  ledcWrite(BACKLIGHT_CHANNEL, currentBrightnessTarget);
+  logPrintf("post-fade confirm: ledcWrite(%d, %d)\n", BACKLIGHT_CHANNEL, currentBrightnessTarget);
   g_startupTime = millis();
 
   xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore0", 10240, NULL, 2, NULL,
@@ -178,8 +195,37 @@ void loop() {
     pendingInvertDisplay = false;
   }
   if (pendingBacklightValue >= 0) {
-    ledcWrite(BACKLIGHT_CHANNEL, (pendingBacklightValue * 255) / 100);
+    currentBrightnessTarget = (pendingBacklightValue * 255) / 100;
+    ledcWrite(BACKLIGHT_CHANNEL, currentBrightnessTarget);
     pendingBacklightValue = -1;
+  }
+
+  if (ENABLE_AUTO_BRIGHTNESS) {
+    static int autoBrightTarget = -1;
+    static float autoBrightPwmF = -1.0f;
+    static unsigned long lastAutoBrightMs = 0;
+    unsigned long abNow = millis();
+    if (abNow - lastAutoBrightMs >= 500) {
+      lastAutoBrightMs = abNow;
+      int dVal = LIGHT_SENSOR_DARK_VAL;
+      int bVal = LIGHT_SENSOR_BRIGHT_VAL;
+      if (bVal != dVal) {
+        float t = (filteredAmbientValue - (float)dVal) / (float)(bVal - dVal);
+        t = constrain(t, 0.0f, 1.0f);
+        int pct = AUTO_BRIGHT_DARK + (int)((AUTO_BRIGHT_LIGHT - AUTO_BRIGHT_DARK) * t);
+        pct = constrain(pct, 0, 100);
+        autoBrightTarget = (pct * 255) / 100;
+        if (autoBrightPwmF < 0.0f) autoBrightPwmF = (float)autoBrightTarget;
+      }
+    }
+    if (autoBrightTarget >= 0) {
+      currentBrightnessTarget = autoBrightTarget;
+      float alpha = 1.0f - expf(-(float)DISPLAY_REFRESH_MS / (float)AUTO_BRIGHT_FADE_MS);
+      autoBrightPwmF += ((float)autoBrightTarget - autoBrightPwmF) * alpha;
+      if (abs(autoBrightTarget - (int)autoBrightPwmF) <= 1)
+        autoBrightPwmF = (float)autoBrightTarget;
+      ledcWrite(BACKLIGHT_CHANNEL, (int)autoBrightPwmF);
+    }
   }
 
   unsigned long now = millis();

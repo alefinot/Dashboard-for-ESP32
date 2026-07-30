@@ -13,8 +13,8 @@ static void measureDs15Cells(int *cells, int &totalW, int count, int decimalPos)
   for (int i = 0; i < count; i++) {
     char cb[2] = {(i == decimalPos) ? '.' : '8', 0};
     display.getTextBounds(cb, cumX, 0, &bx1, &by1, &bw, &bh);
-    cells[i] = cumX + bw;
-    cumX += bw + G;
+    cells[i] = cumX + bx1 + bw;
+    cumX += bx1 + bw + G;
   }
   totalW = cumX - G;
 }
@@ -283,7 +283,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
         speedNumY = BIG_CENTER_Y + OFFSET_BIG_SPEED_NUM_Y;
     static uint16_t w_speed3_max = 0, h_speed_max = 0;
     static int16_t refY1 = 0;
-    static int digitWidth[10] = {0}, digitXOff[10] = {0};
+    static int digitWidth[10] = {0}, digitXOff[10] = {0}, digitRightOff[10] = {0};
     static int spdCellR[MAX_CELLS] = {0};
     int spdCount = SPEED_DIGITS;
 
@@ -307,13 +307,18 @@ void updateBigDisplay(const SensorSnapshot &snap) {
           digitXOff[i] = sx1;
         }
         display.getTextBounds("0", 0, 0, &sx1, &refY1, &tw, &th);
+        int refW = digitWidth[8];
+        for (int i = 0; i < 10; i++) {
+          int diff = refW - digitWidth[i];
+          digitRightOff[i] = (diff > 10) ? diff / 5 : 0;
+        }
         constexpr int SG = 4;
         int cumX = 0;
         for (int i = 0; i < spdCount; i++) {
           char cb[2] = {'8', 0};
           display.getTextBounds(cb, cumX, 0, &sx1, &sy1, &tw, &th);
-          spdCellR[i] = cumX + tw;
-          cumX += tw + SG;
+          spdCellR[i] = cumX + sx1 + tw;
+          cumX += sx1 + tw + SG;
         }
         w_speed3_max = cumX - SG;
         h_speed_max = th;
@@ -341,7 +346,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       for (int i = 0; i < len; i++) {
         int d = speedStr[i] - '0';
         int cellIdx = (spdCount - len) + i;
-        int cx = spdCellR[cellIdx] + 4 - digitXOff[d] - digitWidth[d];
+        int cx = spdCellR[cellIdx] + 4 - digitXOff[d] - digitWidth[d] + digitRightOff[d];
         sp.setCursor(cx, 2 - refY1);
         sp.print(speedStr[i]);
       }
@@ -356,7 +361,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
         int d = speedStr2[i] - '0';
         int cellIdx = (spdCount - len2) + i;
         int cellRight = boxLeft + spdCellR[cellIdx];
-        int cx = cellRight - 2 - digitXOff[d] - digitWidth[d];
+        int cx = cellRight - 2 - digitXOff[d] - digitWidth[d] + digitRightOff[d];
         display.setCursor(cx, speedNumY - refY1);
         display.print(speedStr2[i]);
       }
@@ -922,21 +927,14 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     drawDebugBox(display, batX, batClearTop, w_bat_max, batClearH);
   }
 
+  // --- Instant KM/L ---
   float displayInstKml = displaySnap.instantKml;
-  float displayAvgKml = displaySnap.averageKml;
   static float lastDispInstKml = -1.0f;
-  static float lastDispAvgKml = -1.0f;
-
+  static unsigned long lastInstUpdate = 0;
   bool instChanged = fabsf(displayInstKml - lastDispInstKml) >= 0.1f;
-  bool avgChanged = fabsf(displayAvgKml - lastDispAvgKml) >= 0.1f;
-  static unsigned long lastInstAvgUpdate = 0;
-  unsigned long instAvgMs = (REFRESH_INST_MS == 0 || REFRESH_AVG_MS == 0)
-                                ? 0UL
-                                : (unsigned long)min(REFRESH_INST_MS, REFRESH_AVG_MS);
-  if ((instChanged || avgChanged) && (instAvgMs == 0 || now - lastInstAvgUpdate >= instAvgMs) || forceDraw) {
-    lastInstAvgUpdate = now;
-    if (instChanged) lastDispInstKml = displayInstKml;
-    if (avgChanged) lastDispAvgKml = displayAvgKml;
+  if ((instChanged || forceDraw) && (REFRESH_INST_MS == 0 || now - lastInstUpdate >= (unsigned long)REFRESH_INST_MS)) {
+    lastInstUpdate = now;
+    lastDispInstKml = displayInstKml;
     componentUpdated = true;
 
     int instCenterX = BIG_CENTER_X + OFFSET_INST_KML_X;
@@ -1034,18 +1032,32 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     if (SHOW_ELEMENT_BOUNDS)
       drawDebugBox(display, instNumAreaX - 2, instY - 20, currentInstWidth + 4,
                    24);
+  }
+
+  // --- Average KM/L ---
+  float displayAvgKml = displaySnap.averageKml;
+  static float lastDispAvgKml = -1.0f;
+  static unsigned long lastAvgUpdate = 0;
+  bool avgChanged = fabsf(displayAvgKml - lastDispAvgKml) >= 0.1f;
+  if ((avgChanged || forceDraw) && (REFRESH_AVG_MS == 0 || now - lastAvgUpdate >= (unsigned long)REFRESH_AVG_MS)) {
+    lastAvgUpdate = now;
+    lastDispAvgKml = displayAvgKml;
+    componentUpdated = true;
 
     int avgCenterX = BIG_CENTER_X + OFFSET_AVG_KML_X;
     int avgY = BIG_CENTER_Y + OFFSET_AVG_KML_Y;
 
     static uint16_t badgeW_avg = 0, badgeH_avg = 0;
     static int16_t badgeBx_avg = 0, badgeBy_avg = 0;
+    static uint16_t w_kml_unit_avg = 0;
     static bool avgLayoutInit = false;
 
     if (!avgLayoutInit) {
       avgLayoutInit = true;
       uint16_t bw, bh;
+      int16_t tl1, tl2;
       display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.getTextBounds("KM/L", 0, 0, &tl1, &tl2, &w_kml_unit_avg, &bh);
       display.getTextBounds("AVG", 0, 0, &badgeBx_avg, &badgeBy_avg, &bw, &bh);
       badgeW_avg = bw + 6;
       badgeH_avg = bh + 4;
@@ -1063,7 +1075,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     else
       snprintf(avgStr, sizeof(avgStr), "0.0");
 
-    uint16_t w_right_avg = (badgeW_avg > w_kml_unit) ? badgeW_avg : w_kml_unit;
+    uint16_t w_right_avg = (badgeW_avg > w_kml_unit_avg) ? badgeW_avg : w_kml_unit_avg;
     int currentAvgWidth = avgCellW + 4 + w_right_avg;
     int avgNumAreaX = applyAlign(avgCenterX, currentAvgWidth, ALIGN_AVG_KML);
 
@@ -1113,7 +1125,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setCursor(avgBadgeX + 3 - badgeBx_avg, avgBadgeY - badgeBy_avg + 2);
     display.print("AVG");
 
-    int kmlAvgX = rightColAvgX + (w_right_avg - w_kml_unit) / 2;
+    int kmlAvgX = rightColAvgX + (w_right_avg - w_kml_unit_avg) / 2;
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
     display.setTextColor(TFT_YELLOW);
     display.setCursor(kmlAvgX, avgY - 1);

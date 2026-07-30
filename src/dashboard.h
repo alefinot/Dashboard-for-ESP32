@@ -89,9 +89,10 @@ constexpr int HALL_SENSOR_PIN = 33;
 #define TXD2 26
 #define COMPASS_SDA 21
 #define COMPASS_SCL 22
-#define POWER_SENSE_PIN 34
+#define POWER_SENSE_PIN 4
 #define BATTERY_SENSE_PIN 35
 #define TEMP_SENSE_PIN 36
+#define LIGHT_SENSOR_PIN 34
 
 // ----------------------------------------------------------------------------
 // Alignment constants
@@ -219,7 +220,16 @@ extern bool DISPLAY_INVERT_COLORS;
 
 extern int TARGET_FPS;
 extern int BACKLIGHT_BRIGHTNESS;
+extern bool ENABLE_AUTO_BRIGHTNESS;
+extern int LIGHT_SENSOR_DARK_VAL;
+extern int LIGHT_SENSOR_BRIGHT_VAL;
+extern int AUTO_BRIGHT_DARK;
+extern int AUTO_BRIGHT_LIGHT;
+extern int AUTO_BRIGHT_FADE_MS;
+extern int ambientLightValue;
+extern float filteredAmbientValue;
 extern int FADE_DURATION_MS;
+extern int currentBrightnessTarget;
 
 extern int REFRESH_SPEED_MS;
 extern int REFRESH_SAT_MS;
@@ -347,6 +357,7 @@ extern volatile unsigned long hallPulseCount;
 extern double tripDistanceKm;
 extern float tripStartFuelLiters;
 extern float tripFuelConsumedLiters;
+extern unsigned long movingTimeMs;
 extern float instantKml;
 extern float averageKml;
 extern float averageSpeed;
@@ -430,8 +441,10 @@ bool initCompass();
 void processCompassSensor();
 void processBatterySensor();
 void processTemperatureSensor();
+void processLightSensor();
 void updateGPSOdometer();
 void processFuelConsumption();
+void updateAverageSpeed();
 void updateAccelTimer();
 void processFuelSensor();
 void sensorTask(void *pvParameters);

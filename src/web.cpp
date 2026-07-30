@@ -2,6 +2,8 @@
 #include <ArduinoOTA.h>
 #include <Update.h>
 #include <ESPmDNS.h>
+#include <esp_partition.h>
+#include <esp_ota_ops.h>
 
 Preferences preferences;
 WebServer server(80);
@@ -24,6 +26,7 @@ const char *index_html = R"rawliteral(
     --bg-card: rgba(16, 22, 34, 0.75);
     --bg-card-hover: rgba(23, 31, 48, 0.85);
     --bg-input: #121824;
+    --bg-tertiary: #0f1422;
     --border-color: rgba(255, 255, 255, 0.08);
     --border-focus: #00e5ff;
     --accent-cyan: #00e5ff;
@@ -640,16 +643,18 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 }
 
 .perf-bar {
-    height: 6px;
-    background: #1e293b;
-    border-radius: 3px;
+    height: 20px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
     margin-top: 6px;
     overflow: hidden;
+    display: flex;
+    padding: 0;
 }
 
 .perf-bar-fill {
     height: 100%;
-    border-radius: 3px;
+    border-radius: 4px;
     transition: width 0.8s ease, background 0.4s ease;
 }
 
@@ -1074,7 +1079,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
                     <span>CPU Usage</span><span class="perf-value"><strong id="cpu-pct">100.0</strong>%</span>
                 </div>
                 <div class="perf-bar">
-                    <div id="cpu-used-bar" class="perf-bar-fill" style="width: 100%; background: var(--accent-rose);"></div>
+                    <div id="cpu-used-bar" class="perf-bar-fill" style="width:100%;background:var(--accent-rose);border-radius:4px;"></div>
                 </div>
             </div>
         </div>
@@ -1083,15 +1088,16 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:flex;justify-content:space-between;">
                 <span>RAM Usage</span><span><strong id="mem-used" style="color:#fff;">118</strong> / <strong id="mem-total" style="color:#fff;">292</strong> KB (<strong id="mem-pct" style="color:#fff;">40.3</strong>%)</span>
             </div>
-            <div class="perf-bar" style="margin-bottom:8px;">
-                <div id="mem-used-bar" class="perf-bar-fill" style="width: 40%; background: var(--accent-emerald);"></div>
+            <div class="perf-bar" style="margin-bottom:14px;">
+                <div id="mem-used-bar" class="perf-bar-fill" style="width:40%;background:var(--accent-emerald);border-radius:4px;"></div>
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:flex;justify-content:space-between;">
-                <span>Flash Storage</span><span><strong id="fl-used" style="color:#fff;">2816</strong> / <strong id="fl-total" style="color:#fff;">4096</strong> KB (<strong id="fl-pct" style="color:#fff;">68.8</strong>%)</span>
+                <span>Flash Storage</span><span><strong id="fl-used" style="color:#fff;">--</strong> / <strong id="fl-total" style="color:#fff;">4096</strong> KB (<strong id="fl-pct" style="color:#fff;">--</strong>%)</span>
             </div>
-            <div class="perf-bar">
-                <div id="fl-used-bar" class="perf-bar-fill" style="width: 69%; background: var(--accent-blue);"></div>
+            <div class="perf-bar" style="margin-bottom:6px;">
+                <div id="fl-partitions-bar" style="display:flex;width:100%;height:100%;"></div>
             </div>
+            <div id="fl-legend" style="font-size:11px;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:2px 12px;margin-top:6px;"></div>
         </div>
         <div class="perf-card" style="grid-column:1/-1;">
             <h4>Serial Output Monitor</h4>
@@ -1190,6 +1196,7 @@ const configMap = [
             { type: "subtitle", label: "Brightness Control" },
             { id: "BACKLIGHT_BRIGHTNESS", label: "Backlight Brightness", type: "range", min: 0, max: 100, step: 1 },
             { id: "FADE_DURATION_MS", label: "Fade Duration", type: "range", min: 100, max: 5000, step: 100, unit: "ms" },
+            { id: "ENABLE_AUTO_BRIGHTNESS", label: "Enable Auto Brightness" },
             { id: "ENABLE_NIGHT_MODE", label: "Enable Night Mode" },
             { id: "NIGHT_MODE_START_HOUR", label: "Start Time", unit: "Hour" },
             { id: "NIGHT_MODE_END_HOUR", label: "End Time", unit: "Hour" },
@@ -1211,6 +1218,18 @@ const configMap = [
         title: "Sensors Tuning", icon: iconSVG.sensors,
         items: [
             { type: "touch-table", label: "Fuel Level Mapping Table", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable" },
+            { type: "card_header", label: "Auto Brightness Sensor", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="ambient-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span>
+        <div style="display:flex;gap:6px;">
+            <button onclick="calibrateDark()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Capture Dark</button>
+            <button onclick="calibrateBright()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Capture Bright</button>
+        </div>
+    </div>` },
+            { id: "LIGHT_SENSOR_DARK_VAL", label: "Dark Value (ADC)", type: "number" },
+            { id: "LIGHT_SENSOR_BRIGHT_VAL", label: "Bright Value (ADC)", type: "number" },
+            { id: "AUTO_BRIGHT_DARK", label: "Brightness When Dark", type: "range", min: 0, max: 100, step: 1 },
+            { id: "AUTO_BRIGHT_LIGHT", label: "Brightness When Bright", type: "range", min: 0, max: 100, step: 1 },
+            { id: "AUTO_BRIGHT_FADE_MS", label: "Transition Speed", type: "range", min: 100, max: 5000, step: 100, unit: "ms" },
             { type: "subtitle", label: "Temperature Sensor" },
             { id: "NTC_R_BALANCE", label: "NTC Balance Resistor", unit: "Ohms" },
             { id: "NTC_BETA", label: "NTC Beta Value" },
@@ -1327,7 +1346,9 @@ document.addEventListener('DOMContentLoaded', function() {
             WIFI_TX_POWER_DBM: 20, WIFI_SSID: "Xiaomi 15", WIFI_PASSWORD: "••••••••", WIFI_SSID_1: "D-Link-627F3B", WIFI_PASSWORD_1: "••••••••",
             WIFI_SSID_2: "TP-Link_F3EB", WIFI_PASSWORD_2: "••••••••", WIFI_SSID_3: "", WIFI_PASSWORD_3: "", WIFI_SSID_4: "", WIFI_PASSWORD_4: "",
             SHUTDOWN_TIME_MS: 3000, DISPLAY_ROTATION: 3, DISPLAY_WIDTH: 480, DISPLAY_HEIGHT: 320, SPI_BUS_SPEED: 60000000, DISPLAY_INVERT_COLORS: false,
-            ENABLE_ANTIALIASING: true, AA_SHARPNESS: 0.2, BACKLIGHT_BRIGHTNESS: 100, FADE_DURATION_MS: 700, ENABLE_NIGHT_MODE: false,
+            ENABLE_ANTIALIASING: true, AA_SHARPNESS: 0.2, BACKLIGHT_BRIGHTNESS: 100, ENABLE_AUTO_BRIGHTNESS: false,
+            LIGHT_SENSOR_DARK_VAL: 500, LIGHT_SENSOR_BRIGHT_VAL: 3000, AUTO_BRIGHT_DARK: 10, AUTO_BRIGHT_LIGHT: 100, AUTO_BRIGHT_FADE_MS: 1000,
+            ambientLightValue: 2048, FADE_DURATION_MS: 700, ENABLE_NIGHT_MODE: false,
             NIGHT_MODE_START_HOUR: 23, NIGHT_MODE_END_HOUR: 0, COLOR_TEMP_NORM: "#00ffff", TEMP_BAR_MIN: 10, COLOR_TEMP_WARN: "#ff8c00",
             TEMP_WARN_YEL: 45, COLOR_TEMP_CRIT: "#ff0000", TEMP_WARN_RED: 90, TEMP_BAR_MAX: 110, COLOR_FUEL_NORM: "#00ff00", COLOR_FUEL_WARN: "#ffff00",
             FUEL_WARN_YEL: 45, COLOR_FUEL_CRIT: "#ff0000", FUEL_WARN_RED: 20, GHOST_COLOR_STR: "#6b6b6b", FUEL_TOUCH_POINTS: 8,
@@ -1348,6 +1369,8 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     syncTime();
+    pollAmbient();
+    setInterval(pollAmbient, 2000);
 
     fetch('/api/perf').then(r => r.json()).then(perf => {
         let ipEl = document.getElementById('ip-info');
@@ -1385,6 +1408,7 @@ function renderForm(d) {
                 hasItems = true;
                 closeSubCard();
                 groupHtml += `<div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">${item.label}</h4><div style="display:flex;flex-direction:column;gap:6px;">`;
+                if (item.content) groupHtml += item.content;
                 inCardSubCard = true;
             } else if (iType === 'section_header' || iType === 'heading') {
                 hasItems = true;
@@ -1700,6 +1724,33 @@ function sendConfigToDevice(jsonPayload, startMsg, successMsg) {
     });
 }
 
+function calibrateDark() {
+    fetch('/api/ambient/cal-dark', {method:'POST'}).then(r => r.json()).then(d => {
+        let el = document.getElementById('LIGHT_SENSOR_DARK_VAL');
+        if (el) el.value = d.value;
+        let msg = document.getElementById('msg');
+        msg.className = 'msg-success'; msg.innerText = 'Dark calibration saved: ' + d.value;
+        setTimeout(() => save(), 100);
+    }).catch(() => {});
+}
+
+function calibrateBright() {
+    fetch('/api/ambient/cal-bright', {method:'POST'}).then(r => r.json()).then(d => {
+        let el = document.getElementById('LIGHT_SENSOR_BRIGHT_VAL');
+        if (el) el.value = d.value;
+        let msg = document.getElementById('msg');
+        msg.className = 'msg-success'; msg.innerText = 'Bright calibration saved: ' + d.value;
+        setTimeout(() => save(), 100);
+    }).catch(() => {});
+}
+
+function pollAmbient() {
+    fetch('/api/ambient').then(r => r.json()).then(d => {
+        let el = document.getElementById('ambient-reading');
+        if (el) el.textContent = d.raw;
+    }).catch(() => {});
+}
+
 let serialPollTimer = null;
 let serialHasData = false;
 
@@ -1840,13 +1891,35 @@ function updatePerf() {
         set('mem-total', (d.heap_size / 1024).toFixed(0));
         set('mem-pct', rPct.toFixed(1));
 
-        let flUsed = d.flash_total - d.flash_free;
-        let flPct = d.flash_total > 0 ? (flUsed / d.flash_total * 100) : 0;
-        let flBar = document.getElementById('fl-used-bar');
-        if (flBar) flBar.style.width = flPct.toFixed(0) + '%';
+        let flTotal = d.flash_total;
+        let flUsed = d.flash_used || 0;
+        let flPct = flTotal > 0 ? (flUsed / flTotal * 100) : 0;
         set('fl-used', (flUsed / 1024).toFixed(0));
-        set('fl-total', (d.flash_total / 1024).toFixed(0));
+        set('fl-total', (flTotal / 1024).toFixed(0));
         set('fl-pct', flPct.toFixed(1));
+        let partBar = document.getElementById('fl-partitions-bar');
+        let legend = document.getElementById('fl-legend');
+        if (partBar && d.partitions && d.partitions.length) {
+            let colors = ['#a855f7','#f59e0b','#06b6d4','#3b82f6','#10b981'];
+            let usedTotal = 0, barHtml = '', legendHtml = '';
+            d.partitions.forEach((p, i) => {
+                let used = p.used !== undefined ? p.used : 0;
+                if (used <= 0) return;
+                let color = colors[i % colors.length];
+                let pct = flTotal > 0 ? (used / flTotal * 100) : 0;
+                usedTotal += used;
+                barHtml += '<div style="width:' + pct.toFixed(2) + '%;background:' + color + ';height:100%;min-width:2px;" title="' + p.label + ': ' + (used/1024).toFixed(0) + 'KB"></div>';
+                let info = p.label + ' ' + (used/1024).toFixed(0) + 'KB (' + pct.toFixed(1) + '%)';
+                legendHtml += '<span style="display:inline-flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:2px;background:' + color + ';display:inline-block;"></span>' + info + '</span>';
+            });
+            let freePct = flTotal > usedTotal ? ((flTotal - usedTotal) / flTotal * 100) : 0;
+            if (freePct > 0) {
+                barHtml += '<div style="flex:1;background:var(--bg-tertiary);height:100%;" title="Free: ' + ((flTotal - usedTotal)/1024).toFixed(0) + 'KB"></div>';
+                legendHtml += '<span style="display:inline-flex;align-items:center;gap:3px;color:var(--text-dim);"><span style="width:8px;height:8px;border-radius:2px;background:var(--bg-tertiary);border:1px solid rgba(255,255,255,0.1);display:inline-block;"></span>free ' + ((flTotal - usedTotal)/1024).toFixed(0) + 'KB (' + freePct.toFixed(1) + '%)</span>';
+            }
+            partBar.innerHTML = barHtml;
+            if (legend) legend.innerHTML = legendHtml;
+        }
 
         set('p-fps-cur', d.fps_current.toFixed(1));
         set('p-fps-avg', d.fps_average.toFixed(1));
@@ -1972,6 +2045,7 @@ void webServerTask(void *pvParameters) {
   server.on("/api/config", HTTP_GET, []() {
     JsonDocument doc;
     processConfig(1, &doc);
+    doc["ambientLightValue"] = ambientLightValue;
     String out;
     serializeJson(doc, out);
     server.send(200, "application/json", out);
@@ -1997,7 +2071,8 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", "{\"status\":\"ok\"}");
     forceFullRedraw = true;
     pendingInvertDisplay = true;
-    pendingBacklightValue = BACKLIGHT_BRIGHTNESS;
+    if (!ENABLE_AUTO_BRIGHTNESS)
+      pendingBacklightValue = BACKLIGHT_BRIGHTNESS;
   });
 
   server.on("/api/time", HTTP_POST, []() {
@@ -2043,6 +2118,27 @@ void webServerTask(void *pvParameters) {
     logPrintf("Factory reset, rebooting\n");
 
     pendingReboot = true;
+  });
+
+  server.on("/api/ambient", HTTP_GET, []() {
+    server.send(200, "application/json",
+                "{\"raw\":" + String(ambientLightValue) + "}");
+  });
+
+  server.on("/api/ambient/cal-dark", HTTP_POST, []() {
+    LIGHT_SENSOR_DARK_VAL = ambientLightValue;
+    { Preferences p; p.begin("cfg", false);
+      p.putInt("LIGHT_DARK", LIGHT_SENSOR_DARK_VAL); p.end(); }
+    server.send(200, "application/json",
+                "{\"status\":\"ok\",\"value\":" + String(LIGHT_SENSOR_DARK_VAL) + "}");
+  });
+
+  server.on("/api/ambient/cal-bright", HTTP_POST, []() {
+    LIGHT_SENSOR_BRIGHT_VAL = ambientLightValue;
+    { Preferences p; p.begin("cfg", false);
+      p.putInt("LIGHT_BRIGHT", LIGHT_SENSOR_BRIGHT_VAL); p.end(); }
+    server.send(200, "application/json",
+                "{\"status\":\"ok\",\"value\":" + String(LIGHT_SENSOR_BRIGHT_VAL) + "}");
   });
 
   server.on("/api/ota", HTTP_POST, []() {
@@ -2120,6 +2216,37 @@ void webServerTask(void *pvParameters) {
     doc["psram_free"] = ESP.getFreePsram();
     doc["flash_total"] = ESP.getFlashChipSize();
     doc["flash_free"] = ESP.getFreeSketchSpace();
+
+    {
+      JsonArray parts = doc["partitions"].to<JsonArray>();
+      const char *knownLabels[] = {"nvs","otadata","app0","app1","spiffs"};
+      esp_partition_type_t knownTypes[] = {ESP_PARTITION_TYPE_DATA,ESP_PARTITION_TYPE_DATA,ESP_PARTITION_TYPE_APP,ESP_PARTITION_TYPE_APP,ESP_PARTITION_TYPE_DATA};
+      esp_partition_subtype_t knownSubtypes[] = {ESP_PARTITION_SUBTYPE_DATA_NVS,ESP_PARTITION_SUBTYPE_DATA_OTA,ESP_PARTITION_SUBTYPE_APP_OTA_0,ESP_PARTITION_SUBTYPE_APP_OTA_1,ESP_PARTITION_SUBTYPE_DATA_SPIFFS};
+      uint32_t flashUsed = 0;
+      const esp_partition_t *running = esp_ota_get_running_partition();
+      for (int i = 0; i < 5; i++) {
+        const esp_partition_t *p = esp_partition_find_first(knownTypes[i], knownSubtypes[i], knownLabels[i]);
+        if (p) {
+          JsonObject part = parts.add<JsonObject>();
+          part["label"] = p->label;
+          part["type"] = (int)p->type;
+          part["subtype"] = (int)p->subtype;
+          part["size"] = p->size;
+          part["addr"] = p->address;
+          if (strcmp(p->label, "spiffs") == 0) {
+            uint32_t u = LittleFS.usedBytes();
+            part["used"] = u;
+            flashUsed += u;
+          } else if (p == running) {
+            part["used"] = p->size;
+            flashUsed += p->size;
+          } else {
+            part["used"] = 0;
+          }
+        }
+      }
+      doc["flash_used"] = flashUsed;
+    }
     doc["fps_current"] = currentMeasuredFps;
     doc["fps_average"] = currentAverageFps;
     doc["fps_target"] = TARGET_FPS;
@@ -2136,6 +2263,7 @@ void webServerTask(void *pvParameters) {
         doc["lan_ip"] = "";
       }
     }
+    doc["ambient_light"] = ambientLightValue;
     doc["resolution"] = String(DISPLAY_WIDTH) + "x" + String(DISPLAY_HEIGHT);
 
     String out;
