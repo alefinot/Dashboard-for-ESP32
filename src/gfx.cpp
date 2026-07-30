@@ -1,71 +1,5 @@
 #include "dashboard.h"
-
-// ----------------------------------------------------------------------------
-// Text bounds helper (custom glyph metrics for the loaded GFXfonts)
-// ----------------------------------------------------------------------------
-inline void calculateTextBounds(const GFXfont *font, const char *str, int16_t x,
-                                int16_t y, int16_t *x1, int16_t *y1,
-                                uint16_t *w, uint16_t *h) {
-  if (!font || !str || !*str) {
-    *x1 = 0;
-    *y1 = 0;
-    *w = 0;
-    *h = 0;
-    return;
-  }
-
-  int16_t minx = 32767, miny = 32767, maxx = -32768, maxy = -32768;
-  int16_t cursor_x = x, cursor_y = y;
-  const uint8_t first = font->first;
-  const uint8_t last = font->last;
-
-  char c;
-  while ((c = *str++)) {
-    if (c == '\n') {
-      cursor_x = x;
-      cursor_y += (int16_t)font->yAdvance;
-    } else if (c != '\r') {
-      uint8_t uc = (uint8_t)c;
-      if (uc >= first && uc <= last) {
-        const GFXglyph *glyph = &(font->glyph[uc - first]);
-        const uint8_t gw = glyph->width;
-        const uint8_t gh = glyph->height;
-
-        if (gw && gh) {
-          int16_t gx1 = cursor_x + glyph->xOffset;
-          int16_t gy1 = cursor_y + glyph->yOffset;
-          int16_t gx2 = gx1 + gw - 1;
-          int16_t gy2 = gy1 + gh - 1;
-
-          if (gx1 < minx)
-            minx = gx1;
-          if (gy1 < miny)
-            miny = gy1;
-          if (gx2 > maxx)
-            maxx = gx2;
-          if (gy2 > maxy)
-            maxy = gy2;
-        }
-        cursor_x += glyph->xAdvance;
-      }
-    }
-  }
-
-  if (maxx >= minx) {
-    *x1 = minx - x;
-    *w = maxx - minx + 1;
-  } else {
-    *x1 = 0;
-    *w = 0;
-  }
-  if (maxy >= miny) {
-    *y1 = miny - y;
-    *h = maxy - miny + 1;
-  } else {
-    *y1 = 0;
-    *h = 0;
-  }
-}
+#include <vector>
 
 // ----------------------------------------------------------------------------
 // Display device (ILI9488 4-inch TFT)
@@ -109,23 +43,64 @@ void LGFX_ST7789_4::applyBusConfig() {
   _bus_instance.config(cfg);
 }
 
-void LGFX_ST7789_4::setFont(const GFXfont *f) {
-  _currentGfxFont = f;
-  lgfx::LGFX_Device::setFont(f);
-  lgfx::LGFX_Device::setTextDatum(lgfx::textdatum_t::baseline_left);
+#include "DS_DIGIT50pt7b.h"
+#include "DS_DIGIT15pt7b.h"
+#include "Conthrax_SemiBold12pt7b.h"
+#include "Conthrax_SemiBold7pt7b.h"
+#include "Conthrax_SemiBold4pt7b.h"
+
+VFontData getVLWData120() {
+  static std::vector<uint8_t> buf;
+  if (buf.empty()) {
+    fs::File f = LittleFS.open("/Fonts/DS-DIGIT_120px.vlw", "r");
+    if (f) {
+      buf.resize(f.size());
+      f.read(buf.data(), buf.size());
+      f.close();
+    }
+  }
+  return { buf.empty() ? nullptr : buf.data(), buf.size() };
+}
+
+void LGFX_ST7789_4::loadVLWFont(const char *path) {
+  setTextDatum(lgfx::textdatum_t::baseline_left);
+
+  bool is120  = (path[7] == 'D' && path[16] == '1');
+  bool isDs28 = (path[7] == 'D' && path[16] == '2');
+  bool isCon28 = (path[7] == 'C' && path[25] == '2');
+  bool isCon16 = (path[7] == 'C' && path[26] == '6');
+
+  static int lastFont = -1;
+  int cur = is120 ? 0 : isDs28 ? 1 : isCon28 ? 2 : isCon16 ? 3 : 4;
+  if (cur == lastFont) return;
+  lastFont = cur;
+
+  if (is120) {
+    auto vfd = getVLWData120();
+    if (vfd.data) {
+      if (!loadFont(vfd.data, lgfx::v1::IFont::font_type_t::ft_vlw))
+        logPrintf("Font load failed (parse): %s\n", path);
+    } else {
+      logPrintf("Font load failed (open): %s\n", path);
+    }
+  } else if (isDs28) {
+    setFont(&DS_DIGIT15pt7b);
+  } else if (isCon28) {
+    setFont(&Conthrax_SemiBold12pt7b);
+  } else if (isCon16) {
+    setFont(&Conthrax_SemiBold7pt7b);
+  } else {
+    setFont(&Conthrax_SemiBold4pt7b);
+  }
 }
 
 void LGFX_ST7789_4::getTextBounds(const char *string, int16_t x, int16_t y,
                                 int16_t *x1, int16_t *y1, uint16_t *w,
                                 uint16_t *h) {
-  if (_currentGfxFont) {
-    calculateTextBounds(_currentGfxFont, string, x, y, x1, y1, w, h);
-  } else {
-    *x1 = 0;
-    *y1 = 0;
-    *w = textWidth(string);
-    *h = fontHeight();
-  }
+  *x1 = 0;
+  *y1 = -_font_metrics.baseline;
+  *w = textWidth(string);
+  *h = fontHeight();
 }
 
 void LGFX_ST7789_4::getTextBounds(const String &str, int16_t x, int16_t y,
@@ -140,36 +115,31 @@ LGFX_ST7789_4 display;
 // Color blending helpers
 // ----------------------------------------------------------------------------
 uint16_t blendColor(uint16_t fg, uint16_t bg, float alpha) {
-  if (alpha <= 0.02f)
-    return bg;
-  if (alpha >= 0.98f)
-    return fg;
-
-  uint8_t fg_r = (fg >> 11) & 0x1F;
-  uint8_t fg_g = (fg >> 5) & 0x3F;
-  uint8_t fg_b = fg & 0x1F;
-
-  uint8_t bg_r = (bg >> 11) & 0x1F;
-  uint8_t bg_g = (bg >> 5) & 0x3F;
-  uint8_t bg_b = bg & 0x1F;
-
-  uint8_t r = (uint8_t)(bg_r + (fg_r - bg_r) * alpha);
-  uint8_t g = (uint8_t)(bg_g + (fg_g - bg_g) * alpha);
-  uint8_t b = (uint8_t)(bg_b + (fg_b - bg_b) * alpha);
-  return (r << 11) | (g << 5) | b;
+  if (alpha <= 0.02f) return bg;
+  if (alpha >= 0.98f) return fg;
+  // Fast integer blend: alpha as 8-bit fraction
+  uint32_t a = (uint32_t)(alpha * 256.0f);
+  if (a > 255) a = 255;
+  uint32_t ia = 256 - a;
+  uint32_t fg32 = fg, bg32 = bg;
+  uint32_t r = ((bg32 & 0xF800) * ia + (fg32 & 0xF800) * a) >> 8;
+  uint32_t g = ((bg32 & 0x07E0) * ia + (fg32 & 0x07E0) * a) >> 8;
+  uint32_t b = ((bg32 & 0x001F) * ia + (fg32 & 0x001F) * a) >> 8;
+  return (uint16_t)((r & 0xF800) | (g & 0x07E0) | (b & 0x001F));
 }
 
 uint16_t blendColorLinear(uint16_t c1, uint16_t c2, float t) {
-  if (t <= 0.0f)
-    return c1;
-  if (t >= 1.0f)
-    return c2;
-  uint8_t r1 = (c1 >> 11) & 0x1F, g1 = (c1 >> 5) & 0x3F, b1 = c1 & 0x1F;
-  uint8_t r2 = (c2 >> 11) & 0x1F, g2 = (c2 >> 5) & 0x3F, b2 = c2 & 0x1F;
-  uint8_t r = (uint8_t)(r1 + (r2 - r1) * t);
-  uint8_t g = (uint8_t)(g1 + (g2 - g1) * t);
-  uint8_t b = (uint8_t)(b1 + (b2 - b1) * t);
-  return (r << 11) | (g << 5) | b;
+  if (t <= 0.0f) return c1;
+  if (t >= 1.0f) return c2;
+  // Fast integer blend using 8-bit fraction
+  uint32_t a = (uint32_t)(t * 256.0f);
+  if (a > 255) a = 255;
+  uint32_t ia = 256 - a;
+  uint32_t c1_32 = c1, c2_32 = c2;
+  uint32_t r = ((c1_32 & 0xF800) * ia + (c2_32 & 0xF800) * a) >> 8;
+  uint32_t g = ((c1_32 & 0x07E0) * ia + (c2_32 & 0x07E0) * a) >> 8;
+  uint32_t b = ((c1_32 & 0x001F) * ia + (c2_32 & 0x001F) * a) >> 8;
+  return (uint16_t)((r & 0xF800) | (g & 0x07E0) | (b & 0x001F));
 }
 
 uint16_t blendColorWithBlack(uint16_t color, float alpha) {
@@ -186,10 +156,11 @@ void drawAALine(T &disp, float x0, float y0, float x1, float y1,
     disp.drawLine((int)roundf(x0), (int)roundf(y0), (int)roundf(x1), (int)roundf(y1), color);
     return;
   }
+  const float aaSh = AA_SHARPNESS;
   auto plot = [&](int x, int y, float c) {
     if (c <= 0.0f)
       return;
-    c = powf(c, AA_SHARPNESS);
+    if (aaSh != 1.0f) c = powf(c, aaSh);
     uint16_t aaColor = blendColorWithBlack(color, c);
     disp.drawPixel(x, y, aaColor);
   };
@@ -253,11 +224,12 @@ void drawAACircle(T &disp, int cx, int cy, int r, uint16_t color) {
   }
   if (r <= 0)
     return;
+  const float aaSh = AA_SHARPNESS;
   int x = r, y = 0;
   auto plot8 = [&](int px, int py, float alpha) {
     if (alpha <= 0.0f)
       return;
-    alpha = powf(alpha, AA_SHARPNESS);
+    if (aaSh != 1.0f) alpha = powf(alpha, aaSh);
     uint16_t c = blendColorWithBlack(color, alpha);
     disp.drawPixel(cx + px, cy + py, c);
     disp.drawPixel(cx - px, cy + py, c);
@@ -285,13 +257,14 @@ void drawAACornerArc(T &disp, int cx, int cy, int r, uint8_t corner,
                      uint16_t color) {
   if (r <= 0)
     return;
+  const float aaSh = AA_SHARPNESS;
   int x = r, y = 0;
   int signX = (corner == 0 || corner == 1) ? 1 : -1;
   int signY = (corner == 1 || corner == 2) ? 1 : -1;
   auto plotCorner = [&](int px, int py, float alpha) {
     if (alpha <= 0.0f)
       return;
-    alpha = powf(alpha, AA_SHARPNESS);
+    if (aaSh != 1.0f) alpha = powf(alpha, aaSh);
     uint16_t c = blendColorWithBlack(color, alpha);
     disp.drawPixel(cx + signX * px, cy + signY * py, c);
     if (px != py)
@@ -358,6 +331,7 @@ void fillAARoundRect(T &disp, int x, int y, int w, int h, int r, uint16_t color,
   disp.fillRect(x + r, y, w - 2 * r, h, color);
   disp.fillRect(x, y + r, r, h - 2 * r, color);
   disp.fillRect(x + w - r, y + r, r, h - 2 * r, color);
+  const float aaSh = AA_SHARPNESS;
   auto fillCornerSquare = [&](int cx, int cy, int signX, int signY,
                               uint16_t bgColor) {
     for (int py = 0; py <= r; py++) {
@@ -366,7 +340,7 @@ void fillAARoundRect(T &disp, int x, int y, int w, int h, int r, uint16_t color,
       float T_val = (float)px - x_exact;
       if (T_val < 1.0f) {
         float aa = 1.0f - T_val;
-        aa = powf(aa, AA_SHARPNESS);
+        if (aaSh != 1.0f) aa = powf(aa, aaSh);
         uint16_t c1 = blendColor(color, bgColor, aa);
         disp.drawPixel(cx + signX * px, cy + signY * py, c1);
       }
@@ -455,6 +429,13 @@ void drawClockIcon(int x, int y, uint16_t color) {
   drawAALine(display, (float)(x + 8), (float)(y + 8), (float)(x + 12), (float)(y + 8), color);
 }
 
+void drawStopwatchIcon(int x, int y, uint16_t color) {
+  display.fillRect(x + 6, y, 4, 2, color);
+  display.fillRect(x + 7, y - 1, 2, 1, color);
+  drawAACircle(display, x + 8, y + 8, 7, color);
+  drawAALine(display, (float)(x + 8), (float)(y + 8), (float)(x + 12), (float)(y + 4), color);
+}
+
 void drawLocationIcon(int x, int y, uint16_t color) {
   int cx = x + 8, cy = y + 5, r = 6;
   int px = r, py = 0;
@@ -531,14 +512,14 @@ void drawSplashBase() {
   splashCurrentProgress = 0;
   display.startWrite();
   display.fillScreen(TFT_BLACK);
-  display.setFont(&Conthrax_SemiBold12pt7b);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
   display.setTextColor(TFT_WHITE);
   int16_t x1, y1;
   uint16_t w, h;
   display.getTextBounds("DASHBOARD++", 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 120 - y1);
   display.print("DASHBOARD++");
-  display.setFont(&Conthrax_SemiBold7pt7b);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
   display.setTextColor(TFT_WHITE);
   display.getTextBounds(SPLASH_SIGNATURE.c_str(), 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 185 - y1);
@@ -596,12 +577,12 @@ void showGoodbyeScreen(bool isSleep) {
   String title = isSleep ? "SEE YOU SOON" : "REBOOTING...";
 
   display.startWrite();
-  display.setFont(&Conthrax_SemiBold12pt7b);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
   display.setTextColor(TFT_WHITE);
   display.getTextBounds(title.c_str(), 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 120 - y1);
   display.print(title);
-  display.setFont(&Conthrax_SemiBold7pt7b);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
   display.setTextColor(TFT_WHITE);
   display.getTextBounds(REBOOT_SIGNATURE.c_str(), 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 185 - y1);
@@ -703,13 +684,13 @@ void showUpdatingScreen() {
   display.fillScreen(TFT_BLACK);
 
   String title = "UPDATING...";
-  display.setFont(&Conthrax_SemiBold12pt7b);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
   display.setTextColor(TFT_WHITE);
   display.getTextBounds(title.c_str(), 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 120 - y1);
   display.print(title);
 
-  display.setFont(&Conthrax_SemiBold7pt7b);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
   display.setTextColor(TFT_WHITE);
   String msg = "DO NOT TURN OFF THE DEVICE";
   display.getTextBounds(msg.c_str(), 0, 0, &x1, &y1, &w, &h);
@@ -734,6 +715,20 @@ void updateOTAProgress(int progress, int total) {
   if (targetW > 260) targetW = 260;
   if (targetW > otaProgressTarget)
     otaProgressTarget = targetW;
+}
+
+// ----------------------------------------------------------------------------
+// Filesystem (SPIFFS) initialization
+// ----------------------------------------------------------------------------
+void initFilesystem() {
+  if (!LittleFS.begin(false)) {
+    logPrintf("LittleFS mount failed, formatting...\n");
+    if (!LittleFS.begin(true)) {
+      logPrintf("LittleFS format+re-mount failed!\n");
+      return;
+    }
+  }
+  logPrintf("LittleFS mounted OK\n");
 }
 
 // ----------------------------------------------------------------------------
@@ -765,6 +760,7 @@ void drawFpsOverlay() {
     lastAnchorY = anchorY;
     lastBoxW = 0;
   }
+
   if (!showFpsCounter)
     return;
   char fpsBuf[48];
@@ -776,7 +772,7 @@ void drawFpsOverlay() {
     lastDrawnAvgFpsBig = currentAverageFps;
     lastStateBig = true;
     display.startWrite();
-    display.setFont(&Conthrax_SemiBold4pt7b);
+    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
     display.setTextColor(TFT_GREEN);
     int16_t tx1, ty1;
     uint16_t tw, th;

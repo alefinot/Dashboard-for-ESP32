@@ -40,11 +40,23 @@ void setup() {
   delay(50);
 
   processConfig(0);
+  // Upgrade NVS defaults on first boot with optimized firmware
+  {
+    Preferences pref;
+    pref.begin("cfg", false);
+    if (!pref.isKey("CFG_VER")) {
+      SPI_BUS_SPEED = 60000000;
+      TARGET_FPS = 60;
+      ENABLE_DYNAMIC_CPU = false;
+      pref.putInt("SPI_FREQ", SPI_BUS_SPEED);
+      pref.putInt("TGT_FPS", TARGET_FPS);
+      pref.putBool("DYN_CPU", ENABLE_DYNAMIC_CPU);
+      pref.putInt("CFG_VER", 1);
+    }
+    pref.end();
+  }
   recalculateDerivedParams();
 
-  // Apply SPI bus speed (loaded from NVS above) to the display bus before init.
-  // The global display constructor already captured the default; this re-applies
-  // the user-configured SPI_BUS_SPEED so the web UI setting actually takes effect.
   display.applyBusConfig();
 
   if (!ENABLE_DYNAMIC_CPU) {
@@ -81,6 +93,9 @@ void setup() {
   logPrintf("display.init() done ok=%d\n", (int)initOk);
   display.setRotation(DISPLAY_ROTATION);
   logPrintf("setRotation done\n");
+
+  initFilesystem();
+
   drawSplashBase();
   logPrintf("drawSplashBase done\n");
   int fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
@@ -120,6 +135,7 @@ void setup() {
   }
   updateSplashProgress(100);
   delay(50);
+
   fadeTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
   if (fadeTarget > 255) fadeTarget = 255;
   fadeStepCount = (fadeTarget / 8) + 1;
@@ -280,15 +296,32 @@ void loop() {
     uint32_t targetFreq;
     float cpuTemp = temperatureRead();
     if (ENABLE_DYNAMIC_CPU) {
-      // Stay at 240 MHz for first 5s after boot to let WiFi AP init
-      if (now < 5000)
+      // Hysteresis-based scaling to prevent frequency oscillation.
+      // Each state uses different up/down thresholds.
+      static int lastCpuFreq = 240;
+      if (now < 5000) {
         targetFreq = 240;
-      else if (currentAverageFps < (TARGET_FPS * 0.5f))
-        targetFreq = 240;
-      else if (currentAverageFps < (TARGET_FPS * 0.8f))
-        targetFreq = 160;
-      else
-        targetFreq = 80;
+      } else if (lastCpuFreq == 240) {
+        if (currentAverageFps > (TARGET_FPS * 0.85f))
+          targetFreq = 160;
+        else
+          targetFreq = 240;
+      } else if (lastCpuFreq == 160) {
+        if (currentAverageFps < (TARGET_FPS * 0.65f))
+          targetFreq = 240;
+        else if (currentAverageFps > (TARGET_FPS * 0.95f))
+          targetFreq = 80;
+        else
+          targetFreq = 160;
+      } else {
+        if (currentAverageFps < (TARGET_FPS * 0.45f))
+          targetFreq = 240;
+        else if (currentAverageFps < (TARGET_FPS * 0.70f))
+          targetFreq = 160;
+        else
+          targetFreq = 80;
+      }
+      lastCpuFreq = targetFreq;
 
       // Thermal throttling: cap frequency based on die temperature
       if (ENABLE_CPU_THROTTLE) {

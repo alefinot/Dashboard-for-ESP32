@@ -2,10 +2,13 @@
 #define DASHBOARD_H
 
 #include <Arduino.h>
+#include <LittleFS.h>
+
 #include <esp32-hal-ledc.h>
 #include <SPI.h>
 #include <algorithm>
 #include <utility>
+#include <vector>
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
@@ -22,12 +25,6 @@
 #include <ArduinoJson.h>
 #include <WebServer.h>
 #include <WiFi.h>
-
-#include "Conthrax_SemiBold12pt7b.h"
-#include "Conthrax_SemiBold4pt7b.h"
-#include "Conthrax_SemiBold7pt7b.h"
-#include "DS_DIGIT15pt7b.h"
-#include "DS_DIGIT50pt7b.h"
 
 // ----------------------------------------------------------------------------
 // Forward type definitions (must precede any extern usage below)
@@ -46,6 +43,7 @@ struct SensorSnapshot {
   TimerState accelState = READY;
   float instantKml = 0.0f;
   float averageKml = 0.0f;
+  float averageSpeed = 0.0f;
   float heading = 0.0f;
   int localHour = 0;
   int minute = 0;
@@ -61,17 +59,12 @@ struct SensorSnapshot {
 class LGFX_ST7789_4 : public lgfx::LGFX_Device {
   lgfx::Panel_ILI9488 _panel_instance;
   lgfx::Bus_SPI _bus_instance;
-  const GFXfont *_currentGfxFont = nullptr;
 
 public:
   LGFX_ST7789_4();
 
-  // Re-applies the SPI bus config (e.g. SPI_BUS_SPEED loaded from NVS by
-  // processConfig) after the global constructor has already run. Call this
-  // between processConfig() and display.init().
   void applyBusConfig();
-
-  void setFont(const GFXfont *f);
+  void loadVLWFont(const char *path);
   void getTextBounds(const char *string, int16_t x, int16_t y, int16_t *x1,
                      int16_t *y1, uint16_t *w, uint16_t *h);
   void getTextBounds(const String &str, int16_t x, int16_t y, int16_t *x1,
@@ -156,6 +149,7 @@ extern float MAX_SPEED_DELTA_KMH;
 extern float MIN_SPEED_THRESHOLD;
 extern float ACCEL_START_SPEED;
 extern float ACCEL_TARGET_SPEED;
+extern float ACCEL_MAX_TIME;
 extern String ACCEL_BADGE_LINE1;
 extern String ACCEL_BADGE_LINE2;
 
@@ -195,6 +189,8 @@ extern int OFFSET_AVG_KML_X;
 extern int OFFSET_AVG_KML_Y;
 extern int OFFSET_FUEL_LTRS_X;
 extern int OFFSET_FUEL_LTRS_Y;
+extern int OFFSET_AVG_SPEED_X;
+extern int OFFSET_AVG_SPEED_Y;
 
 extern int ALIGN_BIG_SPEED_NUM;
 extern int ALIGN_BIG_SAT;
@@ -203,6 +199,7 @@ extern int ALIGN_BIG_BAT;
 extern int ALIGN_INST_KML;
 extern int ALIGN_AVG_KML;
 extern int ALIGN_FUEL_LTRS;
+extern int ALIGN_AVG_SPEED;
 
 extern bool SHOW_ELEMENT_BOUNDS;
 extern bool ENABLE_POWER_SENSE;
@@ -235,6 +232,7 @@ extern int REFRESH_ODO_MS;
 extern int REFRESH_TIME_MS;
 extern int REFRESH_SIDEBAR_TEMP_MS;
 extern int REFRESH_SIDEBAR_FUEL_MS;
+extern int REFRESH_AVG_SPEED_MS;
 
 extern int SPEED_DIGITS;
 extern int SAT_DIGITS;
@@ -248,6 +246,8 @@ extern int AVG_INT_DIGITS;
 extern int AVG_DEC_DIGITS;
 extern int FUEL_INT_DIGITS;
 extern int FUEL_DEC_DIGITS;
+extern int AVG_SPEED_INT_DIGITS;
+extern int AVG_SPEED_DEC_DIGITS;
 extern int ODO_INT_DIGITS;
 extern int ODO_DEC_DIGITS;
 
@@ -349,6 +349,7 @@ extern float tripStartFuelLiters;
 extern float tripFuelConsumedLiters;
 extern float instantKml;
 extern float averageKml;
+extern float averageSpeed;
 
 extern TimerState accelState;
 extern unsigned long accelStartTime;
@@ -390,6 +391,7 @@ int getDayOfWeek(int y, int m, int d);
 int getEuropeanOffset(int year, int month, int day, int hour);
 void drawCalendarIcon(int x, int y, uint16_t color);
 void drawClockIcon(int x, int y, uint16_t color);
+void drawStopwatchIcon(int x, int y, uint16_t color);
 void drawLocationIcon(int x, int y, uint16_t color);
 void drawWifiIcon(int x, int y, uint16_t color, bool filled = false);
 void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color);
@@ -399,6 +401,9 @@ inline int applyAlign(int anchorX, int elementW, int align) {
   if (align == ALIGN_RIGHT) return anchorX - elementW;
   return anchorX - (elementW / 2);
 }
+struct VFontData { const uint8_t *data; size_t len; };
+VFontData getVLWData120();
+void initFilesystem();
 void drawSplashBase();
 void updateSplashProgress(int targetProgress);
 void showGoodbyeScreen(bool isSleep);

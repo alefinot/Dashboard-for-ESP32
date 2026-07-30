@@ -85,6 +85,7 @@ float tripStartFuelLiters = -1.0f;
 float tripFuelConsumedLiters = 0.0f;
 float instantKml = 0.0f;
 float averageKml = 0.0f;
+float averageSpeed = 0.0f;
 
 TimerState accelState = READY;
 unsigned long accelStartTime = 0;
@@ -266,6 +267,13 @@ void processFuelConsumption() {
   if (averageKml > 99.9f)
     averageKml = 99.9f;
 
+  float elapsedHours = (millis() - g_startupTime) / 3600000.0f;
+  averageSpeed = (tripDistanceKm > 0.05 && elapsedHours > 0.001f)
+                     ? (float)(tripDistanceKm / elapsedHours)
+                     : 0.0f;
+  if (averageSpeed > 299.9f)
+    averageSpeed = 299.9f;
+
   static unsigned long lastInstSampleTime = 0;
   static double lastInstDistKm = 0.0;
   static float lastInstFuelLiters = 0.0f;
@@ -300,6 +308,9 @@ void updateAccelTimer() {
   case RUNNING:
     accelResultTime = (millis() - accelStartTime) / 1000.0f;
     if (currentSpeed >= ACCEL_TARGET_SPEED) {
+      accelState = FINISHED;
+      readyForNextRun = false;
+    } else if (ACCEL_MAX_TIME > 0.0f && accelResultTime >= ACCEL_MAX_TIME) {
       accelState = FINISHED;
       readyForNextRun = false;
     } else if (currentSpeed < ACCEL_START_SPEED) {
@@ -387,6 +398,7 @@ void sensorTask(void *pvParameters) {
         }
         g_sensorData.instantKml = demoInstKml;
         g_sensorData.averageKml = demoAvgKml;
+        g_sensorData.averageSpeed = simSpeed * 0.8f;
         g_sensorData.timeValid = true;
         g_sensorData.dateValid = true;
         g_sensorData.isGpsSpeedValid = true;
@@ -409,6 +421,7 @@ void sensorTask(void *pvParameters) {
         g_sensorData.accelState = accelState;
         g_sensorData.instantKml = instantKml;
         g_sensorData.averageKml = averageKml;
+        g_sensorData.averageSpeed = averageSpeed;
         g_sensorData.heading = currentHeading;
 
         struct timeval tv;
