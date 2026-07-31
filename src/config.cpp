@@ -188,6 +188,16 @@ String WIFI_SSID_4 = "";
 String WIFI_PASSWORD_4 = "";
 int WIFI_TX_POWER_DBM = 11;
 
+bool NTP_ENABLED = true;
+String NTP_SERVER = "pool.ntp.org";
+int TZ_OFFSET_HOURS = 1;
+bool TZ_DST_ENABLED = true;
+
+bool OTA_PULL_ENABLED = false;
+String OTA_PULL_URL = "";
+int OTA_PULL_INTERVAL_HOURS = 24;
+String OTA_CURRENT_VERSION = "1.0.0";
+
 int FUEL_TOUCH_POINTS = 8;
 int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400};
 
@@ -412,6 +422,15 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_STR(WIFI_SSID_4, "WIFI_S4", "");
   CFG_STR(WIFI_PASSWORD_4, "WIFI_P4", "");
   CFG_INT(WIFI_TX_POWER_DBM, "WIFI_TXP", 11);
+  CFG_BOOL(NTP_ENABLED, "NTP_EN", true);
+  CFG_STR(NTP_SERVER, "NTP_SRV", "pool.ntp.org");
+  CFG_INT(TZ_OFFSET_HOURS, "TZ_OFFSET", 1);
+  CFG_BOOL(TZ_DST_ENABLED, "TZ_DST", true);
+
+  CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
+  CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "");
+  CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.0.0");
 
   if (mode == 0 || mode == 2) {
     if (FUEL_TOUCH_POINTS < 2) FUEL_TOUCH_POINTS = 2;

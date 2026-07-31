@@ -463,9 +463,13 @@ void sensorTask(void *pvParameters) {
           g_sensorData.dateValid = true;
           time_t local = tv.tv_sec;
           struct tm *loc_tm = gmtime(&local);
-          int offset =
-              getEuropeanOffset(loc_tm->tm_year + 1900, loc_tm->tm_mon + 1,
-                                loc_tm->tm_mday, loc_tm->tm_hour);
+          int dst = 0;
+          if (TZ_DST_ENABLED) {
+            int euroOff = getEuropeanOffset(loc_tm->tm_year + 1900, loc_tm->tm_mon + 1,
+                                            loc_tm->tm_mday, loc_tm->tm_hour);
+            dst = euroOff - 1;
+          }
+          int offset = TZ_OFFSET_HOURS + dst;
           local += (offset * 3600);
           loc_tm = gmtime(&local);
 

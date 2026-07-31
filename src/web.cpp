@@ -4,11 +4,175 @@
 #include <ESPmDNS.h>
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
+#include <esp_sntp.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 
 Preferences preferences;
 WebServer server(80);
 
 static bool otaUpdateSuccess = false;
+
+// OTA Pull state
+static unsigned long lastOtaPullCheck = 0;
+
+void checkForFirmwareUpdate() {
+  if (!OTA_PULL_ENABLED) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (OTA_PULL_URL.length() == 0) return;
+
+  logPrintf("OTA Pull: checking %s\n", OTA_PULL_URL.c_str());
+
+  HTTPClient http;
+  WiFiClient *client = nullptr;
+
+  if (OTA_PULL_URL.startsWith("https://")) {
+    WiFiClientSecure *ssl = new WiFiClientSecure();
+    ssl->setInsecure();
+    client = ssl;
+    if (!http.begin(*ssl, OTA_PULL_URL)) {
+      delete ssl;
+      logPrintf("OTA Pull: begin failed\n");
+      return;
+    }
+  } else {
+    client = new WiFiClient();
+    if (!http.begin(*client, OTA_PULL_URL)) {
+      delete client;
+      logPrintf("OTA Pull: begin failed\n");
+      return;
+    }
+  }
+
+  http.setTimeout(10000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.addHeader("Cache-Control", "no-cache");
+
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    logPrintf("OTA Pull: HTTP %d\n", httpCode);
+    http.end();
+    delete client;
+    return;
+  }
+
+  String payload = http.getString();
+  http.end();
+  delete client;
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    logPrintf("OTA Pull: JSON parse error: %s\n", err.c_str());
+    return;
+  }
+
+  String latestVersion = doc["version"] | "";
+  String firmwareUrl = doc["firmware_url"] | "";
+
+  if (latestVersion.length() == 0 || firmwareUrl.length() == 0) {
+    logPrintf("OTA Pull: invalid manifest (missing version/firmware_url)\n");
+    return;
+  }
+
+  logPrintf("OTA Pull: latest=%s current=%s\n", latestVersion.c_str(), OTA_CURRENT_VERSION.c_str());
+
+  if (latestVersion.equals(OTA_CURRENT_VERSION)) {
+    logPrintf("OTA Pull: already up-to-date\n");
+    return;
+  }
+
+  logPrintf("OTA Pull: new firmware v%s available, downloading\n", latestVersion.c_str());
+  performFirmwareUpdate(firmwareUrl);
+}
+
+void performFirmwareUpdate(const String &firmwareUrl) {
+  logPrintf("OTA Pull: downloading %s\n", firmwareUrl.c_str());
+  otaUpdateInProgress = true;
+  otaUpdateSuccess = false;
+  showUpdatingScreen();
+
+  HTTPClient http;
+  WiFiClient *client = nullptr;
+
+  if (firmwareUrl.startsWith("https://")) {
+    WiFiClientSecure *ssl = new WiFiClientSecure();
+    ssl->setInsecure();
+    client = ssl;
+    if (!http.begin(*ssl, firmwareUrl)) {
+      delete ssl;
+      otaUpdateInProgress = false;
+      forceFullRedraw = true;
+      logPrintf("OTA Pull: begin failed\n");
+      return;
+    }
+  } else {
+    client = new WiFiClient();
+    if (!http.begin(*client, firmwareUrl)) {
+      delete client;
+      otaUpdateInProgress = false;
+      forceFullRedraw = true;
+      logPrintf("OTA Pull: begin failed\n");
+      return;
+    }
+  }
+
+  http.setTimeout(30000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    logPrintf("OTA Pull: HTTP %d\n", httpCode);
+    http.end();
+    delete client;
+    otaUpdateInProgress = false;
+    forceFullRedraw = true;
+    return;
+  }
+
+  int totalSize = http.getSize();
+
+  if (!Update.begin(totalSize > 0 ? totalSize : UPDATE_SIZE_UNKNOWN)) {
+    Update.printError(Serial);
+    http.end();
+    delete client;
+    otaUpdateInProgress = false;
+    forceFullRedraw = true;
+    return;
+  }
+
+  size_t written = 0;
+  while (http.connected() && (totalSize <= 0 || written < (size_t)totalSize)) {
+    size_t available = client->available();
+    if (available) {
+      uint8_t buf[512];
+      size_t n = client->readBytes(buf, min(available, sizeof(buf)));
+      size_t w = Update.write(buf, n);
+      if (w != n) {
+        logPrintf("OTA Pull: write error\n");
+        break;
+      }
+      written += w;
+      if (totalSize > 0) {
+        updateOTAProgress(written, totalSize);
+      }
+    }
+    delay(1);
+  }
+
+  if (Update.end(true)) {
+    logPrintf("OTA Pull: success %zu bytes\n", written);
+    otaUpdateSuccess = true;
+    otaProgressTarget = 258;
+  } else {
+    Update.printError(Serial);
+    otaUpdateInProgress = false;
+    forceFullRedraw = true;
+  }
+
+  http.end();
+  delete client;
+}
 
 const char *index_html = R"rawliteral(
 <!DOCTYPE html>
@@ -1113,6 +1277,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
     <button onclick="exportBackup()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Backup</button>
     <button onclick="document.getElementById('importFile').click()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Import</button>
     <button id="otaBtn" onclick="doOta()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Firmware OTA</button>
+    <button id="otaPullBtn" onclick="doOtaPull()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Check Updates</button>
     <button onclick="factoryReset()" class="btn-danger btn-reset-wide"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Reset</button>
 </div>
 
@@ -1155,7 +1320,45 @@ const configMap = [
             { type: "card_header", label: "Custom Signatures" },
             { id: "SPLASH_SIGNATURE", label: "Boot Screen Signature" },
             { id: "REBOOT_SIGNATURE", label: "Reboot Screen Signature" },
-            { id: "DASHBOARD_SIGNATURE", label: "Main Dashboard Watermark" }
+            { id: "DASHBOARD_SIGNATURE", label: "Main Dashboard Watermark" },
+            { type: "card_header", label: "Time Settings" },
+            { id: "NTP_ENABLED", label: "Enable NTP Time Sync" },
+            { id: "NTP_SERVER", label: "NTP Server" },
+            { id: "TZ_DST_ENABLED", label: "Enable Automatic DST (European rules)" },
+            {
+                id: "TZ_OFFSET_HOURS",
+                label: "Time Zone",
+                type: "select",
+                options: [
+                    { value: -12, label: "(GMT-12:00) Baker Island" },
+                    { value: -11, label: "(GMT-11:00) American Samoa, Niue" },
+                    { value: -10, label: "(GMT-10:00) Honolulu, Papeete" },
+                    { value: -9, label: "(GMT-09:00) Anchorage" },
+                    { value: -8, label: "(GMT-08:00) Los Angeles, Vancouver, Tijuana" },
+                    { value: -7, label: "(GMT-07:00) Denver, Calgary, Phoenix" },
+                    { value: -6, label: "(GMT-06:00) Chicago, Mexico City, Winnipeg" },
+                    { value: -5, label: "(GMT-05:00) New York, Toronto, Bogota" },
+                    { value: -4, label: "(GMT-04:00) Santiago, Caracas, Halifax" },
+                    { value: -3, label: "(GMT-03:00) Buenos Aires, Sao Paulo, Montevideo" },
+                    { value: -2, label: "(GMT-02:00) Fernando de Noronha" },
+                    { value: -1, label: "(GMT-01:00) Azores, Cape Verde" },
+                    { value: 0, label: "(GMT+00:00) London, Dublin, Lisbon, Accra" },
+                    { value: 1, label: "(GMT+01:00) Paris, Berlin, Rome, Madrid, Lagos" },
+                    { value: 2, label: "(GMT+02:00) Cairo, Athens, Helsinki, Kyiv" },
+                    { value: 3, label: "(GMT+03:00) Moscow, Istanbul, Nairobi, Baghdad" },
+                    { value: 4, label: "(GMT+04:00) Dubai, Baku, Muscat" },
+                    { value: 5, label: "(GMT+05:00) Karachi, Tashkent, Yekaterinburg" },
+                    { value: 6, label: "(GMT+06:00) Dhaka, Almaty, Omsk" },
+                    { value: 7, label: "(GMT+07:00) Bangkok, Jakarta, Ho Chi Minh" },
+                    { value: 8, label: "(GMT+08:00) Beijing, Singapore, Perth, Taipei" },
+                    { value: 9, label: "(GMT+09:00) Tokyo, Seoul, Pyongyang" },
+                    { value: 10, label: "(GMT+10:00) Sydney, Melbourne, Guam" },
+                    { value: 11, label: "(GMT+11:00) Solomon Islands, Noumea" },
+                    { value: 12, label: "(GMT+12:00) Auckland, Fiji, Kamchatka" },
+                    { value: 13, label: "(GMT+13:00) Apia, Nuku'alofa" },
+                    { value: 14, label: "(GMT+14:00) Kiritimati" }
+                ]
+            }
         ]
     },
     {
@@ -1178,7 +1381,12 @@ const configMap = [
             { id: "WIFI_PASSWORD_3", label: "Password" },
             { type: "section_header", label: "Network 4" },
             { id: "WIFI_SSID_4", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD_4", label: "Password" }
+            { id: "WIFI_PASSWORD_4", label: "Password" },
+            { type: "card_header", label: "OTA Pull Update" },
+            { id: "OTA_PULL_ENABLED", label: "Enable Automatic OTA Pull" },
+            { id: "OTA_PULL_URL", label: "Firmware Manifest URL" },
+            { id: "OTA_PULL_INTERVAL_HOURS", label: "Check Interval", unit: "hours" },
+            { id: "OTA_CURRENT_VERSION", label: "Current Firmware Version" }
         ]
     },
     {
@@ -1341,6 +1549,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Fallback demo dataset if API isn't present
         const demoData = {
             TARGET_FPS: 60, SHOW_FPS_COUNTER_DEFAULT: true, ENABLE_DEMO_MODE: true, ENABLE_POWER_SENSE: false, SHOW_ELEMENT_BOUNDS: false,
+            NTP_ENABLED: true, NTP_SERVER: "pool.ntp.org", TZ_OFFSET_HOURS: 1, TZ_DST_ENABLED: true,
             MANUAL_CPU_FREQ: 240, ENABLE_DYNAMIC_CPU: false, ENABLE_CPU_THROTTLE: true, CPU_THROTTLE_TEMP_WARN: 60, CPU_THROTTLE_TEMP_CRIT: 70,
             SPLASH_SIGNATURE: "by @ale.finot", REBOOT_SIGNATURE: "Dashboard++ by @ale.finot", DASHBOARD_SIGNATURE: "<<<<<<    Dashboard++ by @ale.finot    >>>>>>",
             WIFI_TX_POWER_DBM: 20, WIFI_SSID: "Xiaomi 15", WIFI_PASSWORD: "••••••••", WIFI_SSID_1: "D-Link-627F3B", WIFI_PASSWORD_1: "••••••••",
@@ -1812,6 +2021,28 @@ function doOta() {
     });
 }
 
+function doOtaPull() {
+    const btn = document.getElementById('otaPullBtn');
+    const msgBox = document.getElementById('msg');
+    btn.disabled = true; btn.textContent = 'Checking...';
+    msgBox.className = ''; msgBox.innerText = 'Checking for firmware updates...';
+    fetch('/api/ota/pull', {method:'POST'}).then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            msgBox.className = 'msg-success';
+            msgBox.innerText = d.msg || 'Update check initiated. Check display for progress.';
+            setTimeout(() => { btn.disabled = false; btn.textContent = 'Check Updates'; }, 3000);
+        } else {
+            msgBox.className = 'msg-error';
+            msgBox.innerText = d.msg || 'Update check failed.';
+            btn.disabled = false; btn.textContent = 'Check Updates';
+        }
+    }).catch(() => {
+        msgBox.className = 'msg-error';
+        msgBox.innerText = 'Communication error. Device may be rebooting for update.';
+        setTimeout(() => { btn.disabled = false; btn.textContent = 'Check Updates'; }, 10000);
+    });
+}
+
 let perfTimer = null;
 function buildPerfPanel() {
     let grid = document.getElementById('perf-grid');
@@ -2004,6 +2235,28 @@ void webServerTask(void *pvParameters) {
       MDNS.addService("http", "tcp", 80);
       logPrintf("mDNS: http://dashboard-pp.local\n");
     }
+
+    if (NTP_ENABLED) {
+      logPrintf("Syncing time via NTP: %s\n", NTP_SERVER.c_str());
+      configTime(0, 0, NTP_SERVER.c_str());
+      time_t now = 0;
+      struct tm timeinfo = {0};
+      int retry = 0;
+      while (timeinfo.tm_year < (2024 - 1900) && retry < 10) {
+        delay(500);
+        time(&now);
+        localtime_r(&now, &timeinfo);
+        retry++;
+      }
+      if (retry < 10) {
+        logPrintf("NTP time sync OK: %04d-%02d-%02d %02d:%02d:%02d\n",
+                  timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
+                  timeinfo.tm_mday, timeinfo.tm_hour,
+                  timeinfo.tm_min, timeinfo.tm_sec);
+      } else {
+        logPrintf("NTP time sync failed after %d retries\n", retry);
+      }
+    }
   } else {
     logPrintf("All WiFi networks failed, using AP only\n");
   }
@@ -2178,6 +2431,31 @@ void webServerTask(void *pvParameters) {
     }
   });
 
+  server.on("/api/ota/pull", HTTP_POST, []() {
+    if (otaUpdateInProgress) {
+      server.send(200, "application/json", "{\"status\":\"busy\",\"msg\":\"OTA already in progress\"}");
+      return;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+      server.send(200, "application/json", "{\"status\":\"error\",\"msg\":\"Not connected to WiFi\"}");
+      return;
+    }
+    server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"OTA pull started\"}");
+    logPrintf("OTA Pull: triggered from web UI\n");
+    checkForFirmwareUpdate();
+  });
+
+  server.on("/api/ota/check", HTTP_GET, []() {
+    JsonDocument doc;
+    doc["enabled"] = OTA_PULL_ENABLED;
+    doc["url"] = OTA_PULL_URL;
+    doc["interval_hours"] = OTA_PULL_INTERVAL_HOURS;
+    doc["current_version"] = OTA_CURRENT_VERSION;
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+  });
+
   server.on("/api/serial", HTTP_GET, []() {
     // Read all available data and advance the tail atomically
     int tail = logTail;
@@ -2278,6 +2556,17 @@ void webServerTask(void *pvParameters) {
   for (;;) {
     server.handleClient();
     ArduinoOTA.handle();
+
+    if (lastOtaPullCheck == 0) {
+      lastOtaPullCheck = millis();
+    }
+    if (OTA_PULL_ENABLED && OTA_PULL_INTERVAL_HOURS > 0 && !otaUpdateInProgress) {
+      unsigned long intervalMs = (unsigned long)OTA_PULL_INTERVAL_HOURS * 3600000UL;
+      if (millis() - lastOtaPullCheck >= intervalMs) {
+        lastOtaPullCheck = millis();
+        checkForFirmwareUpdate();
+      }
+    }
 
     if (WiFi.softAPgetStationNum() > 0) {
       lastClientTime = millis();

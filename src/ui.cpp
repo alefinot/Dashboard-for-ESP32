@@ -5,7 +5,7 @@
 static constexpr unsigned long STARTUP_RAMP_DURATION_MS = 3000;
 
 static void measureDs15Cells(int *cells, int &totalW, int count, int decimalPos) {
-  constexpr int G = 3;
+  constexpr int G = 1;
   int16_t bx1, by1;
   uint16_t bw, bh;
   int cumX = 0;
@@ -224,7 +224,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setTextColor(TFT_WHITE);
     display.setCursor(timeX + 22 - save_h_x1, timeY);
     display.print(hourStr);
-    display.setCursor(timeX + 22 - save_h_x1 + w_h + w_sep_t, timeY);
+    display.setCursor(timeX + 22 - save_h_x1 + w_h + 4 + w_sep_t + 4, timeY);
     display.print(minStr);
     drawDebugBox(display, timeX - 2, timeY + timeClearOfsY + 2, timeW + 4, timeClearH - 4);
 
@@ -240,7 +240,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     // Draw separators in Conthrax font (single switch)
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
     display.setTextColor(TFT_WHITE);
-    display.setCursor(timeX + 22 - save_h_x1 + w_h, timeY);
+    display.setCursor(timeX + 22 - save_h_x1 + w_h + 4, timeY);
     display.print(":");
     display.setCursor(dateX + 22 - save_d_x1 + w_d, dateY);
     display.print("/");
@@ -312,7 +312,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
           int diff = refW - digitWidth[i];
           digitRightOff[i] = (diff > 10) ? diff / 5 : 0;
         }
-        constexpr int SG = 4;
+        constexpr int SG = -3;
         int cumX = 0;
         for (int i = 0; i < spdCount; i++) {
           char cb[2] = {'8', 0};

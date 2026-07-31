@@ -287,6 +287,16 @@ extern String WIFI_SSID_4;
 extern String WIFI_PASSWORD_4;
 extern int WIFI_TX_POWER_DBM;
 
+extern bool NTP_ENABLED;
+extern String NTP_SERVER;
+extern int TZ_OFFSET_HOURS;
+extern bool TZ_DST_ENABLED;
+
+extern bool OTA_PULL_ENABLED;
+extern String OTA_PULL_URL;
+extern int OTA_PULL_INTERVAL_HOURS;
+extern String OTA_CURRENT_VERSION;
+
 // ----------------------------------------------------------------------------
 // Fuel touch table
 // ----------------------------------------------------------------------------
@@ -453,6 +463,8 @@ void sensorTask(void *pvParameters);
 // Web API
 // ----------------------------------------------------------------------------
 void webServerTask(void *pvParameters);
+void checkForFirmwareUpdate();
+void performFirmwareUpdate(const String &firmwareUrl);
 extern const char *index_html;
 
 // ----------------------------------------------------------------------------
