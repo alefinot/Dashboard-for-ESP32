@@ -311,12 +311,49 @@ void loop() {
   static unsigned long lastTelemetryUpdate = 0;
   if (now - lastTelemetryUpdate >= TELEMETRY_REFRESH_MS) {
     lastTelemetryUpdate = now;
-    logPrintf("%s|%.2fL(%d%%)|%.1fV|%.1fC|%dkmh|%dsat|%.0fdeg|%.1fkm|%.2fs|%.1ffps\n",
-              snap.isGpsSpeedValid ? "GPS" : "HALL",
-              snap.fuelLiters, snap.fuelPercentage, snap.batteryVoltage,
-              snap.engineTemperature, (int)snap.currentSpeed, snap.satellites,
-              snap.heading,
-              snap.totalDistanceKm, snap.accelResultTime, currentMeasuredFps);
+
+    unsigned long hallIntUs, hallCnt;
+    portENTER_CRITICAL(&hallMux);
+    hallIntUs = hallPulseIntervalUs;
+    hallCnt = hallPulseCount;
+    portEXIT_CRITICAL(&hallMux);
+
+    const char *speedSrc =
+        (snap.speedSourceMode == 1) ? "GPS" :
+        (snap.speedSourceMode == 2) ? "G+H" : "HALL";
+    float gpsSpeed = gps.speed.isValid() ? gps.speed.kmph() : 0.0f;
+    float hdop = gps.hdop.isValid() ? gps.hdop.hdop() : 0.0f;
+    float altitude = gps.altitude.isValid() ? gps.altitude.meters() : 0.0f;
+
+    logPrintf("[RAW] hallInt=%.1fms hallCnt=%lu fuelADC=%d fuelFlt=%.1f "
+              "lightADC=%d batADC=%d tempADC=%d "
+              "magX=%d magY=%d magZ=%d\n",
+              hallIntUs / 1000.0f, hallCnt,
+              rawFuelADC, filteredReading, rawLightADC,
+              rawBatteryADC, rawTempADC,
+              compassRawX, compassRawY, compassRawZ);
+
+    logPrintf("[VAL] spd=%.1fkmh src=%s bat=%.1fV engT=%.1fC fuel=%.1fL(%d%%) "
+              "sat=%d hdop=%.1f alt=%.0fm lat=%.6f lon=%.6f gpsSpd=%.1f "
+              "head=%.0f odo=%.1fkm trip=%.2fkm avg=%.1fkmh avgKml=%.1f "
+              "instKml=%.1f accel=%.2fs\n",
+              snap.currentSpeed, speedSrc, snap.batteryVoltage,
+              snap.engineTemperature, snap.fuelLiters, snap.fuelPercentage,
+              snap.satellites, hdop, altitude,
+              gps.location.lat(), gps.location.lng(), gpsSpeed,
+              snap.heading, snap.totalDistanceKm, tripDistanceKm,
+              snap.averageSpeed, snap.averageKml, snap.instantKml,
+              snap.accelResultTime);
+
+    logPrintf("[ESP] cpu=%uMHz apb=%uMHz xtal=%uMHz usage=%.1f%% "
+              "dieTemp=%.1fC heap=%luB minHeap=%luB maxAlloc=%luB "
+              "psram=%luB up=%lus fps=%.1f avgFps=%.1f chip=%s rev=%d\n",
+              getCpuFrequencyMhz(), getApbFrequency() / 1000000UL, getXtalFrequencyMhz(),
+              cpuUsagePct, temperatureRead(),
+              ESP.getFreeHeap(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap(),
+              ESP.getFreePsram(), millis() / 1000UL,
+              currentMeasuredFps, currentAverageFps,
+              ESP.getChipModel(), ESP.getChipRevision());
   }
   static unsigned long lastCpuScaleCheck = 0;
     static uint32_t lastCpuCycleCount = 0;

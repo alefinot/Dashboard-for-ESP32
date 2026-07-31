@@ -40,10 +40,15 @@ bool initCompass() {
   return true;
 }
 
+int16_t compassRawX = 0, compassRawY = 0, compassRawZ = 0;
+
 void processCompassSensor() {
   if (!compassReady) return;
   int16_t x, y, z;
   if (!qmcReadRaw(x, y, z)) return;
+  compassRawX = x;
+  compassRawY = y;
+  compassRawZ = z;
   float h = atan2f((float)y, (float)x) * (180.0f / M_PI);
   if (h < 0) h += 360.0f;
   currentHeading = h;
@@ -62,6 +67,10 @@ float currentAverageFps = 0.0f;
 
 unsigned long lastDisplayUpdate = 0;
 float filteredReading = 950.0f;
+int rawFuelADC = 0;
+int rawBatteryADC = 0;
+int rawTempADC = 0;
+int rawLightADC = 0;
 float fuelLiters = 0.0f;
 int fuelPercentage = 0;
 float batteryVoltage = 0.0f;
@@ -165,6 +174,7 @@ void updateFilteredSpeed() {
 // ----------------------------------------------------------------------------
 void processBatterySensor() {
   int rawADC = analogRead(BATTERY_SENSE_PIN);
+  rawBatteryADC = rawADC;
   batteryVoltage = ((float)rawADC * ADC_VOLTS_FACTOR * 5.7f) + 0.2f;
   if (batteryVoltage < 2.0f)
     batteryVoltage = 0.0f;
@@ -172,6 +182,7 @@ void processBatterySensor() {
 
 void processTemperatureSensor() {
   int rawADC = analogRead(TEMP_SENSE_PIN);
+  rawTempADC = rawADC;
   if (rawADC <= 100 || rawADC >= 4000) {
     engineTemperature = 0.0f;
     return;
@@ -188,6 +199,7 @@ void processLightSensor() {
   analogRead(LIGHT_SENSOR_PIN);
   int raw = analogRead(LIGHT_SENSOR_PIN);
   ambientLightValue = raw;
+  rawLightADC = raw;
   if (filteredAmbientValue < 1.0f)
     filteredAmbientValue = (float)raw;
   else
@@ -200,6 +212,7 @@ void processFuelSensor() {
     sum += analogRead(FUEL_TOUCH_PIN);
   }
   int instantReading = sum / 64;
+  rawFuelADC = instantReading;
   filteredReading = ((float)instantReading * FUEL_FILTER_ALPHA) +
                     (filteredReading * (1.0f - FUEL_FILTER_ALPHA));
   if (filteredReading >= touchTable[0]) {

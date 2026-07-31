@@ -344,6 +344,13 @@ extern float currentAverageFps;
 
 extern unsigned long lastDisplayUpdate;
 extern float filteredReading;
+extern int rawFuelADC;
+extern int rawBatteryADC;
+extern int rawTempADC;
+extern int rawLightADC;
+extern int16_t compassRawX;
+extern int16_t compassRawY;
+extern int16_t compassRawZ;
 extern float fuelLiters;
 extern int fuelPercentage;
 extern float batteryVoltage;
