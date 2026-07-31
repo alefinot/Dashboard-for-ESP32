@@ -4,6 +4,27 @@
 
 static constexpr unsigned long STARTUP_RAMP_DURATION_MS = 3000;
 
+// Pre-rendered speed-digit sprite (~70KB). Freed by the display task itself
+// (safe point, see processOtaMemRelease) before an OTA pull check so the TLS
+// handshake gets a big contiguous heap block; rebuilt on the next frame after
+// the check finishes.
+static LGFX_Sprite sp(&display);
+static bool spInit = false;
+static bool spValid = false;
+volatile bool otaMemReleaseRequested = false;
+volatile bool otaMemReleased = false;
+
+// Called from loop() every frame, before any sprite use: frees the sprite
+// buffer when an OTA check has asked for it. Runs in the display task so no
+// other task can be using the sprite at the same time.
+void processOtaMemRelease() {
+  if (!otaMemReleaseRequested || otaMemReleased) return;
+  sp.deleteSprite();
+  spValid = false;
+  spInit = false;
+  otaMemReleased = true;
+}
+
 static void measureDs15Cells(int *cells, int &totalW, int count, int decimalPos) {
   constexpr int G = 1;
   int16_t bx1, by1;
@@ -288,8 +309,6 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     int spdCount = SPEED_DIGITS;
 
     // Pre-render speed digits to an off-screen sprite — VLW font loaded ONCE
-    static LGFX_Sprite sp(&display);
-    static bool spInit = false, spValid = false;
     if (!spInit) {
       spInit = true;
       sp.setColorDepth(16);
@@ -323,7 +342,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
         w_speed3_max = cumX - SG;
         h_speed_max = th;
       }
-      if (vfd.data && sp.createSprite(w_speed3_max + 12, h_speed_max + 6)
+      if (vfd.data && !otaMemReleaseRequested &&
+          sp.createSprite(w_speed3_max + 12, h_speed_max + 6)
           && sp.loadFont(vfd.data, lgfx::v1::IFont::font_type_t::ft_vlw)) {
         spValid = true;
       }

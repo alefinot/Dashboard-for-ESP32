@@ -323,6 +323,7 @@ extern bool forceFullRedraw;
 extern volatile bool pendingSleep;
 extern volatile bool pendingReboot;
 extern volatile bool otaUpdateInProgress;
+extern volatile bool pendingOtaScreen;
 extern volatile int otaProgressFillW;
 extern volatile int otaProgressTarget;
 
@@ -471,7 +472,11 @@ void sensorTask(void *pvParameters);
 // ----------------------------------------------------------------------------
 void webServerTask(void *pvParameters);
 void checkForFirmwareUpdate(bool manual = false);
-void performFirmwareUpdate(const String &firmwareUrl);
+void performFirmwareUpdate(const String &firmwareUrl, const String &newVersion);
+void startOtaPull(bool manual);
+void processOtaMemRelease();
+extern volatile bool otaMemReleaseRequested;
+extern volatile bool otaMemReleased;
 extern const char *index_html;
 
 // ----------------------------------------------------------------------------

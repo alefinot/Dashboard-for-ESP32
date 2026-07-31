@@ -11,6 +11,7 @@ bool forceFullRedraw = false;
 volatile bool pendingSleep = false;
 volatile bool pendingReboot = false;
 volatile bool otaUpdateInProgress = false;
+volatile bool pendingOtaScreen = false;
 
 bool pendingInvertDisplay = false;
 int pendingBacklightValue = -1;
@@ -176,7 +177,7 @@ void setup() {
 
   xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore0", 10240, NULL, 2, NULL,
                            0);
-  xTaskCreatePinnedToCore(webServerTask, "WebTaskCore0", 8192, NULL, 1, NULL,
+  xTaskCreatePinnedToCore(webServerTask, "WebTaskCore0", 12288, NULL, 1, NULL,
                            0);
 
   logPrintf("Setup done\n");
@@ -228,6 +229,10 @@ void loop() {
 
   unsigned long now = millis();
 
+  // Frees the speed sprite when an OTA check is pending (safe point: no sprite
+  // is in use between frames). Must run before any TLS work starts.
+  processOtaMemRelease();
+
   SensorSnapshot snap;
   if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
     snap = g_sensorData;
@@ -264,6 +269,11 @@ void loop() {
         lastDisplayUpdate = now;
     } else {
       lastDisplayUpdate = now;
+    }
+
+    if (pendingOtaScreen) {
+      pendingOtaScreen = false;
+      showUpdatingScreen();
     }
 
     if (!otaUpdateInProgress) {

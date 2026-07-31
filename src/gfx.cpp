@@ -65,12 +65,13 @@ VFontData getVLWData120() {
 void LGFX_ST7789_4::loadVLWFont(const char *path) {
   setTextDatum(lgfx::textdatum_t::baseline_left);
 
+  static int lastFont = -1;
+
   bool is120  = (path[7] == 'D' && path[16] == '1');
   bool isDs28 = (path[7] == 'D' && path[16] == '2');
   bool isCon28 = (path[7] == 'C' && path[25] == '2');
   bool isCon16 = (path[7] == 'C' && path[26] == '6');
 
-  static int lastFont = -1;
   int cur = is120 ? 0 : isDs28 ? 1 : isCon28 ? 2 : isCon16 ? 3 : 4;
   if (cur == lastFont) return;
   lastFont = cur;

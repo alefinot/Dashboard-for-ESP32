@@ -17,75 +17,178 @@ static bool otaUpdateSuccess = false;
 static unsigned long lastOtaPullCheck = 0;
 static String otaPullStatus = "idle";
 static bool otaPullStatusUpdated = false;
+static SemaphoreHandle_t otaStatusMutex = NULL;
+static bool otaPullTaskRunning = false;
+static bool otaPullManualFlag = false;
+
+void setOtaPullStatus(const char *status) {
+  if (otaStatusMutex) xSemaphoreTake(otaStatusMutex, portMAX_DELAY);
+  otaPullStatus = status;
+  otaPullStatusUpdated = true;
+  if (otaStatusMutex) xSemaphoreGive(otaStatusMutex);
+}
+
+void otaPullTask(void *pvParameters) {
+  checkForFirmwareUpdate(otaPullManualFlag);
+  otaPullTaskRunning = false;
+  vTaskDelete(NULL);
+}
+
+void startOtaPull(bool manual) {
+  if (otaPullTaskRunning || otaUpdateInProgress) return;
+  otaPullManualFlag = manual;
+  otaPullTaskRunning = true;
+  xTaskCreatePinnedToCore(otaPullTask, "OtaPullTask", 16384, NULL, 1, NULL, 0);
+}
+
+// Suspends the display loop task while the OTA task does TLS work, so the
+// heap does not get fragmented by per-frame UI allocations. The mbedTLS
+// handshake needs large contiguous blocks and fails (ALLOC_FAILED) otherwise.
+// Before suspending, asks the display task to free the speed sprite (~70KB,
+// the biggest UI allocation) at a safe point — see processOtaMemRelease in
+// ui.cpp. The display task rebuilds it after the check finishes.
+namespace {
+struct OtaHeapGuard {
+  TaskHandle_t h;
+  OtaHeapGuard() {
+    otaMemReleaseRequested = true;
+    unsigned long t0 = millis();
+    while (!otaMemReleased && (millis() - t0) < 3000)
+      vTaskDelay(pdMS_TO_TICKS(1));
+    h = xTaskGetHandle("loopTask");
+    if (h) vTaskSuspend(h);
+    logPrintf("OTA Pull: UI mem released heap=%lu max=%lu\n",
+              (unsigned long)ESP.getFreeHeap(),
+              (unsigned long)ESP.getMaxAllocHeap());
+  }
+  ~OtaHeapGuard() {
+    if (h) vTaskResume(h);
+    otaMemReleaseRequested = false;
+  }
+};
+}
 
 void checkForFirmwareUpdate(bool manual) {
   if (!OTA_PULL_ENABLED && !manual) return;
   if (WiFi.status() != WL_CONNECTED) {
-    otaPullStatus = "error: not connected to WiFi";
-    otaPullStatusUpdated = true;
+    setOtaPullStatus("error: not connected to WiFi");
     return;
   }
   if (OTA_PULL_URL.length() == 0) {
-    otaPullStatus = "error: no OTA URL configured";
-    otaPullStatusUpdated = true;
+    setOtaPullStatus("error: no OTA URL configured");
     return;
   }
 
   logPrintf("OTA Pull: checking %s\n", OTA_PULL_URL.c_str());
+  logPrintf("OTA Pull: heap free=%lu maxAlloc=%lu\n",
+            (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap());
+  logPrintf("OTA Pull: staIP=%s gw=%s wifiStatus=%d\n",
+            WiFi.localIP().toString().c_str(),
+            WiFi.gatewayIP().toString().c_str(), (int)WiFi.status());
+
+  OtaHeapGuard heapGuard;
+
+  String host = OTA_PULL_URL;
+  int protoEnd = host.indexOf("://");
+  if (protoEnd >= 0) host = host.substring(protoEnd + 3);
+  int slash = host.indexOf('/');
+  if (slash >= 0) host = host.substring(0, slash);
+
+  bool dnsOk = false;
+  bool tcpOk = false;
+  String tlsErr = "";
+  IPAddress resolvedIp;
+  if (WiFi.hostByName(host.c_str(), resolvedIp)) {
+    logPrintf("OTA Pull: DNS ok %s -> %s\n", host.c_str(),
+              resolvedIp.toString().c_str());
+    dnsOk = true;
+  } else {
+    logPrintf("OTA Pull: DNS FAILED for %s\n", host.c_str());
+  }
+  {
+    WiFiClient probe;
+    if (probe.connect(host.c_str(), 443, 5000)) {
+      logPrintf("OTA Pull: TCP 443 connect OK\n");
+      tcpOk = true;
+      probe.stop();
+    } else {
+      logPrintf("OTA Pull: TCP 443 connect FAILED\n");
+    }
+  }
+  {
+    WiFiClientSecure tls;
+    tls.setInsecure();
+    if (tls.connect(host.c_str(), 443, 5000)) {
+      logPrintf("OTA Pull: TLS handshake OK\n");
+      tls.stop();
+    } else {
+      char errBuf[128] = "";
+      tls.lastError(errBuf, sizeof(errBuf));
+      logPrintf("OTA Pull: TLS handshake FAILED: %s\n", errBuf);
+      tlsErr = errBuf;
+    }
+  }
 
   String payload;
   int httpCode = 0;
+  bool beginFailed = false;
 
   for (int attempt = 0; attempt < 3; attempt++) {
-    HTTPClient http;
     WiFiClient *client = nullptr;
 
     if (OTA_PULL_URL.startsWith("https://")) {
       WiFiClientSecure *ssl = new WiFiClientSecure();
       ssl->setInsecure();
       client = ssl;
-      if (!http.begin(*ssl, OTA_PULL_URL)) {
-        delete ssl;
-        logPrintf("OTA Pull: begin failed\n");
-        otaPullStatus = "error: connection begin failed";
-        otaPullStatusUpdated = true;
-        return;
-      }
     } else {
       client = new WiFiClient();
+    }
+
+    {
+      HTTPClient http;
       if (!http.begin(*client, OTA_PULL_URL)) {
-        delete client;
-        logPrintf("OTA Pull: begin failed\n");
-        otaPullStatus = "error: connection begin failed";
-        otaPullStatusUpdated = true;
-        return;
+        beginFailed = true;
+      } else {
+        http.setTimeout(10000);
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+        http.addHeader("Cache-Control", "no-cache");
+        // GitHub API gzips responses by default, which the ESP32 cannot decode
+        http.addHeader("Accept-Encoding", "identity");
+
+        httpCode = http.GET();
+        if (httpCode == HTTP_CODE_OK) {
+          payload = http.getString();
+          logPrintf("OTA Pull: manifest %d bytes, heap free=%lu\n", payload.length(),
+                    (unsigned long)ESP.getFreeHeap());
+        } else {
+          logPrintf("OTA Pull: attempt %d/%d -> HTTP %d (%s)\n", attempt + 1, 3,
+                    httpCode, HTTPClient::errorToString(httpCode).c_str());
+        }
+        http.end();
       }
     }
 
-    http.setTimeout(10000);
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    http.addHeader("Cache-Control", "no-cache");
-    // GitHub API gzips responses by default, which the ESP32 cannot decode
-    http.addHeader("Accept-Encoding", "identity");
-
-    httpCode = http.GET();
-    if (httpCode == HTTP_CODE_OK) {
-      payload = http.getString();
-    } else {
-      logPrintf("OTA Pull: attempt %d/%d -> HTTP %d (%s)\n", attempt + 1, 3,
-                httpCode, HTTPClient::errorToString(httpCode).c_str());
-    }
-
-    http.end();
     delete client;
 
+    if (beginFailed) {
+      logPrintf("OTA Pull: begin failed\n");
+      String diag = " dns=" + String(dnsOk ? "ok" : "fail") +
+                    " tcp443=" + String(tcpOk ? "ok" : "fail");
+      setOtaPullStatus(("error: connection begin failed" + diag).c_str());
+      return;
+    }
     if (httpCode == HTTP_CODE_OK) break;
     if (attempt < 2) delay(2000);
   }
 
   if (httpCode != HTTP_CODE_OK) {
-    otaPullStatus = "error: HTTP " + String(httpCode);
-    otaPullStatusUpdated = true;
+    String diag = " dns=" + String(dnsOk ? "ok" : "fail") +
+                  " tcp443=" + String(tcpOk ? "ok" : "fail") +
+                  " tls=" + (tlsErr.length() ? tlsErr : "ok") +
+                  " heap=" + String(ESP.getFreeHeap()) +
+                  " max=" + String(ESP.getMaxAllocHeap());
+    setOtaPullStatus(("error: HTTP " + String(httpCode) + " (" +
+                      HTTPClient::errorToString(httpCode) + ")" + diag).c_str());
     return;
   }
 
@@ -93,8 +196,7 @@ void checkForFirmwareUpdate(bool manual) {
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
     logPrintf("OTA Pull: JSON parse error: %s\n", err.c_str());
-    otaPullStatus = "error: invalid manifest JSON";
-    otaPullStatusUpdated = true;
+    setOtaPullStatus("error: invalid manifest JSON");
     return;
   }
 
@@ -113,8 +215,7 @@ void checkForFirmwareUpdate(bool manual) {
 
   if (latestVersion.length() == 0 || firmwareUrl.length() == 0) {
     logPrintf("OTA Pull: invalid manifest (missing version/firmware_url)\n");
-    otaPullStatus = "error: manifest missing version or firmware url";
-    otaPullStatusUpdated = true;
+    setOtaPullStatus("error: manifest missing version or firmware url");
     return;
   }
 
@@ -127,105 +228,97 @@ void checkForFirmwareUpdate(bool manual) {
 
   if (latestVersion.equals(curVer)) {
     logPrintf("OTA Pull: already up-to-date\n");
-    otaPullStatus = "up-to-date (v" + curVer + ")";
-    otaPullStatusUpdated = true;
+    setOtaPullStatus(("up-to-date (v" + curVer + ")").c_str());
     return;
   }
 
   logPrintf("OTA Pull: new firmware v%s available, downloading\n", latestVersion.c_str());
-  otaPullStatus = "updating to v" + latestVersion;
-  otaPullStatusUpdated = true;
-  performFirmwareUpdate(firmwareUrl);
+  setOtaPullStatus(("updating to v" + latestVersion).c_str());
+  performFirmwareUpdate(firmwareUrl, latestVersion);
 }
 
-void performFirmwareUpdate(const String &firmwareUrl) {
+void performFirmwareUpdate(const String &firmwareUrl, const String &newVersion) {
   logPrintf("OTA Pull: downloading %s\n", firmwareUrl.c_str());
+  logPrintf("OTA Pull: heap free=%lu maxAlloc=%lu\n",
+            (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap());
   otaUpdateInProgress = true;
   otaUpdateSuccess = false;
-  showUpdatingScreen();
+  pendingOtaScreen = true;
 
-  HTTPClient http;
   WiFiClient *client = nullptr;
-
   if (firmwareUrl.startsWith("https://")) {
     WiFiClientSecure *ssl = new WiFiClientSecure();
     ssl->setInsecure();
     client = ssl;
-    if (!http.begin(*ssl, firmwareUrl)) {
-      delete ssl;
-      otaUpdateInProgress = false;
-      forceFullRedraw = true;
-      logPrintf("OTA Pull: begin failed\n");
-      return;
-    }
   } else {
     client = new WiFiClient();
+  }
+
+  {
+    HTTPClient http;
     if (!http.begin(*client, firmwareUrl)) {
-      delete client;
-      otaUpdateInProgress = false;
-      forceFullRedraw = true;
       logPrintf("OTA Pull: begin failed\n");
-      return;
+      setOtaPullStatus("error: update begin failed");
+    } else {
+      http.setTimeout(30000);
+      http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+      http.addHeader("Accept-Encoding", "identity");
+
+      int httpCode = http.GET();
+      if (httpCode != HTTP_CODE_OK) {
+        logPrintf("OTA Pull: download HTTP %d (%s)\n", httpCode,
+                  HTTPClient::errorToString(httpCode).c_str());
+        setOtaPullStatus(("error: download HTTP " + String(httpCode)).c_str());
+      } else {
+        int totalSize = http.getSize();
+
+        if (!Update.begin(totalSize > 0 ? totalSize : UPDATE_SIZE_UNKNOWN)) {
+          Update.printError(Serial);
+          setOtaPullStatus("error: update.begin failed");
+        } else {
+          size_t written = 0;
+          while (http.connected() && (totalSize <= 0 || written < (size_t)totalSize)) {
+            size_t available = client->available();
+            if (available) {
+              uint8_t buf[512];
+              size_t n = client->readBytes(buf, min(available, sizeof(buf)));
+              size_t w = Update.write(buf, n);
+              if (w != n) {
+                logPrintf("OTA Pull: write error\n");
+                break;
+              }
+              written += w;
+              if (totalSize > 0) {
+                updateOTAProgress(written, totalSize);
+              }
+            }
+            delay(1);
+          }
+
+          if (Update.end(true)) {
+            logPrintf("OTA Pull: success %zu bytes\n", written);
+            otaUpdateSuccess = true;
+            otaProgressTarget = 258;
+            // Record the new version in NVS so the next check reports
+            // up-to-date instead of re-downloading the same release.
+            { Preferences p; p.begin("cfg", false);
+              p.putString("OTA_VER", newVersion); p.end(); }
+          } else {
+            Update.printError(Serial);
+            setOtaPullStatus("error: update.end failed");
+          }
+        }
+      }
+      http.end();
     }
   }
 
-  http.setTimeout(30000);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.addHeader("Accept-Encoding", "identity");
-
-  int httpCode = http.GET();
-  if (httpCode != HTTP_CODE_OK) {
-    logPrintf("OTA Pull: download HTTP %d (%s)\n", httpCode,
-              HTTPClient::errorToString(httpCode).c_str());
-    http.end();
-    delete client;
-    otaUpdateInProgress = false;
-    forceFullRedraw = true;
-    return;
-  }
-
-  int totalSize = http.getSize();
-
-  if (!Update.begin(totalSize > 0 ? totalSize : UPDATE_SIZE_UNKNOWN)) {
-    Update.printError(Serial);
-    http.end();
-    delete client;
-    otaUpdateInProgress = false;
-    forceFullRedraw = true;
-    return;
-  }
-
-  size_t written = 0;
-  while (http.connected() && (totalSize <= 0 || written < (size_t)totalSize)) {
-    size_t available = client->available();
-    if (available) {
-      uint8_t buf[512];
-      size_t n = client->readBytes(buf, min(available, sizeof(buf)));
-      size_t w = Update.write(buf, n);
-      if (w != n) {
-        logPrintf("OTA Pull: write error\n");
-        break;
-      }
-      written += w;
-      if (totalSize > 0) {
-        updateOTAProgress(written, totalSize);
-      }
-    }
-    delay(1);
-  }
-
-  if (Update.end(true)) {
-    logPrintf("OTA Pull: success %zu bytes\n", written);
-    otaUpdateSuccess = true;
-    otaProgressTarget = 258;
-  } else {
-    Update.printError(Serial);
-    otaUpdateInProgress = false;
-    forceFullRedraw = true;
-  }
-
-  http.end();
   delete client;
+
+  if (!otaUpdateSuccess) {
+    otaUpdateInProgress = false;
+    forceFullRedraw = true;
+  }
 }
 
 const char *index_html = R"rawliteral(
@@ -2293,6 +2386,7 @@ document.getElementById('perf-panel').addEventListener('toggle', function() {
 )rawliteral";
 
 void webServerTask(void *pvParameters) {
+  otaStatusMutex = xSemaphoreCreateMutex();
   WiFi.mode(WIFI_AP_STA);
   int txPower = WIFI_TX_POWER_DBM;
   if (txPower < -1) txPower = -1;
@@ -2374,7 +2468,7 @@ void webServerTask(void *pvParameters) {
   ArduinoOTA.onStart([]() {
     logPrintf("OTA started\n");
     otaUpdateInProgress = true;
-    showUpdatingScreen();
+    pendingOtaScreen = true;
   });
   ArduinoOTA.onEnd([]() {
     logPrintf("OTA finished\n");
@@ -2547,7 +2641,7 @@ void webServerTask(void *pvParameters) {
     if (upload.status == UPLOAD_FILE_START) {
       otaUpdateSuccess = false;
       otaUpdateInProgress = true;
-      showUpdatingScreen();
+      pendingOtaScreen = true;
       logPrintf("OTA web: start %s\n", upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
         Update.printError(Serial);
@@ -2570,7 +2664,7 @@ void webServerTask(void *pvParameters) {
   });
 
   server.on("/api/ota/pull", HTTP_POST, []() {
-    if (otaUpdateInProgress) {
+    if (otaUpdateInProgress || otaPullTaskRunning) {
       server.send(200, "application/json", "{\"status\":\"busy\",\"msg\":\"OTA already in progress\"}");
       return;
     }
@@ -2578,11 +2672,10 @@ void webServerTask(void *pvParameters) {
       server.send(200, "application/json", "{\"status\":\"error\",\"msg\":\"Not connected to WiFi\"}");
       return;
     }
-    otaPullStatus = "checking...";
-    otaPullStatusUpdated = true;
+    setOtaPullStatus("checking...");
     server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"OTA pull started\"}");
     logPrintf("OTA Pull: triggered from web UI\n");
-    checkForFirmwareUpdate(true);
+    startOtaPull(true);
   });
 
   server.on("/api/ota/check", HTTP_GET, []() {
@@ -2591,8 +2684,10 @@ void webServerTask(void *pvParameters) {
     doc["url"] = OTA_PULL_URL;
     doc["interval_hours"] = OTA_PULL_INTERVAL_HOURS;
     doc["current_version"] = OTA_CURRENT_VERSION;
+    if (otaStatusMutex) xSemaphoreTake(otaStatusMutex, portMAX_DELAY);
     doc["status"] = otaPullStatus;
     doc["status_updated"] = otaPullStatusUpdated;
+    if (otaStatusMutex) xSemaphoreGive(otaStatusMutex);
     String out;
     serializeJson(doc, out);
     server.send(200, "application/json", out);
@@ -2702,11 +2797,12 @@ void webServerTask(void *pvParameters) {
     if (lastOtaPullCheck == 0) {
       lastOtaPullCheck = millis();
     }
-    if (OTA_PULL_ENABLED && OTA_PULL_INTERVAL_HOURS > 0 && !otaUpdateInProgress) {
+    if (OTA_PULL_ENABLED && OTA_PULL_INTERVAL_HOURS > 0 && !otaUpdateInProgress &&
+        !otaPullTaskRunning) {
       unsigned long intervalMs = (unsigned long)OTA_PULL_INTERVAL_HOURS * 3600000UL;
       if (millis() - lastOtaPullCheck >= intervalMs) {
         lastOtaPullCheck = millis();
-        checkForFirmwareUpdate();
+        startOtaPull(false);
       }
     }
 
