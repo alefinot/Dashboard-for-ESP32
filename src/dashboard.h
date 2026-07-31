@@ -463,7 +463,7 @@ void sensorTask(void *pvParameters);
 // Web API
 // ----------------------------------------------------------------------------
 void webServerTask(void *pvParameters);
-void checkForFirmwareUpdate();
+void checkForFirmwareUpdate(bool manual = false);
 void performFirmwareUpdate(const String &firmwareUrl);
 extern const char *index_html;
 

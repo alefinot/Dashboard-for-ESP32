@@ -15,11 +15,21 @@ static bool otaUpdateSuccess = false;
 
 // OTA Pull state
 static unsigned long lastOtaPullCheck = 0;
+static String otaPullStatus = "idle";
+static bool otaPullStatusUpdated = false;
 
-void checkForFirmwareUpdate() {
-  if (!OTA_PULL_ENABLED) return;
-  if (WiFi.status() != WL_CONNECTED) return;
-  if (OTA_PULL_URL.length() == 0) return;
+void checkForFirmwareUpdate(bool manual) {
+  if (!OTA_PULL_ENABLED && !manual) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    otaPullStatus = "error: not connected to WiFi";
+    otaPullStatusUpdated = true;
+    return;
+  }
+  if (OTA_PULL_URL.length() == 0) {
+    otaPullStatus = "error: no OTA URL configured";
+    otaPullStatusUpdated = true;
+    return;
+  }
 
   logPrintf("OTA Pull: checking %s\n", OTA_PULL_URL.c_str());
 
@@ -33,6 +43,8 @@ void checkForFirmwareUpdate() {
     if (!http.begin(*ssl, OTA_PULL_URL)) {
       delete ssl;
       logPrintf("OTA Pull: begin failed\n");
+      otaPullStatus = "error: connection begin failed";
+      otaPullStatusUpdated = true;
       return;
     }
   } else {
@@ -40,6 +52,8 @@ void checkForFirmwareUpdate() {
     if (!http.begin(*client, OTA_PULL_URL)) {
       delete client;
       logPrintf("OTA Pull: begin failed\n");
+      otaPullStatus = "error: connection begin failed";
+      otaPullStatusUpdated = true;
       return;
     }
   }
@@ -53,6 +67,8 @@ void checkForFirmwareUpdate() {
     logPrintf("OTA Pull: HTTP %d\n", httpCode);
     http.end();
     delete client;
+    otaPullStatus = "error: HTTP " + String(httpCode);
+    otaPullStatusUpdated = true;
     return;
   }
 
@@ -64,6 +80,8 @@ void checkForFirmwareUpdate() {
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
     logPrintf("OTA Pull: JSON parse error: %s\n", err.c_str());
+    otaPullStatus = "error: invalid manifest JSON";
+    otaPullStatusUpdated = true;
     return;
   }
 
@@ -82,6 +100,8 @@ void checkForFirmwareUpdate() {
 
   if (latestVersion.length() == 0 || firmwareUrl.length() == 0) {
     logPrintf("OTA Pull: invalid manifest (missing version/firmware_url)\n");
+    otaPullStatus = "error: manifest missing version or firmware url";
+    otaPullStatusUpdated = true;
     return;
   }
 
@@ -94,10 +114,14 @@ void checkForFirmwareUpdate() {
 
   if (latestVersion.equals(curVer)) {
     logPrintf("OTA Pull: already up-to-date\n");
+    otaPullStatus = "up-to-date (v" + curVer + ")";
+    otaPullStatusUpdated = true;
     return;
   }
 
   logPrintf("OTA Pull: new firmware v%s available, downloading\n", latestVersion.c_str());
+  otaPullStatus = "updating to v" + latestVersion;
+  otaPullStatusUpdated = true;
   performFirmwareUpdate(firmwareUrl);
 }
 
@@ -2080,9 +2104,28 @@ function doOtaPull() {
     msgBox.className = ''; msgBox.innerText = 'Checking for firmware updates...';
     fetch('/api/ota/pull', {method:'POST'}).then(r => r.json()).then(d => {
         if (d.status === 'ok') {
-            msgBox.className = 'msg-success';
-            msgBox.innerText = d.msg || 'Update check initiated. Check display for progress.';
-            setTimeout(() => { btn.disabled = false; btn.textContent = 'Check Updates'; }, 3000);
+            const poll = setInterval(() => {
+                fetch('/api/ota/check').then(r => r.json()).then(c => {
+                    if (c.status && c.status !== 'checking...') {
+                        clearInterval(poll);
+                        btn.disabled = false; btn.textContent = 'Check Updates';
+                        if (c.status.startsWith('error')) {
+                            msgBox.className = 'msg-error';
+                            msgBox.innerText = 'Update check failed: ' + c.status;
+                        } else if (c.status.startsWith('up-to-date')) {
+                            msgBox.className = 'msg-success';
+                            msgBox.innerText = 'Firmware is ' + c.status;
+                        } else if (c.status.startsWith('updating')) {
+                            msgBox.className = 'msg-success';
+                            msgBox.innerText = c.status + ' - check the display for progress. Device will reboot.';
+                        } else {
+                            msgBox.className = 'msg-success';
+                            msgBox.innerText = c.status;
+                        }
+                    }
+                }).catch(() => {});
+            }, 1500);
+            setTimeout(() => { clearInterval(poll); btn.disabled = false; btn.textContent = 'Check Updates'; }, 120000);
         } else {
             msgBox.className = 'msg-error';
             msgBox.innerText = d.msg || 'Update check failed.';
@@ -2520,9 +2563,11 @@ void webServerTask(void *pvParameters) {
       server.send(200, "application/json", "{\"status\":\"error\",\"msg\":\"Not connected to WiFi\"}");
       return;
     }
+    otaPullStatus = "checking...";
+    otaPullStatusUpdated = true;
     server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"OTA pull started\"}");
     logPrintf("OTA Pull: triggered from web UI\n");
-    checkForFirmwareUpdate();
+    checkForFirmwareUpdate(true);
   });
 
   server.on("/api/ota/check", HTTP_GET, []() {
@@ -2531,6 +2576,8 @@ void webServerTask(void *pvParameters) {
     doc["url"] = OTA_PULL_URL;
     doc["interval_hours"] = OTA_PULL_INTERVAL_HOURS;
     doc["current_version"] = OTA_CURRENT_VERSION;
+    doc["status"] = otaPullStatus;
+    doc["status_updated"] = otaPullStatusUpdated;
     String out;
     serializeJson(doc, out);
     server.send(200, "application/json", out);
