@@ -33,48 +33,61 @@ void checkForFirmwareUpdate(bool manual) {
 
   logPrintf("OTA Pull: checking %s\n", OTA_PULL_URL.c_str());
 
-  HTTPClient http;
-  WiFiClient *client = nullptr;
+  String payload;
+  int httpCode = 0;
 
-  if (OTA_PULL_URL.startsWith("https://")) {
-    WiFiClientSecure *ssl = new WiFiClientSecure();
-    ssl->setInsecure();
-    client = ssl;
-    if (!http.begin(*ssl, OTA_PULL_URL)) {
-      delete ssl;
-      logPrintf("OTA Pull: begin failed\n");
-      otaPullStatus = "error: connection begin failed";
-      otaPullStatusUpdated = true;
-      return;
+  for (int attempt = 0; attempt < 3; attempt++) {
+    HTTPClient http;
+    WiFiClient *client = nullptr;
+
+    if (OTA_PULL_URL.startsWith("https://")) {
+      WiFiClientSecure *ssl = new WiFiClientSecure();
+      ssl->setInsecure();
+      client = ssl;
+      if (!http.begin(*ssl, OTA_PULL_URL)) {
+        delete ssl;
+        logPrintf("OTA Pull: begin failed\n");
+        otaPullStatus = "error: connection begin failed";
+        otaPullStatusUpdated = true;
+        return;
+      }
+    } else {
+      client = new WiFiClient();
+      if (!http.begin(*client, OTA_PULL_URL)) {
+        delete client;
+        logPrintf("OTA Pull: begin failed\n");
+        otaPullStatus = "error: connection begin failed";
+        otaPullStatusUpdated = true;
+        return;
+      }
     }
-  } else {
-    client = new WiFiClient();
-    if (!http.begin(*client, OTA_PULL_URL)) {
-      delete client;
-      logPrintf("OTA Pull: begin failed\n");
-      otaPullStatus = "error: connection begin failed";
-      otaPullStatusUpdated = true;
-      return;
+
+    http.setTimeout(10000);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.addHeader("Cache-Control", "no-cache");
+    // GitHub API gzips responses by default, which the ESP32 cannot decode
+    http.addHeader("Accept-Encoding", "identity");
+
+    httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) {
+      payload = http.getString();
+    } else {
+      logPrintf("OTA Pull: attempt %d/%d -> HTTP %d (%s)\n", attempt + 1, 3,
+                httpCode, HTTPClient::errorToString(httpCode).c_str());
     }
-  }
 
-  http.setTimeout(10000);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.addHeader("Cache-Control", "no-cache");
-
-  int httpCode = http.GET();
-  if (httpCode != HTTP_CODE_OK) {
-    logPrintf("OTA Pull: HTTP %d\n", httpCode);
     http.end();
     delete client;
+
+    if (httpCode == HTTP_CODE_OK) break;
+    if (attempt < 2) delay(2000);
+  }
+
+  if (httpCode != HTTP_CODE_OK) {
     otaPullStatus = "error: HTTP " + String(httpCode);
     otaPullStatusUpdated = true;
     return;
   }
-
-  String payload = http.getString();
-  http.end();
-  delete client;
 
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, payload);
@@ -158,10 +171,12 @@ void performFirmwareUpdate(const String &firmwareUrl) {
 
   http.setTimeout(30000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.addHeader("Accept-Encoding", "identity");
 
   int httpCode = http.GET();
   if (httpCode != HTTP_CODE_OK) {
-    logPrintf("OTA Pull: HTTP %d\n", httpCode);
+    logPrintf("OTA Pull: download HTTP %d (%s)\n", httpCode,
+              HTTPClient::errorToString(httpCode).c_str());
     http.end();
     delete client;
     otaUpdateInProgress = false;
