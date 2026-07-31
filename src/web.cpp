@@ -1121,7 +1121,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
                     <div class="summary-title">GNSS</div>
                     <svg class="summary-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
                 </summary>
-                <div class="details-content" style=""><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">🛰️ GNSS Settings</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Minimum Satellites Required</label><input type="number" id="MIN_SATELLITES" value="5" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Optimal Satellites Count</label><input type="number" id="OPTIMAL_SATELLITES" value="8" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Max Deviation Hall vs GPS (km/h)</label><input type="number" id="MAX_SPEED_DELTA_KMH" value="5" step="any" style="width:85px;text-align:center;"></div></div></div></div>
+                <div class="details-content" style=""><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">🛰️ GNSS Settings</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>GNSS Baud Rate (baud)</label><input type="number" id="GPS_BAUD" value="115200" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Minimum Satellites Required</label><input type="number" id="MIN_SATELLITES" value="5" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Optimal Satellites Count</label><input type="number" id="OPTIMAL_SATELLITES" value="8" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Max Deviation Hall vs GPS (km/h)</label><input type="number" id="MAX_SPEED_DELTA_KMH" value="5" step="any" style="width:85px;text-align:center;"></div></div></div></div>
             </details>
             <details>
                 <summary>
@@ -1635,6 +1635,7 @@ const configMap = [
             { id: "REFRESH_AVG_SPEED_MS", label: "Average Speed", type: "number", unit: "ms" },
             { id: "REFRESH_FUEL_MS", label: "Fuel Liters", type: "number", unit: "ms" },
             { id: "REFRESH_ODO_MS", label: "Odometer", type: "number", unit: "ms" },
+            { id: "REFRESH_COMPASS_MS", label: "Compass Heading", type: "number", unit: "ms" },
             { type: "card_header", label: "Digit Count Configuration" },
             { id: "SPEED_DIGITS", label: "Speed Digits" },
             { id: "SAT_DIGITS", label: "Satellites Digits" },
@@ -1648,6 +1649,7 @@ const configMap = [
             { id: "AVG_DEC_DIGITS", label: "Average KM/L Decimal Digits" },
             { id: "AVG_SPEED_INT_DIGITS", label: "Average Speed Integer Digits" },
             { id: "AVG_SPEED_DEC_DIGITS", label: "Average Speed Decimal Digits" },
+            { id: "HEADING_DIGITS", label: "Compass Heading Digits" },
             { id: "FUEL_INT_DIGITS", label: "Fuel Integer Digits" },
             { id: "FUEL_DEC_DIGITS", label: "Fuel Decimal Digits" },
             { id: "ODO_INT_DIGITS", label: "Odometer Integer Digits" },
@@ -1658,9 +1660,12 @@ const configMap = [
         title: "GNSS", icon: iconSVG.gnss,
         items: [
             { type: "card_header", label: "GNSS Settings" },
+            { id: "GPS_BAUD", label: "GNSS Baud Rate", unit: "baud" },
             { id: "MIN_SATELLITES", label: "Minimum Satellites Required" },
             { id: "OPTIMAL_SATELLITES", label: "Optimal Satellites Count" },
-            { id: "MAX_SPEED_DELTA_KMH", label: "Max Deviation Hall vs GPS", unit: "km/h" }
+            { id: "MAX_SPEED_DELTA_KMH", label: "Max Deviation Hall vs GPS", unit: "km/h" },
+            { type: "card_header", label: "Compass" },
+            { id: "COMPASS_DECLINATION_DEG", label: "Declination Offset", unit: "deg" }
         ]
     },
     {
@@ -1705,6 +1710,9 @@ const configMap = [
             { type: 'xy', idX: "OFFSET_BIG_SAT_X", idY: "OFFSET_BIG_SAT_Y", label: "Position" },
             { type: "section_header", label: "WiFi Icon" },
             { type: 'xy', idX: "OFFSET_WIFI_ICON_X", idY: "OFFSET_WIFI_ICON_Y", label: "Position" },
+            { type: "card_header", label: "Compass" },
+            { type: "section_header", label: "Heading Indicator" },
+            { type: 'xy', idX: "OFFSET_COMPASS_X", idY: "OFFSET_COMPASS_Y", label: "Position" },
             { type: "card_header", label: "Sidebars" },
             { type: "section_header", label: "Left Bar (Engine Temp)" },
             { type: 'xy', idX: "SIDEBAR_LEFT_X", idY: "SIDEBAR_LEFT_Y", label: "Position" },
@@ -1741,10 +1749,12 @@ document.addEventListener('DOMContentLoaded', function() {
             REFRESH_SPEED_MS: 250, REFRESH_SAT_MS: 1000, REFRESH_TMR_MS: 10, REFRESH_BAT_MS: 2500, SPEED_DIGITS: 3, SAT_DIGITS: 2, TMR_INT_DIGITS: 2,
             TMR_DEC_DIGITS: 2, BAT_INT_DIGITS: 2, BAT_DEC_DIGITS: 1, INST_INT_DIGITS: 2, INST_DEC_DIGITS: 1, AVG_INT_DIGITS: 2, AVG_DEC_DIGITS: 1,
             FUEL_INT_DIGITS: 1, FUEL_DEC_DIGITS: 1, ODO_INT_DIGITS: 5, ODO_DEC_DIGITS: 1, MIN_SATELLITES: 5, OPTIMAL_SATELLITES: 8, MAX_SPEED_DELTA_KMH: 5,
+            GPS_BAUD: 115200, HEADING_DIGITS: 3, REFRESH_COMPASS_MS: 200, COMPASS_DECLINATION_DEG: 0,
             BIG_CENTER_X: 240, BIG_CENTER_Y: 160, OFFSET_BIG_FPS_X: 0, OFFSET_BIG_FPS_Y: -33, OFFSET_BIG_SIGNATURE_X: 0, OFFSET_BIG_SIGNATURE_Y: -102,
             OFFSET_BIG_TMR_X: -53, OFFSET_BIG_TMR_Y: -68, OFFSET_HALL_ICON_X: 0, OFFSET_HALL_ICON_Y: -140, OFFSET_BIG_SPEED_NUM_X: -20, OFFSET_BIG_SPEED_NUM_Y: -15,
             OFFSET_BIG_SPEED_UNIT_X: 103, OFFSET_BIG_SPEED_UNIT_Y: 26, OFFSET_BIG_ODO_X: 15, OFFSET_BIG_ODO_Y: 150, OFFSET_AVG_KML_X: 150, OFFSET_AVG_KML_Y: -49,
             OFFSET_INST_KML_X: 60, OFFSET_INST_KML_Y: -49, OFFSET_FUEL_LTRS_X: 132, OFFSET_FUEL_LTRS_Y: 150, OFFSET_BIG_BAT_X: -112, OFFSET_BIG_BAT_Y: 149,
+            OFFSET_COMPASS_X: -182, OFFSET_COMPASS_Y: 95,
             OFFSET_BIG_TIME_X: -98, OFFSET_BIG_TIME_Y: -132, OFFSET_BIG_DATE_X: 118, OFFSET_BIG_DATE_Y: -132, OFFSET_BIG_SAT_X: -180, OFFSET_BIG_SAT_Y: -132,
             OFFSET_WIFI_ICON_X: 215, OFFSET_WIFI_ICON_Y: -153, SIDEBAR_LEFT_X: 10, SIDEBAR_LEFT_Y: 64, SIDEBAR_RIGHT_X: 462, SIDEBAR_RIGHT_Y: 64,
             SIDEBAR_BAR_WIDTH: 8, SIDEBAR_BAR_HEIGHT: 250

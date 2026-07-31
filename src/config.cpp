@@ -45,6 +45,7 @@ float NTC_R_BALANCE = 10000.0f;
 float NTC_R_ROOM = 10000.0f;
 float NTC_BETA = 3950.0f;
 
+int GPS_BAUD = 115200;
 int MIN_SATELLITES = 5;
 int OPTIMAL_SATELLITES = 8;
 float MAX_SPEED_DELTA_KMH = 5.0f;
@@ -91,6 +92,8 @@ int OFFSET_AVG_KML_X = 172;
 int OFFSET_AVG_KML_Y = 71;
 int OFFSET_AVG_SPEED_X = 172;
 int OFFSET_AVG_SPEED_Y = 101;
+int OFFSET_COMPASS_X = -182;
+int OFFSET_COMPASS_Y = 95;
 int OFFSET_FUEL_LTRS_X = -172;
 int OFFSET_FUEL_LTRS_Y = 41;
 
@@ -130,6 +133,8 @@ int REFRESH_TIME_MS = 0;
 int REFRESH_SIDEBAR_TEMP_MS = 0;
 int REFRESH_SIDEBAR_FUEL_MS = 0;
 int REFRESH_AVG_SPEED_MS = 5000;
+int REFRESH_COMPASS_MS = 200;
+float COMPASS_DECLINATION_DEG = 0.0f;
 
 int SPEED_DIGITS = 3;
 int SAT_DIGITS = 2;
@@ -143,6 +148,7 @@ int AVG_INT_DIGITS = 2;
 int AVG_DEC_DIGITS = 1;
 int AVG_SPEED_INT_DIGITS = 3;
 int AVG_SPEED_DEC_DIGITS = 0;
+int HEADING_DIGITS = 3;
 int FUEL_INT_DIGITS = 2;
 int FUEL_DEC_DIGITS = 1;
 int ODO_INT_DIGITS = 6;
@@ -195,7 +201,7 @@ bool TZ_DST_ENABLED = true;
 bool OTA_PULL_ENABLED = false;
 String OTA_PULL_URL = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-String OTA_CURRENT_VERSION = "1.0.8";
+String OTA_CURRENT_VERSION = "1.0.9";
 
 // Optional PIN protecting the web config page and admin API (empty = disabled)
 String CONFIG_PIN = "";
@@ -313,6 +319,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(FUEL_TOUCH_POINTS, "FTL_PTS", 8);
   CFG_FLT(NTC_R_BALANCE, "NTC_BAL", 10000.0f);
   CFG_FLT(NTC_BETA, "NTC_BETA", 3950.0f);
+  CFG_INT(GPS_BAUD, "GPS_BAUD", 115200);
   CFG_INT(MIN_SATELLITES, "MIN_SAT", 5);
   CFG_INT(OPTIMAL_SATELLITES, "OPT_SAT", 8);
   CFG_FLT(MAX_SPEED_DELTA_KMH, "MAX_SPD_DELT", 5.0f);
@@ -359,8 +366,11 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(OFFSET_AVG_KML_Y, "O_AVG_Y", 71);
   CFG_INT(OFFSET_AVG_SPEED_X, "O_AVG_SPD_X", 172);
   CFG_INT(OFFSET_AVG_SPEED_Y, "O_AVG_SPD_Y", 101);
+  CFG_INT(OFFSET_COMPASS_X, "O_CMP_X", -182);
+  CFG_INT(OFFSET_COMPASS_Y, "O_CMP_Y", 95);
   CFG_INT(OFFSET_FUEL_LTRS_X, "O_FLTRS_X", -172);
   CFG_INT(OFFSET_FUEL_LTRS_Y, "O_FLTRS_Y", 41);
+  CFG_FLT(COMPASS_DECLINATION_DEG, "CMP_DECL", 0.0f);
 
   CFG_INT(SIDEBAR_BAR_WIDTH, "SBAR_W", 8);
   CFG_INT(SIDEBAR_BAR_HEIGHT, "SBAR_H", 200);
@@ -395,6 +405,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(REFRESH_SIDEBAR_TEMP_MS, "R_SBAR_T", 0);
   CFG_INT(REFRESH_SIDEBAR_FUEL_MS, "R_SBAR_F", 0);
   CFG_INT(REFRESH_AVG_SPEED_MS, "R_AVG_SPD", 5000);
+  CFG_INT(REFRESH_COMPASS_MS, "R_CMP", 200);
 
   CFG_INT(SPEED_DIGITS, "SPD_DIG", 3);
   CFG_INT(SAT_DIGITS, "SAT_DIG", 2);
@@ -408,6 +419,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(AVG_DEC_DIGITS, "AVG_DEC", 1);
   CFG_INT(AVG_SPEED_INT_DIGITS, "AVG_SPD_INT", 3);
   CFG_INT(AVG_SPEED_DEC_DIGITS, "AVG_SPD_DEC", 0);
+  CFG_INT(HEADING_DIGITS, "HEAD_DIG", 3);
   CFG_INT(FUEL_INT_DIGITS, "FUEL_INT", 2);
   CFG_INT(FUEL_DEC_DIGITS, "FUEL_DEC", 1);
   CFG_INT(ODO_INT_DIGITS, "ODO_INT", 6);
@@ -429,7 +441,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
   CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.0.8");
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.0.9");
 
   // CONFIG_PIN is handled manually: never serialized back (mode 1) so the web
   // config API cannot leak it. Mode 2 accepts a new 4-16 char PIN, or clears

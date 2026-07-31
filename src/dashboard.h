@@ -143,6 +143,7 @@ extern float NTC_R_BALANCE;
 extern float NTC_R_ROOM;
 extern float NTC_BETA;
 
+extern int GPS_BAUD;
 extern int MIN_SATELLITES;
 extern int OPTIMAL_SATELLITES;
 extern float MAX_SPEED_DELTA_KMH;
@@ -191,6 +192,8 @@ extern int OFFSET_FUEL_LTRS_X;
 extern int OFFSET_FUEL_LTRS_Y;
 extern int OFFSET_AVG_SPEED_X;
 extern int OFFSET_AVG_SPEED_Y;
+extern int OFFSET_COMPASS_X;
+extern int OFFSET_COMPASS_Y;
 
 extern int ALIGN_BIG_SPEED_NUM;
 extern int ALIGN_BIG_SAT;
@@ -242,6 +245,8 @@ extern int REFRESH_TIME_MS;
 extern int REFRESH_SIDEBAR_TEMP_MS;
 extern int REFRESH_SIDEBAR_FUEL_MS;
 extern int REFRESH_AVG_SPEED_MS;
+extern int REFRESH_COMPASS_MS;
+extern float COMPASS_DECLINATION_DEG;
 
 extern int SPEED_DIGITS;
 extern int SAT_DIGITS;
@@ -257,6 +262,7 @@ extern int FUEL_INT_DIGITS;
 extern int FUEL_DEC_DIGITS;
 extern int AVG_SPEED_INT_DIGITS;
 extern int AVG_SPEED_DEC_DIGITS;
+extern int HEADING_DIGITS;
 extern int ODO_INT_DIGITS;
 extern int ODO_DEC_DIGITS;
 
@@ -460,6 +466,8 @@ inline float getFilteredSpeed() { return currentCachedSpeed; }
 
 bool initCompass();
 void processCompassSensor();
+void configureGNSS();
+extern bool compassReady;
 void processBatterySensor();
 void processTemperatureSensor();
 void processLightSensor();

@@ -10,7 +10,7 @@ HardwareSerial gpsSerial(2);
 #define QMC5883L_X_LSB  0x00
 #define QMC5883L_CTRL1  0x0B
 
-static bool compassReady = false;
+bool compassReady = false;
 
 static void qmcWrite(uint8_t reg, uint8_t val) {
   Wire.beginTransmission(QMC5883L_ADDR);
@@ -51,7 +51,71 @@ void processCompassSensor() {
   compassRawZ = z;
   float h = atan2f((float)y, (float)x) * (180.0f / M_PI);
   if (h < 0) h += 360.0f;
-  currentHeading = h;
+  h += COMPASS_DECLINATION_DEG;
+  if (h < 0.0f) h += 360.0f;
+  else if (h >= 360.0f) h -= 360.0f;
+  // EMA smoothing with wraparound handling (jump 359 -> 0)
+  float diff = h - currentHeading;
+  if (diff > 180.0f) diff -= 360.0f;
+  else if (diff < -180.0f) diff += 360.0f;
+  currentHeading += diff * 0.15f;
+  if (currentHeading < 0.0f) currentHeading += 360.0f;
+  else if (currentHeading >= 360.0f) currentHeading -= 360.0f;
+}
+
+// ----------------------------------------------------------------------------
+// BZGNSS P25 Pro (u-blox M10) configuration
+// The module ships as NMEA/UBX dual-protocol at 115200 baud / 10 Hz by
+// default, but some units leave the factory in UBX mode for flight
+// controllers. These UBX commands force UART1 to plain NMEA at GPS_BAUD with
+// a 10 Hz update rate so TinyGPS++ always sees standard sentences.
+// ----------------------------------------------------------------------------
+static void ubxSend(const uint8_t *payload, uint8_t cls, uint8_t id, uint8_t len) {
+  uint8_t ckA = 0, ckB = 0;
+  for (uint8_t i = 0; i < len; i++) {
+    ckA += payload[i];
+    ckB += ckA;
+  }
+  ckA += cls; ckB += ckA;
+  ckA += id;  ckB += ckA;
+  ckA += len; ckB += ckA;
+  gpsSerial.write(0xB5);
+  gpsSerial.write(0x62);
+  gpsSerial.write(cls);
+  gpsSerial.write(id);
+  gpsSerial.write(len);
+  gpsSerial.write(payload, len);
+  gpsSerial.write(ckA);
+  gpsSerial.write(ckB);
+}
+
+void configureGNSS() {
+  while (gpsSerial.available()) gpsSerial.read();
+  gpsSerial.flush();
+
+  // UBX-CFG-PRT: UART1 -> NMEA in/out, 8N1 @ GPS_BAUD
+  uint8_t prt[20];
+  memset(prt, 0, sizeof(prt));
+  prt[0] = 1; // portID = UART1
+  uint32_t mode = 0x000008D0; // 8 data bits, no parity, 1 stop bit
+  uint32_t baud = (uint32_t)GPS_BAUD;
+  uint16_t proto = 0x0001;    // NMEA only
+  prt[4] = mode & 0xFF;         prt[5] = (mode >> 8) & 0xFF;
+  prt[6] = (mode >> 16) & 0xFF; prt[7] = (mode >> 24) & 0xFF;
+  prt[8] = baud & 0xFF;         prt[9] = (baud >> 8) & 0xFF;
+  prt[10] = (baud >> 16) & 0xFF; prt[11] = (baud >> 24) & 0xFF;
+  prt[12] = proto & 0xFF;       prt[13] = (proto >> 8) & 0xFF; // inProtoMask
+  prt[14] = proto & 0xFF;       prt[15] = (proto >> 8) & 0xFF; // outProtoMask
+  ubxSend(prt, 0x06, 0x00, sizeof(prt));
+  delay(50);
+
+  // UBX-CFG-RATE: 10 Hz navigation/measurement rate
+  uint8_t rate[6] = {0x64, 0x00, 0x01, 0x00, 0x00, 0x00};
+  ubxSend(rate, 0x06, 0x08, sizeof(rate));
+  delay(50);
+
+  while (gpsSerial.available()) gpsSerial.read();
+  logPrintf("GNSS: forced NMEA @ %d baud, 10 Hz\n", GPS_BAUD);
 }
 
 // ----------------------------------------------------------------------------

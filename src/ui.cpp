@@ -1356,6 +1356,113 @@ void updateBigDisplay(const SensorSnapshot &snap) {
                    (int)ds15_fontH + 4);
   }
 
+  // --- Compass (heading rose + degrees) ---
+  float displayHeading = displaySnap.heading;
+  static int lastDispHeading = -1;
+  static int lastCompassX = -1, lastCompassY = -1;
+  static unsigned long lastCompassUpdate = 0;
+  int currentHeadingInt = ((int)displayHeading + 360) % 360;
+
+  int compassX = BIG_CENTER_X + OFFSET_COMPASS_X;
+  int compassY = BIG_CENTER_Y + OFFSET_COMPASS_Y;
+
+  if ((currentHeadingInt != lastDispHeading && (REFRESH_COMPASS_MS == 0 || now - lastCompassUpdate >= (unsigned long)REFRESH_COMPASS_MS)) || forceDraw) {
+    lastCompassUpdate = now;
+    lastDispHeading = currentHeadingInt;
+    componentUpdated = true;
+
+    static int headCells[MAX_CELLS] = {0};
+    static int headCellW = 0, headCellsCount = 0;
+    static uint16_t w_deg_unit = 0;
+    static bool compassLayoutInit = false;
+    if (!compassLayoutInit) {
+      compassLayoutInit = true;
+      headCellsCount = HEADING_DIGITS;
+      measureDs15Cells(headCells, headCellW, headCellsCount, -1);
+      int16_t tl1, tl2;
+      uint16_t th1;
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+      display.getTextBounds("DEG", 0, 0, &tl1, &tl2, &w_deg_unit, &th1);
+    }
+
+    const int roseR = 21;
+    int roseCX = compassX, roseCY = compassY;
+    int numAreaX = roseCX + roseR + 10;
+    int clearW = roseR * 2 + 10 + 4 + headCellW + 4 + w_deg_unit + 8;
+    int clearX = roseCX - roseR - 6;
+    int clearTop = roseCY - roseR - 6;
+    int clearH = roseR * 2 + 12;
+
+    if (lastCompassX >= 0 && lastCompassY >= 0 &&
+        (lastCompassX != roseCX || lastCompassY != roseCY)) {
+      display.fillRect(clearX, clearTop, clearW, clearH, TFT_BLACK);
+    }
+    lastCompassX = roseCX;
+    lastCompassY = roseCY;
+    display.fillRect(clearX, clearTop, clearW, clearH, TFT_BLACK);
+
+    // Rose ring + cardinal ticks
+    uint16_t c_tick = display.color565(90, 90, 90);
+    drawAACircle(display, roseCX, roseCY, roseR, c_tick);
+    drawAALine(display, (float)roseCX, (float)(roseCY - roseR + 1),
+               (float)roseCX, (float)(roseCY - roseR + 7), TFT_RED);
+    drawAALine(display, (float)(roseCX + roseR - 7), (float)roseCY,
+               (float)(roseCX + roseR - 1), (float)roseCY, c_tick);
+    drawAALine(display, (float)roseCX, (float)(roseCY + roseR - 1),
+               (float)roseCX, (float)(roseCY + roseR - 7), c_tick);
+    drawAALine(display, (float)(roseCX - roseR + 1), (float)roseCY,
+               (float)(roseCX - roseR + 7), (float)roseCY, c_tick);
+
+    // Rotating needle (red head, gray tail)
+    float rad = (float)currentHeadingInt * M_PI / 180.0f;
+    int fx = roseCX + (int)roundf(sinf(rad) * (float)(roseR - 1));
+    int fy = roseCY - (int)roundf(cosf(rad) * (float)(roseR - 1));
+    int tx = roseCX - (int)roundf(sinf(rad) * (float)(roseR - 4));
+    int ty = roseCY + (int)roundf(cosf(rad) * (float)(roseR - 4));
+    drawAALine(display, roseCX, roseCY, fx, fy, TFT_RED);
+    drawAALine(display, roseCX, roseCY, tx, ty, display.color565(120, 120, 120));
+
+    // Heading digits
+    char headStr[8];
+    bool headValid = compassReady || ENABLE_DEMO_MODE;
+    if (!headValid)
+      snprintf(headStr, sizeof(headStr), "---");
+    else
+      snprintf(headStr, sizeof(headStr), "%d", currentHeadingInt);
+    int headLen = strlen(headStr);
+
+    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
+    display.setTextColor(ghost_color);
+    for (int ci = 0; ci < headCellsCount; ci++) {
+      int cellRight = numAreaX + headCells[ci];
+      int cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+      display.setCursor(cx, compassY);
+      display.print('8');
+    }
+    display.setTextColor(headValid ? TFT_WHITE : display.color565(70, 70, 70));
+    for (int i = 0; i < headLen; i++) {
+      char c = headStr[i];
+      int cellIdx = (headCellsCount - headLen) + i;
+      int cellRight = numAreaX + headCells[cellIdx];
+      int cx;
+      if (c == '-') {
+        cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8] + 2;
+      } else {
+        int d = c - '0';
+        cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
+      }
+      display.setCursor(cx, compassY);
+      display.print(c);
+    }
+
+    display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+    display.setTextColor(headValid ? TFT_WHITE : display.color565(70, 70, 70));
+    display.setCursor(numAreaX + headCellW + 4, compassY - 1);
+    display.print("DEG");
+
+    drawDebugBox(display, clearX, clearTop, clearW, clearH);
+  }
+
   if ((componentUpdated || forceDraw) && ENABLE_CIRCLE_TEST)
     for (int i = 0; i < 4; i++)
       drawAACircle(display, BIG_CENTER_X, BIG_CENTER_Y, 173 - i, TFT_CYAN);

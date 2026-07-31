@@ -97,8 +97,8 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **Microcontroller** | ESP32-WROOM-32 | Xtensa 32-bit LX6 | Dual-core 240 MHz, 520 KB SRAM, 4 MB SPI Flash, RTC IO |
 | **Display Panel** | ILI9488 TFT LCD (4.0") | SPI (16-bit RGB565) | 480×320 pixels, 60 MHz SPI bus speed, hardware CS/DC/RST |
 | **Display Backlight** | LED Backlight Channel | LEDC PWM (Channel 0) | 1 kHz hardware PWM, 256 brightness levels, logarithmic fading |
-| **GNSS Module** | NEO-6M / BN-220 GPS | UART2 (RX=25, TX=26) | 115200 baud, NMEA 0183 standard, UTC epoch time synchronization |
-| **Digital Compass** | QMC5883L | I2C (SDA=21, SCL=22) | 3-axis magnetometer, 0x0D address, 200 Hz continuous mode |
+| **GNSS Module** | BZGNSS P25 Pro (u-blox M10) | UART2 (RX=25, TX=26) | 115200 baud (configurable), NMEA 0183 (forced at boot via UBX), 10 Hz update rate, multi-constellation (GPS/GLONASS/BDS/Galileo), UTC epoch time synchronization |
+| **Digital Compass** | QMC5883L (built into BZGNSS P25 Pro) | I2C (SDA=21, SCL=22) | 3-axis magnetometer, 0x0D address, 200 Hz continuous mode, configurable declination offset |
 | **Wheel Speed Sensor** | Hall Effect Interrupt | GPIO33 (Input Pullup) | Hardware Falling-Edge ISR, microsecond interval timing |
 | **Fuel Level Sensor** | Capacitive / Resistive Sender | GPIO32 (ADC1_CH4) | Analog 0–3.3V, 20-point touch table, EMA smoothing filter |
 | **Engine Temp Sensor** | NTC Thermistor (10k/100k) | GPIO36 (ADC1_CH0) | Analog 0–3.3V, Steinhart-Hart equation, voltage divider balance |
@@ -115,8 +115,8 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **GPIO12** | `BL_DISPLAY` | Backlight PWM | Output | Attached to ESP32 LEDC Channel 0 (1 kHz PWM) |
 | **GPIO14** | `SPI_RST` | Display Reset | Output | Active-Low hardware reset line for ILI9488 |
 | **GPIO18** | `SPI_CLK` | SPI Clock | Output | Hardware SPI SCK pin (60 MHz) |
-| **GPIO21** | `COMPASS_SDA` | I2C Data | Bi-directional | QMC5883L I2C SDA (Requires external/internal 4.7k pullups) |
-| **GPIO22** | `COMPASS_SCL` | I2C Clock | Output | QMC5883L I2C SCL line |
+| **GPIO21** | `COMPASS_SDA` | I2C Data | Bi-directional | QMC5883L I2C SDA — wired to the GNSS module's SDA pin (built-in compass) (Requires external/internal 4.7k pullups) |
+| **GPIO22** | `COMPASS_SCL` | I2C Clock | Output | QMC5883L I2C SCL — wired to the GNSS module's SCL pin (built-in compass) |
 | **GPIO23** | `SPI_MOSI` | SPI Master Out | Output | Hardware SPI MOSI pin for LCD data command stream |
 | **GPIO25** | `RXD2` | GPS Serial RX | Input | Connected to GNSS Module TX pin (UART2) |
 | **GPIO26** | `TXD2` | GPS Serial TX | Output | Connected to GNSS Module RX pin (UART2) |
@@ -356,6 +356,10 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `FUEL_TOUCH_POINTS` (default=8): Number of valid entries in the calibration touch table.
 - `NTC_R_BALANCE` (default=10000.0): Balance resistor value in ohms for NTC divider.
 - `NTC_BETA` (default=3950.0): Thermistor Beta coefficient.
+- `GPS_BAUD` (default=115200): UART baud rate for the GNSS module. On boot the module is forced into NMEA output at this baud with a 10 Hz update rate via u-blox UBX commands (compatible with BZGNSS P25 Pro / M10 receivers).
+- `COMPASS_DECLINATION_DEG` (default=0.0): Magnetic declination offset applied to the compass heading.
+- `REFRESH_COMPASS_MS` (default=200): Throttle for the compass heading widget redraw.
+- `HEADING_DIGITS` (default=3): Integer digit count for the compass heading readout.
 - `MIN_SATELLITES` (default=5): Minimum GPS satellite lock requirement.
 - `OPTIMAL_SATELLITES` (default=8): Satellite count threshold for full GPS speed reliance.
 - `MAX_SPEED_DELTA_KMH` (default=5.0): Maximum allowable difference between GPS and Hall speed before falling back.
@@ -366,7 +370,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 
 #### UI Layout Offset Coordinates
 - `BIG_CENTER_X`, `BIG_CENTER_Y`: Screen anchor origin point.
-- `OFFSET_BIG_TIME_X/Y`, `OFFSET_BIG_DATE_X/Y`, `OFFSET_BIG_SPEED_NUM_X/Y`, `OFFSET_BIG_SPEED_UNIT_X/Y`, `OFFSET_BIG_ODO_X/Y`, `OFFSET_BIG_SAT_X/Y`, `OFFSET_BIG_TMR_X/Y`, `OFFSET_BIG_BAT_X/Y`, `OFFSET_INST_KML_X/Y`, `OFFSET_AVG_KML_X/Y`, `OFFSET_AVG_SPEED_X/Y`, `OFFSET_FUEL_LTRS_X/Y`, `SIDEBAR_LEFT_X/Y`, `SIDEBAR_RIGHT_X/Y`: Fine-grained pixel coordinate offsets for every UI component.
+- `OFFSET_BIG_TIME_X/Y`, `OFFSET_BIG_DATE_X/Y`, `OFFSET_BIG_SPEED_NUM_X/Y`, `OFFSET_BIG_SPEED_UNIT_X/Y`, `OFFSET_BIG_ODO_X/Y`, `OFFSET_BIG_SAT_X/Y`, `OFFSET_BIG_TMR_X/Y`, `OFFSET_BIG_BAT_X/Y`, `OFFSET_INST_KML_X/Y`, `OFFSET_AVG_KML_X/Y`, `OFFSET_AVG_SPEED_X/Y`, `OFFSET_FUEL_LTRS_X/Y`, `OFFSET_COMPASS_X/Y`, `SIDEBAR_LEFT_X/Y`, `SIDEBAR_RIGHT_X/Y`: Fine-grained pixel coordinate offsets for every UI component.
 
 ---
 

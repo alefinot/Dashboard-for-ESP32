@@ -133,8 +133,9 @@ void setup() {
   logPrintf("  fade final: value=%d\n", currentBrightnessTarget);
   updateSplashProgress(20);
 
-  gpsSerial.begin(115200, SERIAL_8N1, RXD2, TXD2);
+  gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
   delay(100);
+  configureGNSS();
 
   Wire.begin(COMPASS_SDA, COMPASS_SCL);
   initCompass();
