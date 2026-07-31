@@ -88,6 +88,17 @@ float averageKml = 0.0f;
 float averageSpeed = 0.0f;
 unsigned long movingTimeMs = 0;
 
+void setOdometerKm(double km) {
+  if (km < 0.0) km = 0.0;
+  totalDistanceKm = km;
+  lastSavedOdo = km;
+  g_sensorData.totalDistanceKm = km;
+  preferences.begin("dashboard", false);
+  preferences.putDouble("odo", km);
+  preferences.end();
+  logPrintf("Odometer set to %.1f km\n", km);
+}
+
 TimerState accelState = READY;
 unsigned long accelStartTime = 0;
 float accelResultTime = 0.0f;

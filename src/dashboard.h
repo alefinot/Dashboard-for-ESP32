@@ -136,7 +136,6 @@ extern int SHUTDOWN_TIME_MS;
 extern int BIG_CENTER_X;
 extern int BIG_CENTER_Y;
 
-extern double INITIAL_ODOMETER_KM;
 extern float WHEEL_CIRCUMFERENCE_MM;
 extern float FUEL_FILTER_ALPHA;
 
@@ -351,6 +350,7 @@ extern float batteryVoltage;
 extern float engineTemperature;
 extern double totalDistanceKm;
 extern double lastSavedOdo;
+void setOdometerKm(double km);
 extern double lastLat;
 extern double lastLon;
 extern bool hasLastPos;

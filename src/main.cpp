@@ -141,9 +141,7 @@ void setup() {
   updateSplashProgress(40);
 
   preferences.begin("dashboard", false);
-  if (!preferences.isKey("odo"))
-    preferences.putDouble("odo", INITIAL_ODOMETER_KM);
-  totalDistanceKm = preferences.getDouble("odo", INITIAL_ODOMETER_KM);
+  totalDistanceKm = preferences.getDouble("odo", 0.0);
   lastSavedOdo = totalDistanceKm;
 
   updateSplashProgress(60);

@@ -1463,6 +1463,13 @@ const configMap = [
             { id: "ACCEL_BADGE_LINE1", label: "Badge Line 1 (e.g., '0-50')" },
             { id: "ACCEL_BADGE_LINE2", label: "Badge Line 2 (e.g., 'km/h')" },
             { type: "subtitle", label: "Miscellaneous" },
+            { type: "card_header", label: "Odometer (km)", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:12px;color:var(--text-muted);">Current value: <strong id="odo-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> km</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+        <input type="number" id="ODO_SET" step="0.1" min="0" placeholder="Set odometer (km)" style="flex:1;min-width:0;">
+        <button onclick="setOdometer()" class="btn-secondary" style="font-size:11px;padding:5px 10px;white-space:nowrap;">Set Value</button>
+    </div>` },
             { id: "WHEEL_CIRCUMFERENCE_MM", label: "Wheel Circumference", unit: "mm" },
             { id: "MIN_SPEED_THRESHOLD", label: "Minimum Speed Threshold", unit: "km/h" },
             { id: "FUEL_FILTER_ALPHA", label: "Fuel Sensor Smoothing Alpha" },
@@ -1595,6 +1602,8 @@ document.addEventListener('DOMContentLoaded', function() {
     syncTime();
     pollAmbient();
     setInterval(pollAmbient, 2000);
+    pollOdo();
+    setInterval(pollOdo, 1000);
 
     fetch('/api/perf').then(r => r.json()).then(perf => {
         let ipEl = document.getElementById('ip-info');
@@ -1973,6 +1982,34 @@ function pollAmbient() {
         let el = document.getElementById('ambient-reading');
         if (el) el.textContent = d.raw;
     }).catch(() => {});
+}
+
+function pollOdo() {
+    fetch('/api/odo').then(r => r.json()).then(d => {
+        let el = document.getElementById('odo-reading');
+        if (el) el.textContent = d.km.toFixed(1);
+    }).catch(() => {});
+}
+
+function setOdometer() {
+    let input = document.getElementById('ODO_SET');
+    if (!input || input.value === '' || isNaN(parseFloat(input.value))) {
+        alert("Enter an odometer value first.");
+        return;
+    }
+    let msgBox = document.getElementById('msg');
+    msgBox.className = ''; msgBox.innerText = "Setting odometer...";
+    fetch('/api/odo', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({km: parseFloat(input.value)})
+    }).then(r => r.json()).then(d => {
+        msgBox.className = 'msg-success'; msgBox.innerText = 'Odometer set to ' + d.km.toFixed(1) + ' km';
+        input.value = '';
+        pollOdo();
+    }).catch(() => {
+        msgBox.className = 'msg-error'; msgBox.innerText = "Failed to set odometer.";
+    });
 }
 
 let serialPollTimer = null;
@@ -2359,6 +2396,34 @@ void webServerTask(void *pvParameters) {
       logPrintf("RTC sync: %ld\n", epoch);
     }
     server.send(200, "application/json", "{\"status\":\"ok\"}");
+  });
+
+  server.on("/api/odo", HTTP_GET, []() {
+    JsonDocument doc;
+    doc["km"] = totalDistanceKm;
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+  });
+
+  server.on("/api/odo", HTTP_POST, []() {
+    if (!server.hasArg("plain")) {
+      server.send(400);
+      return;
+    }
+    JsonDocument doc;
+    deserializeJson(doc, server.arg("plain"));
+    if (doc["km"].is<double>()) {
+      setOdometerKm(doc["km"].as<double>());
+      forceFullRedraw = true;
+      JsonDocument resp;
+      resp["km"] = totalDistanceKm;
+      String out;
+      serializeJson(resp, out);
+      server.send(200, "application/json", out);
+    } else {
+      server.send(400, "application/json", "{\"status\":\"error\"}");
+    }
   });
 
   server.on("/api/reboot", HTTP_POST, []() {
