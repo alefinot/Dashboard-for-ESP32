@@ -195,7 +195,7 @@ bool TZ_DST_ENABLED = true;
 bool OTA_PULL_ENABLED = false;
 String OTA_PULL_URL = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-String OTA_CURRENT_VERSION = "1.0.3";
+String OTA_CURRENT_VERSION = "1.0.4";
 
 int FUEL_TOUCH_POINTS = 8;
 int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400};

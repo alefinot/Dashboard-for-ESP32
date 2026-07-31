@@ -730,7 +730,7 @@ void initFilesystem() {
 // FPS overlay
 // ----------------------------------------------------------------------------
 void drawFpsOverlay() {
-  static float lastDrawnFpsBig = -1.0f, lastDrawnAvgFpsBig = -1.0f;
+  static char lastFpsStr[48] = "";
   static bool lastStateBig = false;
   static int lastAnchorX = -1, lastAnchorY = -1;
   static int lastBoxW = 0, lastBoxH = 0;
@@ -748,8 +748,7 @@ void drawFpsOverlay() {
                        lastBoxW, lastBoxH, TFT_BLACK);
       display.endWrite();
       lastStateBig = false;
-      lastDrawnFpsBig = -1.0f;
-      lastDrawnAvgFpsBig = -1.0f;
+      lastFpsStr[0] = '\0';
     }
     lastAnchorX = anchorX;
     lastAnchorY = anchorY;
@@ -761,35 +760,38 @@ void drawFpsOverlay() {
   char fpsBuf[48];
   snprintf(fpsBuf, sizeof(fpsBuf), "%.1f | AVG %.1f | %.1f", currentMeasuredFps,
            currentAverageFps, temperatureRead());
-  if (fabsf(currentMeasuredFps - lastDrawnFpsBig) >= 0.3f ||
-      fabsf(currentAverageFps - lastDrawnAvgFpsBig) >= 0.3f || !lastStateBig) {
-    lastDrawnFpsBig = currentMeasuredFps;
-    lastDrawnAvgFpsBig = currentAverageFps;
-    lastStateBig = true;
-    display.startWrite();
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-    display.setTextColor(TFT_GREEN);
-    int16_t tx1, ty1;
-    uint16_t tw, th;
-    display.getTextBounds(fpsBuf, 0, 0, &tx1, &ty1, &tw, &th);
-    int boxW = tw + 3 + 4 + 2;
-    int boxH = th + 6;
-    if (lastBoxW > 0)
-      display.fillRect(lastAnchorX - (lastBoxW / 2), lastAnchorY - (lastBoxH / 2),
-                       lastBoxW, lastBoxH, TFT_BLACK);
-    int boxLeft = anchorX - (boxW / 2);
-    int boxTop = anchorY - (boxH / 2);
-    display.fillRect(boxLeft, boxTop, boxW, boxH, TFT_BLACK);
-    display.setCursor(boxLeft + 2, boxTop + boxH - 3);
-    display.print(fpsBuf);
-    int cx = display.getCursorX();
-    int cy = boxTop + (boxH / 2) - 1;
-    drawAACircle(display, cx + 1, cy, 1, TFT_GREEN);
-    display.setCursor(cx + 4, boxTop + boxH - 3);
-    display.print("c");
-    drawDebugBox(display, boxLeft, boxTop, boxW, boxH);
-    lastBoxW = boxW;
-    lastBoxH = boxH;
-    display.endWrite();
-  }
+  if (strcmp(fpsBuf, lastFpsStr) == 0 && lastStateBig)
+    return;
+
+  display.startWrite();
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+  display.setTextColor(TFT_GREEN);
+  int16_t tx1, ty1;
+  uint16_t tw, th;
+  display.getTextBounds(fpsBuf, 0, 0, &tx1, &ty1, &tw, &th);
+  int16_t ccx, ccy;
+  uint16_t cw;
+  display.getTextBounds("c", 0, 0, &ccx, &ccy, &cw, &th);
+  int boxW = 2 + tw + 3 + 1 + cw + 2;
+  int boxH = th + 6;
+  if (lastBoxW > 0)
+    display.fillRect(lastAnchorX - (lastBoxW / 2), lastAnchorY - (lastBoxH / 2),
+                     lastBoxW, lastBoxH, TFT_BLACK);
+  int boxLeft = anchorX - (boxW / 2);
+  int boxTop = anchorY - (boxH / 2);
+  display.fillRect(boxLeft, boxTop, boxW, boxH, TFT_BLACK);
+  int textBaseline = boxTop + 3 - ty1;
+  display.setCursor(boxLeft + 2, textBaseline);
+  display.print(fpsBuf);
+  int cx = display.getCursorX();
+  int cy = boxTop + (boxH / 2) - 1;
+  drawAACircle(display, cx + 1, cy, 1, TFT_GREEN);
+  display.setCursor(cx + 4, textBaseline);
+  display.print("c");
+  drawDebugBox(display, boxLeft, boxTop, boxW, boxH);
+  strcpy(lastFpsStr, fpsBuf);
+  lastStateBig = true;
+  lastBoxW = boxW;
+  lastBoxH = boxH;
+  display.endWrite();
 }

@@ -131,7 +131,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       drawAALine(display, (float)(px - 3), (float)py, (float)(px + 3), (float)py, TFT_WHITE);
       drawAALine(display, (float)px, (float)(py - 3), (float)px, (float)(py + 3), TFT_WHITE);
     }
-    drawDebugBox(display, wifiX - 4, wifiY, 24, 16);
+    drawDebugBox(display, wifiX - 4, wifiY - 3, 24, 19);
   }
 
   unsigned long now = millis();
@@ -226,7 +226,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.print(hourStr);
     display.setCursor(timeX + 22 - save_h_x1 + w_h + 4 + w_sep_t + 4, timeY);
     display.print(minStr);
-    drawDebugBox(display, timeX - 2, timeY + timeClearOfsY + 2, timeW + 4, timeClearH - 4);
+    drawDebugBox(display, timeX - 2, timeY + timeClearOfsY + 2, timeW + 12, timeClearH - 4);
 
     drawCalendarIcon(dateX, dateY - 18, TFT_WHITE);
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
@@ -366,7 +366,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
         display.print(speedStr2[i]);
       }
     }
-    drawDebugBox(display, boxLeft - 1, speedNumY - 1, w_speed3_max + 2, h_speed_max + 2);
+    drawDebugBox(display, boxLeft - 6, speedNumY - 2, w_speed3_max + 12, h_speed_max + 6);
   }
 
   double displayOdo = displaySnap.totalDistanceKm;
@@ -574,7 +574,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
     drawAACircle(display, cStartX + 3, barY + barH - 10, 2, tempColor);
     display.drawString("c", cStartX + 6, barY + barH);
-    drawDebugBox(display, barX - 2, barY - 2, barW + 4, barH + 4);
+    drawDebugBox(display, barX - 2, barY - 2, barW + 4 + 6 + totalW, barH + 4);
   }
 
   // Right Sidebar: Fuel
@@ -626,7 +626,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setTextPadding(48);
     display.drawString(fBuf, barX - 5, barY + barH);
     display.setTextPadding(0);
-    drawDebugBox(display, barX - 2, barY - 2, barW + 4, barH + 4);
+    int fuelTxtW = display.textWidth(fBuf);
+    drawDebugBox(display, barX - 5 - fuelTxtW - 2, barY - 2, barW + 9 + fuelTxtW, barH + 4);
   }
 
   int displaySat = displaySnap.satellites;
@@ -1029,9 +1030,12 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setCursor(kmlInstX, instY - 1);
     display.print("KM/L");
 
-    if (SHOW_ELEMENT_BOUNDS)
-      drawDebugBox(display, instNumAreaX - 2, instY - 20, currentInstWidth + 4,
-                   24);
+    if (SHOW_ELEMENT_BOUNDS) {
+      int instTop = instY + std::min((int)ds15_refY1, -18);
+      int instBottom = instY + (int)ds15_refY1 + (int)ds15_fontH;
+      drawDebugBox(display, instNumAreaX - 2, instTop - 2, currentInstWidth + 4,
+                   instBottom - instTop + 4);
+    }
   }
 
   // --- Average KM/L ---
@@ -1131,8 +1135,12 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setCursor(kmlAvgX, avgY - 1);
     display.print("KM/L");
 
-    if (SHOW_ELEMENT_BOUNDS)
-      drawDebugBox(display, avgNumAreaX - 2, avgY - 20, currentAvgWidth + 4, 24);
+    if (SHOW_ELEMENT_BOUNDS) {
+      int avgTop = avgY + std::min((int)ds15_refY1, -18);
+      int avgBottom = avgY + (int)ds15_refY1 + (int)ds15_fontH;
+      drawDebugBox(display, avgNumAreaX - 2, avgTop - 2, currentAvgWidth + 4,
+                   avgBottom - avgTop + 4);
+    }
   }
 
   // --- Average Speed (3 int digits, no decimal) ---
@@ -1234,8 +1242,12 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.setCursor(kmhAvgX, avgSpdY - 1);
     display.print("KM/H");
 
-    if (SHOW_ELEMENT_BOUNDS)
-      drawDebugBox(display, avgSpdNumAreaX - 2, avgSpdY - 20, currentAvgSpdWidth + 4, 24);
+    if (SHOW_ELEMENT_BOUNDS) {
+      int avgSpdTop = avgSpdY + std::min((int)ds15_refY1, -18);
+      int avgSpdBottom = avgSpdY + (int)ds15_refY1 + (int)ds15_fontH;
+      drawDebugBox(display, avgSpdNumAreaX - 2, avgSpdTop - 2,
+                   currentAvgSpdWidth + 4, avgSpdBottom - avgSpdTop + 4);
+    }
   }
 
   // --- Fuel Liters (4 fixed cells: tens, ones, dot, tenths) ---
@@ -1314,7 +1326,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.print("L");
 
     if (SHOW_ELEMENT_BOUNDS)
-      drawDebugBox(display, fuelCenterX - totalW - 2, clearY, totalW + 4, 32);
+      drawDebugBox(display, fuelNumAreaX - 2, fuelY + (int)ds15_refY1 - 2, totalW + 4,
+                   (int)ds15_fontH + 4);
   }
 
   if ((componentUpdated || forceDraw) && ENABLE_CIRCLE_TEST)
