@@ -195,7 +195,10 @@ bool TZ_DST_ENABLED = true;
 bool OTA_PULL_ENABLED = false;
 String OTA_PULL_URL = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-String OTA_CURRENT_VERSION = "1.0.7";
+String OTA_CURRENT_VERSION = "1.0.8";
+
+// Optional PIN protecting the web config page and admin API (empty = disabled)
+String CONFIG_PIN = "";
 
 int FUEL_TOUCH_POINTS = 8;
 int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400};
@@ -411,15 +414,12 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(ODO_DEC_DIGITS, "ODO_DEC", 1);
 
   CFG_STR(WIFI_SSID, "WIFI_SSID", "D-Link-627F3B");
-  CFG_STR(WIFI_PASSWORD, "WIFI_PWD", "GDk2DxjVDc");
+  // WiFi passwords are handled manually (below): never serialized back to the
+  // web API, and an empty posted value means "keep the stored one".
   CFG_STR(WIFI_SSID_1, "WIFI_S1", "");
-  CFG_STR(WIFI_PASSWORD_1, "WIFI_P1", "");
   CFG_STR(WIFI_SSID_2, "WIFI_S2", "");
-  CFG_STR(WIFI_PASSWORD_2, "WIFI_P2", "");
   CFG_STR(WIFI_SSID_3, "WIFI_S3", "");
-  CFG_STR(WIFI_PASSWORD_3, "WIFI_P3", "");
   CFG_STR(WIFI_SSID_4, "WIFI_S4", "");
-  CFG_STR(WIFI_PASSWORD_4, "WIFI_P4", "");
   CFG_INT(WIFI_TX_POWER_DBM, "WIFI_TXP", 11);
   CFG_BOOL(NTP_ENABLED, "NTP_EN", true);
   CFG_STR(NTP_SERVER, "NTP_SRV", "pool.ntp.org");
@@ -429,7 +429,53 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
   CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.0.7");
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.0.8");
+
+  // CONFIG_PIN is handled manually: never serialized back (mode 1) so the web
+  // config API cannot leak it. Mode 2 accepts a new 4-16 char PIN, or clears
+  // it when CONFIG_PIN_REMOVE is true.
+  if (mode == 0) {
+    CONFIG_PIN = pref.getString("CONFIG_PIN", "");
+  } else if (mode == 1) {
+    (*doc)["CONFIG_PIN_REMOVE"] = false;
+  } else if (mode == 2) {
+    if ((*doc)["CONFIG_PIN_REMOVE"].as<bool>()) {
+      CONFIG_PIN = "";
+      pref.putString("CONFIG_PIN", "");
+    } else if (!(*doc)["CONFIG_PIN"].isNull()) {
+      String newPin = (*doc)["CONFIG_PIN"].as<String>();
+      if (newPin.length() >= 4 && newPin.length() <= 16) {
+        CONFIG_PIN = newPin;
+        pref.putString("CONFIG_PIN", CONFIG_PIN);
+      }
+    }
+  }
+
+  // WiFi passwords: mode 1 sends empty strings so they never leave the device,
+  // mode 2 keeps the stored value when the posted password is empty.
+  {
+    String *pwds[5] = { &WIFI_PASSWORD, &WIFI_PASSWORD_1, &WIFI_PASSWORD_2,
+                        &WIFI_PASSWORD_3, &WIFI_PASSWORD_4 };
+    const char *keys[5] = { "WIFI_PASSWORD", "WIFI_PASSWORD_1",
+                            "WIFI_PASSWORD_2", "WIFI_PASSWORD_3",
+                            "WIFI_PASSWORD_4" };
+    const char *nvs[5] = { "WIFI_PWD", "WIFI_P1", "WIFI_P2", "WIFI_P3",
+                           "WIFI_P4" };
+    const char *defs[5] = { "GDk2DxjVDc", "", "", "", "" };
+    for (int i = 0; i < 5; i++) {
+      if (mode == 0) {
+        *pwds[i] = pref.getString(nvs[i], defs[i]);
+      } else if (mode == 1) {
+        (*doc)[keys[i]] = "";
+      } else if (mode == 2 && !(*doc)[keys[i]].isNull()) {
+        String v = (*doc)[keys[i]].as<String>();
+        if (v.length() > 0) {
+          *pwds[i] = v;
+          pref.putString(nvs[i], v);
+        }
+      }
+    }
+  }
 
   if (mode == 0 || mode == 2) {
     if (FUEL_TOUCH_POINTS < 2) FUEL_TOUCH_POINTS = 2;

@@ -295,6 +295,7 @@ extern bool OTA_PULL_ENABLED;
 extern String OTA_PULL_URL;
 extern int OTA_PULL_INTERVAL_HOURS;
 extern String OTA_CURRENT_VERSION;
+extern String CONFIG_PIN;
 
 // ----------------------------------------------------------------------------
 // Fuel touch table

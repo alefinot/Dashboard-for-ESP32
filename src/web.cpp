@@ -791,7 +791,7 @@ label {
 }
 
 /* Form Controls Styling */
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="number"], input[type="password"], select {
     width: 100%;
     padding: 6px 10px;
     margin-top: 4px;
@@ -804,7 +804,7 @@ input[type="text"], input[type="number"], select {
     transition: all 0.2s ease;
 }
 
-input[type="text"]:focus, input[type="number"]:focus, select:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:focus, select:focus {
     border-color: var(--accent-cyan);
     outline: none;
     background: #182030;
@@ -1071,7 +1071,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
                             <input type="range" id="WIFI_TX_POWER_DBM_slider" min="-1" max="20" step="1" value="20" oninput="document.getElementById(&#39;WIFI_TX_POWER_DBM&#39;).value = this.value">
                             <input type="number" id="WIFI_TX_POWER_DBM" value="20" min="-1" max="20" step="1" oninput="document.getElementById(&#39;WIFI_TX_POWER_DBM_slider&#39;).value = this.value">
                         </div>
-                    </div></div><div class="section-title">📡 Primary Network</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID" value="Xiaomi 15" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD" value="Saaaaaaso" step="any" style="width:85px;text-align:center;"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">🔄 Fallback Networks</h4><div style="display:flex;flex-direction:column;gap:6px;"></div><div class="section-title">Network 1</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_1" value="D-Link-627F3B" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_1" value="GDk2DxjVDc" step="any" style="width:85px;text-align:center;"></div></div><div class="section-title">Network 2</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_2" value="TP-Link_F3EB" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_2" value="14500763" step="any" style="width:85px;text-align:center;"></div></div><div class="section-title">Network 3</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_3" value="" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_3" value="" step="any" style="width:85px;text-align:center;"></div></div><div class="section-title">Network 4</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_4" value="" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_4" value="" step="any" style="width:85px;text-align:center;"></div></div></div></div>
+                    </div></div><div class="section-title">📡 Primary Network</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID" value="Xiaomi 15" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD" value="" step="any" style="width:85px;text-align:center;"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">🔄 Fallback Networks</h4><div style="display:flex;flex-direction:column;gap:6px;"></div><div class="section-title">Network 1</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_1" value="D-Link-627F3B" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_1" value="" step="any" style="width:85px;text-align:center;"></div></div><div class="section-title">Network 2</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_2" value="TP-Link_F3EB" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_2" value="" step="any" style="width:85px;text-align:center;"></div></div><div class="section-title">Network 3</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_3" value="" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_3" value="" step="any" style="width:85px;text-align:center;"></div></div><div class="section-title">Network 4</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_4" value="" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_4" value="" step="any" style="width:85px;text-align:center;"></div></div></div></div>
             </details>
             <details>
                 <summary>
@@ -1448,9 +1448,19 @@ const iconSVG = {
     display: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
     sensors: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
     gnss: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
-    layout: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>'
+    layout: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>',
+    security: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
 };
 const configMap = [
+    {
+        title: "Security", icon: iconSVG.security,
+        items: [
+            { type: "card_header", label: "Config Page PIN" },
+            { type: "pin", id: "CONFIG_PIN", label: "New PIN (4-16 chars)" },
+            { id: "CONFIG_PIN_REMOVE", label: "Remove PIN" },
+            { type: "note", label: "When set, the config page and admin actions (reboot, reset, OTA, odo) require this PIN. Leave the field empty to keep the current PIN." }
+        ]
+    },
     {
         title: "System & General", icon: iconSVG.system,
         items: [
@@ -1859,6 +1869,12 @@ function renderForm(d) {
                     </div>`;
                     groupHtml += xyContent;
                 }
+            } else if (iType === 'pin') {
+                hasItems = true;
+                groupHtml += `<div class="card"><div style="display:flex;align-items:center;gap:8px;"><label style="min-width:170px;">${item.label}</label><div style="display:flex;align-items:center;gap:4px;margin-left:auto;width:135px;justify-content:flex-end;"><input type="password" id="${item.id}" placeholder="leave empty = keep" style="width:85px;text-align:center;"></div></div></div>`;
+            } else if (iType === 'note') {
+                hasItems = true;
+                groupHtml += `<div style="font-size:11px;color:var(--text-dim);padding:2px 2px 8px 2px;">${item.label}</div>`;
             } else if (iType === 'touch-table') {
                 closeSubCard();
                 hasItems = true;
@@ -1883,19 +1899,21 @@ function renderForm(d) {
                     hasItems = true;
                     let val = d[item.id];
                     let isBool = (typeof val === 'boolean');
+                    let isPwd = /^WIFI_PASSWORD(_\d+)?$/.test(item.id);
+                    let inputType = isPwd ? 'password' : (typeof val === 'number' ? 'number' : 'text');
 
                     if (inCardSubCard) {
                         if (isBool) {
                             groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>${item.label}</label><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div>`;
                         } else {
-                            groupHtml += `<div style="display:flex;align-items:center;padding:3px 0;"><label style="min-width:170px;">${item.label}</label><div style="display:flex;align-items:center;gap:4px;margin-left:auto;width:135px;justify-content:flex-end;">${item.unit ? `<span class="unit">${item.unit}</span>` : ''}<input type="${typeof val === 'number' ? 'number' : 'text'}" id="${item.id}" value="${val}" step="any" style="width:85px;text-align:center;"></div></div>`;
+                            groupHtml += `<div style="display:flex;align-items:center;padding:3px 0;"><label style="min-width:170px;">${item.label}</label><div style="display:flex;align-items:center;gap:4px;margin-left:auto;width:135px;justify-content:flex-end;">${item.unit ? `<span class="unit">${item.unit}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any" style="width:85px;text-align:center;"></div></div>`;
                         }
                     } else {
                         closeSubCard();
                         if (isBool) {
                             groupHtml += `<div class="card checkbox-card"><label>${item.label}</label><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div>`;
                         } else {
-                            groupHtml += `<div class="card"><div style="display:flex;align-items:center;gap:8px;"><label style="min-width:170px;">${item.label}</label><div style="display:flex;align-items:center;gap:4px;margin-left:auto;width:135px;justify-content:flex-end;">${item.unit ? `<span class="unit">${item.unit}</span>` : ''}<input type="${typeof val === 'number' ? 'number' : 'text'}" id="${item.id}" value="${val}" step="any" style="width:85px;text-align:center;"></div></div></div>`;
+                            groupHtml += `<div class="card"><div style="display:flex;align-items:center;gap:8px;"><label style="min-width:170px;">${item.label}</label><div style="display:flex;align-items:center;gap:4px;margin-left:auto;width:135px;justify-content:flex-end;">${item.unit ? `<span class="unit">${item.unit}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any" style="width:85px;text-align:center;"></div></div></div>`;
                         }
                     }
                 }
@@ -2010,12 +2028,10 @@ function save() {
         else if (el.type === 'number' || el.tagName.toLowerCase() === 'select') {
             let val = parseFloat(el.value);
             out[el.id] = isNaN(val) ? el.value : val;
-        } else if (el.id.match(/^WIFI_PASSWORD(_\d+)?$/)) {
-            if (el.value === '' && el.hasAttribute('data-orig')) {
-                out[el.id] = el.getAttribute('data-orig');
-            } else {
-                out[el.id] = el.value;
-            }
+        } else if (el.type === 'password') {
+            // Masked/bullet values mean "unchanged": keep the stored one.
+            // Only a freshly typed value is sent to the device.
+            if (el.value !== '' && !/^•+$/.test(el.value)) out[el.id] = el.value;
         } else out[el.id] = el.value;
     });
     sendConfigToDevice(out, "Saving settings to device...", "Configuration saved successfully! Display updated.");
@@ -2498,7 +2514,21 @@ void webServerTask(void *pvParameters) {
   ArduinoOTA.begin();
   logPrintf("ArduinoOTA ready\n");
 
-  server.on("/", HTTP_GET, []() { server.send_P(200, PSTR("text/html"), index_html); });
+  // Config page PIN: when set, the config page and admin API require HTTP
+  // basic auth (user "admin", PIN as password). Read-only monitoring endpoints
+  // (/api/serial, /api/perf, /api/ambient) stay open.
+  auto configAuthed = []() {
+    if (CONFIG_PIN.length() == 0) return true;
+    return server.authenticate("admin", CONFIG_PIN.c_str());
+  };
+
+  server.on("/", HTTP_GET, [&configAuthed]() {
+    if (!configAuthed()) {
+      server.requestAuthentication();
+      return;
+    }
+    server.send_P(200, PSTR("text/html"), index_html);
+  });
   server.on("/debug", HTTP_GET, []() {
     String out = "strlen(index_html) = " + String(strlen(index_html)) + "\n";
     out += "First 100 hex: ";
@@ -2510,7 +2540,11 @@ void webServerTask(void *pvParameters) {
     server.send(200, "text/plain", out);
   });
 
-  server.on("/api/config", HTTP_GET, []() {
+  server.on("/api/config", HTTP_GET, [&configAuthed]() {
+    if (!configAuthed()) {
+      server.requestAuthentication();
+      return;
+    }
     JsonDocument doc;
     processConfig(1, &doc);
     doc["ambientLightValue"] = ambientLightValue;
@@ -2519,7 +2553,11 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", out);
   });
 
-  server.on("/api/config", HTTP_POST, []() {
+  server.on("/api/config", HTTP_POST, [&configAuthed]() {
+    if (!configAuthed()) {
+      server.requestAuthentication();
+      return;
+    }
     if (!server.hasArg("plain")) {
       server.send(400);
       return;
@@ -2569,7 +2607,11 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", out);
   });
 
-  server.on("/api/odo", HTTP_POST, []() {
+  server.on("/api/odo", HTTP_POST, [&configAuthed]() {
+    if (!configAuthed()) {
+      server.requestAuthentication();
+      return;
+    }
     if (!server.hasArg("plain")) {
       server.send(400);
       return;
@@ -2589,17 +2631,29 @@ void webServerTask(void *pvParameters) {
     }
   });
 
-  server.on("/api/reboot", HTTP_POST, []() {
+  server.on("/api/reboot", HTTP_POST, [&configAuthed]() {
+    if (!configAuthed()) {
+      server.requestAuthentication();
+      return;
+    }
     server.send(200, "application/json", "{\"status\":\"ok\"}");
     pendingReboot = true;
   });
 
-  server.on("/api/sleep", HTTP_POST, []() {
+  server.on("/api/sleep", HTTP_POST, [&configAuthed]() {
+    if (!configAuthed()) {
+      server.requestAuthentication();
+      return;
+    }
     server.send(200, "application/json", "{\"status\":\"ok\"}");
     pendingSleep = true;
   });
 
-  server.on("/api/reset", HTTP_POST, []() {
+  server.on("/api/reset", HTTP_POST, [&configAuthed]() {
+    if (!configAuthed()) {
+      server.requestAuthentication();
+      return;
+    }
     Preferences pref;
 
     pref.begin("cfg", false);
@@ -2637,7 +2691,11 @@ void webServerTask(void *pvParameters) {
                 "{\"status\":\"ok\",\"value\":" + String(LIGHT_SENSOR_BRIGHT_VAL) + "}");
   });
 
-  server.on("/api/ota", HTTP_POST, []() {
+  server.on("/api/ota", HTTP_POST, [&configAuthed]() {
+    if (!configAuthed()) {
+      server.requestAuthentication();
+      return;
+    }
     if (otaUpdateSuccess) {
       server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Update OK\"}");
       delay(100);
@@ -2674,7 +2732,11 @@ void webServerTask(void *pvParameters) {
     }
   });
 
-  server.on("/api/ota/pull", HTTP_POST, []() {
+  server.on("/api/ota/pull", HTTP_POST, [&configAuthed]() {
+    if (!configAuthed()) {
+      server.requestAuthentication();
+      return;
+    }
     if (otaUpdateInProgress || otaPullTaskRunning) {
       server.send(200, "application/json", "{\"status\":\"busy\",\"msg\":\"OTA already in progress\"}");
       return;
