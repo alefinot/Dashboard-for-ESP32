@@ -194,7 +194,7 @@ int TZ_OFFSET_HOURS = 1;
 bool TZ_DST_ENABLED = true;
 
 bool OTA_PULL_ENABLED = false;
-String OTA_PULL_URL = "";
+String OTA_PULL_URL = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
 String OTA_CURRENT_VERSION = "1.0.0";
 
@@ -428,7 +428,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(TZ_DST_ENABLED, "TZ_DST", true);
 
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
-  CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "");
+  CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
   CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
   CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.0.0");
 

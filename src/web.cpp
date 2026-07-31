@@ -67,17 +67,32 @@ void checkForFirmwareUpdate() {
     return;
   }
 
-  String latestVersion = doc["version"] | "";
+  String latestVersion = doc["version"] | doc["tag_name"] | "";
   String firmwareUrl = doc["firmware_url"] | "";
+
+  if (firmwareUrl.length() == 0) {
+    JsonArray assets = doc["assets"].as<JsonArray>();
+    for (JsonObject asset : assets) {
+      if (String(asset["name"] | "").endsWith(".bin")) {
+        firmwareUrl = asset["browser_download_url"] | "";
+        break;
+      }
+    }
+  }
 
   if (latestVersion.length() == 0 || firmwareUrl.length() == 0) {
     logPrintf("OTA Pull: invalid manifest (missing version/firmware_url)\n");
     return;
   }
 
-  logPrintf("OTA Pull: latest=%s current=%s\n", latestVersion.c_str(), OTA_CURRENT_VERSION.c_str());
+  String curVer = OTA_CURRENT_VERSION;
+  if (curVer.startsWith("v") || curVer.startsWith("V")) curVer = curVer.substring(1);
+  if (latestVersion.startsWith("v") || latestVersion.startsWith("V"))
+    latestVersion = latestVersion.substring(1);
 
-  if (latestVersion.equals(OTA_CURRENT_VERSION)) {
+  logPrintf("OTA Pull: latest=%s current=%s\n", latestVersion.c_str(), curVer.c_str());
+
+  if (latestVersion.equals(curVer)) {
     logPrintf("OTA Pull: already up-to-date\n");
     return;
   }
