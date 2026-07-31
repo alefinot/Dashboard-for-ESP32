@@ -7,6 +7,7 @@
 #include <esp_sntp.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <esp_heap_caps.h>
 
 Preferences preferences;
 WebServer server(80);
@@ -38,7 +39,10 @@ void startOtaPull(bool manual) {
   if (otaPullTaskRunning || otaUpdateInProgress) return;
   otaPullManualFlag = manual;
   otaPullTaskRunning = true;
-  xTaskCreatePinnedToCore(otaPullTask, "OtaPullTask", 16384, NULL, 1, NULL, 0);
+  // 32KB stack: the TLS download handshake plus HTTPClient redirect handling
+  // overflows 16KB, silently corrupting adjacent heap chunks (subsequent
+  // mallocs then fail with "malloc failed" despite plenty of free heap).
+  xTaskCreatePinnedToCore(otaPullTask, "OtaPullTask", 32768, NULL, 1, NULL, 0);
 }
 
 // Suspends the display loop task while the OTA task does TLS work, so the
@@ -52,6 +56,7 @@ struct OtaHeapGuard {
   TaskHandle_t h;
   OtaHeapGuard() {
     otaMemReleaseRequested = true;
+    otaMemReleased = false;
     unsigned long t0 = millis();
     while (!otaMemReleased && (millis() - t0) < 3000)
       vTaskDelay(pdMS_TO_TICKS(1));
@@ -118,6 +123,9 @@ void checkForFirmwareUpdate(bool manual) {
   {
     WiFiClientSecure tls;
     tls.setInsecure();
+    if (!heap_caps_check_integrity_all(true)) {
+      logPrintf("OTA Pull: HEAP CORRUPTED before TLS probe\n");
+    }
     if (tls.connect(host.c_str(), 443, 5000)) {
       logPrintf("OTA Pull: TLS handshake OK\n");
       tls.stop();
@@ -272,6 +280,9 @@ void performFirmwareUpdate(const String &firmwareUrl, const String &newVersion) 
       } else {
         int totalSize = http.getSize();
 
+        if (!heap_caps_check_integrity_all(true)) {
+          logPrintf("OTA Pull: HEAP CORRUPTED before Update.begin\n");
+        }
         if (!Update.begin(totalSize > 0 ? totalSize : UPDATE_SIZE_UNKNOWN)) {
           Update.printError(Serial);
           setOtaPullStatus("error: update.begin failed");

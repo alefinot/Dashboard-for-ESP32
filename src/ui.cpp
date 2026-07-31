@@ -4,24 +4,29 @@
 
 static constexpr unsigned long STARTUP_RAMP_DURATION_MS = 3000;
 
-// Pre-rendered speed-digit sprite (~70KB). Freed by the display task itself
-// (safe point, see processOtaMemRelease) before an OTA pull check so the TLS
-// handshake gets a big contiguous heap block; rebuilt on the next frame after
-// the check finishes.
+// Pre-rendered speed-digit sprite (~40KB), the cached 120px VLW file buffer
+// (~45KB) and the loaded 120px glyph tables (~30KB). Freed by the display task
+// itself (safe point, see processOtaMemRelease) before an OTA pull check so
+// the TLS handshake gets big contiguous heap blocks; rebuilt on the next frame
+// after the check finishes.
 static LGFX_Sprite sp(&display);
 static bool spInit = false;
 static bool spValid = false;
+static bool vlw120Ready = true;
 volatile bool otaMemReleaseRequested = false;
 volatile bool otaMemReleased = false;
 
-// Called from loop() every frame, before any sprite use: frees the sprite
-// buffer when an OTA check has asked for it. Runs in the display task so no
+// Called from loop() every frame, before any sprite use: frees the big UI
+// buffers when an OTA check has asked for it. Runs in the display task so no
 // other task can be using the sprite at the same time.
 void processOtaMemRelease() {
   if (!otaMemReleaseRequested || otaMemReleased) return;
   sp.deleteSprite();
   spValid = false;
   spInit = false;
+  vlw120Ready = false;
+  resetVLWFontCache();
+  freeVLWData120();
   otaMemReleased = true;
 }
 
@@ -342,6 +347,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
         w_speed3_max = cumX - SG;
         h_speed_max = th;
       }
+      vlw120Ready = true;
       if (vfd.data && !otaMemReleaseRequested &&
           sp.createSprite(w_speed3_max + 12, h_speed_max + 6)
           && sp.loadFont(vfd.data, lgfx::v1::IFont::font_type_t::ft_vlw)) {
@@ -371,7 +377,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
         sp.print(speedStr[i]);
       }
       sp.pushSprite(&display, boxLeft - 6, speedNumY - 2);
-    } else {
+    } else if (vlw120Ready) {
       // Fallback: draw directly on main display (VLW font already loaded above)
       display.setTextColor(TFT_WHITE);
       char speedStr2[12];

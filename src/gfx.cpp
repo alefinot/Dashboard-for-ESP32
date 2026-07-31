@@ -49,23 +49,36 @@ void LGFX_ST7789_4::applyBusConfig() {
 #include "Conthrax_SemiBold7pt7b.h"
 #include "Conthrax_SemiBold4pt7b.h"
 
+// Cached VLW file buffer for the 120px speed digits (~45KB) and the index of
+// the currently loaded VLW font on the display. Both are released cooperatively
+// before an OTA check frees the heap for the TLS handshake (see
+// processOtaMemRelease in ui.cpp) and rebuilt lazily on the next frame.
+static std::vector<uint8_t> g_vlw120Buf;
+static int g_lastVLWFont = -1;
+
 VFontData getVLWData120() {
-  static std::vector<uint8_t> buf;
-  if (buf.empty()) {
+  if (g_vlw120Buf.empty()) {
     fs::File f = LittleFS.open("/Fonts/DS-DIGIT_120px.vlw", "r");
     if (f) {
-      buf.resize(f.size());
-      f.read(buf.data(), buf.size());
+      g_vlw120Buf.resize(f.size());
+      f.read(g_vlw120Buf.data(), g_vlw120Buf.size());
       f.close();
     }
   }
-  return { buf.empty() ? nullptr : buf.data(), buf.size() };
+  return { g_vlw120Buf.empty() ? nullptr : g_vlw120Buf.data(), g_vlw120Buf.size() };
+}
+
+void freeVLWData120() {
+  std::vector<uint8_t>().swap(g_vlw120Buf);
+}
+
+void resetVLWFontCache() {
+  g_lastVLWFont = -1;
+  display.unloadFont();
 }
 
 void LGFX_ST7789_4::loadVLWFont(const char *path) {
   setTextDatum(lgfx::textdatum_t::baseline_left);
-
-  static int lastFont = -1;
 
   bool is120  = (path[7] == 'D' && path[16] == '1');
   bool isDs28 = (path[7] == 'D' && path[16] == '2');
@@ -73,8 +86,8 @@ void LGFX_ST7789_4::loadVLWFont(const char *path) {
   bool isCon16 = (path[7] == 'C' && path[26] == '6');
 
   int cur = is120 ? 0 : isDs28 ? 1 : isCon28 ? 2 : isCon16 ? 3 : 4;
-  if (cur == lastFont) return;
-  lastFont = cur;
+  if (cur == g_lastVLWFont) return;
+  g_lastVLWFont = cur;
 
   if (is120) {
     auto vfd = getVLWData120();
@@ -663,8 +676,10 @@ volatile int otaProgressFillW = 0;
 volatile int otaProgressTarget = 0;
 
 void showUpdatingScreen() {
+  // Start the bar empty, but keep any target already set by the OTA task
+  // (pull flow sets otaProgressTarget = 258 once the flash completes; the
+  // animation in loop() uses it to fill the bar and trigger the reboot).
   otaProgressFillW = 0;
-  otaProgressTarget = 0;
 
   int fadeTarget = currentBrightnessTarget;
   int fadeStepCount = (fadeTarget / 8) + 1;

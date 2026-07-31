@@ -432,6 +432,8 @@ inline int applyAlign(int anchorX, int elementW, int align) {
 }
 struct VFontData { const uint8_t *data; size_t len; };
 VFontData getVLWData120();
+void freeVLWData120();
+void resetVLWFontCache();
 void initFilesystem();
 void drawSplashBase();
 void updateSplashProgress(int targetProgress);
