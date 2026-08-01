@@ -899,10 +899,17 @@ void sensorTask(void *pvParameters) {
       processFuelConsumption();
       updateAverageSpeed();
     }
-    // Only use GPS date/time while a real position fix is valid. Receivers
-    // keep emitting a date/time even without satellites (stale value from the
-    // last fix or a dead RTC battery) and blindly applying it here would
-    // freeze the clock at that old value and clobber every NTP/manual sync.
+    // GNSS date/time is only applied while a real position fix is valid AND
+    // the module clock has been observed ticking in step with real time
+    // (3 consecutive advances of ~1s). Receivers without a fix (or with a
+    // dead RTC battery) keep emitting a stale/frozen date+time, typically the
+    // time of the last fix. Without the ticking check, applying that frozen
+    // value every few seconds snaps the system clock back to it right after
+    // every NTP/manual sync, leaving the dashboard stuck on one time forever.
+    static time_t gpsLastEpoch = 0;
+    static unsigned long gpsLastEpochMs = 0;
+    static int gpsTickCount = 0;
+    bool gpsTimeReady = false;
     if (gps.location.isValid() && gps.date.isValid() && gps.time.isValid()) {
       struct tm t = {0};
       t.tm_year = gps.date.year() - 1900;
@@ -913,13 +920,27 @@ void sensorTask(void *pvParameters) {
       t.tm_sec = gps.time.second();
       time_t epoch = mktime(&t);
       if (epoch > 1577836800 && epoch < 4102444800) { // sanity: 2020 .. 2100
-        struct timeval tv;
-        gettimeofday(&tv, NULL);
-        if (abs((long)(tv.tv_sec - epoch)) > 5) {
-          tv.tv_sec = epoch;
-          tv.tv_usec = 0;
-          settimeofday(&tv, NULL);
+        if (epoch != gpsLastEpoch) {
+          unsigned long elapsedMs = millis() - gpsLastEpochMs;
+          if (gpsLastEpoch != 0 && epoch == gpsLastEpoch + 1 &&
+              elapsedMs >= 300 && elapsedMs <= 3000) {
+            if (gpsTickCount < 3) gpsTickCount++;
+          } else {
+            gpsTickCount = 0;
+          }
+          gpsLastEpoch = epoch;
+          gpsLastEpochMs = millis();
         }
+        gpsTimeReady = (gpsTickCount >= 3);
+      }
+    }
+    if (gpsTimeReady) {
+      struct timeval tv;
+      gettimeofday(&tv, NULL);
+      if (abs((long)(tv.tv_sec - gpsLastEpoch)) > 5) {
+        tv.tv_sec = gpsLastEpoch;
+        tv.tv_usec = 0;
+        settimeofday(&tv, NULL);
       }
     }
 
