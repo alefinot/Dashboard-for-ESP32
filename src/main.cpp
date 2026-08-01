@@ -280,6 +280,7 @@ void loop() {
     if (!otaUpdateInProgress) {
       updateBigDisplay(snap);
       drawFpsOverlay();
+      drawGpsDebugOverlay();
       checkNightMode(snap);
     } else {
       static unsigned long lastOtaAdvance = 0;
@@ -319,6 +320,9 @@ void loop() {
     }
   }
 
+  // NOTE: periodic [RAW]/[VAL]/[ESP] telemetry temporarily disabled for a
+  // clean serial monitor during GNSS debugging. Re-enable by flipping to #if 1.
+#if 0
   static unsigned long lastTelemetryUpdate = 0;
   if (now - lastTelemetryUpdate >= TELEMETRY_REFRESH_MS) {
     lastTelemetryUpdate = now;
@@ -366,6 +370,7 @@ void loop() {
               currentMeasuredFps, currentAverageFps,
               ESP.getChipModel(), ESP.getChipRevision());
   }
+#endif // telemetry disabled
   static unsigned long lastCpuScaleCheck = 0;
     static uint32_t lastCpuCycleCount = 0;
     static unsigned long lastCpuUsageCheck = 0;

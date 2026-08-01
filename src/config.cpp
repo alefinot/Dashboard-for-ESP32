@@ -50,6 +50,10 @@ int MIN_SATELLITES = 5;
 int OPTIMAL_SATELLITES = 8;
 float MAX_SPEED_DELTA_KMH = 5.0f;
 float MIN_SPEED_THRESHOLD = 1.0f;
+float GPS_START_KMH = 3.0f;
+int GPS_STOP_SETTLE_MS = 1500;
+float GPS_MIN_DEV_KMH = 2.0f;
+bool GPS_ONLY_MODE = false;
 float ACCEL_START_SPEED = 1.0f;
 float ACCEL_TARGET_SPEED = 50.0f;
 float ACCEL_MAX_TIME = 30.0f;
@@ -114,6 +118,7 @@ bool ENABLE_ANTIALIASING = true;
 float AA_SHARPNESS = 1.0f;
  
 bool SHOW_FPS_COUNTER_DEFAULT = true;
+bool GPS_DEBUG_DEFAULT = false;
 int OFFSET_BIG_FPS_X = 5;
 int OFFSET_BIG_FPS_Y = 5;
 
@@ -180,6 +185,7 @@ double WHEEL_DIST_PER_PULSE_KM;
 float NTC_INV_ROOM_KELVIN;
 float ADC_VOLTS_FACTOR;
 bool showFpsCounter = true;
+bool showGpsDebug = false;
 
 String WIFI_SSID = "D-Link-627F3B";
 String WIFI_PASSWORD = "GDk2DxjVDc";
@@ -201,7 +207,7 @@ bool TZ_DST_ENABLED = true;
 bool OTA_PULL_ENABLED = false;
 String OTA_PULL_URL = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-String OTA_CURRENT_VERSION = "1.0.9";
+String OTA_CURRENT_VERSION = "1.1.0";
 
 // Optional PIN protecting the web config page and admin API (empty = disabled)
 String CONFIG_PIN = "";
@@ -324,6 +330,10 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(OPTIMAL_SATELLITES, "OPT_SAT", 8);
   CFG_FLT(MAX_SPEED_DELTA_KMH, "MAX_SPD_DELT", 5.0f);
   CFG_FLT(MIN_SPEED_THRESHOLD, "MIN_SPD_THR", 1.0f);
+  CFG_FLT(GPS_START_KMH, "GPS_START", 3.0f);
+  CFG_INT(GPS_STOP_SETTLE_MS, "GPS_STL_MS", 1500);
+  CFG_FLT(GPS_MIN_DEV_KMH, "GPS_MIN_DV", 2.0f);
+  CFG_BOOL(GPS_ONLY_MODE, "GPS_ONLY", false);
   CFG_FLT(ACCEL_START_SPEED, "ACC_STRT", 1.0f);
   CFG_FLT(ACCEL_TARGET_SPEED, "ACC_TGT", 50.0f);
   CFG_FLT(ACCEL_MAX_TIME, "ACC_MAX_T", 30.0f);
@@ -381,6 +391,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(ENABLE_ANTIALIASING, "EN_AA", true);
   CFG_FLT(AA_SHARPNESS, "AA_SHARP", 1.0f);
   CFG_BOOL(SHOW_FPS_COUNTER_DEFAULT, "SHW_FPS", true);
+  CFG_BOOL(GPS_DEBUG_DEFAULT, "GPS_DBG", false);
   CFG_BOOL(ENABLE_DYNAMIC_CPU, "DYN_CPU", false);
   CFG_INT(MANUAL_CPU_FREQ, "MAN_CPU", 240);
   CFG_BOOL(ENABLE_CPU_THROTTLE, "CPU_THR_EN", true);
@@ -441,7 +452,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
   CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.0.9");
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.1.0");
 
   // CONFIG_PIN is handled manually: never serialized back (mode 1) so the web
   // config API cannot leak it. Mode 2 accepts a new 4-16 char PIN, or clears
@@ -528,4 +539,5 @@ void recalculateDerivedParams() {
   NTC_INV_ROOM_KELVIN = 1.0f / (25.0f + 273.15f);
   ADC_VOLTS_FACTOR = 3.3f / 4095.0f;
   showFpsCounter = SHOW_FPS_COUNTER_DEFAULT;
+  showGpsDebug = GPS_DEBUG_DEFAULT;
 }

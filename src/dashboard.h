@@ -85,10 +85,10 @@ constexpr int HALL_SENSOR_PIN = 33;
 // pin 33 for both, which made analog fuel readings unreliable because the Hall
 // interrupt also fires on that line. It is now assigned to a dedicated ADC pin.
 #define FUEL_TOUCH_PIN 32
-#define RXD2 25
-#define TXD2 26
-#define COMPASS_SDA 21
-#define COMPASS_SCL 22
+#define RXD2 16 // TEST: moved from 25 for pin-swap isolation test
+#define TXD2 17 // TEST: moved from 26 for pin-swap isolation test
+#define COMPASS_SDA 13 // TEST: moved from 21 (board silkscreen labels unreliable)
+#define COMPASS_SCL 15 // TEST: moved from 22
 #define POWER_SENSE_PIN 4
 #define BATTERY_SENSE_PIN 35
 #define TEMP_SENSE_PIN 36
@@ -148,6 +148,10 @@ extern int MIN_SATELLITES;
 extern int OPTIMAL_SATELLITES;
 extern float MAX_SPEED_DELTA_KMH;
 extern float MIN_SPEED_THRESHOLD;
+extern float GPS_START_KMH;
+extern int GPS_STOP_SETTLE_MS;
+extern float GPS_MIN_DEV_KMH;
+extern bool GPS_ONLY_MODE;
 extern float ACCEL_START_SPEED;
 extern float ACCEL_TARGET_SPEED;
 extern float ACCEL_MAX_TIME;
@@ -212,6 +216,7 @@ extern bool ENABLE_ANTIALIASING;
 extern float AA_SHARPNESS;
  
 extern bool SHOW_FPS_COUNTER_DEFAULT;
+extern bool GPS_DEBUG_DEFAULT;
 extern int OFFSET_BIG_FPS_X;
 extern int OFFSET_BIG_FPS_Y;
 
@@ -279,6 +284,7 @@ extern double WHEEL_DIST_PER_PULSE_KM;
 extern float NTC_INV_ROOM_KELVIN;
 extern float ADC_VOLTS_FACTOR;
 extern bool showFpsCounter;
+extern bool showGpsDebug;
 
 extern String WIFI_SSID;
 extern String WIFI_PASSWORD;
@@ -342,6 +348,17 @@ extern TinyGPSPlus gps;
 extern HardwareSerial gpsSerial;
 
 extern uint16_t DEBUG_BOX_COLOR;
+
+// GPS debug counters (sensors.cpp), read by the on-screen overlay (gfx.cpp)
+extern volatile uint32_t gpsRxBytes;
+extern volatile uint32_t ubxFramesParsed;
+extern volatile uint8_t ubxLastFixType;
+extern volatile uint8_t ubxLastNumSv;
+extern volatile double ubxLastLat;
+extern volatile double ubxLastLon;
+extern volatile uint32_t ubxSyncSeen;
+extern volatile uint32_t ubxCkFail;
+extern volatile uint32_t ubxOversize;
 extern float cpuUsagePct;
 extern float currentMeasuredFps;
 constexpr uint8_t FPS_AVG_SAMPLES = 5;
@@ -448,6 +465,7 @@ void showGoodbyeScreen(bool isSleep);
 void showUpdatingScreen();
 void updateOTAProgress(int progress, int total);
 void drawFpsOverlay();
+void drawGpsDebugOverlay();
 
 template <typename T>
 inline void drawDebugBox(T &disp, int x, int y, int w, int h,

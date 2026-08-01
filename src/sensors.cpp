@@ -4,40 +4,153 @@ TinyGPSPlus gps;
 HardwareSerial gpsSerial(2);
 
 // ----------------------------------------------------------------------------
-// QMC5883L compass driver (I2C)
+// Compass driver (I2C) - auto-detects the chip actually fitted:
+//   QMC5883P @ 0x2C  (newest revision, used by BZGNSS P25 Pro: CHIPID 0x80,
+//                     data at 0x01-0x06 LSB-first, mode 0x0A, config 0x0B)
+//   QMC5883L @ 0x0D  (standard)
+//   VCM5883L @ 0x0C  (older BZGNSS units)
+//   HMC5883L @ 0x1E  (oldest modules, MSB-first data at 0x03)
 // ----------------------------------------------------------------------------
+#define QMC5883P_ADDR   0x2C
+#define QMC5883P_CHIPID 0x00
+#define QMC5883P_DATA   0x01
+#define QMC5883P_STATUS 0x09
+#define QMC5883P_MODE   0x0A
+#define QMC5883P_CONFIG 0x0B
+
 #define QMC5883L_ADDR   0x0D
+#define VCM5883L_ADDR   0x0C
+#define HMC5883L_ADDR   0x1E
+
 #define QMC5883L_X_LSB  0x00
 #define QMC5883L_CTRL1  0x0B
+#define HMC5883L_CFGA   0x00
+#define HMC5883L_CFGB   0x01
+#define HMC5883L_MODE   0x02
+#define HMC5883L_X_MSB  0x03
 
+enum CompassChip { COMPASS_NONE = 0, COMPASS_QMC = 1, COMPASS_HMC = 2,
+                   COMPASS_P = 3 };
+
+static CompassChip compassChip = COMPASS_NONE;
+static uint8_t compassAddr = 0;
 bool compassReady = false;
 
-static void qmcWrite(uint8_t reg, uint8_t val) {
-  Wire.beginTransmission(QMC5883L_ADDR);
-  Wire.write(reg); Wire.write(val);
-  Wire.endTransmission();
+static bool compassWriteReg(uint8_t addr, uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  Wire.write(val);
+  return Wire.endTransmission() == 0;
 }
 
-static bool qmcReadRaw(int16_t &x, int16_t &y, int16_t &z) {
-  Wire.beginTransmission(QMC5883L_ADDR);
-  Wire.write(QMC5883L_X_LSB);
+static bool compassRead6(uint8_t addr, uint8_t startReg, bool msbFirst,
+                         int16_t &x, int16_t &y, int16_t &z) {
+  Wire.beginTransmission(addr);
+  Wire.write(startReg);
   if (Wire.endTransmission() != 0) return false;
-  if (Wire.requestFrom(QMC5883L_ADDR, 6) < 6) return false;
+  if (Wire.requestFrom(addr, 6) < 6) return false;
   uint8_t b[6];
   for (int i = 0; i < 6; i++) b[i] = Wire.read();
-  x = (int16_t)(b[1] << 8 | b[0]);
-  y = (int16_t)(b[3] << 8 | b[2]);
-  z = (int16_t)(b[5] << 8 | b[4]);
+  if (msbFirst) {
+    x = (int16_t)(b[0] << 8 | b[1]);
+    y = (int16_t)(b[2] << 8 | b[3]);
+    z = (int16_t)(b[4] << 8 | b[5]);
+  } else {
+    x = (int16_t)(b[1] << 8 | b[0]);
+    y = (int16_t)(b[3] << 8 | b[2]);
+    z = (int16_t)(b[5] << 8 | b[4]);
+  }
   return true;
+}
+
+static void compassDumpRegs(uint8_t addr) {
+  for (int off = 0; off < 0x40; off += 16) {
+    Wire.beginTransmission(addr);
+    Wire.write(off);
+    if (Wire.endTransmission() != 0) break;
+    Wire.requestFrom(addr, 16);
+    uint8_t buf[16];
+    uint8_t n = 0;
+    while (Wire.available() && n < 16) buf[n++] = Wire.read();
+    if (n == 0) break;
+    char line[128];
+    int p = snprintf(line, sizeof(line), "Compass: regs[0x%02X]=", off);
+    for (uint8_t i = 0; i < n && p < (int)sizeof(line) - 4; i++)
+      p += snprintf(line + p, sizeof(line) - p, "%02X ", buf[i]);
+    logPrintf("%s\n", line);
+  }
+}
+
+// Full-bus scan + compass candidate check on a given SDA/SCL pin assignment.
+// Returns true and initializes the chip if a compass is found.
+static bool compassScanBus(uint8_t sdaPin, uint8_t sclPin) {
+  gpio_pullup_en((gpio_num_t)sdaPin);
+  gpio_pullup_en((gpio_num_t)sclPin);
+  Wire.begin(sdaPin, sclPin);
+  delay(10);
+
+  uint8_t foundDevices[8];
+  uint8_t devCount = 0;
+  for (uint8_t addr = 1; addr <= 126; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0 && devCount < 8)
+      foundDevices[devCount++] = addr;
+  }
+  for (uint8_t i = 0; i < devCount; i++)
+    logPrintf("Compass: I2C device found @0x%02X\n", foundDevices[i]);
+
+  static const uint8_t candidates[] = {QMC5883P_ADDR, QMC5883L_ADDR,
+                                       VCM5883L_ADDR, HMC5883L_ADDR};
+  for (uint8_t addr : candidates) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() != 0) continue;
+    if (addr == HMC5883L_ADDR) {
+      if (!compassWriteReg(addr, HMC5883L_CFGA, 0x70) || // 8 samples, 15 Hz
+          !compassWriteReg(addr, HMC5883L_CFGB, 0x20) || // 1.3 Ga gain
+          !compassWriteReg(addr, HMC5883L_MODE, 0x00))   // continuous
+        return false;
+      compassChip = COMPASS_HMC;
+    } else if (addr == QMC5883P_ADDR) {
+      // Verify the chip ID (0x80) before configuring a QMC5883P
+      Wire.beginTransmission(addr);
+      Wire.write(QMC5883P_CHIPID);
+      if (Wire.endTransmission() != 0) return false;
+      Wire.requestFrom(addr, 1);
+      if (!Wire.available() || Wire.read() != 0x80) continue;
+      if (!compassWriteReg(addr, QMC5883P_MODE, 0xCF) ||   // continuous 200 Hz
+          !compassWriteReg(addr, QMC5883P_CONFIG, 0x08))   // +/-8G, set/reset
+        return false;
+      compassChip = COMPASS_P;
+    } else {
+      if (!compassWriteReg(addr, QMC5883L_CTRL1, 0x1D)) // cont 200Hz 8G 512osr
+        return false;
+      compassChip = COMPASS_QMC;
+    }
+    compassAddr = addr;
+    compassReady = true;
+    const char *name = (compassChip == COMPASS_HMC) ? "HMC5883L"
+                      : (compassChip == COMPASS_P)  ? "QMC5883P"
+                                                    : "QMC/VCM5883L";
+    logPrintf("Compass: %s detected @0x%02X (SDA=%u, SCL=%u)\n",
+              name, compassAddr, sdaPin, sclPin);
+    return true;
+  }
+
+  logPrintf("Compass: orientation SDA=%u SCL=%u - %u device(s), no known "
+            "compass address\n", sdaPin, sclPin, devCount);
+  for (uint8_t i = 0; i < devCount; i++)
+    compassDumpRegs(foundDevices[i]);
+  return false;
 }
 
 bool initCompass() {
-  Wire.beginTransmission(QMC5883L_ADDR);
-  if (Wire.endTransmission() != 0) return false;
-  qmcWrite(QMC5883L_CTRL1, 0x1D); // cont 200Hz 8G 512osr
-  delay(10);
-  compassReady = true;
-  return true;
+  // Try the normal assignment, then the mirrored one (module pin order 5=SCL,
+  // 6=SDA vs. many boards labeling the other way) - no wire swapping needed.
+  if (compassScanBus(COMPASS_SDA, COMPASS_SCL)) return true;
+  if (compassScanBus(COMPASS_SCL, COMPASS_SDA)) return true;
+  logPrintf("Compass: no compass chip found in either SDA/SCL orientation - "
+            "check wire continuity from module pins 5/6\n");
+  return false;
 }
 
 int16_t compassRawX = 0, compassRawY = 0, compassRawZ = 0;
@@ -45,7 +158,14 @@ int16_t compassRawX = 0, compassRawY = 0, compassRawZ = 0;
 void processCompassSensor() {
   if (!compassReady) return;
   int16_t x, y, z;
-  if (!qmcReadRaw(x, y, z)) return;
+  bool ok = false;
+  if (compassChip == COMPASS_HMC)
+    ok = compassRead6(compassAddr, HMC5883L_X_MSB, true, x, y, z);
+  else if (compassChip == COMPASS_P)
+    ok = compassRead6(compassAddr, QMC5883P_DATA, false, x, y, z);
+  else
+    ok = compassRead6(compassAddr, QMC5883L_X_LSB, false, x, y, z);
+  if (!ok) return;
   compassRawX = x;
   compassRawY = y;
   compassRawZ = z;
@@ -64,11 +184,11 @@ void processCompassSensor() {
 }
 
 // ----------------------------------------------------------------------------
-// BZGNSS P25 Pro (u-blox M10) configuration
-// The module ships as NMEA/UBX dual-protocol at 115200 baud / 10 Hz by
-// default, but some units leave the factory in UBX mode for flight
-// controllers. These UBX commands force UART1 to plain NMEA at GPS_BAUD with
-// a 10 Hz update rate so TinyGPS++ always sees standard sentences.
+// BZGNSS P25 Pro (u-blox M10) UBX-only operation
+// The module streams UBX NAV-PVT frames (0x01 0x07) at its configured rate.
+// We parse those directly and synthesize NMEA for TinyGPSPlus - no module
+// configuration is required or attempted, so an unresponsive RX line or a
+// UBX-only input protocol cannot break anything.
 // ----------------------------------------------------------------------------
 static void ubxSend(const uint8_t *payload, uint8_t cls, uint8_t id, uint8_t len) {
   uint8_t ckA = 0, ckB = 0;
@@ -89,33 +209,109 @@ static void ubxSend(const uint8_t *payload, uint8_t cls, uint8_t id, uint8_t len
   gpsSerial.write(ckB);
 }
 
+// Scans the RX line for a sync pattern at the current baud. Returns true and
+// sets *isUbx when NMEA ('$G..'/'$P..') or UBX (0xB5 0x62) traffic is seen.
+// Requires TWO sync hits within the window: a single random byte pair in
+// noise could otherwise false-positive the baud sweep at a wrong rate.
+static bool gpsWaitForSync(unsigned long ms, bool &isUbx) {
+  isUbx = false;
+  unsigned long start = millis();
+  int state = 0; // 0=idle, 1=seen '$', 2=seen 0xB5
+  int hits = 0;
+  bool ubxHit = false;
+  while (millis() - start < ms) {
+    if (gpsSerial.available() > 0) {
+      uint8_t b = gpsSerial.read();
+      if (state == 0) {
+        if (b == '$') state = 1;
+        else if (b == 0xB5) state = 2;
+      } else if (state == 1) {
+        if (b == 'G' || b == 'P' || b == 'A' || b == 'B' || b == 'L' || b == 'N') {
+          if (++hits >= 2) { isUbx = false; return true; }
+          state = 0;
+        } else {
+          state = 0;
+        }
+      } else {
+        if (b == 0x62) {
+          ubxHit = true;
+          if (++hits >= 2) { isUbx = true; return true; }
+          state = 0;
+        } else {
+          state = 0;
+        }
+      }
+    } else {
+      delay(1);
+    }
+  }
+  return false;
+}
+
+// Sweeps the common baud rates looking for NMEA ('$') or UBX (0xB5 0x62)
+// sync bytes. Returns the detected baud or 0.
+static uint32_t gpsSweepBaud(bool &ubxSeen) {
+  static const uint32_t candidates[] = {115200, 9600, 38400, 57600, 230400, 4800, 460800};
+  for (uint32_t baud : candidates) {
+    gpsSerial.begin(baud, SERIAL_8N1, RXD2, TXD2);
+    delay(30);
+    while (gpsSerial.available()) gpsSerial.read();
+    bool isUbx = false;
+    if (gpsWaitForSync(700, isUbx)) {
+      ubxSeen = isUbx;
+      logPrintf("GNSS: sweep @ %lu baud -> %s sync found\n", baud,
+                isUbx ? "UBX" : "NMEA");
+      return baud;
+    }
+    logPrintf("GNSS: sweep @ %lu baud -> no sync\n", baud);
+  }
+  return 0;
+}
+
 void configureGNSS() {
-  while (gpsSerial.available()) gpsSerial.read();
-  gpsSerial.flush();
+  // 1. Auto-detect the module's baud rate; store it if it changed
+  bool ubxSeen = false;
+  uint32_t detectedBaud = gpsSweepBaud(ubxSeen);
 
-  // UBX-CFG-PRT: UART1 -> NMEA in/out, 8N1 @ GPS_BAUD
-  uint8_t prt[20];
-  memset(prt, 0, sizeof(prt));
-  prt[0] = 1; // portID = UART1
-  uint32_t mode = 0x000008D0; // 8 data bits, no parity, 1 stop bit
-  uint32_t baud = (uint32_t)GPS_BAUD;
-  uint16_t proto = 0x0001;    // NMEA only
-  prt[4] = mode & 0xFF;         prt[5] = (mode >> 8) & 0xFF;
-  prt[6] = (mode >> 16) & 0xFF; prt[7] = (mode >> 24) & 0xFF;
-  prt[8] = baud & 0xFF;         prt[9] = (baud >> 8) & 0xFF;
-  prt[10] = (baud >> 16) & 0xFF; prt[11] = (baud >> 24) & 0xFF;
-  prt[12] = proto & 0xFF;       prt[13] = (proto >> 8) & 0xFF; // inProtoMask
-  prt[14] = proto & 0xFF;       prt[15] = (proto >> 8) & 0xFF; // outProtoMask
-  ubxSend(prt, 0x06, 0x00, sizeof(prt));
-  delay(50);
+  if (detectedBaud == 0) {
+    // 1b. Nothing received. Try to revive a module whose UART output was
+    //     disabled by a previous bad config (CFG-CFG clear + soft reset),
+    //     then sweep again.
+    logPrintf("GNSS: no traffic - sending factory reset (CFG-CFG clear + "
+              "soft reset) at 115200...\n");
+    gpsSerial.begin(115200, SERIAL_8N1, RXD2, TXD2);
+    uint8_t clr[13] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02};
+    ubxSend(clr, 0x06, 0x09, sizeof(clr)); // CFG-CFG: clear all stored config
+    uint8_t rst[4] = {0x00, 0x00, 0x01, 0x00};
+    ubxSend(rst, 0x06, 0x04, sizeof(rst)); // CFG-RST: controlled software reset
+    delay(2500); // module reboots with factory defaults
+    while (gpsSerial.available()) gpsSerial.read();
+    detectedBaud = gpsSweepBaud(ubxSeen);
+    if (detectedBaud == 0) {
+      gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
+      logPrintf("GNSS: still no traffic after factory reset - using saved "
+                "GPS_BAUD=%d. Verify the module itself with u-center2 and "
+                "check wiring: module TX->ESP GPIO16, module RX->ESP GPIO17, "
+                "shared GND, VCC 3.3-5V\n", GPS_BAUD);
+      return;
+    }
+    logPrintf("GNSS: module revived by factory reset @ %lu baud\n",
+              detectedBaud);
+  }
 
-  // UBX-CFG-RATE: 10 Hz navigation/measurement rate
-  uint8_t rate[6] = {0x64, 0x00, 0x01, 0x00, 0x00, 0x00};
-  ubxSend(rate, 0x06, 0x08, sizeof(rate));
-  delay(50);
+  if (detectedBaud != (uint32_t)GPS_BAUD) {
+    logPrintf("GNSS: module detected at %lu baud (%s) - updating GPS_BAUD\n",
+              detectedBaud, ubxSeen ? "UBX" : "NMEA");
+    GPS_BAUD = (int)detectedBaud;
+    Preferences pref;
+    pref.begin("cfg", false);
+    pref.putInt("GPS_BAUD", GPS_BAUD);
+    pref.end();
+  }
 
-  while (gpsSerial.available()) gpsSerial.read();
-  logPrintf("GNSS: forced NMEA @ %d baud, 10 Hz\n", GPS_BAUD);
+  logPrintf("GNSS: %s mode @ %d baud (UBX NAV-PVT parsed, NMEA synthesized)\n",
+            ubxSeen ? "UBX" : "NMEA", GPS_BAUD);
 }
 
 // ----------------------------------------------------------------------------
@@ -209,28 +405,61 @@ void updateFilteredSpeed() {
   float hallSpeed = getHallSpeed();
   int sats = gps.satellites.value();
   bool isGpsValid = gps.speed.isValid() && (sats >= MIN_SATELLITES);
-  if (hallSpeed == 0.0f) {
-    currentCachedSpeed = 0.0f;
-    return;
-  }
+
+  float raw = 0.0f;
+  int mode = 0; // 0=hall, 1=gps, 2=fused
+
   if (!isGpsValid) {
-    currentCachedSpeed = (hallSpeed < MIN_SPEED_THRESHOLD) ? 0.0f : hallSpeed;
+    // Not enough satellites: GPS is untrusted, hall only
+    raw = hallSpeed;
+  } else if (GPS_ONLY_MODE) {
+    // User-forced GPS-only (e.g. no hall sensor installed)
+    raw = (float)gps.speed.kmph();
+    mode = 1;
+  } else if (hallSpeed > 0.0f) {
+    // Always compare both sensors (unless satellites are insufficient)
+    float gpsSpeed = (float)gps.speed.kmph();
+    float delta = fabsf(gpsSpeed - hallSpeed);
+    if (delta > MAX_SPEED_DELTA_KMH) {
+      raw = hallSpeed; // GPS contradicts hall: reject GPS
+    } else if (delta < GPS_MIN_DEV_KMH) {
+      raw = gpsSpeed; // agreement zone: trust GPS
+      mode = 1;
+    } else {
+      float gpsWeight = (float)(sats - MIN_SATELLITES + 1) /
+                        (float)(OPTIMAL_SATELLITES - MIN_SATELLITES + 1);
+      raw = gpsSpeed * gpsWeight + hallSpeed * (1.0f - gpsWeight);
+      mode = 2;
+    }
+  }
+  // else: no hall sensor and GPS-only disabled -> 0
+
+  if (mode == 0) {
+    // Hall-only: pulses are real motion, keep the simple threshold
+    currentCachedSpeed = (raw < MIN_SPEED_THRESHOLD) ? 0.0f : raw;
     return;
   }
-  float gpsSpeed = (float)gps.speed.kmph();
-  if (sats >= OPTIMAL_SATELLITES) {
-    currentCachedSpeed = (gpsSpeed < MIN_SPEED_THRESHOLD) ? 0.0f : gpsSpeed;
-    return;
+
+  // GPS-derived speed: apply hysteresis so stationary GPS noise (typically
+  // 0-2 km/h jitter) can't make the display flicker. Start showing speed
+  // only above GPS_START_KMH, and return to 0 only after the speed has
+  // stayed below MIN_SPEED_THRESHOLD for GPS_STOP_SETTLE_MS.
+  static bool isMoving = false;
+  static unsigned long belowStopSince = 0;
+  if (raw >= GPS_START_KMH) {
+    isMoving = true;
+    belowStopSince = 0;
+  } else if (raw <= MIN_SPEED_THRESHOLD) {
+    if (belowStopSince == 0)
+      belowStopSince = millis();
+    if (isMoving && millis() - belowStopSince >= (unsigned long)GPS_STOP_SETTLE_MS) {
+      isMoving = false;
+      belowStopSince = 0;
+    }
+  } else {
+    belowStopSince = 0; // between thresholds: hold current state
   }
-  float delta = fabsf(gpsSpeed - hallSpeed);
-  if (delta > MAX_SPEED_DELTA_KMH) {
-    currentCachedSpeed = (hallSpeed < MIN_SPEED_THRESHOLD) ? 0.0f : hallSpeed;
-    return;
-  }
-  float gpsWeight = (float)(sats - MIN_SATELLITES + 1) /
-                    (float)(OPTIMAL_SATELLITES - MIN_SATELLITES + 1);
-  float fusedSpeed = (gpsSpeed * gpsWeight) + (hallSpeed * (1.0f - gpsWeight));
-  currentCachedSpeed = (fusedSpeed < MIN_SPEED_THRESHOLD) ? 0.0f : fusedSpeed;
+  currentCachedSpeed = isMoving ? raw : 0.0f;
 }
 
 // ----------------------------------------------------------------------------
@@ -449,12 +678,207 @@ void updateAccelTimer() {
 }
 
 // ----------------------------------------------------------------------------
+// UBX NAV-PVT parser (primary mode)
+// The module streams NAV-PVT (0x01 0x07) frames at its configured rate. We
+// convert them into standard NMEA sentences and feed them to TinyGPSPlus so
+// the dashboard works with the module in UBX mode. If a module instead emits
+// real NMEA, TinyGPSPlus parses that directly and this parser stays idle.
+// ----------------------------------------------------------------------------
+static uint8_t ubxSt = 0;      // 0=idle,1=B5,2=62,3=cls,4=id,5=lenL,6=lenH,7=payload,8=ckA,9=ckB
+static uint8_t ubxCls = 0, ubxId = 0;
+static uint16_t ubxNeed = 0, ubxIdx = 0;
+static uint8_t ubxPld[92];
+static uint8_t ubxCkA = 0, ubxCkB = 0;
+static bool ubxFallbackActive = false;
+
+// Debug counters exposed to the on-screen overlay (gfx.cpp)
+volatile uint32_t gpsRxBytes = 0;
+volatile uint32_t ubxFramesParsed = 0;
+volatile uint8_t ubxLastFixType = 0;
+volatile uint8_t ubxLastNumSv = 0;
+volatile double ubxLastLat = 0.0;
+volatile double ubxLastLon = 0.0;
+volatile uint32_t ubxSyncSeen = 0;   // 0xB5 sync bytes seen
+volatile uint32_t ubxCkFail = 0;     // frames whose checksum failed
+volatile uint32_t ubxOversize = 0;   // frames rejected (payload > 92)
+
+static int32_t ubxI32(uint16_t off) {
+  return (int32_t)((uint32_t)ubxPld[off] | ((uint32_t)ubxPld[off + 1] << 8) |
+                   ((uint32_t)ubxPld[off + 2] << 16) |
+                   ((uint32_t)ubxPld[off + 3] << 24));
+}
+
+static uint16_t ubxU16(uint16_t off) {
+  return (uint16_t)(ubxPld[off] | (ubxPld[off + 1] << 8));
+}
+
+static void feedGpsLine(char *line) {
+  uint8_t cs = 0;
+  int i;
+  for (i = 1; line[i] && line[i] != '*'; i++) cs ^= (uint8_t)line[i];
+  // Write the checksum AFTER the '*' - overwriting it previously produced
+  // "...*" -> "XX\r\n" with no asterisk, so TinyGPSPlus never committed
+  // the sentence (satellites/time/speed stayed at 0).
+  sprintf(line + i + 1, "%02X\r\n", cs);
+  for (i = 0; line[i]; i++) gps.encode((char)line[i]);
+}
+
+// Build $GPRMC + $GPGGA from a validated NAV-PVT payload
+static void ubxNavPvtToNmea() {
+  if (!ubxFallbackActive) {
+    ubxFallbackActive = true;
+    logPrintf("GNSS: UBX NAV-PVT parsed (NMEA synthesized for dashboard): "
+              "fixType=%d sv=%02d lat=%.6f lon=%.6f spd=%.1fkm/h\n",
+              ubxPld[20], ubxPld[23], (double)ubxI32(28) / 1e7,
+              (double)ubxI32(24) / 1e7,
+              (double)ubxI32(60) / 1000.0 * 3.6);
+  }
+  uint16_t year = (uint16_t)(ubxPld[4] | (ubxPld[5] << 8));
+  uint8_t mon = ubxPld[6], day = ubxPld[7];
+  uint8_t hr = ubxPld[8], mn = ubxPld[9], sc = ubxPld[10];
+  uint8_t valid = ubxPld[11];
+  uint8_t fixType = ubxPld[20];
+  uint8_t numSV = ubxPld[23];
+  double lat = (double)ubxI32(28) / 1e7;
+  double lon = (double)ubxI32(24) / 1e7;
+  double altM = (double)ubxI32(36) / 1000.0;     // hMSL mm -> m
+  double knots = (double)ubxI32(60) / 1000.0 * 1.943844; // gSpeed mm/s -> knots
+  double course = (double)ubxI32(64) / 1e5;      // headMot 1e-5 deg
+  double hdop = (double)ubxU16(76) / 100.0;      // pDOP
+  bool hasFix = (fixType >= 2) && (valid & 0x02);
+
+  ubxFramesParsed++;
+  ubxLastFixType = fixType;
+  ubxLastNumSv = numSV;
+  ubxLastLat = lat;
+  ubxLastLon = lon;
+
+  char alat[20], alon[20];
+  double aLat = fabs(lat);
+  int dLat = (int)aLat;
+  int mLat = (int)(((aLat - dLat) * 60.0) * 10000.0 + 0.5);
+  if (mLat >= 600000) { mLat -= 600000; dLat++; }
+  sprintf(alat, "%02d%02d.%04d", dLat, mLat / 10000, mLat % 10000);
+  double aLon = fabs(lon);
+  int dLon = (int)aLon;
+  int mLon = (int)(((aLon - dLon) * 60.0) * 10000.0 + 0.5);
+  if (mLon >= 600000) { mLon -= 600000; dLon++; }
+  sprintf(alon, "%03d%02d.%04d", dLon, mLon / 10000, mLon % 10000);
+
+  char line[130];
+  sprintf(line, "$GPRMC,%02d%02d%02d.00,%c,%s,%c,%s,%c,%.2f,%.1f,%02d%02d%02d*",
+          hr, mn, sc, hasFix ? 'A' : 'V', alat, lat < 0 ? 'S' : 'N',
+          alon, lon < 0 ? 'W' : 'E', knots, course,
+          day, mon, year % 100);
+  feedGpsLine(line);
+
+  sprintf(line, "$GPGGA,%02d%02d%02d.00,%s,%c,%s,%c,%d,%02d,%.1f,%.1f,M,0.0,M,,*",
+          hr, mn, sc, alat, lat < 0 ? 'S' : 'N', alon, lon < 0 ? 'W' : 'E',
+          hasFix ? 1 : 0, numSV, hdop, altM);
+  feedGpsLine(line);
+}
+
+// Feeds one received byte into the UBX frame state machine
+static void ubxParseByte(uint8_t b) {
+  switch (ubxSt) {
+  case 0:
+    if (b == 0xB5) { ubxSyncSeen++; ubxSt = 1; }
+    break;
+  case 1: ubxSt = (b == 0x62) ? 2 : 0; break;
+  case 2: ubxCls = b; ubxSt = 3; break;
+  case 3: ubxId = b; ubxSt = 4; break;
+  case 4: ubxNeed = b; ubxSt = 5; break;
+  case 5:
+    ubxNeed |= (uint16_t)b << 8;
+    if (ubxNeed > 92) { ubxOversize++; ubxSt = 0; break; }
+    ubxIdx = 0;
+    // Seed both accumulators by stepping the CK_A/CK_B algorithm through
+    // EACH header byte (class, id, lenL, lenH) individually - seeding
+    // ckB = ckA after a single combined sum produced wrong CK_B and made
+    // every valid frame fail its checksum.
+    {
+      uint8_t ck = ubxCls;
+      ubxCkB = ck;
+      ck += ubxId; ubxCkB += ck;
+      ck += (uint8_t)(ubxNeed & 0xFF); ubxCkB += ck;
+      ck += b; ubxCkB += ck; // b = lenH
+      ubxCkA = ck;
+    }
+    ubxSt = 6;
+    break;
+  case 6:
+    ubxPld[ubxIdx++] = b;
+    ubxCkA += b; ubxCkB += ubxCkA;
+    if (ubxIdx >= ubxNeed) ubxSt = 7;
+    break;
+  case 7:
+    if (b == ubxCkA) ubxSt = 8;
+    else { ubxCkFail++; ubxSt = 0; }
+    break;
+  case 8:
+    if (b == ubxCkB) {
+      if (ubxCls == 0x01 && ubxId == 0x07)
+        ubxNavPvtToNmea();
+    } else {
+      ubxCkFail++;
+    }
+    ubxSt = 0;
+    break;
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Sensor task
 // ----------------------------------------------------------------------------
 void sensorTask(void *pvParameters) {
+  static bool gpsWatchdogLogged = false;
+  static bool ubxDiagLogged = false;
+  static bool rawDumpLogged = false;
+  static unsigned long gpsWatchdogStart = 0;
+  static uint8_t gpsRawBuf[256];
+  static uint8_t gpsRawIdx = 0;
   for (;;) {
-    while (gpsSerial.available() > 0)
-      gps.encode(gpsSerial.read());
+    while (gpsSerial.available() > 0) {
+      uint8_t b = gpsSerial.read();
+      if (gpsRawIdx < sizeof(gpsRawBuf))
+        gpsRawBuf[gpsRawIdx++] = b;
+      gpsRxBytes++;
+      gps.encode((char)b);
+      ubxParseByte(b);
+    }
+    if (gpsWatchdogStart == 0)
+      gpsWatchdogStart = millis();
+    if (!rawDumpLogged && gpsRawIdx >= 8 && millis() - gpsWatchdogStart > 3000) {
+      rawDumpLogged = true;
+      logPrintf("GNSS raw dump (%u bytes):\n", gpsRawIdx);
+      for (uint16_t i = 0; i < gpsRawIdx; i++) {
+        if (i % 16 == 0) logPrintf("%02X", gpsRawBuf[i]);
+        else logPrintf(" %02X", gpsRawBuf[i]);
+        if (i % 16 == 15) logPrintf("\n");
+      }
+      if (gpsRawIdx % 16 != 0) logPrintf("\n");
+    }
+    if (!ubxDiagLogged && millis() - gpsWatchdogStart > 5000) {
+      ubxDiagLogged = true;
+      logPrintf("UBX diag: rate=%luB/s sync=%lu ckfail=%lu oversize=%lu "
+                "frames=%lu (baud=%d)\n",
+                (unsigned long)(gpsRxBytes / 5), (unsigned long)ubxSyncSeen,
+                (unsigned long)ubxCkFail, (unsigned long)ubxOversize,
+                (unsigned long)ubxFramesParsed, GPS_BAUD);
+    }
+    if (!gpsWatchdogLogged && millis() - gpsWatchdogStart > 8000) {
+      gpsWatchdogLogged = true;
+      if (gps.charsProcessed() == 0) {
+        logPrintf("GPS: NO NMEA data received - check TX/RX wiring and "
+                  "module power (GPS_BAUD=%d)\n", GPS_BAUD);
+      } else if (gps.satellites.value() == 0) {
+        logPrintf("GPS: NMEA flowing (chars=%lu) but no satellites - check "
+                  "antenna / sky view\n", gps.charsProcessed());
+      } else {
+        logPrintf("GPS: locked, %d satellites, %.6f/%.6f\n",
+                  gps.satellites.value(), gps.location.lat(), gps.location.lng());
+      }
+    }
     updateFilteredSpeed();
     processCompassSensor();
     processLightSensor();
@@ -573,13 +997,18 @@ void sensorTask(void *pvParameters) {
 
         g_sensorData.isGpsSpeedValid =
             gps.speed.isValid() && (g_sensorData.satellites >= MIN_SATELLITES);
-        if (g_sensorData.isGpsSpeedValid) {
-          if (g_sensorData.satellites >= OPTIMAL_SATELLITES)
-            g_sensorData.speedSourceMode = 1;
-          else if (fabsf((float)gps.speed.kmph() - getHallSpeed()) <= MAX_SPEED_DELTA_KMH)
-            g_sensorData.speedSourceMode = 2;
-          else
+        float hallSpeedNow = getHallSpeed();
+        if (GPS_ONLY_MODE && g_sensorData.isGpsSpeedValid) {
+          g_sensorData.speedSourceMode = 1;
+        } else if (g_sensorData.isGpsSpeedValid && hallSpeedNow > 0.0f) {
+          float gpsSpeedNow = (float)gps.speed.kmph();
+          float deltaNow = fabsf(gpsSpeedNow - hallSpeedNow);
+          if (deltaNow > MAX_SPEED_DELTA_KMH)
             g_sensorData.speedSourceMode = 0;
+          else if (deltaNow < GPS_MIN_DEV_KMH)
+            g_sensorData.speedSourceMode = 1;
+          else
+            g_sensorData.speedSourceMode = 2;
         } else {
           g_sensorData.speedSourceMode = 0;
         }

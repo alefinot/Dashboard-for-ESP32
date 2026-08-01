@@ -811,3 +811,56 @@ void drawFpsOverlay() {
   lastBoxH = boxH;
   display.endWrite();
 }
+
+// ----------------------------------------------------------------------------
+// GPS debug overlay (RX bytes / NAV-PVT frames / last fix info)
+// Drawn as a solid full-width strip at the top so nothing shows underneath.
+// ----------------------------------------------------------------------------
+void drawGpsDebugOverlay() {
+  if (!showGpsDebug)
+    return;
+  static unsigned long lastGpsDrawTime = 0;
+  static char lastGpsStr[128] = "";
+  static unsigned long lastGpsBytes = 0;
+  unsigned long now = millis();
+  if (now - lastGpsDrawTime < 500)
+    return;
+  unsigned long rate = 0;
+  if (lastGpsDrawTime > 0)
+    rate = (gpsRxBytes - lastGpsBytes) * 1000 / (now - lastGpsDrawTime);
+  lastGpsDrawTime = now;
+  lastGpsBytes = gpsRxBytes;
+
+  char gpsBuf[128];
+  snprintf(gpsBuf, sizeof(gpsBuf),
+           "RX %lu @%luB/s | SYNC %lu | CKFAIL %lu | %dbaud\n"
+           "PVT %lu | OVR %lu | fix %d | SV %d | %.5f %.5f",
+           (unsigned long)gpsRxBytes, (unsigned long)rate,
+           (unsigned long)ubxSyncSeen, (unsigned long)ubxCkFail, GPS_BAUD,
+           (unsigned long)ubxFramesParsed, (unsigned long)ubxOversize,
+           (int)ubxLastFixType, (int)ubxLastNumSv, ubxLastLat, ubxLastLon);
+  if (strcmp(gpsBuf, lastGpsStr) == 0)
+    return;
+
+  int w = display.width();
+  int lineH = 14;
+  int stripH = lineH * 2 + 8;
+  display.startWrite();
+  display.fillRect(0, 0, w, stripH, TFT_BLACK);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+  display.setTextColor(TFT_CYAN);
+  char *nl = strchr(gpsBuf, '\n');
+  if (nl) {
+    *nl = '\0';
+    display.setCursor(4, 6);
+    display.print(gpsBuf);
+    display.setCursor(4, 6 + lineH);
+    display.print(nl + 1);
+  } else {
+    display.setCursor(4, 6);
+    display.print(gpsBuf);
+  }
+  drawDebugBox(display, 0, 0, w, stripH);
+  strcpy(lastGpsStr, gpsBuf);
+  display.endWrite();
+}
