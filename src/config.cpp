@@ -207,7 +207,7 @@ bool TZ_DST_ENABLED = true;
 bool OTA_PULL_ENABLED = false;
 String OTA_PULL_URL = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-String OTA_CURRENT_VERSION = "1.1.1";
+String OTA_CURRENT_VERSION = "1.1.2";
 
 // Optional PIN protecting the web config page and admin API (empty = disabled)
 String CONFIG_PIN = "";
@@ -452,7 +452,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
   CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.1.1");
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.1.2");
 
   // CONFIG_PIN is handled manually: never serialized back (mode 1) so the web
   // config API cannot leak it. Mode 2 accepts a new 4-16 char PIN, or clears
