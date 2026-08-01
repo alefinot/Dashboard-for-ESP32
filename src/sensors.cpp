@@ -899,7 +899,11 @@ void sensorTask(void *pvParameters) {
       processFuelConsumption();
       updateAverageSpeed();
     }
-    if (gps.date.isValid() && gps.time.isValid()) {
+    // Only use GPS date/time while a real position fix is valid. Receivers
+    // keep emitting a date/time even without satellites (stale value from the
+    // last fix or a dead RTC battery) and blindly applying it here would
+    // freeze the clock at that old value and clobber every NTP/manual sync.
+    if (gps.location.isValid() && gps.date.isValid() && gps.time.isValid()) {
       struct tm t = {0};
       t.tm_year = gps.date.year() - 1900;
       t.tm_mon = gps.date.month() - 1;
@@ -908,12 +912,14 @@ void sensorTask(void *pvParameters) {
       t.tm_min = gps.time.minute();
       t.tm_sec = gps.time.second();
       time_t epoch = mktime(&t);
-      struct timeval tv;
-      gettimeofday(&tv, NULL);
-      if (abs((long)(tv.tv_sec - epoch)) > 5) {
-        tv.tv_sec = epoch;
-        tv.tv_usec = 0;
-        settimeofday(&tv, NULL);
+      if (epoch > 1577836800 && epoch < 4102444800) { // sanity: 2020 .. 2100
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        if (abs((long)(tv.tv_sec - epoch)) > 5) {
+          tv.tv_sec = epoch;
+          tv.tv_usec = 0;
+          settimeofday(&tv, NULL);
+        }
       }
     }
 
