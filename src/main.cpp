@@ -278,10 +278,12 @@ void loop() {
     }
 
     if (!otaUpdateInProgress) {
-      updateBigDisplay(snap);
-      drawFpsOverlay();
-      drawGpsDebugOverlay();
-      checkNightMode(snap);
+      if (!otaMemReleaseRequested) {
+        updateBigDisplay(snap);
+        drawFpsOverlay();
+        drawGpsDebugOverlay();
+        checkNightMode(snap);
+      }
     } else {
       static unsigned long lastOtaAdvance = 0;
       static bool otaRebootShown = false;

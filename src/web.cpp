@@ -53,21 +53,17 @@ void startOtaPull(bool manual) {
 // ui.cpp. The display task rebuilds it after the check finishes.
 namespace {
 struct OtaHeapGuard {
-  TaskHandle_t h;
   OtaHeapGuard() {
     otaMemReleaseRequested = true;
     otaMemReleased = false;
     unsigned long t0 = millis();
     while (!otaMemReleased && (millis() - t0) < 3000)
       vTaskDelay(pdMS_TO_TICKS(1));
-    h = xTaskGetHandle("loopTask");
-    if (h) vTaskSuspend(h);
     logPrintf("OTA Pull: UI mem released heap=%lu max=%lu\n",
               (unsigned long)ESP.getFreeHeap(),
               (unsigned long)ESP.getMaxAllocHeap());
   }
   ~OtaHeapGuard() {
-    if (h) vTaskResume(h);
     otaMemReleaseRequested = false;
   }
 };
@@ -288,22 +284,31 @@ void performFirmwareUpdate(const String &firmwareUrl, const String &newVersion) 
           setOtaPullStatus("error: update.begin failed");
         } else {
           size_t written = 0;
+          unsigned long lastReadMs = millis();
           while (http.connected() && (totalSize <= 0 || written < (size_t)totalSize)) {
             size_t available = client->available();
             if (available) {
-              uint8_t buf[512];
+              uint8_t buf[1024];
               size_t n = client->readBytes(buf, min(available, sizeof(buf)));
-              size_t w = Update.write(buf, n);
-              if (w != n) {
-                logPrintf("OTA Pull: write error\n");
+              if (n > 0) {
+                size_t w = Update.write(buf, n);
+                if (w != n) {
+                  logPrintf("OTA Pull: write error\n");
+                  break;
+                }
+                written += w;
+                lastReadMs = millis();
+                if (totalSize > 0) {
+                  updateOTAProgress(written, totalSize);
+                }
+              }
+            } else {
+              if (millis() - lastReadMs > 15000) {
+                logPrintf("OTA Pull: read timeout\n");
                 break;
               }
-              written += w;
-              if (totalSize > 0) {
-                updateOTAProgress(written, totalSize);
-              }
+              vTaskDelay(pdMS_TO_TICKS(5));
             }
-            delay(1);
           }
 
           if (Update.end(true)) {
@@ -2734,15 +2739,22 @@ void webServerTask(void *pvParameters) {
       if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
         Update.printError(Serial);
       }
-      if (upload.totalSize > 0) {
-        updateOTAProgress(Update.progress(), upload.totalSize);
-      }
+      // upload.totalSize is cumulative bytes received so far during upload.
+      // Scaling target progress up to max 240 during writing prevents
+      // premature reboot (fillW >= 258) before Update.end(true) runs.
+      size_t written = Update.progress();
+      int targetW = (240L * (long)written) / (long)(written + 300000);
+      if (targetW > 240) targetW = 240;
+      if (targetW > otaProgressTarget) otaProgressTarget = targetW;
     } else if (upload.status == UPLOAD_FILE_END) {
       if (Update.end(true)) {
         logPrintf("OTA web: success %u bytes\n", upload.totalSize);
         otaUpdateSuccess = true;
+        otaProgressTarget = 258;
       } else {
         Update.printError(Serial);
+        otaUpdateInProgress = false;
+        forceFullRedraw = true;
       }
     }
   });
