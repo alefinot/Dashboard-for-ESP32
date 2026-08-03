@@ -973,7 +973,7 @@ void sensorTask(void *pvParameters) {
         g_sensorData.dateValid = true;
         g_sensorData.isGpsSpeedValid = true;
         g_sensorData.speedSourceMode = 1;
-        g_sensorData.heading = 180.0f + 180.0f * sinf(t / 5000.0f);
+        g_sensorData.heading = fmodf((float)t * 0.02f, 360.0f); // steady 20°/s rotation
         ambientLightValue = 500 + (int)(2500.0f * (0.5f + 0.5f * sinf(t / 3000.0f)));
         g_sensorData.localHour = 10;
         g_sensorData.minute = (t / 1000) % 60;

@@ -1356,111 +1356,185 @@ void updateBigDisplay(const SensorSnapshot &snap) {
                    (int)ds15_fontH + 4);
   }
 
-  // --- Compass (heading rose + degrees) ---
+  // --- Compass (full-width HUD heading tape) ---
   float displayHeading = displaySnap.heading;
-  static int lastDispHeading = -1;
-  static int lastCompassX = -1, lastCompassY = -1;
+  static int lastTapePix = -1;
+  static int lastClearY = -1, lastClearH = -1;
   static unsigned long lastCompassUpdate = 0;
   int currentHeadingInt = ((int)displayHeading + 360) % 360;
 
-  int compassX = BIG_CENTER_X + OFFSET_COMPASS_X;
+  int compassX = display.width() / 2;
   int compassY = BIG_CENTER_Y + OFFSET_COMPASS_Y;
+  int tapeW = display.width();
 
-  if ((currentHeadingInt != lastDispHeading && (REFRESH_COMPASS_MS == 0 || now - lastCompassUpdate >= (unsigned long)REFRESH_COMPASS_MS)) || forceDraw) {
+  const float pxPerDeg = 6.0f;
+  int tapePix = (int)roundf(displayHeading * pxPerDeg);
+
+  if ((tapePix != lastTapePix && (REFRESH_COMPASS_MS == 0 || now - lastCompassUpdate >= (unsigned long)REFRESH_COMPASS_MS)) || forceDraw) {
     lastCompassUpdate = now;
-    lastDispHeading = currentHeadingInt;
+    lastTapePix = tapePix;
     componentUpdated = true;
 
-    static int headCells[MAX_CELLS] = {0};
-    static int headCellW = 0, headCellsCount = 0;
-    static uint16_t w_deg_unit = 0;
-    static bool compassLayoutInit = false;
-    if (!compassLayoutInit) {
-      compassLayoutInit = true;
-      headCellsCount = HEADING_DIGITS;
-      measureDs15Cells(headCells, headCellW, headCellsCount, -1);
-      int16_t tl1, tl2;
-      uint16_t th1;
+    const int bandTop = compassY - 7;
+    const int bandH = 10;
+
+    // VLW glyphs render ABOVE the cursor (cursor y = baseline), so measure the
+    // fonts once and size the erase box from the true glyph tops to keep the
+    // screen clean (a fixed box used to miss the tops -> glitches)
+    static int16_t labelY1 = 0;
+    static int16_t cardY1 = 0;
+    static bool labelMeasured = false;
+    if (!labelMeasured) {
+      labelMeasured = true;
+      int16_t tlx, tly;
+      uint16_t tlw, tlh;
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.getTextBounds("0", 0, 0, &tlx, &labelY1, &tlw, &tlh);
       display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
-      display.getTextBounds("DEG", 0, 0, &tl1, &tl2, &w_deg_unit, &th1);
+      display.getTextBounds("N", 0, 0, &tlx, &cardY1, &tlw, &tlh);
     }
 
-    const int roseR = 21;
-    int roseCX = compassX, roseCY = compassY;
-    int numAreaX = roseCX + roseR + 10;
-    int clearW = roseR * 2 + 10 + 4 + headCellW + 4 + w_deg_unit + 8;
-    int clearX = roseCX - roseR - 6;
-    int clearTop = roseCY - roseR - 6;
-    int clearH = roseR * 2 + 12;
+    // Numbers sit just above the band (cursor y = baseline)
+    int labelBaseline = bandTop - 10;
+    const int markerH = 8; // bottom marker triangle height
+    int clearY = std::min(labelBaseline + (int)labelY1,
+                          std::min(labelBaseline + (int)cardY1, bandTop - 10)) - 2;
+    int clearH = (bandTop + bandH + markerH) - clearY + 2;
 
-    if (lastCompassX >= 0 && lastCompassY >= 0 &&
-        (lastCompassX != roseCX || lastCompassY != roseCY)) {
-      display.fillRect(clearX, clearTop, clearW, clearH, TFT_BLACK);
+    if (lastClearY >= 0 && (lastClearY != clearY || lastClearH != clearH)) {
+      display.fillRect(0, lastClearY, tapeW, lastClearH, TFT_BLACK);
     }
-    lastCompassX = roseCX;
-    lastCompassY = roseCY;
-    display.fillRect(clearX, clearTop, clearW, clearH, TFT_BLACK);
+    lastClearY = clearY;
+    lastClearH = clearH;
+    display.fillRect(0, clearY, tapeW, clearH, TFT_BLACK);
 
-    // Rose ring + cardinal ticks
-    uint16_t c_tick = display.color565(90, 90, 90);
-    drawAACircle(display, roseCX, roseCY, roseR, c_tick);
-    drawAALine(display, (float)roseCX, (float)(roseCY - roseR + 1),
-               (float)roseCX, (float)(roseCY - roseR + 7), TFT_RED);
-    drawAALine(display, (float)(roseCX + roseR - 7), (float)roseCY,
-               (float)(roseCX + roseR - 1), (float)roseCY, c_tick);
-    drawAALine(display, (float)roseCX, (float)(roseCY + roseR - 1),
-               (float)roseCX, (float)(roseCY + roseR - 7), c_tick);
-    drawAALine(display, (float)(roseCX - roseR + 1), (float)roseCY,
-               (float)(roseCX - roseR + 7), (float)roseCY, c_tick);
-
-    // Rotating needle (red head, gray tail)
-    float rad = (float)currentHeadingInt * M_PI / 180.0f;
-    int fx = roseCX + (int)roundf(sinf(rad) * (float)(roseR - 1));
-    int fy = roseCY - (int)roundf(cosf(rad) * (float)(roseR - 1));
-    int tx = roseCX - (int)roundf(sinf(rad) * (float)(roseR - 4));
-    int ty = roseCY + (int)roundf(cosf(rad) * (float)(roseR - 4));
-    drawAALine(display, roseCX, roseCY, fx, fy, TFT_RED);
-    drawAALine(display, roseCX, roseCY, tx, ty, display.color565(120, 120, 120));
-
-    // Heading digits
-    char headStr[8];
     bool headValid = compassReady || ENABLE_DEMO_MODE;
-    if (!headValid)
-      snprintf(headStr, sizeof(headStr), "---");
-    else
-      snprintf(headStr, sizeof(headStr), "%d", currentHeadingInt);
-    int headLen = strlen(headStr);
+    uint16_t c_border = display.color565(90, 90, 90);
+    uint16_t c_tickMin = display.color565(110, 110, 110);
+    uint16_t c_tickMaj = display.color565(170, 170, 170);
+    uint16_t c_marker = headValid ? TFT_RED : display.color565(70, 70, 70);
 
-    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    display.setTextColor(ghost_color);
-    for (int ci = 0; ci < headCellsCount; ci++) {
-      int cellRight = numAreaX + headCells[ci];
-      int cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
-      display.setCursor(cx, compassY);
-      display.print('8');
-    }
-    display.setTextColor(headValid ? TFT_WHITE : display.color565(70, 70, 70));
-    for (int i = 0; i < headLen; i++) {
-      char c = headStr[i];
-      int cellIdx = (headCellsCount - headLen) + i;
-      int cellRight = numAreaX + headCells[cellIdx];
-      int cx;
-      if (c == '-') {
-        cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8] + 2;
-      } else {
-        int d = c - '0';
-        cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
+    // Edge fade: tape content blends toward black at the screen edges (HUD look)
+    const int fadeW = 72;
+    static uint16_t fadeBandColors[72];
+    static uint16_t fadeBorderColors[72];
+    static bool fadeInit = false;
+    if (!fadeInit) {
+      fadeInit = true;
+      for (int i = 0; i < fadeW; i++) {
+        float f = (float)(i + 1) / (float)fadeW;
+        fadeBandColors[i] = blendColorWithBlack(display.color565(20, 20, 20), f);
+        fadeBorderColors[i] = blendColorWithBlack(display.color565(90, 90, 90), f);
       }
-      display.setCursor(cx, compassY);
-      display.print(c);
+    }
+    auto fadeColor = [&](uint16_t color, int x) -> uint16_t {
+      float f = 1.0f;
+      if (x < fadeW) {
+        f = (float)(x + 1) / (float)fadeW;
+      } else if (x >= tapeW - fadeW) {
+        f = (float)(tapeW - x) / (float)fadeW;
+      }
+      return blendColorWithBlack(color, f);
+    };
+
+    // Tape band (edge to edge, fixed reference frame), fading at the edges
+    int midX0 = fadeW, midX1 = tapeW - fadeW;
+    display.fillRect(midX0, bandTop, midX1 - midX0, bandH, display.color565(20, 20, 20));
+    display.fillRect(midX0, bandTop, midX1 - midX0, 1, c_border);
+    display.fillRect(midX0, bandTop + bandH - 1, midX1 - midX0, 1, c_border);
+    for (int i = 0; i < fadeW; i += 6) {
+      int w = std::min(6, fadeW - i);
+      int fi = i + w / 2;
+      display.fillRect(i, bandTop, w, bandH, fadeBandColors[fi]);
+      display.fillRect(tapeW - i - w, bandTop, w, bandH, fadeBandColors[fi]);
+      display.fillRect(i, bandTop, w, 1, fadeBorderColors[fi]);
+      display.fillRect(i, bandTop + bandH - 1, w, 1, fadeBorderColors[fi]);
+      display.fillRect(tapeW - i - w, bandTop, w, 1, fadeBorderColors[fi]);
+      display.fillRect(tapeW - i - w, bandTop + bandH - 1, w, 1, fadeBorderColors[fi]);
     }
 
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
-    display.setTextColor(headValid ? TFT_WHITE : display.color565(70, 70, 70));
-    display.setCursor(numAreaX + headCellW + 4, compassY - 1);
-    display.print("DEG");
+    // Tape scrolls with the fractional heading so ticks/numbers glide smoothly
+    int nearest10 = (currentHeadingInt + 5) / 10 * 10;
+    float refDeg = (float)nearest10;
 
-    drawDebugBox(display, clearX, clearTop, clearW, clearH);
+    // Scrolling ticks: 5° minors, 10° majors
+    for (int t = -40; t <= 40; t += 5) {
+      if (t % 10 == 0) continue;
+      int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
+      if (x < -6 || x >= tapeW + 6) continue;
+      drawAALine(display, (float)x, (float)(bandTop - 5), (float)x, (float)bandTop,
+                 fadeColor(c_tickMin, x));
+    }
+    for (int t = -40; t <= 40; t += 10) {
+      int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
+      if (x < -16 || x >= tapeW + 16) continue;
+      drawAALine(display, (float)x, (float)(bandTop - 8), (float)x, (float)bandTop,
+                 fadeColor(c_tickMaj, x));
+    }
+
+    // Degree labels / cardinal letters (10° steps), centered on the major ticks
+    if (headValid) {
+      // Numbers first (small font)
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      for (int t = -40; t <= 40; t += 10) {
+        int deg = ((nearest10 + t) % 360 + 360) % 360;
+        if (deg == 0 || deg == 90 || deg == 180 || deg == 270) continue;
+        int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
+        if (x < -16 || x >= tapeW + 16) continue;
+        char lb[4];
+        snprintf(lb, sizeof(lb), "%d", deg);
+        int16_t lx1, ly1;
+        uint16_t lw, lh;
+        display.getTextBounds(lb, 0, 0, &lx1, &ly1, &lw, &lh);
+        display.setTextColor(fadeColor(TFT_WHITE, x));
+        display.setCursor(x - (lw / 2) - lx1, labelBaseline);
+        display.print(lb);
+      }
+      // Cardinal letters on top (bigger font)
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+      for (int t = -40; t <= 40; t += 10) {
+        int deg = ((nearest10 + t) % 360 + 360) % 360;
+        if (deg != 0 && deg != 90 && deg != 180 && deg != 270) continue;
+        const char *label;
+        uint16_t col;
+        if (deg == 0) {
+          label = "N";
+          col = TFT_RED;
+        } else if (deg == 90) {
+          label = "E";
+          col = TFT_WHITE;
+        } else if (deg == 180) {
+          label = "S";
+          col = TFT_WHITE;
+        } else {
+          label = "W";
+          col = TFT_WHITE;
+        }
+        int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
+        if (x < -16 || x >= tapeW + 16) continue;
+        int16_t lx1, ly1;
+        uint16_t lw, lh;
+        display.getTextBounds(label, 0, 0, &lx1, &ly1, &lw, &lh);
+        display.setTextColor(fadeColor(col, x));
+        display.setCursor(x - (lw / 2) - lx1, labelBaseline);
+        display.print(label);
+      }
+    } else {
+      int16_t lx1, ly1;
+      uint16_t lw, lh;
+      display.getTextBounds("---", 0, 0, &lx1, &ly1, &lw, &lh);
+      display.setTextColor(display.color565(70, 70, 70));
+      display.setCursor(compassX - (lw / 2) - lx1, labelBaseline);
+      display.print("---");
+    }
+
+    // Fixed center marker: inverted triangle below the band, apex on the band
+    // (kept clear of the numbers so it never covers the center heading)
+    display.fillTriangle(compassX - 5, bandTop + bandH + markerH - 1,
+                         compassX + 5, bandTop + bandH + markerH - 1,
+                         compassX, bandTop + bandH, c_marker);
+
+    drawDebugBox(display, 0, clearY, tapeW, clearH);
   }
 
   if ((componentUpdated || forceDraw) && ENABLE_CIRCLE_TEST)
