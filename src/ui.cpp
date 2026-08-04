@@ -1,4 +1,6 @@
 #include "dashboard.h"
+#include "Conthrax_SemiBold7pt7b.h"
+#include "Conthrax_SemiBold4pt7b.h"
 
 #define MAX_CELLS 16
 
@@ -16,6 +18,14 @@ static bool vlw120Ready = true;
 volatile bool otaMemReleaseRequested = false;
 volatile bool otaMemReleased = false;
 
+// Offscreen backbuffer for the compass tape's scrolling strip (ticks + bg).
+// The strip is painted here and pushed to the panel in one burst so the
+// display never shows a partially repainted tape. Freed together with the
+// other big buffers during an OTA check (see processOtaMemRelease).
+static LGFX_Sprite tapeSprite(&display);
+static bool tapeSpriteReady = false;
+static int tapeSpriteW = 0, tapeSpriteH = 0;
+
 // Called from loop() every frame, before any sprite use: frees the big UI
 // buffers when an OTA check has asked for it. Runs in the display task so no
 // other task can be using the sprite at the same time.
@@ -24,10 +34,38 @@ void processOtaMemRelease() {
   sp.deleteSprite();
   spValid = false;
   spInit = false;
+  if (tapeSpriteReady) {
+    tapeSprite.deleteSprite();
+    tapeSpriteReady = false;
+  }
   vlw120Ready = false;
   resetVLWFontCache();
   freeVLWData120();
   otaMemReleased = true;
+}
+
+// Same release, triggered by the web task when free heap gets dangerously low
+// (the big buffers starve /api/config and the TLS stack). Once active, the
+// speed sprite and tape sprite stay freed until the next reboot; the 120px
+// font buffer is only re-read lazily if a speed digit actually redraws.
+volatile bool memSaverRequested = false;
+volatile bool memSaverActive = false;
+
+void processMemSaverRelease() {
+  if (!memSaverRequested || memSaverActive) return;
+  sp.deleteSprite();
+  spValid = false;
+  spInit = false;
+  if (tapeSpriteReady) {
+    tapeSprite.deleteSprite();
+    tapeSpriteReady = false;
+  }
+  vlw120Ready = false;
+  resetVLWFontCache();
+  freeVLWData120();
+  memSaverActive = true;
+  logPrintf("MEM SAVER: dropped speed sprite, tape sprite and VLW120 (heap=%lu B)\n",
+            (unsigned long)ESP.getFreeHeap());
 }
 
 static void measureDs15Cells(int *cells, int &totalW, int count, int decimalPos) {
@@ -43,6 +81,109 @@ static void measureDs15Cells(int *cells, int &totalW, int count, int decimalPos)
     cumX += bx1 + bw + G;
   }
   totalW = cumX - G;
+}
+
+// ----------------------------------------------------------------------------
+// Compass tape dynamic layer (scrolling ticks)
+// ----------------------------------------------------------------------------
+// Fades tape content toward black at the screen edges (HUD look).
+static uint16_t tapeFadeColor(uint16_t color, int x, int tapeW, int fadeW) {
+  float f = 1.0f;
+  if (x < fadeW) {
+    f = (float)(x + 1) / (float)fadeW;
+  } else if (x >= tapeW - fadeW) {
+    f = (float)(tapeW - x) / (float)fadeW;
+  }
+  return blendColorWithBlack(color, f);
+}
+
+// Erases the strip (black fill) and paints the whole scrolling layer - ticks
+// AND labels - into `d`. yBase is the strip top in `d`'s coordinate space and
+// bandTopL the strip height (sprite: yBase=0, bandTopL=stripH; panel:
+// yBase=labelTop, bandTopL=bandTop-labelTop). Labels use the same compiled-in
+// Conthrax fonts as the panel, so sprite and direct rendering match exactly.
+// Fonts must be switched through the panel's loadVLWFont shim when drawing on
+// the display: the shim caches the last font (g_lastVLWFont) and skips setFont
+// on a hit, so a direct setFont() desyncs the cache and later components (e.g.
+// the FPS counter) keep drawing with a stale, larger font. Sprites have no
+// such cache, so they can use setFont directly.
+static inline void tapeSetFont(LGFX_ST7789_4 &d, const lgfx::IFont *f) {
+  d.loadVLWFont(f == &Conthrax_SemiBold7pt7b ? "/Fonts/Conthrax_SemiBold_16px.vlw"
+                                             : "/Fonts/Conthrax_SemiBold_10px.vlw");
+}
+template <typename T>
+static inline void tapeSetFont(T &d, const lgfx::IFont *f) {
+  d.setFont(f);
+}
+
+template <typename T>
+static void renderTapeStrip(T &d, int tapeW, int compassX, int yBase, int bandTopL,
+                            float refDeg, float displayHeading, float pxPerDeg,
+                            uint16_t c_tickMin, uint16_t c_tickMaj, int fadeW,
+                            bool headValid) {
+  int labelBaselineL = bandTopL - 10;
+  d.fillRect(0, yBase, tapeW, bandTopL, TFT_BLACK);
+  for (int t = -40; t <= 40; t += 5) {
+    if (t % 10 == 0) continue;
+    int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
+    if (x < -6 || x >= tapeW + 6) continue;
+    drawAALine(d, (float)x, (float)(yBase + bandTopL - 6), (float)x, (float)(yBase + bandTopL - 1),
+               tapeFadeColor(c_tickMin, x, tapeW, fadeW));
+  }
+  for (int t = -40; t <= 40; t += 10) {
+    int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
+    if (x < -16 || x >= tapeW + 16) continue;
+    drawAALine(d, (float)x, (float)(yBase + bandTopL - 9), (float)x, (float)(yBase + bandTopL - 1),
+               tapeFadeColor(c_tickMaj, x, tapeW, fadeW));
+  }
+
+  // Degree labels / cardinal letters (10° steps), centered on the major ticks
+  if (headValid) {
+    // Numbers first (small font)
+    tapeSetFont(d, &Conthrax_SemiBold4pt7b);
+    for (int t = -40; t <= 40; t += 10) {
+      int deg = ((int)roundf(refDeg + (float)t) % 360 + 360) % 360;
+      if (deg == 0 || deg == 90 || deg == 180 || deg == 270) continue;
+      int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
+      if (x < -16 || x >= tapeW + 16) continue;
+      char lb[4];
+      snprintf(lb, sizeof(lb), "%d", deg);
+      d.setTextColor(tapeFadeColor(TFT_WHITE, x, tapeW, fadeW));
+      d.setCursor(x - (d.textWidth(lb) / 2), yBase + labelBaselineL);
+      d.print(lb);
+    }
+    // Cardinal letters on top (bigger font)
+    tapeSetFont(d, &Conthrax_SemiBold7pt7b);
+    for (int t = -40; t <= 40; t += 10) {
+      int deg = ((int)roundf(refDeg + (float)t) % 360 + 360) % 360;
+      if (deg != 0 && deg != 90 && deg != 180 && deg != 270) continue;
+      const char *label;
+      uint16_t col;
+      if (deg == 0) {
+        label = "N";
+        col = TFT_RED;
+      } else if (deg == 90) {
+        label = "E";
+        col = TFT_WHITE;
+      } else if (deg == 180) {
+        label = "S";
+        col = TFT_WHITE;
+      } else {
+        label = "W";
+        col = TFT_WHITE;
+      }
+      int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
+      if (x < -16 || x >= tapeW + 16) continue;
+      d.setTextColor(tapeFadeColor(col, x, tapeW, fadeW));
+      d.setCursor(x - (d.textWidth(label) / 2), yBase + labelBaselineL);
+      d.print(label);
+    }
+  } else {
+    tapeSetFont(d, &Conthrax_SemiBold7pt7b);
+    d.setTextColor(d.color565(70, 70, 70));
+    d.setCursor(compassX - (d.textWidth("---") / 2), yBase + labelBaselineL);
+    d.print("---");
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -89,32 +230,37 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
   if (firstRun || forceDraw) {
     firstRun = false;
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
-    display.setTextColor(TFT_WHITE);
-    display.getTextBounds("KM/H", 0, 0, &x1, &y1, &w, &h);
-    int unitX = BIG_CENTER_X + OFFSET_BIG_SPEED_UNIT_X,
-        unitY = BIG_CENTER_Y + OFFSET_BIG_SPEED_UNIT_Y;
-    display.setCursor(unitX - (w / 2) - x1, unitY - y1);
-    display.print("KM/H");
-    drawDebugBox(display, unitX - (w / 2) - 2, unitY - 2, w + 4, h + 4);
+    if (SHOW_ELEMENT_SPEED_UNIT) {
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
+      display.setTextColor(TFT_WHITE);
+      display.getTextBounds("KM/H", 0, 0, &x1, &y1, &w, &h);
+      int unitX = BIG_CENTER_X + OFFSET_BIG_SPEED_UNIT_X,
+          unitY = BIG_CENTER_Y + OFFSET_BIG_SPEED_UNIT_Y;
+      display.setCursor(unitX - (w / 2) - x1, unitY - y1);
+      display.print("KM/H");
+      drawDebugBox(display, unitX - (w / 2) - 2, unitY - 2, w + 4, h + 4);
+    }
   }
   if (forceDraw) {
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
-    display.setTextColor(display.color565(150, 150, 150));
-    display.getTextBounds(DASHBOARD_SIGNATURE.c_str(), 0, 0, &x1, &y1, &w, &h);
-    int sigX = BIG_CENTER_X + OFFSET_BIG_SIGNATURE_X,
-        sigY = BIG_CENTER_Y + OFFSET_BIG_SIGNATURE_Y;
-    display.fillRect(sigX - (w / 2) - 6, sigY - 6, w + 12, h + 12, TFT_BLACK);
-    display.setCursor(sigX - (w / 2) - x1, sigY - y1);
-    display.print(DASHBOARD_SIGNATURE);
-    drawDebugBox(display, sigX - (w / 2) - 2, sigY - 2, w + 4, h + 4);
+    if (SHOW_ELEMENT_SIGNATURE) {
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+      display.setTextColor(display.color565(150, 150, 150));
+      display.getTextBounds(DASHBOARD_SIGNATURE.c_str(), 0, 0, &x1, &y1, &w, &h);
+      int sigX = BIG_CENTER_X + OFFSET_BIG_SIGNATURE_X,
+          sigY = BIG_CENTER_Y + OFFSET_BIG_SIGNATURE_Y;
+      display.fillRect(sigX - (w / 2) - 3, sigY - 3, w + 6, h + 6, TFT_BLACK);
+      display.setCursor(sigX - (w / 2) - x1, sigY - y1);
+      display.print(DASHBOARD_SIGNATURE);
+      drawDebugBox(display, sigX - (w / 2) - 2, sigY - 2, w + 4, h + 4);
+    }
   }
 
   int currentSourceState = displaySnap.speedSourceMode;
   if (ENABLE_DEMO_MODE) {
     currentSourceState = (millis() / 2000) % 3;
   }
-  if (currentSourceState != lastSpeedSourceState || forceDraw) {
+  if (SHOW_ELEMENT_SPEED_SOURCE &&
+      (currentSourceState != lastSpeedSourceState || forceDraw)) {
     lastSpeedSourceState = currentSourceState;
     componentUpdated = true;
     const char *label = "HAL";
@@ -132,21 +278,28 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
   static int lastWifiState = -1;
   static bool lastShowPlus = false;
-  int hasClients = WiFi.softAPgetStationNum() > 0;
-  bool isStation = WiFi.status() == WL_CONNECTED;
-  bool isAP = WiFi.getMode() != WIFI_OFF;
-  int currentWifiState = 0;
-  if (isAP) {
-    currentWifiState = hasClients ? 2 : 1;
+  static int cachedWifiState = -1;
+  static bool cachedShowPlus = false;
+  static unsigned long lastWifiPoll = 0;
+  unsigned long wifiNow = millis();
+  if (cachedWifiState < 0 || wifiNow - lastWifiPoll >= 1000) {
+    lastWifiPoll = wifiNow;
+    int hasClients = WiFi.softAPgetStationNum() > 0;
+    bool isStation = WiFi.status() == WL_CONNECTED;
+    bool isAP = WiFi.getMode() != WIFI_OFF;
+    cachedWifiState = isAP ? (hasClients ? 2 : 1) : 0;
+    cachedShowPlus = isStation;
   }
-  bool showPlus = isStation;
+  int currentWifiState = (cachedWifiState < 0) ? 0 : cachedWifiState;
+  bool showPlus = cachedShowPlus;
 
-  if (currentWifiState != lastWifiState || showPlus != lastShowPlus || forceDraw) {
+  if (SHOW_ELEMENT_WIFI &&
+      (currentWifiState != lastWifiState || showPlus != lastShowPlus || forceDraw)) {
     lastWifiState = currentWifiState;
     lastShowPlus = showPlus;
     int wifiX = BIG_CENTER_X + OFFSET_WIFI_ICON_X;
     int wifiY = BIG_CENTER_Y + OFFSET_WIFI_ICON_Y;
-    display.fillRect(wifiX - 4, wifiY - 3, 24, 19, TFT_BLACK);
+    display.fillRect(wifiX, wifiY - 3, 21, 18, TFT_BLACK);
     if (currentWifiState == 1) {
       drawWifiIcon(wifiX, wifiY, TFT_WHITE, false);
     } else if (currentWifiState == 2) {
@@ -157,13 +310,14 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       drawAALine(display, (float)(px - 3), (float)py, (float)(px + 3), (float)py, TFT_WHITE);
       drawAALine(display, (float)px, (float)(py - 3), (float)px, (float)(py + 3), TFT_WHITE);
     }
-    drawDebugBox(display, wifiX - 4, wifiY - 3, 24, 19);
+    drawDebugBox(display, wifiX, wifiY - 3, 21, 18);
   }
 
   unsigned long now = millis();
   static unsigned long lastTimeUpdate = 0;
-  if ((displaySnap.localHour != lastHour || displaySnap.minute != lastMin ||
-       displaySnap.day != lastDay) && (REFRESH_TIME_MS == 0 || now - lastTimeUpdate >= (unsigned long)REFRESH_TIME_MS) || forceDraw) {
+  if ((SHOW_ELEMENT_TIME || SHOW_ELEMENT_DATE) &&
+      ((displaySnap.localHour != lastHour || displaySnap.minute != lastMin ||
+       displaySnap.day != lastDay) && (REFRESH_TIME_MS == 0 || now - lastTimeUpdate >= (unsigned long)REFRESH_TIME_MS) || forceDraw)) {
     lastTimeUpdate = now;
     lastHour = displaySnap.localHour;
     lastMin = displaySnap.minute;
@@ -245,34 +399,42 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     lastDateWidth = dateW;
     lastDateY = dateY;
 
-    drawClockIcon(timeX, timeY - 18, TFT_WHITE);
-    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    display.setTextColor(TFT_WHITE);
-    display.setCursor(timeX + 22 - save_h_x1, timeY);
-    display.print(hourStr);
-    display.setCursor(timeX + 22 - save_h_x1 + w_h + 4 + w_sep_t + 4, timeY);
-    display.print(minStr);
-    drawDebugBox(display, timeX - 2, timeY + timeClearOfsY + 2, timeW + 12, timeClearH - 4);
+    if (SHOW_ELEMENT_TIME) {
+      drawClockIcon(timeX, timeY - 18, TFT_WHITE);
+      display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
+      display.setTextColor(TFT_WHITE);
+      display.setCursor(timeX + 22 - save_h_x1, timeY);
+      display.print(hourStr);
+      display.setCursor(timeX + 22 - save_h_x1 + w_h + 4 + w_sep_t + 4, timeY);
+      display.print(minStr);
+      drawDebugBox(display, timeX - 2, timeY + timeClearOfsY + 2, timeW + 12, timeClearH - 4);
+    }
 
-    drawCalendarIcon(dateX, dateY - 18, TFT_WHITE);
-    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    display.setCursor(dateX + 22 - save_d_x1, dateY);
-    display.print(dayStr);
-    display.setCursor(dateX + 22 - save_d_x1 + w_d + w_sep_d, dateY);
-    display.print(monthStr);
-    display.setCursor(dateX + 22 - save_d_x1 + w_d + w_sep_d + w_mo + w_sep_d, dateY);
-    display.print(yearStr);
+    if (SHOW_ELEMENT_DATE) {
+      drawCalendarIcon(dateX, dateY - 18, TFT_WHITE);
+      display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
+      display.setCursor(dateX + 22 - save_d_x1, dateY);
+      display.print(dayStr);
+      display.setCursor(dateX + 22 - save_d_x1 + w_d + w_sep_d, dateY);
+      display.print(monthStr);
+      display.setCursor(dateX + 22 - save_d_x1 + w_d + w_sep_d + w_mo + w_sep_d, dateY);
+      display.print(yearStr);
+    }
 
     // Draw separators in Conthrax font (single switch)
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
     display.setTextColor(TFT_WHITE);
-    display.setCursor(timeX + 22 - save_h_x1 + w_h + 4, timeY);
-    display.print(":");
-    display.setCursor(dateX + 22 - save_d_x1 + w_d, dateY);
-    display.print("/");
-    display.setCursor(dateX + 22 - save_d_x1 + w_d + w_sep_d + w_mo, dateY);
-    display.print("/");
-    drawDebugBox(display, dateX - 2, dateY + dateClearOfsY + 2, dateW + 4, dateClearH - 4);
+    if (SHOW_ELEMENT_TIME) {
+      display.setCursor(timeX + 22 - save_h_x1 + w_h + 4, timeY);
+      display.print(":");
+    }
+    if (SHOW_ELEMENT_DATE) {
+      display.setCursor(dateX + 22 - save_d_x1 + w_d, dateY);
+      display.print("/");
+      display.setCursor(dateX + 22 - save_d_x1 + w_d + w_sep_d + w_mo, dateY);
+      display.print("/");
+      drawDebugBox(display, dateX - 2, dateY + dateClearOfsY + 2, dateW + 4, dateClearH - 4);
+    }
   }
 
   // --- DS_DIGIT15pt7b digit metrics (measured once) ---
@@ -301,7 +463,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
   int currentSpeed = (int)displaySnap.currentSpeed;
   static unsigned long lastSpeedUpdate = 0;
-  if ((currentSpeed != lastSpeed && (REFRESH_SPEED_MS == 0 || now - lastSpeedUpdate >= (unsigned long)REFRESH_SPEED_MS)) || forceDraw) {
+  if (SHOW_ELEMENT_SPEED && ((currentSpeed != lastSpeed &&
+      (REFRESH_SPEED_MS == 0 || now - lastSpeedUpdate >= (unsigned long)REFRESH_SPEED_MS)) || forceDraw)) {
     lastSpeed = currentSpeed;
     lastSpeedUpdate = now;
     componentUpdated = true;
@@ -316,7 +479,9 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     // Pre-render speed digits to an off-screen sprite — VLW font loaded ONCE
     if (!spInit) {
       spInit = true;
-      sp.setColorDepth(16);
+      // 8-bit RGB332: halves the sprite's RAM vs 16-bit. The digits are
+      // white/gray on black, so the quantized palette is visually identical.
+      sp.setColorDepth(8);
       sp.setTextDatum(lgfx::textdatum_t::baseline_left);
       auto vfd = getVLWData120();
       // Measure digit metrics on main display (one-time, not per frame)
@@ -348,7 +513,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
         h_speed_max = th;
       }
       vlw120Ready = true;
-      if (vfd.data && !otaMemReleaseRequested &&
+      if (vfd.data && !otaMemReleaseRequested && !memSaverActive &&
           sp.createSprite(w_speed3_max + 12, h_speed_max + 6)
           && sp.loadFont(vfd.data, lgfx::v1::IFont::font_type_t::ft_vlw)) {
         spValid = true;
@@ -397,7 +562,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
   double displayOdo = displaySnap.totalDistanceKm;
   static unsigned long lastOdoUpdate = 0;
-  if ((fabs(displayOdo - lastDispOdo) >= 0.1 && (REFRESH_ODO_MS == 0 || now - lastOdoUpdate >= (unsigned long)REFRESH_ODO_MS)) || forceDraw) {
+  if (SHOW_ELEMENT_ODO && ((fabs(displayOdo - lastDispOdo) >= 0.1 &&
+      (REFRESH_ODO_MS == 0 || now - lastOdoUpdate >= (unsigned long)REFRESH_ODO_MS)) || forceDraw)) {
     lastOdoUpdate = now;
     lastDispOdo = displayOdo;
     componentUpdated = true;
@@ -545,7 +711,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   // Left Sidebar: Engine Temp
   static unsigned long lastSideTempUpdate = 0;
   bool tempMoving = (now - easeTempStart) < SIDEBAR_EASE_MS;
-  if (((currentTemp != lastEngineTemp || tempMoving) && (tempMoving || REFRESH_SIDEBAR_TEMP_MS == 0 || now - lastSideTempUpdate >= (unsigned long)REFRESH_SIDEBAR_TEMP_MS)) || forceDraw) {
+  if (SHOW_ELEMENT_SIDEBAR_TEMP &&
+      (((currentTemp != lastEngineTemp || tempMoving) && (tempMoving || REFRESH_SIDEBAR_TEMP_MS == 0 || now - lastSideTempUpdate >= (unsigned long)REFRESH_SIDEBAR_TEMP_MS)) || forceDraw)) {
     lastSideTempUpdate = now;
     lastEngineTemp = currentTemp;
 
@@ -606,7 +773,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   // Right Sidebar: Fuel
   static unsigned long lastSideFuelUpdate = 0;
   bool fuelMoving = (now - easeFuelStart) < SIDEBAR_EASE_MS;
-  if (((currentFuel != lastFuelPct || fuelMoving) && (fuelMoving || REFRESH_SIDEBAR_FUEL_MS == 0 || now - lastSideFuelUpdate >= (unsigned long)REFRESH_SIDEBAR_FUEL_MS)) || forceDraw) {
+  if (SHOW_ELEMENT_SIDEBAR_FUEL &&
+      (((currentFuel != lastFuelPct || fuelMoving) && (fuelMoving || REFRESH_SIDEBAR_FUEL_MS == 0 || now - lastSideFuelUpdate >= (unsigned long)REFRESH_SIDEBAR_FUEL_MS)) || forceDraw)) {
     lastSideFuelUpdate = now;
     lastFuelPct = currentFuel;
 
@@ -765,7 +933,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     measureDs15Cells(satCells, satCellW, satCellsCount, -1);
   }
   static unsigned long lastSatUpdate = 0;
-  if ((displaySat != lastSat && (REFRESH_SAT_MS == 0 || now - lastSatUpdate >= (unsigned long)REFRESH_SAT_MS)) || forceDrawSat) {
+  if (SHOW_ELEMENT_SAT &&
+      ((displaySat != lastSat && (REFRESH_SAT_MS == 0 || now - lastSatUpdate >= (unsigned long)REFRESH_SAT_MS)) || forceDrawSat)) {
     lastSatUpdate = now;
     lastSat = displaySat;
     componentUpdated = true;
@@ -773,7 +942,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     snprintf(satStr, sizeof(satStr), "%d", displaySat);
     int len = strlen(satStr);
     int satClearTop = satY + ds15_refY1 - 2;
-    int satClearH = (-ds15_refY1) + h_sat_max + 4;
+    int satClearH = h_sat_max + 4;
     display.fillRect(satX - 1, satClearTop, w_sat_max + 2, satClearH,
                      TFT_BLACK);
     int iconCY = satY + ds15_refY1 + (h_sat_max / 2);
@@ -801,7 +970,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
   // -- Accel badge --
   static unsigned long lastBadgeUpdate = 0;
-  if ((displayAccelState != lastState && (REFRESH_TMR_MS == 0 || now - lastBadgeUpdate >= (unsigned long)REFRESH_TMR_MS)) || forceDrawTmr) {
+  if (SHOW_ELEMENT_TMR &&
+      ((displayAccelState != lastState && (REFRESH_TMR_MS == 0 || now - lastBadgeUpdate >= (unsigned long)REFRESH_TMR_MS)) || forceDrawTmr)) {
     lastBadgeUpdate = now;
     lastState = displayAccelState;
     componentUpdated = true;
@@ -814,8 +984,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
     display.getTextBounds(ACCEL_BADGE_LINE1.c_str(), 0, 0, &bx1_b, &by1_b,
                           &bw1_b, &bh1_b);
-    int badgeH = h_badge_max;
-    display.fillRect(badgeX - 1, tmrY - 2, w_badge_max + 2, badgeH + 2, TFT_BLACK);
+    int badgeClearH = ((19 + by1_b + bh1_b) > 17) ? (19 + by1_b + bh1_b) : 17;
+    display.fillRect(badgeX - 1, tmrY - 2, w_badge_max + 2, badgeClearH + 4, TFT_BLACK);
     int iconX = badgeX + (w_badge_max - 16) / 2;
     drawStopwatchIcon(iconX, tmrY + 1, timerColor);
     display.setTextColor(timerColor);
@@ -838,7 +1008,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   static TimerState lastStateTimer = READY;
   static unsigned long lastTmrUpdate = 0;
   bool tmrChanged = strcmp(tmrStr, lastTmrStr) != 0 || displayAccelState != lastStateTimer;
-  if ((tmrChanged && (REFRESH_TMR_MS == 0 || now - lastTmrUpdate >= (unsigned long)REFRESH_TMR_MS)) || forceDrawTmr) {
+  if (SHOW_ELEMENT_TMR &&
+      ((tmrChanged && (REFRESH_TMR_MS == 0 || now - lastTmrUpdate >= (unsigned long)REFRESH_TMR_MS)) || forceDrawTmr)) {
     lastTmrUpdate = now;
     strcpy(lastTmrStr, tmrStr);
     lastStateTimer = displayAccelState;
@@ -900,7 +1071,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   snprintf(batStr, sizeof(batStr), "%.*f", BAT_DEC_DIGITS, displayBat);
   static char lastBatStr[12] = "";
   static unsigned long lastBatUpdate = 0;
-  if ((strcmp(batStr, lastBatStr) != 0 && (REFRESH_BAT_MS == 0 || now - lastBatUpdate >= (unsigned long)REFRESH_BAT_MS)) || forceDrawBat) {
+  if (SHOW_ELEMENT_BAT &&
+      ((strcmp(batStr, lastBatStr) != 0 && (REFRESH_BAT_MS == 0 || now - lastBatUpdate >= (unsigned long)REFRESH_BAT_MS)) || forceDrawBat)) {
     lastBatUpdate = now;
     strcpy(lastBatStr, batStr);
     componentUpdated = true;
@@ -959,7 +1131,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   static float lastDispInstKml = -1.0f;
   static unsigned long lastInstUpdate = 0;
   bool instChanged = fabsf(displayInstKml - lastDispInstKml) >= 0.1f;
-  if ((instChanged || forceDraw) && (REFRESH_INST_MS == 0 || now - lastInstUpdate >= (unsigned long)REFRESH_INST_MS)) {
+  if (SHOW_ELEMENT_INST_KML &&
+      ((instChanged && (REFRESH_INST_MS == 0 || now - lastInstUpdate >= (unsigned long)REFRESH_INST_MS)) || forceDraw)) {
     lastInstUpdate = now;
     lastDispInstKml = displayInstKml;
     componentUpdated = true;
@@ -1069,7 +1242,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   static float lastDispAvgKml = -1.0f;
   static unsigned long lastAvgUpdate = 0;
   bool avgChanged = fabsf(displayAvgKml - lastDispAvgKml) >= 0.1f;
-  if ((avgChanged || forceDraw) && (REFRESH_AVG_MS == 0 || now - lastAvgUpdate >= (unsigned long)REFRESH_AVG_MS)) {
+  if (SHOW_ELEMENT_AVG_KML &&
+      ((avgChanged && (REFRESH_AVG_MS == 0 || now - lastAvgUpdate >= (unsigned long)REFRESH_AVG_MS)) || forceDraw)) {
     lastAvgUpdate = now;
     lastDispAvgKml = displayAvgKml;
     componentUpdated = true;
@@ -1174,7 +1348,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   static float lastDispAvgSpd = -1.0f;
   static unsigned long lastAvgSpdUpdate = 0;
   bool avgSpdChanged = fabsf(displayAvgSpd - lastDispAvgSpd) >= 1.0f;
-  if ((avgSpdChanged && (REFRESH_AVG_SPEED_MS == 0 || now - lastAvgSpdUpdate >= (unsigned long)REFRESH_AVG_SPEED_MS)) || forceDraw) {
+  if (SHOW_ELEMENT_AVG_SPEED &&
+      ((avgSpdChanged && (REFRESH_AVG_SPEED_MS == 0 || now - lastAvgSpdUpdate >= (unsigned long)REFRESH_AVG_SPEED_MS)) || forceDraw)) {
     lastAvgSpdUpdate = now;
     lastDispAvgSpd = displayAvgSpd;
     componentUpdated = true;
@@ -1280,7 +1455,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   float displayFuelLtrs = displaySnap.fuelLiters;
   static float lastDispFuelLtrs = -1.0f;
   static unsigned long lastFuelUpdate = 0;
-  if ((fabsf(displayFuelLtrs - lastDispFuelLtrs) >= 0.1f && (REFRESH_FUEL_MS == 0 || now - lastFuelUpdate >= (unsigned long)REFRESH_FUEL_MS)) || forceDraw) {
+  if (SHOW_ELEMENT_FUEL_LTRS &&
+      ((fabsf(displayFuelLtrs - lastDispFuelLtrs) >= 0.1f && (REFRESH_FUEL_MS == 0 || now - lastFuelUpdate >= (unsigned long)REFRESH_FUEL_MS)) || forceDraw)) {
     lastFuelUpdate = now;
     lastDispFuelLtrs = displayFuelLtrs;
     componentUpdated = true;
@@ -1311,7 +1487,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     int fuelNumAreaX = applyAlign(fuelCenterX, totalW, ALIGN_FUEL_LTRS);
     int unitX = fuelNumAreaX + fuelCellW + 4;
 
-    int clearY = fuelY - 20;
+    int clearY = fuelY + std::min((int)ds15_refY1, -18) - 2;
     int clearW = fuelCellW + 4 + w_fuel_unit;
     int clearX = fuelCenterX - (clearW / 2) - 4;
     display.fillRect(clearX, clearY, clearW + 8, ds15_fontH + 12, TFT_BLACK);
@@ -1359,7 +1535,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   // --- Compass (full-width HUD heading tape) ---
   float displayHeading = displaySnap.heading;
   static int lastTapePix = -1;
-  static int lastClearY = -1, lastClearH = -1;
+  static bool compassStaticDrawn = false;
+  static bool lastHeadValid = false;
   static unsigned long lastCompassUpdate = 0;
   int currentHeadingInt = ((int)displayHeading + 360) % 360;
 
@@ -1370,7 +1547,16 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   const float pxPerDeg = 6.0f;
   int tapePix = (int)roundf(displayHeading * pxPerDeg);
 
-  if ((tapePix != lastTapePix && (REFRESH_COMPASS_MS == 0 || now - lastCompassUpdate >= (unsigned long)REFRESH_COMPASS_MS)) || forceDraw) {
+  // With the tape sprite active, render EVERY frame the heading moves: the
+  // strip is painted in RAM and pushed in one DMA burst, so the tape rolls
+  // smoothly (1-2 px/frame) instead of stepping every REFRESH_COMPASS_MS
+  // (10 Hz updates made the labels visibly jump). The throttle still applies
+  // to the direct-panel fallback, where per-pixel SPI writes would eat the
+  // frame budget at 60 FPS.
+  bool tapeMoved = tapePix != lastTapePix;
+  bool tapeThrottleOk = (REFRESH_COMPASS_MS == 0 || tapeSpriteReady ||
+                         (now - lastCompassUpdate >= (unsigned long)REFRESH_COMPASS_MS));
+  if ((SHOW_ELEMENT_COMPASS && tapeMoved && tapeThrottleOk) || forceDraw) {
     lastCompassUpdate = now;
     lastTapePix = tapePix;
     componentUpdated = true;
@@ -1397,16 +1583,9 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     // Numbers sit just above the band (cursor y = baseline)
     int labelBaseline = bandTop - 10;
     const int markerH = 8; // bottom marker triangle height
-    int clearY = std::min(labelBaseline + (int)labelY1,
-                          std::min(labelBaseline + (int)cardY1, bandTop - 10)) - 2;
-    int clearH = (bandTop + bandH + markerH) - clearY + 2;
-
-    if (lastClearY >= 0 && (lastClearY != clearY || lastClearH != clearH)) {
-      display.fillRect(0, lastClearY, tapeW, lastClearH, TFT_BLACK);
-    }
-    lastClearY = clearY;
-    lastClearH = clearH;
-    display.fillRect(0, clearY, tapeW, clearH, TFT_BLACK);
+    int labelTop = std::min(labelBaseline + (int)labelY1,
+                            std::min(labelBaseline + (int)cardY1, bandTop - 10)) - 2;
+    int stripBottom = bandTop + bandH + markerH;
 
     bool headValid = compassReady || ENABLE_DEMO_MODE;
     uint16_t c_border = display.color565(90, 90, 90);
@@ -1427,114 +1606,89 @@ void updateBigDisplay(const SensorSnapshot &snap) {
         fadeBorderColors[i] = blendColorWithBlack(display.color565(90, 90, 90), f);
       }
     }
-    auto fadeColor = [&](uint16_t color, int x) -> uint16_t {
-      float f = 1.0f;
-      if (x < fadeW) {
-        f = (float)(x + 1) / (float)fadeW;
-      } else if (x >= tapeW - fadeW) {
-        f = (float)(tapeW - x) / (float)fadeW;
-      }
-      return blendColorWithBlack(color, f);
-    };
 
-    // Tape band (edge to edge, fixed reference frame), fading at the edges
-    int midX0 = fadeW, midX1 = tapeW - fadeW;
-    display.fillRect(midX0, bandTop, midX1 - midX0, bandH, display.color565(20, 20, 20));
-    display.fillRect(midX0, bandTop, midX1 - midX0, 1, c_border);
-    display.fillRect(midX0, bandTop + bandH - 1, midX1 - midX0, 1, c_border);
-    for (int i = 0; i < fadeW; i += 6) {
-      int w = std::min(6, fadeW - i);
-      int fi = i + w / 2;
-      display.fillRect(i, bandTop, w, bandH, fadeBandColors[fi]);
-      display.fillRect(tapeW - i - w, bandTop, w, bandH, fadeBandColors[fi]);
-      display.fillRect(i, bandTop, w, 1, fadeBorderColors[fi]);
-      display.fillRect(i, bandTop + bandH - 1, w, 1, fadeBorderColors[fi]);
-      display.fillRect(tapeW - i - w, bandTop, w, 1, fadeBorderColors[fi]);
-      display.fillRect(tapeW - i - w, bandTop + bandH - 1, w, 1, fadeBorderColors[fi]);
+    // Static layer: the band, its edge fades and the center marker never
+    // scroll, so draw them once instead of every update. Erasing the full
+    // strip (erase-to-black + repaint) on every heading change was what made
+    // the tape flash. Redrawn only on a full redraw or when the marker's
+    // validity state flips (gray -> red).
+    if (!compassStaticDrawn || forceDraw || headValid != lastHeadValid) {
+      lastHeadValid = headValid;
+      compassStaticDrawn = true;
+      display.fillRect(0, labelTop, tapeW, stripBottom - labelTop + 2, TFT_BLACK);
+
+      // Tape band (edge to edge, fixed reference frame), fading at the edges
+      int midX0 = fadeW, midX1 = tapeW - fadeW;
+      display.fillRect(midX0, bandTop, midX1 - midX0, bandH, display.color565(20, 20, 20));
+      display.fillRect(midX0, bandTop, midX1 - midX0, 1, c_border);
+      display.fillRect(midX0, bandTop + bandH - 1, midX1 - midX0, 1, c_border);
+      for (int i = 0; i < fadeW; i += 6) {
+        int w = std::min(6, fadeW - i);
+        int fi = i + w / 2;
+        display.fillRect(i, bandTop, w, bandH, fadeBandColors[fi]);
+        display.fillRect(tapeW - i - w, bandTop, w, bandH, fadeBandColors[fi]);
+        display.fillRect(i, bandTop, w, 1, fadeBorderColors[fi]);
+        display.fillRect(i, bandTop + bandH - 1, w, 1, fadeBorderColors[fi]);
+        display.fillRect(tapeW - i - w, bandTop, w, 1, fadeBorderColors[fi]);
+        display.fillRect(tapeW - i - w, bandTop + bandH - 1, w, 1, fadeBorderColors[fi]);
+      }
+
+      // Fixed center marker: inverted triangle below the band, apex on the band
+      // (kept clear of the numbers so it never covers the center heading)
+      display.fillTriangle(compassX - 5, bandTop + bandH + markerH - 1,
+                           compassX + 5, bandTop + bandH + markerH - 1,
+                           compassX, bandTop + bandH, c_marker);
+    }
+
+    // Dynamic layer: only the label/tick region above the band scrolls. It is
+    // painted into an offscreen sprite and pushed to the panel in one burst,
+    // so the display never shows a partially repainted tape. Falls back to
+    // drawing directly if the sprite buffer can't be allocated.
+    int stripH = bandTop - labelTop;
+    if (tapeSpriteReady && (tapeSpriteW != tapeW || tapeSpriteH != stripH)) {
+      tapeSprite.deleteSprite();
+      tapeSpriteReady = false;
+    }
+    if (!tapeSpriteReady && !memSaverActive) {
+      // NOTE: LGFX_Sprite::setColorDepth returns the sprite's buffer pointer
+      // (nullptr until createSprite allocates one), NOT a bool. It must be
+      // called as a statement - inside a bool expression the null return
+      // short-circuits && and createSprite would never run.
+      // 8-bit RGB332 primary (halves RAM vs 16-bit; ticks/labels are
+      // grayscale so the palette loss is invisible), 4-bit as a last resort.
+      tapeSprite.setColorDepth(8);
+      tapeSpriteReady = tapeSprite.createSprite(tapeW, stripH);
+      if (!tapeSpriteReady) {
+        tapeSprite.setColorDepth(4);
+        tapeSpriteReady = tapeSprite.createSprite(tapeW, stripH);
+      }
+      if (tapeSpriteReady)
+        tapeSprite.setTextDatum(lgfx::textdatum_t::baseline_left);
+      tapeSpriteW = tapeW;
+      tapeSpriteH = stripH;
+      logPrintf("Compass tape sprite %s (%dx%d, depth=%d, heap=%lu)\n",
+                tapeSpriteReady ? "OK" : "FAILED (fallback: direct panel)",
+                tapeW, stripH,
+                tapeSpriteReady ? (int)tapeSprite.getColorDepth() : 0,
+                (unsigned long)ESP.getFreeHeap());
     }
 
     // Tape scrolls with the fractional heading so ticks/numbers glide smoothly
     int nearest10 = (currentHeadingInt + 5) / 10 * 10;
     float refDeg = (float)nearest10;
 
-    // Scrolling ticks: 5° minors, 10° majors
-    for (int t = -40; t <= 40; t += 5) {
-      if (t % 10 == 0) continue;
-      int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
-      if (x < -6 || x >= tapeW + 6) continue;
-      drawAALine(display, (float)x, (float)(bandTop - 5), (float)x, (float)bandTop,
-                 fadeColor(c_tickMin, x));
-    }
-    for (int t = -40; t <= 40; t += 10) {
-      int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
-      if (x < -16 || x >= tapeW + 16) continue;
-      drawAALine(display, (float)x, (float)(bandTop - 8), (float)x, (float)bandTop,
-                 fadeColor(c_tickMaj, x));
-    }
-
-    // Degree labels / cardinal letters (10° steps), centered on the major ticks
-    if (headValid) {
-      // Numbers first (small font)
-      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-      for (int t = -40; t <= 40; t += 10) {
-        int deg = ((nearest10 + t) % 360 + 360) % 360;
-        if (deg == 0 || deg == 90 || deg == 180 || deg == 270) continue;
-        int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
-        if (x < -16 || x >= tapeW + 16) continue;
-        char lb[4];
-        snprintf(lb, sizeof(lb), "%d", deg);
-        int16_t lx1, ly1;
-        uint16_t lw, lh;
-        display.getTextBounds(lb, 0, 0, &lx1, &ly1, &lw, &lh);
-        display.setTextColor(fadeColor(TFT_WHITE, x));
-        display.setCursor(x - (lw / 2) - lx1, labelBaseline);
-        display.print(lb);
-      }
-      // Cardinal letters on top (bigger font)
-      display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
-      for (int t = -40; t <= 40; t += 10) {
-        int deg = ((nearest10 + t) % 360 + 360) % 360;
-        if (deg != 0 && deg != 90 && deg != 180 && deg != 270) continue;
-        const char *label;
-        uint16_t col;
-        if (deg == 0) {
-          label = "N";
-          col = TFT_RED;
-        } else if (deg == 90) {
-          label = "E";
-          col = TFT_WHITE;
-        } else if (deg == 180) {
-          label = "S";
-          col = TFT_WHITE;
-        } else {
-          label = "W";
-          col = TFT_WHITE;
-        }
-        int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
-        if (x < -16 || x >= tapeW + 16) continue;
-        int16_t lx1, ly1;
-        uint16_t lw, lh;
-        display.getTextBounds(label, 0, 0, &lx1, &ly1, &lw, &lh);
-        display.setTextColor(fadeColor(col, x));
-        display.setCursor(x - (lw / 2) - lx1, labelBaseline);
-        display.print(label);
-      }
+    if (tapeSpriteReady) {
+      renderTapeStrip(tapeSprite, tapeW, compassX, 0, stripH, refDeg,
+                      displayHeading, pxPerDeg, c_tickMin, c_tickMaj, fadeW,
+                      headValid);
+      tapeSprite.pushSprite(0, labelTop);
     } else {
-      int16_t lx1, ly1;
-      uint16_t lw, lh;
-      display.getTextBounds("---", 0, 0, &lx1, &ly1, &lw, &lh);
-      display.setTextColor(display.color565(70, 70, 70));
-      display.setCursor(compassX - (lw / 2) - lx1, labelBaseline);
-      display.print("---");
+      renderTapeStrip(display, tapeW, compassX, labelTop, stripH, refDeg,
+                      displayHeading, pxPerDeg, c_tickMin, c_tickMaj, fadeW,
+                      headValid);
     }
 
-    // Fixed center marker: inverted triangle below the band, apex on the band
-    // (kept clear of the numbers so it never covers the center heading)
-    display.fillTriangle(compassX - 5, bandTop + bandH + markerH - 1,
-                         compassX + 5, bandTop + bandH + markerH - 1,
-                         compassX, bandTop + bandH, c_marker);
-
-    drawDebugBox(display, 0, clearY, tapeW, clearH);
+    drawDebugBox(display, 0, labelTop, tapeW, stripBottom - labelTop + 2);
   }
 
   if ((componentUpdated || forceDraw) && ENABLE_CIRCLE_TEST)

@@ -12,6 +12,22 @@
 Preferences preferences;
 WebServer server(80);
 
+// Heartbeat counter bumped by the web task loop; the display task watches it
+// and reboots the device if the web server stalls (e.g. a handler hangs).
+volatile unsigned long webLoopCount = 0;
+
+// Wipes the configuration NVS namespaces. Used by /api/reset and by the
+// physical recovery gesture (hold BOOT for 8 seconds after boot).
+void factoryResetConfig() {
+  Preferences pref;
+  pref.begin("cfg", false);
+  pref.clear();
+  pref.end();
+  pref.begin("dashboard", false);
+  pref.clear();
+  pref.end();
+}
+
 static bool otaUpdateSuccess = false;
 
 // OTA Pull state
@@ -344,9 +360,9 @@ const char *index_html = R"rawliteral(
 
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dashboard++ Config</title>
-<link rel="preconnect" href="https://fonts.googleapis.com/">
-<link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+<!-- External web fonts removed: the config AP has no internet access, so a
+     render-blocking Google Fonts stylesheet stalls first paint on every page
+     load. The CSS font stacks below fall back to system fonts. -->
 <style>
 :root {
     --bg-base: #080b11;
@@ -1056,319 +1072,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
     <input type="text" id="searchBar" placeholder="Search configuration parameters..." oninput="filterConfig()" autocomplete="off">
 </div>
 
-<div id="form-container">
-            <details>
-                <summary>
-                    <div class="summary-title">System &amp; General</div>
-                    <svg class="summary-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                </summary>
-                <div class="details-content"><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">⚙️ General</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Target Refresh Rate (FPS)</label><input type="number" id="TARGET_FPS" value="60" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Show FPS Counter</label><input type="checkbox" id="SHOW_FPS_COUNTER_DEFAULT" checked=""></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Enable Sensor Demo Mode</label><input type="checkbox" id="ENABLE_DEMO_MODE"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Enable Power Sensing</label><input type="checkbox" id="ENABLE_POWER_SENSE"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Show UI Element Bounds (Debug)</label><input type="checkbox" id="SHOW_ELEMENT_BOUNDS"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">⚡ CPU</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><label style="font-size:12px;">Manual CPU Frequency</label><select id="MANUAL_CPU_FREQ" style="width:auto;min-width:120px;"><option value="80">80 MHz</option><option value="160">160 MHz</option><option value="240" selected="">240 MHz</option></select></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Enable Dynamic CPU Frequency</label><input type="checkbox" id="ENABLE_DYNAMIC_CPU"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Enable Thermal Throttling</label><input type="checkbox" id="ENABLE_CPU_THROTTLE" checked=""></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Throttle to 160 MHz At (°C)</label><input type="number" id="CPU_THROTTLE_TEMP_WARN" value="60" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Throttle to 80 MHz At (°C)</label><input type="number" id="CPU_THROTTLE_TEMP_CRIT" value="70" step="any" style="width:85px;text-align:center;"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">✍️ Custom Signatures</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Boot Screen Signature</label><input type="text" id="SPLASH_SIGNATURE" value="by @ale.finot" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Reboot Screen Signature</label><input type="text" id="REBOOT_SIGNATURE" value="Dashboard++ by @ale.finot" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Main Dashboard Watermark</label><input type="text" id="DASHBOARD_SIGNATURE" value="&lt;&lt;&lt;&lt;&lt;&lt;    Dashboard++ by @ale.finot    &gt;&gt;&gt;&gt;&gt;&gt;" step="any" style="width:85px;text-align:center;"></div></div></div></div>
-            </details>
-            <details>
-                <summary>
-                    <div class="summary-title">WiFi</div>
-                    <svg class="summary-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                </summary>
-                <div class="details-content"><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">📶 Network Settings</h4><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">TX Power (dBm)</label>
-                        <div class="xy-row">
-                            <input type="range" id="WIFI_TX_POWER_DBM_slider" min="-1" max="20" step="1" value="20" oninput="document.getElementById(&#39;WIFI_TX_POWER_DBM&#39;).value = this.value">
-                            <input type="number" id="WIFI_TX_POWER_DBM" value="20" min="-1" max="20" step="1" oninput="document.getElementById(&#39;WIFI_TX_POWER_DBM_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">📡 Primary Network</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID" value="Xiaomi 15" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD" value="" step="any" style="width:85px;text-align:center;"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">🔄 Fallback Networks</h4><div style="display:flex;flex-direction:column;gap:6px;"></div><div class="section-title">Network 1</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_1" value="D-Link-627F3B" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_1" value="" step="any" style="width:85px;text-align:center;"></div></div><div class="section-title">Network 2</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_2" value="TP-Link_F3EB" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_2" value="" step="any" style="width:85px;text-align:center;"></div></div><div class="section-title">Network 3</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_3" value="" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_3" value="" step="any" style="width:85px;text-align:center;"></div></div><div class="section-title">Network 4</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Network Name (SSID)</label><input type="text" id="WIFI_SSID_4" value="" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Password</label><input type="text" id="WIFI_PASSWORD_4" value="" step="any" style="width:85px;text-align:center;"></div></div></div></div>
-            </details>
-            <details>
-                <summary>
-                    <div class="summary-title">Display &amp; Colors</div>
-                    <svg class="summary-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                </summary>
-                <div class="details-content" style=""><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">🖥️ Display</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Shutdown Loading Duration (ms)</label><input type="number" id="SHUTDOWN_TIME_MS" value="3000" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Screen Rotation (0-3)</label><input type="number" id="DISPLAY_ROTATION" value="3" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Display Width (px)</label><input type="number" id="DISPLAY_WIDTH" value="480" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Display Height (px)</label><input type="number" id="DISPLAY_HEIGHT" value="320" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>SPI Bus Frequency (MHz)</label><input type="number" id="SPI_BUS_SPEED" value="60000000" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Invert Display Colors</label><input type="checkbox" id="DISPLAY_INVERT_COLORS"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Enable Anti-Aliased Rendering</label><input type="checkbox" id="ENABLE_ANTIALIASING" checked=""></div>
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">AA Sharpness</label>
-                        <div class="xy-row">
-                            <input type="range" id="AA_SHARPNESS_slider" min="0.2" max="1" step="0.1" value="0.2" oninput="document.getElementById(&#39;AA_SHARPNESS&#39;).value = this.value">
-                            <input type="number" id="AA_SHARPNESS" value="0.2" min="0.2" max="1" step="0.1" oninput="document.getElementById(&#39;AA_SHARPNESS_slider&#39;).value = this.value">
-                        </div>
-                    </div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">💡 Brightness Control</h4><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Backlight Brightness</label>
-                        <div class="xy-row">
-                            <input type="range" id="BACKLIGHT_BRIGHTNESS_slider" min="0" max="100" step="1" value="100" oninput="document.getElementById(&#39;BACKLIGHT_BRIGHTNESS&#39;).value = this.value">
-                            <input type="number" id="BACKLIGHT_BRIGHTNESS" value="100" min="0" max="100" step="1" oninput="document.getElementById(&#39;BACKLIGHT_BRIGHTNESS_slider&#39;).value = this.value">
-                        </div>
-                    </div>
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Fade Duration (ms)</label>
-                        <div class="xy-row">
-                            <input type="range" id="FADE_DURATION_MS_slider" min="100" max="5000" step="100" value="700" oninput="document.getElementById(&#39;FADE_DURATION_MS&#39;).value = this.value">
-                            <input type="number" id="FADE_DURATION_MS" value="700" min="100" max="5000" step="100" oninput="document.getElementById(&#39;FADE_DURATION_MS_slider&#39;).value = this.value">
-                        </div>
-                    </div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Enable Night Mode</label><input type="checkbox" id="ENABLE_NIGHT_MODE"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Start Time (Hour)</label><input type="number" id="NIGHT_MODE_START_HOUR" value="23" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>End Time (Hour)</label><input type="number" id="NIGHT_MODE_END_HOUR" value="0" step="any" style="width:85px;text-align:center;"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">📊 Thresholds &amp; Colors</h4><div style="display:flex;flex-direction:column;gap:6px;"></div><div class="section-title">Engine Temperature</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;align-items:center;gap:10px;padding:3px 0;"><label style="font-size:12px;min-width:65px;">Low</label><input type="color" id="COLOR_TEMP_NORM" value="#00ffff"><input type="number" id="TEMP_BAR_MIN" value="10" step="any" style="width:75px;text-align:center;"> <span style="font-size:11px;color:var(--text-dim);">°C</span></div><div style="display:flex;align-items:center;gap:10px;padding:3px 0;"><label style="font-size:12px;min-width:65px;">Normal</label><input type="color" id="COLOR_TEMP_WARN" value="#ff8c00"><input type="number" id="TEMP_WARN_YEL" value="45" step="any" style="width:75px;text-align:center;"> <span style="font-size:11px;color:var(--text-dim);">°C</span></div><div style="display:flex;align-items:center;gap:10px;padding:3px 0;"><label style="font-size:12px;min-width:65px;">Critical</label><input type="color" id="COLOR_TEMP_CRIT" value="#ff0000"><input type="number" id="TEMP_WARN_RED" value="90" step="any" style="width:75px;text-align:center;"> <span style="font-size:11px;color:var(--text-dim);">°C</span></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Max (°C)</label><input type="number" id="TEMP_BAR_MAX" value="110" step="any" style="width:85px;text-align:center;"></div></div><div class="section-title">Fuel Level</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;align-items:center;gap:10px;padding:3px 0;"><label style="font-size:12px;min-width:65px;">Normal</label><input type="color" id="COLOR_FUEL_NORM" value="#00ff00"></div><div style="display:flex;align-items:center;gap:10px;padding:3px 0;"><label style="font-size:12px;min-width:65px;">Warning</label><input type="color" id="COLOR_FUEL_WARN" value="#ffff00"><input type="number" id="FUEL_WARN_YEL" value="45" step="any" style="width:75px;text-align:center;"> <span style="font-size:11px;color:var(--text-dim);">%</span></div><div style="display:flex;align-items:center;gap:10px;padding:3px 0;"><label style="font-size:12px;min-width:65px;">Critical</label><input type="color" id="COLOR_FUEL_CRIT" value="#ff0000"><input type="number" id="FUEL_WARN_RED" value="20" step="any" style="width:75px;text-align:center;"> <span style="font-size:11px;color:var(--text-dim);">%</span></div><div style="display:flex;align-items:center;gap:10px;padding:3px 0;"><label style="min-width:65px;">Ghost Digit Color</label><input type="color" id="GHOST_COLOR_STR" value="#6b6b6b""></div></div></div></div>
-            </details>
-            <details>
-                <summary>
-                    <div class="summary-title">Sensors Tuning</div>
-                    <svg class="summary-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                </summary>
-                <div class="details-content" style="">
-                <div class="card" style="grid-column:1/-1;">
-                    <h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">⛽ Fuel Level Mapping Table</h4>
-                    <label style="font-size:11px;">Number of points (tank capacity + 1):</label>
-                    <div style="display:flex; align-items:center; gap:8px; margin:6px 0 10px 0;">
-                        <input type="number" id="FUEL_TOUCH_POINTS" value="8" min="2" max="20" style="width:70px;">
-                        <button onclick="save();setTimeout(() =&gt; location.reload(), 500)" class="btn-secondary" style="padding:5px 10px; font-size:11px;">↻ Refresh Table</button>
-                    </div>
-                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:6px 12px; align-items:center;"><div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:&#39;JetBrains Mono&#39;,monospace;">#0</span><input type="number" id="TT_0" value="950" style="width:100%;"></div><div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:&#39;JetBrains Mono&#39;,monospace;">#1</span><input type="number" id="TT_1" value="840" style="width:100%;"></div><div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:&#39;JetBrains Mono&#39;,monospace;">#2</span><input type="number" id="TT_2" value="750" style="width:100%;"></div><div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:&#39;JetBrains Mono&#39;,monospace;">#3</span><input type="number" id="TT_3" value="670" style="width:100%;"></div><div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:&#39;JetBrains Mono&#39;,monospace;">#4</span><input type="number" id="TT_4" value="600" style="width:100%;"></div><div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:&#39;JetBrains Mono&#39;,monospace;">#5</span><input type="number" id="TT_5" value="530" style="width:100%;"></div><div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:&#39;JetBrains Mono&#39;,monospace;">#6</span><input type="number" id="TT_6" value="460" style="width:100%;"></div><div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:&#39;JetBrains Mono&#39;,monospace;">#7</span><input type="number" id="TT_7" value="400" style="width:100%;"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">🌡️ Temperature Sensor</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>NTC Balance Resistor (Ohms)</label><input type="number" id="NTC_R_BALANCE" value="10000" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>NTC Beta Value</label><input type="number" id="NTC_BETA" value="3950" step="any" style="width:85px;text-align:center;"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">⏱️ Acceleration Timer</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Timer Start Speed (km/h)</label><input type="number" id="ACCEL_START_SPEED" value="1" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Timer Target Speed (km/h)</label><input type="number" id="ACCEL_TARGET_SPEED" value="50" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Badge Top Text (e.g., '0-50')</label><input type="text" id="ACCEL_BADGE_LINE1" value="0-50" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Badge Bottom Text (e.g., 'km/h')</label><input type="text" id="ACCEL_BADGE_LINE2" value="km/h" step="any" style="width:85px;text-align:center;"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">📦 Miscellaneous</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Wheel Circumference (mm)</label><input type="number" id="WHEEL_CIRCUMFERENCE_MM" value="1650" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Minimum Speed Threshold (km/h)</label><input type="number" id="MIN_SPEED_THRESHOLD" value="1" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Fuel Sensor Smoothing Alpha</label><input type="number" id="FUEL_FILTER_ALPHA" value="0.08" step="any" style="width:85px;text-align:center;"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">⏱️ Polling Rates</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Speed (ms)</label><input type="number" id="REFRESH_SPEED_MS" value="250" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Satellites (ms)</label><input type="number" id="REFRESH_SAT_MS" value="1000" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Accel Timer (ms)</label><input type="number" id="REFRESH_TMR_MS" value="10" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Battery Voltage (ms)</label><input type="number" id="REFRESH_BAT_MS" value="2500" step="any" style="width:85px;text-align:center;"></div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">🔢 Digit Count Configuration</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Speed Digits</label><input type="number" id="SPEED_DIGITS" value="3" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Satellites Digits</label><input type="number" id="SAT_DIGITS" value="2" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Timer Integer Digits</label><input type="number" id="TMR_INT_DIGITS" value="2" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Timer Decimal Digits</label><input type="number" id="TMR_DEC_DIGITS" value="2" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Battery Integer Digits</label><input type="number" id="BAT_INT_DIGITS" value="2" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Battery Decimal Digits</label><input type="number" id="BAT_DEC_DIGITS" value="1" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Instant KM/L Integer Digits</label><input type="number" id="INST_INT_DIGITS" value="2" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Instant KM/L Decimal Digits</label><input type="number" id="INST_DEC_DIGITS" value="1" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Average KM/L Integer Digits</label><input type="number" id="AVG_INT_DIGITS" value="2" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Average KM/L Decimal Digits</label><input type="number" id="AVG_DEC_DIGITS" value="1" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Fuel Integer Digits</label><input type="number" id="FUEL_INT_DIGITS" value="1" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Fuel Decimal Digits</label><input type="number" id="FUEL_DEC_DIGITS" value="1" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Odometer Integer Digits</label><input type="number" id="ODO_INT_DIGITS" value="5" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Odometer Decimal Digits</label><input type="number" id="ODO_DEC_DIGITS" value="1" step="any" style="width:85px;text-align:center;"></div></div></div></div>
-            </details>
-            <details>
-                <summary>
-                    <div class="summary-title">GNSS</div>
-                    <svg class="summary-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                </summary>
-                <div class="details-content" style=""><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">🛰️ GNSS Settings</h4><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>GNSS Baud Rate (baud)</label><input type="number" id="GPS_BAUD" value="115200" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Minimum Satellites Required</label><input type="number" id="MIN_SATELLITES" value="8" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Optimal Satellites Count</label><input type="number" id="OPTIMAL_SATELLITES" value="12" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Max Deviation Hall vs GPS (km/h)</label><input type="number" id="MAX_SPEED_DELTA_KMH" value="5" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Min Deviation Hall vs GPS (km/h)</label><input type="number" id="GPS_MIN_DEV_KMH" value="1" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>GPS Only Mode (skip hall fusion)</label><input type="checkbox" id="GPS_ONLY_MODE"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>GPS Start Speed (km/h)</label><input type="number" id="GPS_START_KMH" value="3" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>GPS Stop Settle Time (ms)</label><input type="number" id="GPS_STOP_SETTLE_MS" value="1500" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Show GPS Debug Overlay</label><input type="checkbox" id="GPS_DEBUG_DEFAULT"></div></div></div></div>
-            </details>
-            <details>
-                <summary>
-                    <div class="summary-title">UI Layout</div>
-                    <svg class="summary-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                </summary>
-                <div class="details-content" style=""><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">📊 System</h4><div style="display:flex;flex-direction:column;gap:6px;"></div><div class="section-title">Viewport Center</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="BIG_CENTER_X_slider" min="0" max="480" value="240" oninput="document.getElementById(&#39;BIG_CENTER_X&#39;).value = this.value">
-                            <input type="number" id="BIG_CENTER_X" value="240" step="1" oninput="document.getElementById(&#39;BIG_CENTER_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="BIG_CENTER_Y_slider" min="0" max="320" value="160" oninput="document.getElementById(&#39;BIG_CENTER_Y&#39;).value = this.value">
-                            <input type="number" id="BIG_CENTER_Y" value="160" step="1" oninput="document.getElementById(&#39;BIG_CENTER_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">FPS Counter</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_BIG_FPS_X_slider" min="-240" max="240" value="0" oninput="document.getElementById(&#39;OFFSET_BIG_FPS_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_FPS_X" value="0" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_FPS_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_BIG_FPS_Y_slider" min="-160" max="160" value="-33" oninput="document.getElementById(&#39;OFFSET_BIG_FPS_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_FPS_Y" value="-33" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_FPS_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Signature</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_BIG_SIGNATURE_X_slider" min="-240" max="240" value="0" oninput="document.getElementById(&#39;OFFSET_BIG_SIGNATURE_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_SIGNATURE_X" value="0" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_SIGNATURE_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_BIG_SIGNATURE_Y_slider" min="-160" max="160" value="-102" oninput="document.getElementById(&#39;OFFSET_BIG_SIGNATURE_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_SIGNATURE_Y" value="-102" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_SIGNATURE_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">📊 Speed &amp; Odo</h4><div style="display:flex;flex-direction:column;gap:6px;"></div><div class="section-title">Acceleration Timer</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_BIG_TMR_X_slider" min="-240" max="240" value="-53" oninput="document.getElementById(&#39;OFFSET_BIG_TMR_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_TMR_X" value="-53" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_TMR_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_BIG_TMR_Y_slider" min="-160" max="160" value="-68" oninput="document.getElementById(&#39;OFFSET_BIG_TMR_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_TMR_Y" value="-68" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_TMR_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Speed Source Icon</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_HALL_ICON_X_slider" min="-240" max="240" value="0" oninput="document.getElementById(&#39;OFFSET_HALL_ICON_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_HALL_ICON_X" value="0" step="1" oninput="document.getElementById(&#39;OFFSET_HALL_ICON_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_HALL_ICON_Y_slider" min="-160" max="160" value="-140" oninput="document.getElementById(&#39;OFFSET_HALL_ICON_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_HALL_ICON_Y" value="-140" step="1" oninput="document.getElementById(&#39;OFFSET_HALL_ICON_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Main Speed Number</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_BIG_SPEED_NUM_X_slider" min="-240" max="240" value="-20" oninput="document.getElementById(&#39;OFFSET_BIG_SPEED_NUM_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_SPEED_NUM_X" value="-20" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_SPEED_NUM_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_BIG_SPEED_NUM_Y_slider" min="-160" max="160" value="-15" oninput="document.getElementById(&#39;OFFSET_BIG_SPEED_NUM_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_SPEED_NUM_Y" value="-15" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_SPEED_NUM_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Speed Unit</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_BIG_SPEED_UNIT_X_slider" min="-240" max="240" value="103" oninput="document.getElementById(&#39;OFFSET_BIG_SPEED_UNIT_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_SPEED_UNIT_X" value="103" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_SPEED_UNIT_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_BIG_SPEED_UNIT_Y_slider" min="-160" max="160" value="26" oninput="document.getElementById(&#39;OFFSET_BIG_SPEED_UNIT_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_SPEED_UNIT_Y" value="26" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_SPEED_UNIT_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Odometer</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_BIG_ODO_X_slider" min="-240" max="240" value="15" oninput="document.getElementById(&#39;OFFSET_BIG_ODO_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_ODO_X" value="15" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_ODO_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_BIG_ODO_Y_slider" min="-160" max="160" value="150" oninput="document.getElementById(&#39;OFFSET_BIG_ODO_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_ODO_Y" value="150" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_ODO_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">📊 Fuel &amp; Battery</h4><div style="display:flex;flex-direction:column;gap:6px;"></div><div class="section-title">Average KM/L</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_AVG_KML_X_slider" min="-240" max="240" value="150" oninput="document.getElementById(&#39;OFFSET_AVG_KML_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_AVG_KML_X" value="150" step="1" oninput="document.getElementById(&#39;OFFSET_AVG_KML_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_AVG_KML_Y_slider" min="-160" max="160" value="-49" oninput="document.getElementById(&#39;OFFSET_AVG_KML_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_AVG_KML_Y" value="-49" step="1" oninput="document.getElementById(&#39;OFFSET_AVG_KML_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Instant KM/L</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_INST_KML_X_slider" min="-240" max="240" value="60" oninput="document.getElementById(&#39;OFFSET_INST_KML_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_INST_KML_X" value="60" step="1" oninput="document.getElementById(&#39;OFFSET_INST_KML_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_INST_KML_Y_slider" min="-160" max="160" value="-49" oninput="document.getElementById(&#39;OFFSET_INST_KML_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_INST_KML_Y" value="-49" step="1" oninput="document.getElementById(&#39;OFFSET_INST_KML_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Fuel Liters</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_FUEL_LTRS_X_slider" min="-240" max="240" value="132" oninput="document.getElementById(&#39;OFFSET_FUEL_LTRS_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_FUEL_LTRS_X" value="132" step="1" oninput="document.getElementById(&#39;OFFSET_FUEL_LTRS_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_FUEL_LTRS_Y_slider" min="-160" max="160" value="150" oninput="document.getElementById(&#39;OFFSET_FUEL_LTRS_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_FUEL_LTRS_Y" value="150" step="1" oninput="document.getElementById(&#39;OFFSET_FUEL_LTRS_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Battery</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_BIG_BAT_X_slider" min="-240" max="240" value="-112" oninput="document.getElementById(&#39;OFFSET_BIG_BAT_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_BAT_X" value="-112" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_BAT_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_BIG_BAT_Y_slider" min="-160" max="160" value="149" oninput="document.getElementById(&#39;OFFSET_BIG_BAT_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_BAT_Y" value="149" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_BAT_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">📊 Clock &amp; Date</h4><div style="display:flex;flex-direction:column;gap:6px;"></div><div class="section-title">Clock</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_BIG_TIME_X_slider" min="-240" max="240" value="-98" oninput="document.getElementById(&#39;OFFSET_BIG_TIME_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_TIME_X" value="-98" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_TIME_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_BIG_TIME_Y_slider" min="-160" max="160" value="-132" oninput="document.getElementById(&#39;OFFSET_BIG_TIME_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_TIME_Y" value="-132" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_TIME_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Date</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_BIG_DATE_X_slider" min="-240" max="240" value="118" oninput="document.getElementById(&#39;OFFSET_BIG_DATE_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_DATE_X" value="118" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_DATE_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_BIG_DATE_Y_slider" min="-160" max="160" value="-132" oninput="document.getElementById(&#39;OFFSET_BIG_DATE_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_DATE_Y" value="-132" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_DATE_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">📊 WiFi &amp; Satellites</h4><div style="display:flex;flex-direction:column;gap:6px;"></div><div class="section-title">Satellites</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_BIG_SAT_X_slider" min="-240" max="240" value="-180" oninput="document.getElementById(&#39;OFFSET_BIG_SAT_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_SAT_X" value="-180" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_SAT_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_BIG_SAT_Y_slider" min="-160" max="160" value="-132" oninput="document.getElementById(&#39;OFFSET_BIG_SAT_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_BIG_SAT_Y" value="-132" step="1" oninput="document.getElementById(&#39;OFFSET_BIG_SAT_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">WiFi Icon</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="OFFSET_WIFI_ICON_X_slider" min="-240" max="240" value="215" oninput="document.getElementById(&#39;OFFSET_WIFI_ICON_X&#39;).value = this.value">
-                            <input type="number" id="OFFSET_WIFI_ICON_X" value="215" step="1" oninput="document.getElementById(&#39;OFFSET_WIFI_ICON_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="OFFSET_WIFI_ICON_Y_slider" min="-160" max="160" value="-153" oninput="document.getElementById(&#39;OFFSET_WIFI_ICON_Y&#39;).value = this.value">
-                            <input type="number" id="OFFSET_WIFI_ICON_Y" value="-153" step="1" oninput="document.getElementById(&#39;OFFSET_WIFI_ICON_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div></div><div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">📊 Sidebars</h4><div style="display:flex;flex-direction:column;gap:6px;"></div><div class="section-title">Left Bar (Engine Temp)</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="SIDEBAR_LEFT_X_slider" min="0" max="480" value="10" oninput="document.getElementById(&#39;SIDEBAR_LEFT_X&#39;).value = this.value">
-                            <input type="number" id="SIDEBAR_LEFT_X" value="10" step="1" oninput="document.getElementById(&#39;SIDEBAR_LEFT_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="SIDEBAR_LEFT_Y_slider" min="0" max="320" value="64" oninput="document.getElementById(&#39;SIDEBAR_LEFT_Y&#39;).value = this.value">
-                            <input type="number" id="SIDEBAR_LEFT_Y" value="64" step="1" oninput="document.getElementById(&#39;SIDEBAR_LEFT_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Right Bar (Fuel)</div><div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">Position</label>
-                        <div class="xy-row">
-                            <label>X</label>
-                            <input type="range" id="SIDEBAR_RIGHT_X_slider" min="0" max="480" value="462" oninput="document.getElementById(&#39;SIDEBAR_RIGHT_X&#39;).value = this.value">
-                            <input type="number" id="SIDEBAR_RIGHT_X" value="462" step="1" oninput="document.getElementById(&#39;SIDEBAR_RIGHT_X_slider&#39;).value = this.value">
-                        </div>
-                        <div class="xy-row">
-                            <label>Y</label>
-                            <input type="range" id="SIDEBAR_RIGHT_Y_slider" min="0" max="320" value="64" oninput="document.getElementById(&#39;SIDEBAR_RIGHT_Y&#39;).value = this.value">
-                            <input type="number" id="SIDEBAR_RIGHT_Y" value="64" step="1" oninput="document.getElementById(&#39;SIDEBAR_RIGHT_Y_slider&#39;).value = this.value">
-                        </div>
-                    </div></div><div class="section-title">Bar Dimensions</div><div style="display:flex;flex-direction:column;gap:6px;"><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Width (px)</label><input type="number" id="SIDEBAR_BAR_WIDTH" value="8" step="any" style="width:85px;text-align:center;"></div><div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>Height (px)</label><input type="number" id="SIDEBAR_BAR_HEIGHT" value="250" step="any" style="width:85px;text-align:center;"></div></div></div></div>
-            </details></div>
+<div id="form-container"></div>
 
 <details id="perf-panel">
     <summary>
@@ -1395,6 +1099,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
             <div class="perf-row"><span class="perf-label">Uptime</span><span class="perf-value" id="p-uptime">1h 22m 50s</span></div>
             <div class="perf-row"><span class="perf-label">WiFi Clients</span><span class="perf-value" id="p-wifi">0</span></div>
             <div class="perf-row"><span class="perf-label">SPI Bus</span><span class="perf-value" id="p-spi">60 MHz</span></div>
+            <div class="perf-row"><span class="perf-label">Heap</span><span class="perf-value" id="p-heap">--</span></div>
         </div>
         <div class="perf-card" style="grid-column:1/-1;">
             <h4>CPU Performance</h4>
@@ -1428,7 +1133,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
         </div>
         <div class="perf-card" style="grid-column:1/-1;">
             <h4>Serial Output Monitor</h4>
-            <div id="serial-out">Waiting for data...0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.46L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.41L(91%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.46L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.63L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.53L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.51L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.50L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.70L(95%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.51L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.47L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.46L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.46L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.56L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.51L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.51L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.45L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.47L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.43L(91%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.39L(91%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.45L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.53L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.61L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.54L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.50L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.45L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.51L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.47L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.52L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.63L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.56L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.49L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.46L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.49L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.54L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.52L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.51L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.43L(91%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.61L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.48L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.49L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.47L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.49L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.58L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.71L(95%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.56L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.42L(91%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.39L(91%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.50L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.49L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.51L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.77L(96%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.53L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.48L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.48L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.61L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.57L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.50L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.70L(95%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.57L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.99L(99%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>RTC sync: 1785219220<br>HALL|6.65L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.68L(95%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.79L(96%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.54L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.61L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.61L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.68L(95%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.50L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.53L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.63L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.77L(96%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.55L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.52L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.57L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|61.9fps<br>HALL|6.51L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.57L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.54L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.55L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.64L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.60L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.71L(95%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.60L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.51L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.49L(92%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.53L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.55L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.55L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.56L(93%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.59L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br>HALL|6.64L(94%)|0.0V|0.0C|0kmh|0sat|0deg|19000.0km|0.00s|62.5fps<br></div>
+            <div id="serial-out">Waiting for data...</div>
         </div></div>
     </div>
 </details>
@@ -1471,7 +1176,6 @@ const configMap = [
         items: [
             { type: "card_header", label: "General" },
             { id: "TARGET_FPS", label: "Target Refresh Rate", unit: "FPS" },
-            { id: "SHOW_FPS_COUNTER_DEFAULT", label: "Show FPS Counter" },
             { id: "ENABLE_DEMO_MODE", label: "Enable Sensor Demo Mode" },
             { id: "ENABLE_POWER_SENSE", label: "Enable Power Sensing" },
             { id: "SHOW_ELEMENT_BOUNDS", label: "Show UI Element Bounds (Debug)" },
@@ -1539,6 +1243,7 @@ const configMap = [
         items: [
             { type: "card_header", label: "Network Settings" },
             { id: "WIFI_TX_POWER_DBM", label: "TX Power", type: "range", min: -1, max: 20, step: 1, unit: "dBm" },
+            { id: "WIFI_AUTO_OFF_ENABLED", label: "AUTO DISABLE WIFI" },
             { type: "heading", label: "Primary Network" },
             { id: "WIFI_SSID", label: "Network Name (SSID)" },
             { id: "WIFI_PASSWORD", label: "Password" },
@@ -1566,7 +1271,6 @@ const configMap = [
         title: "Display & Colors", icon: iconSVG.display,
         items: [
             { type: "subtitle", label: "Display" },
-            { id: "SHUTDOWN_TIME_MS", label: "Shutdown Loading Duration", type: "number", unit: "ms" },
             { id: "DISPLAY_ROTATION", label: "Screen Rotation (0-3)" },
             { id: "DISPLAY_WIDTH", label: "Display Width", unit: "px" },
             { id: "DISPLAY_HEIGHT", label: "Display Height", unit: "px" },
@@ -1674,59 +1378,92 @@ const configMap = [
             { id: "GPS_START_KMH", label: "GPS Start Speed", unit: "km/h" },
             { id: "GPS_STOP_SETTLE_MS", label: "GPS Stop Settle Time", unit: "ms" },
             { id: "GPS_DEBUG_DEFAULT", label: "Show GPS Debug Overlay" },
-            { type: "card_header", label: "Compass" },
-            { id: "COMPASS_DECLINATION_DEG", label: "Declination Offset", unit: "deg" }
+            { type: "card_header", label: "Compass", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:12px;color:var(--text-muted);">Status: <strong id="compass-cal-status" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span>
+        <div style="display:flex;gap:6px;">
+            <button onclick="compassCalStart()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Start Calibration (30s)</button>
+            <button onclick="compassCalCancel()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Cancel</button>
+        </div>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Mount the module as it will be mounted (any tilt angle) and slowly rotate the WHOLE UNIT a full circle twice, keeping the tilt fixed. The min/max of each axis become hard-iron offsets and the rotation-plane fit becomes the tilt axis - the heading is then fully tilt-compensated without an accelerometer. Keep magnets and metal away. Saves immediately.</div>` },
+            { id: "COMPASS_DECLINATION_DEG", label: "Declination Offset", unit: "deg" },
+            { id: "COMPASS_CAL_X", label: "Cal X Offset", unit: "raw" },
+            { id: "COMPASS_CAL_Y", label: "Cal Y Offset", unit: "raw" },
+            { id: "COMPASS_CAL_Z", label: "Cal Z Offset", unit: "raw" },
+            { id: "COMPASS_CAL_TX", label: "Tilt Axis X", unit: "raw" },
+            { id: "COMPASS_CAL_TY", label: "Tilt Axis Y", unit: "raw" },
+            { id: "COMPASS_CAL_TZ", label: "Tilt Axis Z", unit: "raw" }
         ]
     },
     {
         title: "UI Layout", icon: iconSVG.layout,
         items: [
             { type: "card_header", label: "System" },
+            { type: "note", label: "The Visible checkbox next to each element controls what is drawn on the display. Sensors, GPS, odometer and all calculations keep running regardless." },
             { type: "section_header", label: "Viewport Center" },
             { type: 'xy', idX: "BIG_CENTER_X", idY: "BIG_CENTER_Y", label: "Position" },
             { type: "section_header", label: "FPS Counter" },
+            { id: "SHOW_FPS_COUNTER_DEFAULT", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_FPS_X", idY: "OFFSET_BIG_FPS_Y", label: "Position" },
             { type: "section_header", label: "Signature" },
+            { id: "SHOW_ELEMENT_SIGNATURE", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_SIGNATURE_X", idY: "OFFSET_BIG_SIGNATURE_Y", label: "Position" },
             { type: "card_header", label: "Speed & Odometer" },
             { type: "section_header", label: "Acceleration Timer" },
+            { id: "SHOW_ELEMENT_TMR", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_TMR_X", idY: "OFFSET_BIG_TMR_Y", label: "Position" },
             { type: "section_header", label: "Speed Source Icon" },
+            { id: "SHOW_ELEMENT_SPEED_SOURCE", label: "Visible" },
             { type: 'xy', idX: "OFFSET_HALL_ICON_X", idY: "OFFSET_HALL_ICON_Y", label: "Position" },
             { type: "section_header", label: "Main Speed Number" },
+            { id: "SHOW_ELEMENT_SPEED", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_SPEED_NUM_X", idY: "OFFSET_BIG_SPEED_NUM_Y", label: "Position" },
             { type: "section_header", label: "Speed Unit" },
+            { id: "SHOW_ELEMENT_SPEED_UNIT", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_SPEED_UNIT_X", idY: "OFFSET_BIG_SPEED_UNIT_Y", label: "Position" },
             { type: "section_header", label: "Odometer" },
+            { id: "SHOW_ELEMENT_ODO", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_ODO_X", idY: "OFFSET_BIG_ODO_Y", label: "Position" },
             { type: "card_header", label: "Fuel & Battery" },
             { type: "section_header", label: "Average KM/L" },
+            { id: "SHOW_ELEMENT_AVG_KML", label: "Visible" },
             { type: 'xy', idX: "OFFSET_AVG_KML_X", idY: "OFFSET_AVG_KML_Y", label: "Position" },
             { type: "section_header", label: "Average Speed" },
+            { id: "SHOW_ELEMENT_AVG_SPEED", label: "Visible" },
             { type: 'xy', idX: "OFFSET_AVG_SPEED_X", idY: "OFFSET_AVG_SPEED_Y", label: "Position" },
             { type: "section_header", label: "Instant KM/L" },
+            { id: "SHOW_ELEMENT_INST_KML", label: "Visible" },
             { type: 'xy', idX: "OFFSET_INST_KML_X", idY: "OFFSET_INST_KML_Y", label: "Position" },
             { type: "section_header", label: "Fuel Liters" },
+            { id: "SHOW_ELEMENT_FUEL_LTRS", label: "Visible" },
             { type: 'xy', idX: "OFFSET_FUEL_LTRS_X", idY: "OFFSET_FUEL_LTRS_Y", label: "Position" },
             { type: "section_header", label: "Battery" },
+            { id: "SHOW_ELEMENT_BAT", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_BAT_X", idY: "OFFSET_BIG_BAT_Y", label: "Position" },
             { type: "card_header", label: "Clock & Date" },
             { type: "section_header", label: "Clock" },
+            { id: "SHOW_ELEMENT_TIME", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_TIME_X", idY: "OFFSET_BIG_TIME_Y", label: "Position" },
             { type: "section_header", label: "Date" },
+            { id: "SHOW_ELEMENT_DATE", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_DATE_X", idY: "OFFSET_BIG_DATE_Y", label: "Position" },
             { type: "card_header", label: "WiFi & Satellites" },
             { type: "section_header", label: "Satellites" },
+            { id: "SHOW_ELEMENT_SAT", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_SAT_X", idY: "OFFSET_BIG_SAT_Y", label: "Position" },
             { type: "section_header", label: "WiFi Icon" },
+            { id: "SHOW_ELEMENT_WIFI", label: "Visible" },
             { type: 'xy', idX: "OFFSET_WIFI_ICON_X", idY: "OFFSET_WIFI_ICON_Y", label: "Position" },
             { type: "card_header", label: "Compass" },
             { type: "section_header", label: "Heading Indicator" },
+            { id: "SHOW_ELEMENT_COMPASS", label: "Visible" },
             { type: 'xy', idX: "OFFSET_COMPASS_X", idY: "OFFSET_COMPASS_Y", label: "Position" },
             { type: "card_header", label: "Sidebars" },
             { type: "section_header", label: "Left Bar (Engine Temp)" },
+            { id: "SHOW_ELEMENT_SIDEBAR_TEMP", label: "Visible" },
             { type: 'xy', idX: "SIDEBAR_LEFT_X", idY: "SIDEBAR_LEFT_Y", label: "Position" },
             { type: "section_header", label: "Right Bar (Fuel)" },
+            { id: "SHOW_ELEMENT_SIDEBAR_FUEL", label: "Visible" },
             { type: 'xy', idX: "SIDEBAR_RIGHT_X", idY: "SIDEBAR_RIGHT_Y", label: "Position" },
             { type: "section_header", label: "Bar Dimensions" },
             { id: "SIDEBAR_BAR_WIDTH", label: "Width", unit: "px" },
@@ -1736,40 +1473,59 @@ const configMap = [
 ];
 
 document.addEventListener('DOMContentLoaded', function() {
-    fetch('/api/config').then(r => r.json()).then(d => {
+    fetch('/api/config').then(r => {
+        if (r.status === 401) throw { auth: true };
+        if (!r.ok) throw { status: r.status };
+        return r.json();
+    }).then(d => {
         renderForm(d);
-    }).catch(() => {
-        // Fallback demo dataset if API isn't present
-        const demoData = {
-            TARGET_FPS: 60, SHOW_FPS_COUNTER_DEFAULT: true, ENABLE_DEMO_MODE: true, ENABLE_POWER_SENSE: false, SHOW_ELEMENT_BOUNDS: false,
-            NTP_ENABLED: true, NTP_SERVER: "pool.ntp.org", TZ_OFFSET_HOURS: 1, TZ_DST_ENABLED: true,
-            MANUAL_CPU_FREQ: 240, ENABLE_DYNAMIC_CPU: false, ENABLE_CPU_THROTTLE: true, CPU_THROTTLE_TEMP_WARN: 50, CPU_THROTTLE_TEMP_CRIT: 60,
-            SPLASH_SIGNATURE: "by @ale.finot", REBOOT_SIGNATURE: "Dashboard++ by @ale.finot", DASHBOARD_SIGNATURE: "<<<<<<    Dashboard++ by @ale.finot    >>>>>>",
-            WIFI_TX_POWER_DBM: 20, WIFI_SSID: "Xiaomi 15", WIFI_PASSWORD: "••••••••", WIFI_SSID_1: "D-Link-627F3B", WIFI_PASSWORD_1: "••••••••",
-            WIFI_SSID_2: "TP-Link_F3EB", WIFI_PASSWORD_2: "••••••••", WIFI_SSID_3: "", WIFI_PASSWORD_3: "", WIFI_SSID_4: "", WIFI_PASSWORD_4: "",
-            SHUTDOWN_TIME_MS: 3000, DISPLAY_ROTATION: 1, DISPLAY_WIDTH: 480, DISPLAY_HEIGHT: 320, SPI_BUS_SPEED: 60000000, DISPLAY_INVERT_COLORS: false,
-            ENABLE_ANTIALIASING: true, AA_SHARPNESS: 0.2, BACKLIGHT_BRIGHTNESS: 22, ENABLE_AUTO_BRIGHTNESS: false,
-            LIGHT_SENSOR_DARK_VAL: 0, LIGHT_SENSOR_BRIGHT_VAL: 3685, AUTO_BRIGHT_DARK: 20, AUTO_BRIGHT_LIGHT: 100, AUTO_BRIGHT_FADE_MS: 4000,
-            ambientLightValue: 615, FADE_DURATION_MS: 700, ENABLE_NIGHT_MODE: false,
-            NIGHT_MODE_START_HOUR: 23, NIGHT_MODE_END_HOUR: 0, COLOR_TEMP_NORM: "#00ffff", TEMP_BAR_MIN: 10, COLOR_TEMP_WARN: "#ff8c00",
-            TEMP_WARN_YEL: 45, COLOR_TEMP_CRIT: "#ff0000", TEMP_WARN_RED: 90, TEMP_BAR_MAX: 110, COLOR_FUEL_NORM: "#00ff00", COLOR_FUEL_WARN: "#ffff00",
-            FUEL_WARN_YEL: 45, COLOR_FUEL_CRIT: "#ff0000", FUEL_WARN_RED: 20, GHOST_COLOR_STR: "#666666", FUEL_TOUCH_POINTS: 8,
-            touchTable: [950, 840, 750, 670, 600, 530, 460, 400], NTC_R_BALANCE: 10000, NTC_BETA: 3950, ACCEL_START_SPEED: 1, ACCEL_TARGET_SPEED: 50, ACCEL_MAX_TIME: 9.99,
-            ACCEL_BADGE_LINE1: "0-50", ACCEL_BADGE_LINE2: "km/h", WHEEL_CIRCUMFERENCE_MM: 1650, MIN_SPEED_THRESHOLD: 1, FUEL_FILTER_ALPHA: 0.08,
-            REFRESH_SPEED_MS: 250, REFRESH_SAT_MS: 1000, REFRESH_TMR_MS: 10, REFRESH_BAT_MS: 2500, SPEED_DIGITS: 3, SAT_DIGITS: 2, TMR_INT_DIGITS: 1,
-            TMR_DEC_DIGITS: 2, BAT_INT_DIGITS: 2, BAT_DEC_DIGITS: 1, INST_INT_DIGITS: 2, INST_DEC_DIGITS: 1, AVG_INT_DIGITS: 2, AVG_DEC_DIGITS: 1,
-            FUEL_INT_DIGITS: 1, FUEL_DEC_DIGITS: 1, ODO_INT_DIGITS: 5, ODO_DEC_DIGITS: 1, MIN_SATELLITES: 8, OPTIMAL_SATELLITES: 12, MAX_SPEED_DELTA_KMH: 5, GPS_MIN_DEV_KMH: 1, GPS_ONLY_MODE: false, GPS_START_KMH: 3, GPS_STOP_SETTLE_MS: 1500,
-            GPS_BAUD: 115200, HEADING_DIGITS: 3, REFRESH_COMPASS_MS: 0, COMPASS_DECLINATION_DEG: 105, GPS_DEBUG_DEFAULT: false,
-            BIG_CENTER_X: 240, BIG_CENTER_Y: 160, OFFSET_BIG_FPS_X: 0, OFFSET_BIG_FPS_Y: 0, OFFSET_BIG_SIGNATURE_X: 0, OFFSET_BIG_SIGNATURE_Y: -65,
-            OFFSET_BIG_TMR_X: -53, OFFSET_BIG_TMR_Y: -35, OFFSET_HALL_ICON_X: 0, OFFSET_HALL_ICON_Y: -90, OFFSET_BIG_SPEED_NUM_X: -7, OFFSET_BIG_SPEED_NUM_Y: 18,
-            OFFSET_BIG_SPEED_UNIT_X: 134, OFFSET_BIG_SPEED_UNIT_Y: 74, OFFSET_BIG_ODO_X: 15, OFFSET_BIG_ODO_Y: 155, OFFSET_AVG_KML_X: 160, OFFSET_AVG_KML_Y: -13,
-            OFFSET_INST_KML_X: 60, OFFSET_INST_KML_Y: -13, OFFSET_FUEL_LTRS_X: 132, OFFSET_FUEL_LTRS_Y: 150, OFFSET_BIG_BAT_X: -112, OFFSET_BIG_BAT_Y: 149,
-            OFFSET_COMPASS_X: 0, OFFSET_COMPASS_Y: -130,
-            OFFSET_BIG_TIME_X: -98, OFFSET_BIG_TIME_Y: -78, OFFSET_BIG_DATE_X: 118, OFFSET_BIG_DATE_Y: -78, OFFSET_BIG_SAT_X: -180, OFFSET_BIG_SAT_Y: -78,
-            OFFSET_WIFI_ICON_X: 195, OFFSET_WIFI_ICON_Y: -106, SIDEBAR_LEFT_X: 10, SIDEBAR_LEFT_Y: 64, SIDEBAR_RIGHT_X: 462, SIDEBAR_RIGHT_Y: 64,
-            SIDEBAR_BAR_WIDTH: 8, SIDEBAR_BAR_HEIGHT: 250
-        };
-        renderForm(demoData);
+    }).catch(e => {
+        if (e && e.auth) {
+            // A PIN is set but the browser has no credentials cached. Navigate
+            // to a protected resource to trigger the browser's Basic-auth
+            // dialog once; after signing in, the reloaded page works.
+            let msgBox = document.getElementById('msg');
+            msgBox.className = 'msg-error';
+            msgBox.innerText = 'Configuration PIN required.';
+            document.getElementById('form-container').innerHTML =
+                '<div style="grid-column:1/-1;padding:24px;text-align:center;color:var(--text-muted);border:1px dashed var(--border-color);border-radius:10px;">' +
+                '<div style="font-size:28px;margin-bottom:8px;">&#128274;</div>' +
+                '<div style="font-weight:600;color:var(--text-main);margin-bottom:4px;">Configuration PIN required</div>' +
+                '<div style="font-size:12px;line-height:1.6;">A PIN protects the settings. Click below, enter the PIN when asked,<br>' +
+                'then you will be returned to the configuration page.</div><br>' +
+                '<a href="/api/config" onclick="event.preventDefault();window.location.href=\'/api/config\';setTimeout(function(){window.location.href=\'/\';},1200);" ' +
+                'style="color:var(--accent-blue);font-weight:600;">Sign in with PIN</a><br>' +
+                '<div style="font-size:11px;margin-top:8px;color:var(--text-dim);">Forgot the PIN? Hold the BOOT button for 8 seconds after boot to reset the device (factory reset).</div>' +
+                '</div>';
+            return;
+        }
+        if (!sessionStorage.getItem('cfgRetried')) {
+            // One automatic retry: the device may still be freeing its big UI
+            // sprites (memory-saver) right after boot. Only retries once per
+            // session so a broken device can't cause a reload loop.
+            sessionStorage.setItem('cfgRetried', '1');
+            setTimeout(() => location.reload(), 3000);
+            return;
+        }
+        fetch('/api/health').then(h => h.json()).then(h => {
+            let healthInfo = 'Heap ' + (h.heap / 1024).toFixed(0) + 'KB free (min ' + (h.minheap / 1024).toFixed(0) + 'KB), uptime ' + h.uptime + 's' + (h.mem_saver ? ', memory-saver active' : '');
+            let msgBox = document.getElementById('msg');
+            msgBox.className = 'msg-error';
+            msgBox.innerText = 'Could not load the configuration from the device (' + healthInfo + ').';
+            document.getElementById('form-container').innerHTML =
+                '<div style="grid-column:1/-1;padding:24px;text-align:center;color:var(--text-muted);border:1px dashed var(--border-color);border-radius:10px;">' +
+                '<div style="font-size:28px;margin-bottom:8px;">&#9888;&#65039;</div>' +
+                '<div style="font-weight:600;color:var(--text-main);margin-bottom:4px;">Cannot reach the device configuration API</div>' +
+                '<div style="font-size:12px;line-height:1.6;">' + healthInfo + '.<br>' +
+                'The web server may still be starting, or the device is low on memory.<br>' +
+                'Try again in a few seconds, or reboot the device.</div><br>' +
+                '<a href="/" style="color:var(--accent-blue);font-weight:600;">Retry</a>' +
+                '</div>';
+        }).catch(() => {
+            let msgBox = document.getElementById('msg');
+            msgBox.className = 'msg-error';
+            msgBox.innerText = 'Could not load the configuration from the device, and the health endpoint is unreachable too. Rebooting the device may help.';
+        });
     });
 
     syncTime();
@@ -1777,6 +1533,8 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(pollAmbient, 2000);
     pollOdo();
     setInterval(pollOdo, 1000);
+    pollCompassCal();
+    setInterval(pollCompassCal, 2000);
 
     fetch('/api/perf').then(r => r.json()).then(perf => {
         let ipEl = document.getElementById('ip-info');
@@ -2014,6 +1772,8 @@ window.addEventListener('scroll', function() {
 });
 
 let autosaveTimer = null;
+let saveInFlight = false;
+let saveQueued = false;
 document.getElementById('form-container').addEventListener('input', function(e) {
     if (e.target.type === 'file') return;
     clearTimeout(autosaveTimer);
@@ -2037,6 +1797,12 @@ function filterConfig() {
 }
 
 function save() {
+    // Never overlap POSTs: the ESP's WebServer handles one request at a time
+    // and each full-config save rewrites ~200 NVS keys. A second save during
+    // an in-flight one is queued and re-collected afterwards, so rapid edits
+    // can't time out or be silently lost.
+    if (saveInFlight) { saveQueued = true; return; }
+    saveInFlight = true;
     let out = {};
     document.querySelectorAll('input, select').forEach(el => {
         if (el.id.endsWith('_slider') || el.type === 'file') return;
@@ -2054,7 +1820,31 @@ function save() {
             if (el.value !== '' && !/^•+$/.test(el.value)) out[el.id] = el.value;
         } else out[el.id] = el.value;
     });
-    sendConfigToDevice(out, "Saving settings to device...", "Configuration saved successfully! Display updated.");
+    let msgBox = document.getElementById('msg');
+    msgBox.className = ''; msgBox.innerText = "Saving settings to device...";
+    fetch('/api/config', {method:'POST', body:JSON.stringify(out)})
+    .then(r => {
+        if (r.status === 401) throw { auth: true };
+        return r.json();
+    }).then(r => {
+        if (r && r.status === 'ok') {
+            msgBox.className = 'msg-success';
+            msgBox.innerText = "Configuration saved successfully! Display updated.";
+        } else {
+            msgBox.className = 'msg-error';
+            msgBox.innerText = 'The device rejected the settings: ' + (r && r.error ? r.error : 'unknown error') + '. Nothing was saved.';
+        }
+    }).catch(e => {
+        if (e && e.auth) {
+            msgBox.className = 'msg-error';
+            msgBox.innerText = "PIN required. Sign in first: open /api/config in this tab, enter the PIN, then save again. Nothing was saved.";
+        } else {
+            msgBox.className = 'msg-error'; msgBox.innerText = "Error communicating with the device. Nothing was saved.";
+        }
+    }).finally(() => {
+        saveInFlight = false;
+        if (saveQueued) { saveQueued = false; setTimeout(save, 250); }
+    });
 }
 
 function reboot() {
@@ -2130,9 +1920,14 @@ function sendConfigToDevice(jsonPayload, startMsg, successMsg) {
     msgBox.className = ''; msgBox.innerText = startMsg;
     fetch('/api/config', {method:'POST', body:JSON.stringify(jsonPayload)})
     .then(r => r.json()).then(r => {
-        msgBox.className = 'msg-success'; msgBox.innerText = successMsg;
+        if (r && r.status === 'ok') {
+            msgBox.className = 'msg-success'; msgBox.innerText = successMsg;
+        } else {
+            msgBox.className = 'msg-error';
+            msgBox.innerText = 'The device rejected the settings: ' + (r && r.error ? r.error : 'unknown error') + '. Nothing was saved.';
+        }
     }).catch(() => {
-        msgBox.className = 'msg-error'; msgBox.innerText = "Error communicating with the device.";
+        msgBox.className = 'msg-error'; msgBox.innerText = 'Error communicating with the device. Nothing was saved.';
     });
 }
 
@@ -2153,6 +1948,39 @@ function calibrateBright() {
         let msg = document.getElementById('msg');
         msg.className = 'msg-success'; msg.innerText = 'Bright calibration saved: ' + d.value;
         setTimeout(() => save(), 100);
+    }).catch(() => {});
+}
+
+let _compassWasCapturing = false;
+function compassCalStart() {
+    fetch('/api/compass/cal-start', {method:'POST'}).then(r => r.json()).then(d => {
+        if (d.status === 'ok') { _compassWasCapturing = true; pollCompassCal(); }
+        else { let el = document.getElementById('compass-cal-status'); if (el) el.innerText = 'Error: ' + (d.error || 'unknown'); }
+    }).catch(() => {});
+}
+function compassCalCancel() {
+    fetch('/api/compass/cal-cancel', {method:'POST'}).then(() => pollCompassCal()).catch(() => {});
+}
+function pollCompassCal() {
+    fetch('/api/compass/cal-status').then(r => r.json()).then(d => {
+        let el = document.getElementById('compass-cal-status');
+        if (!el) return;
+        if (d.state === 'capturing') {
+            _compassWasCapturing = true;
+            el.style.color = '#ffcc00';
+            el.innerText = 'CALIBRATING... rotate slowly - ' + d.remaining + 's left (X ' + d.minX + '..' + d.maxX + ' / Y ' + d.minY + '..' + d.maxY + ')';
+        } else {
+            el.style.color = '';
+            if (_compassWasCapturing && d.result && d.result.length) {
+                let m = { COMPASS_CAL_X: d.offX, COMPASS_CAL_Y: d.offY, COMPASS_CAL_Z: d.offZ,
+                          COMPASS_CAL_TX: d.tX, COMPASS_CAL_TY: d.tY, COMPASS_CAL_TZ: d.tZ };
+                for (let id in m) { let e = document.getElementById(id); if (e) e.value = m[id]; }
+                let msg = document.getElementById('msg');
+                msg.className = 'msg-success'; msg.innerText = d.result;
+            }
+            _compassWasCapturing = false;
+            el.innerText = d.result && d.result.length ? d.result : 'Idle - offsets X ' + d.offX + ' / Y ' + d.offY + ' / Z ' + d.offZ + ' | tilt X ' + d.tX + ' / Y ' + d.tY + ' / Z ' + d.tZ;
+        }
     }).catch(() => {});
 }
 
@@ -2311,6 +2139,7 @@ function buildPerfPanel() {
             <div class="perf-row"><span class="perf-label">Uptime</span><span class="perf-value" id="p-uptime">--</span></div>
             <div class="perf-row"><span class="perf-label">WiFi Clients</span><span class="perf-value" id="p-wifi">--</span></div>
             <div class="perf-row"><span class="perf-label">SPI Bus</span><span class="perf-value" id="p-spi">--</span></div>
+            <div class="perf-row"><span class="perf-label">Heap</span><span class="perf-value" id="p-heap">--</span></div>
         </div>
         <div class="perf-card" style="grid-column:1/-1;">
 <h4>CPU Performance</h4>
@@ -2411,6 +2240,7 @@ function updatePerf() {
         let s = d.uptime_s;
         set('p-uptime', Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m '+(s%60)+'s');
         set('p-wifi', d.wifi_clients);
+        set('p-heap', (d.free_heap / 1024).toFixed(0) + 'KB free / min ' + (d.min_free_heap / 1024).toFixed(0) + 'KB' + (d.mem_saver ? ' (mem-saver ON)' : ''));
         set('p-spi', (d.spi_speed / 1e6).toFixed(0) + ' MHz');
     }).catch(() => {});
 }
@@ -2445,8 +2275,12 @@ void webServerTask(void *pvParameters) {
 
   delay(100);
 
-  struct WifiNetwork { const char *ssid; const char *pass; };
+  // WiFi networks are only recorded here; the actual STA connect attempts run
+  // as a non-blocking state machine inside the task loop below, AFTER the
+  // config server is up, so the config page is reachable via the AP within
+  // ~1s of boot even while the ESP keeps trying to join a LAN network.
   const int MAX_WIFI_NETS = 5;
+  struct WifiNetwork { const char *ssid; const char *pass; };
   WifiNetwork wifiNets[MAX_WIFI_NETS];
   int wifiNetCount = 0;
 
@@ -2456,61 +2290,14 @@ void webServerTask(void *pvParameters) {
   if (WIFI_SSID_3.length() > 0) wifiNets[wifiNetCount++] = {WIFI_SSID_3.c_str(), WIFI_PASSWORD_3.c_str()};
   if (WIFI_SSID_4.length() > 0) wifiNets[wifiNetCount++] = {WIFI_SSID_4.c_str(), WIFI_PASSWORD_4.c_str()};
 
-  bool connected = false;
   WiFi.setHostname("dashboard-pp");
-
-  for (int i = 0; i < wifiNetCount && !connected; i++) {
-    if (strlen(wifiNets[i].ssid) == 0) continue;
-
-    logPrintf("Trying WiFi[%d]: %s\n", i, wifiNets[i].ssid);
-    WiFi.begin(wifiNets[i].ssid, wifiNets[i].pass);
-
-    unsigned long startAttempt = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 5000) {
-      delay(100);
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-      connected = true;
-      logPrintf("STA connected: %s\n", WiFi.localIP().toString().c_str());
-      logPrintf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
-    } else {
-      logPrintf("WiFi[%d] failed, trying next...\n", i);
-      WiFi.disconnect(false);
-      delay(200);
-    }
-  }
-
-  if (connected) {
-    if (MDNS.begin("dashboard-pp")) {
-      MDNS.addService("http", "tcp", 80);
-      logPrintf("mDNS: http://dashboard-pp.local\n");
-    }
-
-    if (NTP_ENABLED) {
-      logPrintf("Syncing time via NTP: %s\n", NTP_SERVER.c_str());
-      configTime(0, 0, NTP_SERVER.c_str());
-      time_t now = 0;
-      struct tm timeinfo = {0};
-      int retry = 0;
-      while (timeinfo.tm_year < (2024 - 1900) && retry < 10) {
-        delay(500);
-        time(&now);
-        localtime_r(&now, &timeinfo);
-        retry++;
-      }
-      if (retry < 10) {
-        logPrintf("NTP time sync OK: %04d-%02d-%02d %02d:%02d:%02d\n",
-                  timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
-                  timeinfo.tm_mday, timeinfo.tm_hour,
-                  timeinfo.tm_min, timeinfo.tm_sec);
-      } else {
-        logPrintf("NTP time sync failed after %d retries\n", retry);
-      }
-    }
-  } else {
-    logPrintf("All WiFi networks failed, using AP only\n");
-  }
+  bool staConnected = false;
+  int staNetIdx = 0;
+  bool staInFlight = false;
+  bool staDone = false;
+  bool staFinalized = false;
+  unsigned long staDeadline = 0;
+  unsigned long staRetryAt = 0;
 
   ArduinoOTA.onStart([]() {
     logPrintf("OTA started\n");
@@ -2542,11 +2329,10 @@ void webServerTask(void *pvParameters) {
     return server.authenticate("admin", CONFIG_PIN.c_str());
   };
 
-  server.on("/", HTTP_GET, [&configAuthed]() {
-    if (!configAuthed()) {
-      server.requestAuthentication();
-      return;
-    }
+  server.on("/", HTTP_GET, []() {
+    // The page itself is always served without PIN: it contains no secrets.
+    // The /api/config endpoints (which carry WiFi passwords etc.) still
+    // require the PIN when one is set.
     server.send_P(200, PSTR("text/html"), index_html);
   });
   server.on("/debug", HTTP_GET, []() {
@@ -2563,6 +2349,23 @@ void webServerTask(void *pvParameters) {
   server.on("/api/config", HTTP_GET, [&configAuthed]() {
     if (!configAuthed()) {
       server.requestAuthentication();
+      return;
+    }
+    // If free heap is too tight for the ~40KB transient this handler needs,
+    // ask the display task to drop the big UI sprites first and give it a
+    // moment to do so (it runs on the display loop task).
+    if (ESP.getFreeHeap() < 60000 && !memSaverRequested) {
+      logPrintf("GET /api/config: heap %lu B, requesting memory-saver\n",
+                (unsigned long)ESP.getFreeHeap());
+      memSaverRequested = true;
+      vTaskDelay(pdMS_TO_TICKS(400));
+    }
+    if (ESP.getFreeHeap() < 40000) {
+      logPrintf("GET /api/config: heap too low (%lu), skipping serialization\n",
+                (unsigned long)ESP.getFreeHeap());
+      server.send(503, "application/json",
+                  "{\"status\":\"error\",\"error\":\"device memory low\",\"heap\":"
+                  + String(ESP.getFreeHeap()) + "}");
       return;
     }
     JsonDocument doc;
@@ -2583,7 +2386,13 @@ void webServerTask(void *pvParameters) {
       return;
     }
     JsonDocument doc;
-    deserializeJson(doc, server.arg("plain"));
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (err) {
+      logPrintf("Config save rejected: JSON parse error: %s\n", err.c_str());
+      server.send(400, "application/json",
+                  "{\"status\":\"error\",\"error\":\"JSON parse failed\"}");
+      return;
+    }
 
     processConfig(2, &doc);
     recalculateDerivedParams();
@@ -2674,16 +2483,7 @@ void webServerTask(void *pvParameters) {
       server.requestAuthentication();
       return;
     }
-    Preferences pref;
-
-    pref.begin("cfg", false);
-    pref.clear();
-    pref.end();
-
-    pref.begin("dashboard", false);
-    pref.clear();
-    pref.end();
-
+    factoryResetConfig();
     server.send(200, "application/json", "{\"status\":\"ok\"}");
     logPrintf("Factory reset, rebooting\n");
 
@@ -2709,6 +2509,39 @@ void webServerTask(void *pvParameters) {
       p.putInt("LIGHT_BRIGHT", LIGHT_SENSOR_BRIGHT_VAL); p.end(); }
     server.send(200, "application/json",
                 "{\"status\":\"ok\",\"value\":" + String(LIGHT_SENSOR_BRIGHT_VAL) + "}");
+  });
+
+  server.on("/api/compass/cal-start", HTTP_POST, [&configAuthed]() {
+    if (!configAuthed()) { server.requestAuthentication(); return; }
+    if (!compassReady) {
+      server.send(200, "application/json",
+                  "{\"status\":\"error\",\"error\":\"Compass not detected\"}");
+      return;
+    }
+    compassCalStart(30);
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+  });
+
+  server.on("/api/compass/cal-cancel", HTTP_POST, [&configAuthed]() {
+    if (!configAuthed()) { server.requestAuthentication(); return; }
+    compassCalCancel();
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+  });
+
+  server.on("/api/compass/cal-status", HTTP_GET, []() {
+    String s = String("{\"state\":\"") + (compassCalActive ? "capturing" : "idle")
+      + "\",\"remaining\":" + String(compassCalActive ? (long)((compassCalEndTime - millis()) / 1000) : 0)
+      + ",\"minX\":" + String(compassCalMinX) + ",\"maxX\":" + String(compassCalMaxX)
+      + ",\"minY\":" + String(compassCalMinY) + ",\"maxY\":" + String(compassCalMaxY)
+      + ",\"minZ\":" + String(compassCalMinZ) + ",\"maxZ\":" + String(compassCalMaxZ)
+      + ",\"offX\":" + String(COMPASS_CAL_X)
+      + ",\"offY\":" + String(COMPASS_CAL_Y)
+      + ",\"offZ\":" + String(COMPASS_CAL_Z)
+      + ",\"tX\":" + String(COMPASS_CAL_TX)
+      + ",\"tY\":" + String(COMPASS_CAL_TY)
+      + ",\"tZ\":" + String(COMPASS_CAL_TZ)
+      + ",\"result\":\"" + String(compassCalResult) + "\"}";
+    server.send(200, "application/json", s);
   });
 
   server.on("/api/ota", HTTP_POST, [&configAuthed]() {
@@ -2826,6 +2659,7 @@ void webServerTask(void *pvParameters) {
     doc["uptime_s"] = millis() / 1000;
     doc["free_heap"] = ESP.getFreeHeap();
     doc["min_free_heap"] = ESP.getMinFreeHeap();
+    doc["mem_saver"] = memSaverActive ? 1 : 0;
     doc["heap_size"] = ESP.getHeapSize();
     doc["psram_size"] = ESP.getPsramSize();
     doc["psram_free"] = ESP.getFreePsram();
@@ -2886,13 +2720,91 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", out);
   });
 
+  server.on("/api/health", HTTP_GET, []() {
+    String s = "{\"heap\":" + String(ESP.getFreeHeap()) +
+               ",\"maxalloc\":" + String(ESP.getMaxAllocHeap()) +
+               ",\"minheap\":" + String(ESP.getMinFreeHeap()) +
+               ",\"mem_saver\":" + String(memSaverActive ? 1 : 0) +
+               ",\"uptime\":" + String(millis() / 1000) + "}";
+    server.send(200, "application/json", s);
+  });
+
   server.begin();
+  logPrintf("Web server started: heap=%lu B, maxalloc=%lu B\n",
+            (unsigned long)ESP.getFreeHeap(),
+            (unsigned long)ESP.getMaxAllocHeap());
 
   unsigned long lastClientTime = millis();
+  unsigned long webStartMs = millis();
 
   for (;;) {
+    webLoopCount++;
     server.handleClient();
     ArduinoOTA.handle();
+
+    // Non-blocking STA connect: try each configured network for up to 5s,
+    // while the config server keeps serving AP clients. mDNS/NTP run once
+    // after a network is joined.
+    if (!staDone) {
+      if (staRetryAt && millis() < staRetryAt) {
+        // backoff between attempts
+      } else if (staNetIdx < wifiNetCount) {
+        if (!staInFlight) {
+          if (strlen(wifiNets[staNetIdx].ssid) == 0) {
+            staNetIdx++;
+          } else {
+            logPrintf("Trying WiFi[%d]: %s\n", staNetIdx, wifiNets[staNetIdx].ssid);
+            WiFi.begin(wifiNets[staNetIdx].ssid, wifiNets[staNetIdx].pass);
+            staDeadline = millis() + 5000;
+            staInFlight = true;
+          }
+        } else if (WiFi.status() == WL_CONNECTED) {
+          staConnected = true;
+          staDone = true;
+          logPrintf("STA connected: %s\n", WiFi.localIP().toString().c_str());
+          logPrintf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
+        } else if (millis() >= staDeadline) {
+          logPrintf("WiFi[%d] failed, trying next...\n", staNetIdx);
+          WiFi.disconnect(false);
+          staInFlight = false;
+          staNetIdx++;
+          staRetryAt = millis() + 200;
+        }
+      } else {
+        staDone = true;
+        logPrintf("All WiFi networks failed, using AP only\n");
+      }
+    }
+
+    if (staDone && staConnected && !staFinalized) {
+      staFinalized = true;
+      if (MDNS.begin("dashboard-pp")) {
+        MDNS.addService("http", "tcp", 80);
+        logPrintf("mDNS: http://dashboard-pp.local\n");
+      }
+
+      if (NTP_ENABLED) {
+        logPrintf("Syncing time via NTP: %s\n", NTP_SERVER.c_str());
+        configTime(0, 0, NTP_SERVER.c_str());
+        time_t now = 0;
+        struct tm timeinfo = {0};
+        int retry = 0;
+        while (timeinfo.tm_year < (2024 - 1900) && retry < 10) {
+          delay(500);
+          time(&now);
+          localtime_r(&now, &timeinfo);
+          retry++;
+        }
+        if (retry < 10) {
+          logPrintf("NTP time sync OK: %04d-%02d-%02d %02d:%02d:%02d\n",
+                    timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
+                    timeinfo.tm_mday, timeinfo.tm_hour,
+                    timeinfo.tm_min, timeinfo.tm_sec);
+        } else {
+          logPrintf("NTP time sync failed after %d retries\n", retry);
+        }
+      }
+    }
 
     if (lastOtaPullCheck == 0) {
       lastOtaPullCheck = millis();
@@ -2914,11 +2826,33 @@ void webServerTask(void *pvParameters) {
       lastClientTime = millis();
     }
 
-    // Allow 10 minutes before powering off (for testing)
-    if (millis() - lastClientTime > 600000) {
-      logPrintf("WiFi timeout, disabled\n");
-      WiFi.mode(WIFI_OFF);
-      vTaskDelete(NULL);
+    // Allow 10 minutes before disabling the STA uplink (for testing) - the
+    // AP and the config web server always stay alive so the config page
+    // keeps working even after the LAN connection idles out.
+    if (WIFI_AUTO_OFF_ENABLED && WiFi.status() == WL_CONNECTED &&
+        millis() - lastClientTime > 600000) {
+      logPrintf("WiFi STA timeout, disconnecting LAN uplink (AP stays up)\n");
+      WiFi.disconnect();
+    }
+
+    // Low-heap watchdog: the display keeps speed sprite + tape sprite +
+    // the 120px VLW buffer (~150-180KB total), which can starve /api/config
+    // (~30-45KB transient) and the TLS stack. Ask the display task to drop the
+    // big sprites (memory-saver mode); if even that is not enough, reboot
+    // to clear heap fragmentation. Armed 5s after start so the sprites are
+    // freed long before a user opens the config page (~20-30s after boot).
+    if (millis() - webStartMs > 5000) {
+      uint32_t fh = ESP.getFreeHeap();
+      if (!memSaverRequested && !memSaverActive && fh < 70000) {
+        logPrintf("Low heap (%lu B), enabling memory-saver mode\n", (unsigned long)fh);
+        memSaverRequested = true;
+      }
+      if (memSaverActive && fh < 16000) {
+        logPrintf("Heap critical (%lu B) even with memory-saver, rebooting\n",
+                  (unsigned long)fh);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        ESP.restart();
+      }
     }
 
     vTaskDelay(pdMS_TO_TICKS(10));

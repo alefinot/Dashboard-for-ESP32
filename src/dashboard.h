@@ -131,7 +131,7 @@ extern String GHOST_COLOR_STR;
 
 extern int DISPLAY_WIDTH;
 extern int DISPLAY_HEIGHT;
-extern int SHUTDOWN_TIME_MS;
+constexpr int SHUTDOWN_TIME_MS = 3000;
 
 extern int BIG_CENTER_X;
 extern int BIG_CENTER_Y;
@@ -209,6 +209,27 @@ extern int ALIGN_FUEL_LTRS;
 extern int ALIGN_AVG_SPEED;
 
 extern bool SHOW_ELEMENT_BOUNDS;
+// Display-only element visibility toggles. Sensors, calculations and trip
+// tracking keep running regardless of these flags; only the rendered widgets
+// on the dashboard are affected.
+extern bool SHOW_ELEMENT_SPEED;
+extern bool SHOW_ELEMENT_SPEED_UNIT;
+extern bool SHOW_ELEMENT_SIGNATURE;
+extern bool SHOW_ELEMENT_SPEED_SOURCE;
+extern bool SHOW_ELEMENT_WIFI;
+extern bool SHOW_ELEMENT_TIME;
+extern bool SHOW_ELEMENT_DATE;
+extern bool SHOW_ELEMENT_ODO;
+extern bool SHOW_ELEMENT_SIDEBAR_TEMP;
+extern bool SHOW_ELEMENT_SIDEBAR_FUEL;
+extern bool SHOW_ELEMENT_SAT;
+extern bool SHOW_ELEMENT_TMR;
+extern bool SHOW_ELEMENT_BAT;
+extern bool SHOW_ELEMENT_INST_KML;
+extern bool SHOW_ELEMENT_AVG_KML;
+extern bool SHOW_ELEMENT_AVG_SPEED;
+extern bool SHOW_ELEMENT_FUEL_LTRS;
+extern bool SHOW_ELEMENT_COMPASS;
 extern bool ENABLE_POWER_SENSE;
 extern bool ENABLE_CIRCLE_TEST;
 extern bool ENABLE_DEMO_MODE;
@@ -297,6 +318,7 @@ extern String WIFI_PASSWORD_3;
 extern String WIFI_SSID_4;
 extern String WIFI_PASSWORD_4;
 extern int WIFI_TX_POWER_DBM;
+extern bool WIFI_AUTO_OFF_ENABLED;
 
 extern bool NTP_ENABLED;
 extern String NTP_SERVER;
@@ -376,6 +398,23 @@ extern int rawLightADC;
 extern int16_t compassRawX;
 extern int16_t compassRawY;
 extern int16_t compassRawZ;
+extern int16_t COMPASS_CAL_X;
+extern int16_t COMPASS_CAL_Y;
+extern int16_t COMPASS_CAL_Z;
+extern int16_t COMPASS_CAL_TX;
+extern int16_t COMPASS_CAL_TY;
+extern int16_t COMPASS_CAL_TZ;
+extern volatile bool compassCalActive;
+extern unsigned long compassCalEndTime;
+extern int16_t compassCalMinX;
+extern int16_t compassCalMaxX;
+extern int16_t compassCalMinY;
+extern int16_t compassCalMaxY;
+extern int16_t compassCalMinZ;
+extern int16_t compassCalMaxZ;
+extern char compassCalResult[128];
+void compassCalStart(unsigned int seconds);
+void compassCalCancel();
 extern float fuelLiters;
 extern int fuelPercentage;
 extern float batteryVoltage;
@@ -506,6 +545,11 @@ void startOtaPull(bool manual);
 void processOtaMemRelease();
 extern volatile bool otaMemReleaseRequested;
 extern volatile bool otaMemReleased;
+void processMemSaverRelease();
+extern volatile bool memSaverRequested;
+extern volatile bool memSaverActive;
+extern volatile unsigned long webLoopCount;
+void factoryResetConfig();
 extern const char *index_html;
 
 // ----------------------------------------------------------------------------

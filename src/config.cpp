@@ -33,7 +33,6 @@ uint16_t ghost_color;
 uint32_t SPI_BUS_SPEED = 60000000;
 int DISPLAY_WIDTH = 480;
 int DISPLAY_HEIGHT = 320;
-int SHUTDOWN_TIME_MS = 3000;
 
 int BIG_CENTER_X = 240;
 int BIG_CENTER_Y = 160;
@@ -111,6 +110,24 @@ int ALIGN_AVG_SPEED = ALIGN_CENTER;
 int ALIGN_FUEL_LTRS = ALIGN_CENTER;
 
 bool SHOW_ELEMENT_BOUNDS = false;
+bool SHOW_ELEMENT_SPEED = true;
+bool SHOW_ELEMENT_SPEED_UNIT = true;
+bool SHOW_ELEMENT_SIGNATURE = true;
+bool SHOW_ELEMENT_SPEED_SOURCE = true;
+bool SHOW_ELEMENT_WIFI = true;
+bool SHOW_ELEMENT_TIME = true;
+bool SHOW_ELEMENT_DATE = true;
+bool SHOW_ELEMENT_ODO = true;
+bool SHOW_ELEMENT_SIDEBAR_TEMP = true;
+bool SHOW_ELEMENT_SIDEBAR_FUEL = true;
+bool SHOW_ELEMENT_SAT = true;
+bool SHOW_ELEMENT_TMR = true;
+bool SHOW_ELEMENT_BAT = true;
+bool SHOW_ELEMENT_INST_KML = true;
+bool SHOW_ELEMENT_AVG_KML = true;
+bool SHOW_ELEMENT_AVG_SPEED = true;
+bool SHOW_ELEMENT_FUEL_LTRS = true;
+bool SHOW_ELEMENT_COMPASS = true;
 bool ENABLE_POWER_SENSE = false;
 bool ENABLE_CIRCLE_TEST = false;
 bool ENABLE_DEMO_MODE = true;
@@ -138,7 +155,7 @@ int REFRESH_TIME_MS = 0;
 int REFRESH_SIDEBAR_TEMP_MS = 0;
 int REFRESH_SIDEBAR_FUEL_MS = 0;
 int REFRESH_AVG_SPEED_MS = 0;
-int REFRESH_COMPASS_MS = 0;
+int REFRESH_COMPASS_MS = 100;
 float COMPASS_DECLINATION_DEG = 0.0f;
 
 int SPEED_DIGITS = 3;
@@ -198,6 +215,7 @@ String WIFI_PASSWORD_3 = "";
 String WIFI_SSID_4 = "";
 String WIFI_PASSWORD_4 = "";
 int WIFI_TX_POWER_DBM = 20;
+bool WIFI_AUTO_OFF_ENABLED = false;
 
 bool NTP_ENABLED = true;
 String NTP_SERVER = "pool.ntp.org";
@@ -207,7 +225,7 @@ bool TZ_DST_ENABLED = true;
 bool OTA_PULL_ENABLED = true;
 String OTA_PULL_URL = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-String OTA_CURRENT_VERSION = "1.1.4";
+String OTA_CURRENT_VERSION = "1.1.5";
 
 // Optional PIN protecting the web config page and admin API (empty = disabled)
 String CONFIG_PIN = "";
@@ -299,7 +317,6 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(AUTO_BRIGHT_LIGHT, "AB_LIGHT", 100);
   CFG_INT(AUTO_BRIGHT_FADE_MS, "AB_FADE", 4000);
   CFG_INT(FADE_DURATION_MS, "FADE_DUR", 700);
-  CFG_INT(SHUTDOWN_TIME_MS, "SHUT_TMS", 3000);
   CFG_STR(SPLASH_SIGNATURE, "SPLASH_SIG", "by @ale.finot");
   CFG_STR(REBOOT_SIGNATURE, "REBOOT_SIG", "Dashboard++ by @ale.finot");
   CFG_STR(DASHBOARD_SIGNATURE, "DASH_SIG",
@@ -380,11 +397,35 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(OFFSET_COMPASS_Y, "O_CMP_Y", -130);
   CFG_INT(OFFSET_FUEL_LTRS_X, "O_FLTRS_X", 132);
   CFG_INT(OFFSET_FUEL_LTRS_Y, "O_FLTRS_Y", 150);
-  CFG_FLT(COMPASS_DECLINATION_DEG, "CMP_DECL", 105.0f);
+  CFG_FLT(COMPASS_DECLINATION_DEG, "CMP_DECL", 0.0f);
+  CFG_INT(COMPASS_CAL_X, "CMP_CAL_X", 0);
+  CFG_INT(COMPASS_CAL_Y, "CMP_CAL_Y", 0);
+  CFG_INT(COMPASS_CAL_Z, "CMP_CAL_Z", 0);
+  CFG_INT(COMPASS_CAL_TX, "CMP_TILT_X", 0);
+  CFG_INT(COMPASS_CAL_TY, "CMP_TILT_Y", 0);
+  CFG_INT(COMPASS_CAL_TZ, "CMP_TILT_Z", 32767);
 
   CFG_INT(SIDEBAR_BAR_WIDTH, "SBAR_W", 8);
   CFG_INT(SIDEBAR_BAR_HEIGHT, "SBAR_H", 250);
   CFG_BOOL(SHOW_ELEMENT_BOUNDS, "SHW_BNDS", false);
+  CFG_BOOL(SHOW_ELEMENT_SPEED, "SH_SPD", true);
+  CFG_BOOL(SHOW_ELEMENT_SPEED_UNIT, "SH_SPD_UN", true);
+  CFG_BOOL(SHOW_ELEMENT_SIGNATURE, "SH_SIG", true);
+  CFG_BOOL(SHOW_ELEMENT_SPEED_SOURCE, "SH_SPD_SRC", true);
+  CFG_BOOL(SHOW_ELEMENT_WIFI, "SH_WIFI", true);
+  CFG_BOOL(SHOW_ELEMENT_TIME, "SH_TIME", true);
+  CFG_BOOL(SHOW_ELEMENT_DATE, "SH_DATE", true);
+  CFG_BOOL(SHOW_ELEMENT_ODO, "SH_ODO", true);
+  CFG_BOOL(SHOW_ELEMENT_SIDEBAR_TEMP, "SH_SB_TMP", true);
+  CFG_BOOL(SHOW_ELEMENT_SIDEBAR_FUEL, "SH_SB_FUL", true);
+  CFG_BOOL(SHOW_ELEMENT_SAT, "SH_SAT", true);
+  CFG_BOOL(SHOW_ELEMENT_TMR, "SH_TMR", true);
+  CFG_BOOL(SHOW_ELEMENT_BAT, "SH_BAT", true);
+  CFG_BOOL(SHOW_ELEMENT_INST_KML, "SH_INST", true);
+  CFG_BOOL(SHOW_ELEMENT_AVG_KML, "SH_AVG", true);
+  CFG_BOOL(SHOW_ELEMENT_AVG_SPEED, "SH_AVG_SPD", true);
+  CFG_BOOL(SHOW_ELEMENT_FUEL_LTRS, "SH_FUL", true);
+  CFG_BOOL(SHOW_ELEMENT_COMPASS, "SH_CMP", true);
   CFG_BOOL(ENABLE_POWER_SENSE, "PWR_SNS", false);
   CFG_BOOL(ENABLE_CIRCLE_TEST, "CIRC_TST", false);
   CFG_BOOL(ENABLE_DEMO_MODE, "DEMO_MODE", true);
@@ -416,7 +457,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(REFRESH_SIDEBAR_TEMP_MS, "R_SB_T", 0);
   CFG_INT(REFRESH_SIDEBAR_FUEL_MS, "R_SB_F", 0);
   CFG_INT(REFRESH_AVG_SPEED_MS, "R_AVG_SPD", 0);
-  CFG_INT(REFRESH_COMPASS_MS, "R_CMP", 0);
+  CFG_INT(REFRESH_COMPASS_MS, "R_CMP", 100);
 
   CFG_INT(SPEED_DIGITS, "SPD_DIG", 3);
   CFG_INT(SAT_DIGITS, "SAT_DIG", 2);
@@ -444,6 +485,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_STR(WIFI_SSID_3, "WIFI_S3", "");
   CFG_STR(WIFI_SSID_4, "WIFI_S4", "");
   CFG_INT(WIFI_TX_POWER_DBM, "WIFI_TXP", 20);
+  CFG_BOOL(WIFI_AUTO_OFF_ENABLED, "WIFI_AOFF", false);
   CFG_BOOL(NTP_ENABLED, "NTP_EN", true);
   CFG_STR(NTP_SERVER, "NTP_SRV", "pool.ntp.org");
   CFG_INT(TZ_OFFSET_HOURS, "TZ_OFFSET", 1);
@@ -452,7 +494,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", true);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
   CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.1.4");
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.1.5");
 
   // CONFIG_PIN is handled manually: never serialized back (mode 1) so the web
   // config API cannot leak it. Mode 2 accepts a new 4-16 char PIN, or clears

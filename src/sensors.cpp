@@ -155,6 +155,131 @@ bool initCompass() {
 
 int16_t compassRawX = 0, compassRawY = 0, compassRawZ = 0;
 
+// Hard-iron calibration: X/Y/Z offsets removed from the raw readings before
+// the heading is computed. Captured live while the user rotates the device
+// (min/max tracking) and persisted to NVS ("cfg" namespace, CMP_CAL_*).
+int16_t COMPASS_CAL_X = 0, COMPASS_CAL_Y = 0, COMPASS_CAL_Z = 0;
+// Tilt compensation: unit "up" axis (rotation-axis normal fitted during
+// calibration) in sensor coordinates, scaled by 32767. Default (0,0,1) = flat
+// mount, which degrades to plain atan2(y,x). Persisted as CMP_TILT_*.
+int16_t COMPASS_CAL_TX = 0, COMPASS_CAL_TY = 0, COMPASS_CAL_TZ = 32767;
+volatile bool compassCalActive = false;
+unsigned long compassCalEndTime = 0;
+int16_t compassCalMinX = 0, compassCalMaxX = 0;
+int16_t compassCalMinY = 0, compassCalMaxY = 0;
+int16_t compassCalMinZ = 0, compassCalMaxZ = 0;
+char compassCalResult[128] = "";
+
+// Raw (X,Y,Z) ring buffer captured during calibration, used to fit the plane
+// of the rotation circle (its normal = sensor "up" axis = tilt).
+#define COMPASS_CAL_MAX_SAMPLES 600
+static int16_t calSamples[COMPASS_CAL_MAX_SAMPLES][3];
+static uint16_t calSampleCount = 0;
+static unsigned long lastCalSampleMs = 0;
+
+void compassCalStart(unsigned int seconds) {
+  if (!compassReady || seconds == 0) return;
+  compassCalActive = true;
+  compassCalEndTime = millis() + (unsigned long)seconds * 1000UL;
+  compassCalMinX = compassCalMaxX = compassRawX;
+  compassCalMinY = compassCalMaxY = compassRawY;
+  compassCalMinZ = compassCalMaxZ = compassRawZ;
+  calSampleCount = 0;
+  lastCalSampleMs = 0;
+  compassCalResult[0] = 0;
+  logPrintf("Compass: calibration started - rotate the device slowly for "
+            "%us around a VERTICAL axis, keeping the module at its mounting "
+            "angle (keep metal/magnets away)\n", seconds);
+}
+
+void compassCalCancel() {
+  compassCalActive = false;
+  logPrintf("Compass: calibration cancelled\n");
+}
+
+static void compassCalFinish() {
+  compassCalActive = false;
+  int32_t offX = ((int32_t)compassCalMinX + compassCalMaxX) / 2;
+  int32_t offY = ((int32_t)compassCalMinY + compassCalMaxY) / 2;
+  int32_t offZ = ((int32_t)compassCalMinZ + compassCalMaxZ) / 2;
+  COMPASS_CAL_X = offX;
+  COMPASS_CAL_Y = offY;
+  COMPASS_CAL_Z = offZ;
+  int32_t spanX = (int32_t)compassCalMaxX - compassCalMinX;
+  int32_t spanY = (int32_t)compassCalMaxY - compassCalMinY;
+  bool lowSpan = (spanX < 200 || spanY < 200);
+  { Preferences p; p.begin("cfg", false);
+    p.putInt("CMP_CAL_X", COMPASS_CAL_X);
+    p.putInt("CMP_CAL_Y", COMPASS_CAL_Y);
+    p.putInt("CMP_CAL_Z", COMPASS_CAL_Z);
+    p.end(); }
+
+  // Tilt fit: the samples trace a circle in 3D whose plane is perpendicular to
+  // the rotation (vertical) axis. Consecutive edge vectors d_i, d_{i+1} both
+  // lie in that plane, so d_i x d_{i+1} points along its normal; the sum over
+  // the whole rotation cancels wobble and yields the "up" axis in sensor
+  // coordinates. A flat calibration naturally fits (0,0,1).
+  char tiltTxt[64] = "";
+  if (calSampleCount >= 32) {
+    int64_t nx = 0, ny = 0, nz = 0;
+    for (uint16_t i = 1; i + 1 < calSampleCount; i++) {
+      int32_t dx1 = calSamples[i][0] - calSamples[i - 1][0];
+      int32_t dy1 = calSamples[i][1] - calSamples[i - 1][1];
+      int32_t dz1 = calSamples[i][2] - calSamples[i - 1][2];
+      int32_t dx2 = calSamples[i + 1][0] - calSamples[i][0];
+      int32_t dy2 = calSamples[i + 1][1] - calSamples[i][1];
+      int32_t dz2 = calSamples[i + 1][2] - calSamples[i][2];
+      nx += (int64_t)dy1 * dz2 - (int64_t)dz1 * dy2;
+      ny += (int64_t)dz1 * dx2 - (int64_t)dx1 * dz2;
+      nz += (int64_t)dx1 * dy2 - (int64_t)dy1 * dx2;
+    }
+    float nf[3] = {(float)nx, (float)ny, (float)nz};
+    float mag = sqrtf(nf[0] * nf[0] + nf[1] * nf[1] + nf[2] * nf[2]);
+    if (mag > 1.0f) {
+      nf[0] /= mag;
+      nf[1] /= mag;
+      nf[2] /= mag;
+      // Planarity check: mean |p . n| vs mean |p| over the centered samples.
+      // Near 0 = clean circle; >= ~0.6 = the module was wobbled, fit is junk.
+      float sumDot = 0.0f, sumR = 0.0f;
+      for (uint16_t i = 0; i < calSampleCount; i++) {
+        float px = (float)calSamples[i][0] - offX;
+        float py = (float)calSamples[i][1] - offY;
+        float pz = (float)calSamples[i][2] - offZ;
+        sumDot += fabsf(px * nf[0] + py * nf[1] + pz * nf[2]);
+        sumR += sqrtf(px * px + py * py + pz * pz);
+      }
+      float ratio = (sumR > 0.01f) ? sumDot / sumR : 1.0f;
+      if (ratio < 0.6f) {
+        COMPASS_CAL_TX = (int16_t)(nf[0] * 32767.0f);
+        COMPASS_CAL_TY = (int16_t)(nf[1] * 32767.0f);
+        COMPASS_CAL_TZ = (int16_t)(nf[2] * 32767.0f);
+        { Preferences p; p.begin("cfg", false);
+          p.putInt("CMP_TILT_X", COMPASS_CAL_TX);
+          p.putInt("CMP_TILT_Y", COMPASS_CAL_TY);
+          p.putInt("CMP_TILT_Z", COMPASS_CAL_TZ);
+          p.end(); }
+        snprintf(tiltTxt, sizeof(tiltTxt), " tilt=%.2f/%.2f/%.2f",
+                 nf[0], nf[1], nf[2]);
+      } else {
+        snprintf(tiltTxt, sizeof(tiltTxt),
+                 " TILT FIT FAILED (wobble=%.2f, keep tilt fixed)", ratio);
+      }
+    } else {
+      snprintf(tiltTxt, sizeof(tiltTxt), " TILT FIT FAILED (low motion)");
+    }
+  } else {
+    snprintf(tiltTxt, sizeof(tiltTxt), " TILT FIT SKIPPED (few samples)");
+  }
+
+  snprintf(compassCalResult, sizeof(compassCalResult),
+           "Calibration saved: X=%d Y=%d Z=%d%s (span %ld/%ld)%s",
+           COMPASS_CAL_X, COMPASS_CAL_Y, COMPASS_CAL_Z, tiltTxt,
+           (long)spanX, (long)spanY,
+           lowSpan ? " - LOW SPAN, did you rotate?" : "");
+  logPrintf("Compass: %s\n", compassCalResult);
+}
+
 void processCompassSensor() {
   if (!compassReady) return;
   int16_t x, y, z;
@@ -169,7 +294,42 @@ void processCompassSensor() {
   compassRawX = x;
   compassRawY = y;
   compassRawZ = z;
-  float h = atan2f((float)y, (float)x) * (180.0f / M_PI);
+
+  // Calibration capture: track min/max over the window; offsets and the tilt
+  // axis are derived and saved when it elapses.
+  if (compassCalActive) {
+    if (x < compassCalMinX) compassCalMinX = x;
+    if (x > compassCalMaxX) compassCalMaxX = x;
+    if (y < compassCalMinY) compassCalMinY = y;
+    if (y > compassCalMaxY) compassCalMaxY = y;
+    if (z < compassCalMinZ) compassCalMinZ = z;
+    if (z > compassCalMaxZ) compassCalMaxZ = z;
+    unsigned long nowMs = millis();
+    if (calSampleCount < COMPASS_CAL_MAX_SAMPLES &&
+        nowMs - lastCalSampleMs >= 40) {
+      lastCalSampleMs = nowMs;
+      calSamples[calSampleCount][0] = x;
+      calSamples[calSampleCount][1] = y;
+      calSamples[calSampleCount][2] = z;
+      calSampleCount++;
+    }
+    if (nowMs >= compassCalEndTime) compassCalFinish();
+  }
+
+  // Tilt-compensated heading: project the field onto the plane perpendicular
+  // to the calibrated "up" axis, then atan2. Flat mount (0,0,1) degenerates
+  // to the plain atan2(y - oy, x - ox).
+  int32_t xc = (int32_t)x - COMPASS_CAL_X;
+  int32_t yc = (int32_t)y - COMPASS_CAL_Y;
+  int32_t zc = (int32_t)z - COMPASS_CAL_Z;
+  float ux = (float)COMPASS_CAL_TX / 32767.0f;
+  float uy = (float)COMPASS_CAL_TY / 32767.0f;
+  float uz = (float)COMPASS_CAL_TZ / 32767.0f;
+  float ulen = sqrtf(ux * ux + uy * uy + uz * uz);
+  if (ulen > 0.001f) { ux /= ulen; uy /= ulen; uz /= ulen; }
+  float px = (float)xc, py = (float)yc, pz = (float)zc;
+  float dot = px * ux + py * uy + pz * uz;
+  float h = atan2f(py - dot * uy, px - dot * ux) * (180.0f / M_PI);
   if (h < 0) h += 360.0f;
   h += COMPASS_DECLINATION_DEG;
   if (h < 0.0f) h += 360.0f;
@@ -501,10 +661,10 @@ void processLightSensor() {
 
 void processFuelSensor() {
   int sum = 0;
-  for (int i = 0; i < 64; i++) {
+  for (int i = 0; i < 16; i++) {
     sum += analogRead(FUEL_TOUCH_PIN);
   }
-  int instantReading = sum / 64;
+  int instantReading = sum / 16;
   rawFuelADC = instantReading;
   filteredReading = ((float)instantReading * FUEL_FILTER_ALPHA) +
                     (filteredReading * (1.0f - FUEL_FILTER_ALPHA));

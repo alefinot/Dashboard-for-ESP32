@@ -43,7 +43,6 @@ void LGFX_ST7789_4::applyBusConfig() {
   _bus_instance.config(cfg);
 }
 
-#include "DS_DIGIT50pt7b.h"
 #include "DS_DIGIT15pt7b.h"
 #include "Conthrax_SemiBold12pt7b.h"
 #include "Conthrax_SemiBold7pt7b.h"
@@ -375,6 +374,7 @@ void fillAARoundRect(T &disp, int x, int y, int w, int h, int r, uint16_t color,
 // Explicit instantiations so the templates are available across translation
 // units that include the header declarations.
 template void drawAALine(LGFX_ST7789_4 &, float, float, float, float, uint16_t);
+template void drawAALine(LGFX_Sprite &, float, float, float, float, uint16_t);
 template void drawAACircle(LGFX_ST7789_4 &, int, int, int, uint16_t);
 template void drawAACornerArc(LGFX_ST7789_4 &, int, int, int, uint8_t, uint16_t);
 template void drawAARoundRect(LGFX_ST7789_4 &, int, int, int, int, int, uint16_t);

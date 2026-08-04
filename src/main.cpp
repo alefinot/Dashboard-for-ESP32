@@ -17,6 +17,10 @@ bool pendingInvertDisplay = false;
 int pendingBacklightValue = -1;
 int currentBrightnessTarget = 0;
 
+// Web-task watchdog state: disarmed when the device shows a fast-reboot loop
+// so a watchdog can't brick the device by restarting it forever.
+static bool watchdogDisabled = false;
+
 void logPrintf(const char *fmt, ...) {
   char tmp[256];
   va_list args;
@@ -58,6 +62,44 @@ void setup() {
     pref.end();
   }
   recalculateDerivedParams();
+
+  // Recovery + watchdog guard:
+  // - Serial "RESET" within the first 2s after boot: factory reset (NVS wipe).
+  // - Hold BOOT (GPIO0) for 8s within the first 30s after boot: factory reset.
+  // - Track fast reboot loops (RTC memory survives ESP.restart) so the
+  //   web-task watchdog can never brick the device by rebooting it forever.
+  RTC_NOINIT_ATTR static uint32_t bootCount;
+  RTC_NOINIT_ATTR static uint32_t bootStampSec;
+  pinMode(0, INPUT_PULLUP);
+  {
+    uint32_t nowSec = (uint32_t)(esp_timer_get_time() / 1000000ULL);
+    bootCount++;
+    if (bootStampSec == 0 || bootCount > 10 || nowSec - bootStampSec > 120) {
+      bootCount = 1;
+    } else if (bootCount >= 4) {
+      watchdogDisabled = true;
+      logPrintf("Warning: %u fast reboots in 2 min, web watchdog disabled\n",
+                bootCount);
+    }
+    bootStampSec = nowSec;
+  }
+  {
+    unsigned long resetDeadline = millis() + 2000;
+    String bootInput = "";
+    while (millis() < resetDeadline) {
+      while (Serial.available()) {
+        bootInput += (char)Serial.read();
+        if (bootInput.indexOf("RESET") >= 0) {
+          logPrintf("Serial factory reset command received\n");
+          factoryResetConfig();
+          logPrintf("Factory reset done, rebooting\n");
+          delay(100);
+          ESP.restart();
+        }
+      }
+      delay(10);
+    }
+  }
 
   display.applyBusConfig();
 
@@ -233,6 +275,10 @@ void loop() {
   // Frees the speed sprite when an OTA check is pending (safe point: no sprite
   // is in use between frames). Must run before any TLS work starts.
   processOtaMemRelease();
+
+  // Same release triggered by the web task when free heap gets critically low,
+  // so the big UI buffers never starve the /api/config handler or TLS stack.
+  processMemSaverRelease();
 
   SensorSnapshot snap;
   if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
@@ -437,5 +483,40 @@ void loop() {
       logPrintf("CPU: %dMHz (%.1f FPS, %.1fC)\n", targetFreq, currentAverageFps, cpuTemp);
     }
   }
+  // BOOT-hold factory reset: hold GPIO0 (BOOT) for 8s within the first 30s
+  // after boot to wipe the config (recovery when a forgotten config PIN
+  // locks the webui, or any other config corruption).
+  static unsigned long bootHoldStart = 0;
+  if (millis() < 30000) {
+    if (digitalRead(0) == LOW) {
+      if (bootHoldStart == 0) bootHoldStart = millis();
+      if (bootHoldStart && millis() - bootHoldStart > 8000) {
+        logPrintf("BOOT held 8s: factory reset\n");
+        factoryResetConfig();
+        logPrintf("Factory reset done, rebooting\n");
+        delay(100);
+        ESP.restart();
+      }
+    } else {
+      bootHoldStart = 0;
+    }
+  }
+
+  // Web-task heartbeat watchdog: if the web server task stops advancing its
+  // counter, the config page would be unreachable forever. Reboot to recover.
+  static unsigned long lastWebLoop = 0;
+  static unsigned long webWatchdogDue = 0;
+  if (webWatchdogDue == 0) webWatchdogDue = millis() + 60000;
+  if (now >= webWatchdogDue) {
+    if (webLoopCount != lastWebLoop) {
+      lastWebLoop = webLoopCount;
+      webWatchdogDue = now + 15000;
+    } else if (!watchdogDisabled) {
+      logPrintf("Web task stalled (heartbeat stopped), rebooting\n");
+      delay(100);
+      ESP.restart();
+    }
+  }
+
   vTaskDelay(pdMS_TO_TICKS(1));
 }
