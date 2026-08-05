@@ -8,6 +8,13 @@ volatile unsigned long logSequence = 0;
 
 unsigned long g_startupTime = 0;
 bool forceFullRedraw = false;
+
+// Rolling worst inter-frame gap (ms), reset by the heartbeat every 10s. >18ms
+// on a 60fps dashboard is a visible frame-drop; this catches the sub-33ms
+// jitter that the SLOW FRAME diagnostic (>33ms threshold) misses.
+volatile unsigned long g_diagMaxFrameMs = 0;
+volatile unsigned long g_diagOver24Ms = 0;
+volatile unsigned long g_diagMaxSensorGapMs = 0;
 volatile bool pendingSleep = false;
 volatile bool pendingReboot = false;
 volatile bool otaUpdateInProgress = false;
@@ -51,7 +58,7 @@ void setup() {
     Preferences pref;
     pref.begin("cfg", false);
     if (!pref.isKey("CFG_VER")) {
-      SPI_BUS_SPEED = 60000000;
+      SPI_BUS_SPEED = 80000000;
       TARGET_FPS = 60;
       ENABLE_DYNAMIC_CPU = false;
       pref.putInt("SPI_FREQ", SPI_BUS_SPEED);
@@ -59,6 +66,38 @@ void setup() {
       pref.putBool("DYN_CPU", ENABLE_DYNAMIC_CPU);
       pref.putInt("CFG_VER", 1);
     }
+    // v2: raise the SPI write bus from 60MHz to 80MHz (cuts every panel write
+    // ~25%, the main lever against redraw stutter). Only bumps when the stored
+    // value is still the old 60MHz default, so a manual web-UI speed choice is
+    // never overwritten.
+    if (pref.getInt("CFG_VER", -1) == 1 &&
+        pref.getInt("SPI_FREQ", 80000000) == 60000000) {
+      SPI_BUS_SPEED = 80000000;
+      pref.putInt("SPI_FREQ", SPI_BUS_SPEED);
+      pref.putInt("CFG_VER", 2);
+    }
+    // v3: force dynamic CPU scaling off. setCpuFrequencyMhz() recalibrates the
+    // APB clock that the SPI bus and ALL timers derive from, and the scaler
+    // downsteps to 160MHz whenever average fps exceeds ~85% of target — a
+    // known source of periodic refresh glitches that no component setting can
+    // disable. Old builds could leave DYN_CPU=true saved; override it once.
+    if (pref.getInt("CFG_VER", -1) == 2 && pref.getBool("DYN_CPU", false)) {
+      ENABLE_DYNAMIC_CPU = false;
+      pref.putBool("DYN_CPU", false);
+      logPrintf("Config v3: dynamic CPU scaling disabled\n");
+    }
+    if (pref.getInt("CFG_VER", -1) == 2)
+      pref.putInt("CFG_VER", 3);
+    // v4: a saved TGT_FPS of 30 (or 0) paces every frame at 33ms — half-speed
+    // animation that reads as "lag" on a speedometer. Reset to 60 once; a
+    // deliberate web-UI choice can still be re-applied.
+    if (pref.getInt("CFG_VER", -1) == 3 && pref.getInt("TGT_FPS", 60) != 60) {
+      TARGET_FPS = 60;
+      pref.putInt("TGT_FPS", 60);
+      logPrintf("Config v4: target FPS reset to 60\n");
+    }
+    if (pref.getInt("CFG_VER", -1) == 3)
+      pref.putInt("CFG_VER", 4);
     pref.end();
   }
   recalculateDerivedParams();
@@ -176,6 +215,7 @@ void setup() {
   updateSplashProgress(20);
 
   gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
+  gpsSerial.setTimeout(20);
   delay(100);
   configureGNSS();
 
@@ -218,8 +258,18 @@ void setup() {
   logPrintf("post-fade confirm: ledcWrite(%d, %d)\n", BACKLIGHT_CHANNEL, currentBrightnessTarget);
   g_startupTime = millis();
 
-  xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore0", 10240, NULL, 2, NULL,
-                           0);
+// GPS is quarantined from the sensors: the UBX module streams ~1.1KB/s, so the
+// one-byte-at-a-time drain parks ~1s per 1024 bytes and CANNOT get ahead of
+// the ring (v13: parse 9us/byte but ~940us/byte wall). On the old single
+// sensor task that froze every real-mode value and (on core 1) the display.
+// gpsTask (core 0, prio 2) sits BELOW the httpd(5)/TCP/IP(18)/WiFi(23) stack
+// so the network always wins and the drain only ever lags GPS (1Hz-tolerant).
+// sensorTask (core 1, prio 2 > loopTask prio 1) owns only the short I2C/ADC
+// reads + snapshot: a few ms per 20ms tick, preempting the display briefly
+// then sleeping, so rendering keeps its ~62.5fps while values stay live.
+  xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore1", 10240, NULL, 2, NULL,
+                           1);
+  xTaskCreatePinnedToCore(gpsTask, "GpsTaskCore0", 10240, NULL, 2, NULL, 0);
   xTaskCreatePinnedToCore(webServerTask, "WebTaskCore0", 12288, NULL, 1, NULL,
                            0);
 
@@ -272,6 +322,60 @@ void loop() {
 
   unsigned long now = millis();
 
+  // Diagnostic build markers: verifies the new firmware is running and gives a
+  // rolling baseline (boot banner once, heartbeat every 10s).
+  static bool diagBannerLogged = false;
+  if (!diagBannerLogged) {
+    diagBannerLogged = true;
+    logPrintf("DIAG BUILD v15: freq=%uMHz fpsTarget=%u heap=%lu\n",
+              getCpuFrequencyMhz(), TARGET_FPS, (unsigned long)ESP.getFreeHeap());
+  }
+  static unsigned long lastDiagHeartbeat = 0;
+  if (now - lastDiagHeartbeat >= 10000) {
+    lastDiagHeartbeat = now;
+    logPrintf("HB: up=%lus fps=%.1f freq=%uMHz tgtFps=%d heap=%lu min=%lu maxAlloc=%lu sp=%d tape=%d fallback=%d otaReq=%d memAct=%d wifi=%d rssi=%d apClients=%u temp=%.1f maxFrame=%lums over24=%lu sMaxGap=%lums\n",
+              millis() / 1000UL, (double)currentMeasuredFps,
+              (unsigned)getCpuFrequencyMhz(), TARGET_FPS,
+              (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
+              (unsigned long)ESP.getMaxAllocHeap(), (int)speedSpriteValid(),
+              (int)tapeSpriteValid(), (int)isSpeedFallback(),
+              (int)otaMemReleaseRequested, (int)memSaverActive,
+              (int)WiFi.status(), (int)WiFi.RSSI(),
+              (unsigned)WiFi.softAPgetStationNum(), (double)temperatureRead(),
+              (unsigned long)g_diagMaxFrameMs, (unsigned long)g_diagOver24Ms,
+              (unsigned long)g_diagMaxSensorGapMs);
+    g_diagMaxFrameMs = 0;
+    g_diagOver24Ms = 0;
+    g_diagMaxSensorGapMs = 0;
+  }
+
+  // Diagnostic: log OTA/mem-saver state transitions and any loop stall >50ms.
+  // Logs only on change/anomaly so steady-state operation stays silent.
+  static bool tOtaReq = false, tOtaRel = false, tMemReq = false, tMemAct = false,
+              tOtaUp = false;
+  if (otaMemReleaseRequested != tOtaReq || otaMemReleased != tOtaRel ||
+      memSaverRequested != tMemReq || memSaverActive != tMemAct ||
+      otaUpdateInProgress != tOtaUp) {
+    tOtaReq = otaMemReleaseRequested;
+    tOtaRel = otaMemReleased;
+    tMemReq = memSaverRequested;
+    tMemAct = memSaverActive;
+    tOtaUp = otaUpdateInProgress;
+    logPrintf("STATE: otaReq=%d otaRel=%d memReq=%d memAct=%d otaUp=%d heap=%lu\n",
+              (int)tOtaReq, (int)tOtaRel, (int)tMemReq, (int)tMemAct, (int)tOtaUp,
+              (unsigned long)ESP.getFreeHeap());
+  }
+  static unsigned long lastLoopEntryMs = 0;
+  if (lastLoopEntryMs != 0) {
+    unsigned long loopGap = now - lastLoopEntryMs;
+    if (loopGap > 50)
+      logPrintf("STALL: loop gap %lums heap=%lu otaReq=%d memAct=%d webCount=%lu rssi=%d\n",
+                (unsigned long)loopGap, (unsigned long)ESP.getFreeHeap(),
+                (int)otaMemReleaseRequested, (int)memSaverActive,
+                (unsigned long)webLoopCount, (int)WiFi.RSSI());
+  }
+  lastLoopEntryMs = now;
+
   // Frees the speed sprite when an OTA check is pending (safe point: no sprite
   // is in use between frames). Must run before any TLS work starts.
   processOtaMemRelease();
@@ -280,19 +384,59 @@ void loop() {
   // so the big UI buffers never starve the /api/config handler or TLS stack.
   processMemSaverRelease();
 
+  // Rebuilds the speed sprite dropped by either release above. Runs here, at a
+  // safe point between frames, so the VLW parse + allocation never stalls a
+  // draw frame (previously it ran mid-frame on the next speed change).
+  ensureSpeedSprite();
+
   SensorSnapshot snap;
   if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
     snap = g_sensorData;
     xSemaphoreGive(g_stateMutex);
   }
+  // Demo values are regenerated HERE on the display core, never on core 0:
+  // WiFi/HTTP/TLS work preempts the priority-2 sensor task for whole seconds,
+  // which would freeze every demo value (and the whole screen with it). The
+  // display loop is never starved, so demo animation cannot stall.
+  if (ENABLE_DEMO_MODE)
+    demoSnapshotOverride(snap);
+  else {
+    // Real mode: refresh the clock/date from the system clock directly (the
+    // sensor task keeps it synced from GPS/NTP). If the sensor task is stalled
+    // by core-0 network work the on-screen clock keeps ticking.
+    int hh, mm, dd, mo, yy;
+    if (systemTimeToLocal(hh, mm, dd, mo, yy)) {
+      snap.localHour = hh;
+      snap.minute = mm;
+      snap.day = dd;
+      snap.month = mo;
+      snap.year = yy;
+      snap.timeValid = true;
+      snap.dateValid = true;
+    }
+  }
+  // Sensor-task heartbeat: the loop never stalls (HB proves it), so a stalled
+  // sensor task is invisible without a dedicated tick watch. Track the max
+  // gap between sensor ticks; printed in the HB as sMaxGap=.
+  static unsigned long lastSensorTickSeen = 0;
+  if (g_sensorLastTickMs != lastSensorTickSeen) {
+    if (lastSensorTickSeen != 0) {
+      unsigned long gap = g_sensorLastTickMs - lastSensorTickSeen;
+      if (gap > g_diagMaxSensorGapMs) g_diagMaxSensorGapMs = gap;
+    }
+    lastSensorTickSeen = g_sensorLastTickMs;
+  }
 
   if (DISPLAY_REFRESH_MS == 0 ||
       (now - lastDisplayUpdate >= DISPLAY_REFRESH_MS)) {
+    unsigned long frameStartMs = millis();
     static unsigned long lastFrameTime = 0;
     static float filteredFrameTimeMs = 16.6f;
     unsigned long frameDeltaMs = now - lastFrameTime;
     if (frameDeltaMs > 0) {
       lastFrameTime = now;
+      if (frameDeltaMs > g_diagMaxFrameMs) g_diagMaxFrameMs = frameDeltaMs;
+      if (frameDeltaMs > 24) g_diagOver24Ms++;
       filteredFrameTimeMs =
           (filteredFrameTimeMs * 0.95f) + ((float)frameDeltaMs * 0.05f);
       if (filteredFrameTimeMs > 0.0f)
@@ -324,12 +468,14 @@ void loop() {
     }
 
     if (!otaUpdateInProgress) {
-      if (!otaMemReleaseRequested) {
-        updateBigDisplay(snap);
-        drawFpsOverlay();
-        drawGpsDebugOverlay();
-        checkNightMode(snap);
-      }
+      // An OTA pull *check* must not freeze the dashboard: the big sprites are
+      // dropped and rebuilt around the check (processOtaMemRelease /
+      // ensureSpeedSprite) and the components fall back to direct-panel
+      // drawing for its duration, so the screen keeps animating.
+      updateBigDisplay(snap);
+      drawFpsOverlay();
+      drawGpsDebugOverlay();
+      checkNightMode(snap);
     } else {
       static unsigned long lastOtaAdvance = 0;
       static bool otaRebootShown = false;
@@ -366,6 +512,11 @@ void loop() {
         ESP.restart();
       }
     }
+    unsigned long frameMs = millis() - frameStartMs;
+    if (frameMs > 100)
+      logPrintf("FRAME STALL: draw block %lums heap=%lu otaReq=%d memAct=%d\n",
+                (unsigned long)frameMs, (unsigned long)ESP.getFreeHeap(),
+                (int)otaMemReleaseRequested, (int)memSaverActive);
   }
 
   // NOTE: periodic [RAW]/[VAL]/[ESP] telemetry temporarily disabled for a

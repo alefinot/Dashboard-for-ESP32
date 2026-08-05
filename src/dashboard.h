@@ -533,6 +533,7 @@ void processFuelConsumption();
 void updateAverageSpeed();
 void updateAccelTimer();
 void processFuelSensor();
+void gpsTask(void *pvParameters);
 void sensorTask(void *pvParameters);
 
 // ----------------------------------------------------------------------------
@@ -545,12 +546,43 @@ void startOtaPull(bool manual);
 void processOtaMemRelease();
 extern volatile bool otaMemReleaseRequested;
 extern volatile bool otaMemReleased;
+extern volatile bool otaMemReleased;
 void processMemSaverRelease();
 extern volatile bool memSaverRequested;
 extern volatile bool memSaverActive;
+void ensureSpeedSprite();
+bool speedSpriteValid();
+bool tapeSpriteValid();
+bool isSpeedFallback();
 extern volatile unsigned long webLoopCount;
 void factoryResetConfig();
 extern const char *index_html;
+
+// ----------------------------------------------------------------------------
+// Weather Widget API & Data
+// ----------------------------------------------------------------------------
+struct WeatherData {
+  float temperature = 0.0f;
+  int humidity = 0;
+  float windSpeed = 0.0f;
+  float windDirection = 0.0f;
+  int weatherCode = 0;
+  int cloudCover = 0;
+  String sunsetTime = "";
+  bool valid = false;
+  unsigned long lastUpdated = 0;
+};
+
+extern WeatherData g_weatherData;
+extern bool SHOW_ELEMENT_WEATHER;
+extern int OFFSET_WEATHER_X;
+extern int OFFSET_WEATHER_Y;
+extern String WEATHER_CITY;
+extern float WEATHER_LAT;
+extern float WEATHER_LON;
+
+void startWeatherFetch();
+void updateWeather();
 
 // ----------------------------------------------------------------------------
 // UI API
@@ -558,4 +590,12 @@ extern const char *index_html;
 void updateBigDisplay(const SensorSnapshot &snap);
 void checkNightMode(const SensorSnapshot &snap);
 
+// ----------------------------------------------------------------------------
+// Sensor API
+// ----------------------------------------------------------------------------
+void demoSnapshotOverride(SensorSnapshot &snap);
+bool systemTimeToLocal(int &hour, int &minute, int &day, int &month, int &year);
+extern volatile unsigned long g_sensorLastTickMs;
+
 #endif // DASHBOARD_H
+

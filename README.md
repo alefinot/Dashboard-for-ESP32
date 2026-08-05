@@ -43,7 +43,7 @@ Dashboard++ replaces legacy analog or basic digital gauges with an automotive-gr
 - **Dirty-Rendering Frame Pipeline:** Element state tracking ensures only mutated visual regions are drawn to the SPI bus, with dedicated per-element refresh rate throttles for speed, satellite count, timer, battery, fuel economy, and average speed.
 - **Configurable 7-Segment Digital Fonts:** 120px (sprite) and 28px (direct) seven-segment fonts with background "ghost digit" rendering (888 backdrop effect) and fully user-configurable integer and decimal digit boundaries for all telemetry counters.
 - **Full Sensor Suite Integration:** Precise fuel level monitoring (20-point piecewise linear calibration table + EMA filtering), engine coolant thermistor telemetry (Steinhart-Hart equation), battery voltage divider monitoring, 3-axis I2C digital compass heading, trip fuel economy tracking, and **trip average speed** display.
-- **FreeRTOS Dual-Core Multitasking:** Strict core isolation separating real-time sensor processing and GPS parsing (Core 0) from UI rendering and graphics updates (Core 1).
+- **FreeRTOS Dual-Core Multitasking:** Strict core isolation — the continuous ~1.1KB/s GNSS UART stream is quarantined in its own Core 0 task (bulk ring-buffer read, bounded per tick, sitting below the WiFi stack), while the vehicle sensor suite and UI rendering run on Core 1, so a GPS stream backlog can never stall the dashboard or freeze any real-time value.
 - **Embedded Web Management Portal:** Embedded single-page Web application accessible over SoftAP or local WiFi network featuring grouped card-based configuration UI with live search, real-time performance telemetry panel (FPS, CPU frequency/temp, RAM, flash storage), interactive sliders, color pickers, NVS backup/restore, web serial terminal stream, and HTTP file upload OTA firmware updating.
 - **Hysteresis-Based Dynamic CPU Scaling:** Three-state frequency governor (240/160/80 MHz) with hysteresis deadbands prevents oscillation, and thermal throttling automatically caps frequency at configurable warning/critical temperature thresholds.
 
@@ -58,35 +58,48 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 │                                 ESP32 WROOM-32 DUAL-CORE                               │
 ├───────────────────────────────────────────────────────┬────────────────────────────────┤
 │                      CORE 0                           │             CORE 1             │
-│            (Real-Time Telemetry & Network)            │      (Rendering & System)      │
+│            (GNSS Stream & Network)                    │   (Vehicle Sensors & Display)  │
 ├───────────────────────────────────────────────────────┼────────────────────────────────┤
 │ ┌───────────────────────────────────────────────────┐ │ ┌────────────────────────────┐ │
-│ │ Task: SensorTaskCore0 (Priority 2, Stack 10KB)    │ │ │ Main Loop (Priority 1)     │ │
-│ │  • Hall Sensor GPIO33 Interrupt & Microsecond ISR │ │ │  • Dirty-Rendering Frame   │ │
-│ │  • TinyGPS++ NMEA Parser (UART2 @ 115200)         │ │ │    Update Pipeline         │ │
-│ │  • QMC5883L Magnetometer Reading (I2C @ 200 Hz)   │ │ │  • LovyanGFX SPI Display   │ │
-│ │  • ADC Sampling: Fuel (32), Temp (36), Bat (35)   │ │ │    Driver (@ 60 MHz)       │ │
-│ │  • Speed Fusion & Odometer Distance Calculation   │ │ │  • Sprite-Based Speed      │ │
-│ │  • Fuel Economy & Acceleration Timer Engine       │ │ │    Rendering (120px VLW)   │ │
-│ │  • GPS Epoch Time Sync → settimeofday()           │ │ │  • Hysteresis Dynamic CPU  │ │
-│ │  • Trip Average Speed Calculation                 │ │ │    Scaling (80/160/240 MHz) │ │
-│ │  • Safe Thread Sync via g_stateMutex              │ │ │  • Auto Night-Mode Backlight│ │
-│ │ └───────────────────────────────────────────────────┘ │ │    PWM Control             │ │
-│ ┌───────────────────────────────────────────────────┐ │ │  • Ignition Sense Deep     │ │
-│ │ Task: WebTaskCore0 (Priority 1, Stack 8KB)        │ │ │    Sleep State Machine     │ │
-│ │  • SoftAP ("Dashboard_Config") & Multi-SSID STA   │ │ │  • Telemetry Logging to    │ │
-│ │  • WebServer HTTP Handlers (8 REST Endpoints)     │ │ │    4KB Ring Buffer         │ │
-│ │  • ArduinoOTA Firmware Listener                   │ │ └────────────────────────────┘ │
-│ │  • Serial Log Streaming API                       │ │                                │
-│ └───────────────────────────────────────────────────┘ │                                │
+│ │ Task: GpsTaskCore0 (Priority 2, Stack 10KB)       │ │ │ Task: SensorTaskCore1      │ │
+│ │  • UART2 @ 115200 bulk ring-buffer drain          │ │ │  (Priority 2, Stack 10KB)  │ │
+│ │    (readBytes() batch, 1024 B/tick cap)           │ │ │  • Hall Sensor GPIO33 ISR  │ │
+│ │  • TinyGPS++ NMEA + UBX NAV-PVT Parser            │ │ │    & Microsecond Timing    │ │
+│ │  • Speed Fusion & Odometer Distance Calculation   │ │ │  • QMC5883L Magnetometer   │ │
+│ │  • GNSS Epoch Time Sync → settimeofday()          │ │ │    (I2C @ 200 Hz)          │ │
+│ │  • Safe Thread Sync via g_stateMutex              │ │ │  • ADC Sampling: Fuel (32),│ │
+│ │ └───────────────────────────────────────────────────┘ │ │    Temp (36), Bat (35)     │ │
+│ ┌───────────────────────────────────────────────────┐ │ │  • Fuel Economy &          │ │
+│ │ Task: WebTaskCore0 (Priority 1, Stack 12KB)       │ │ │    Acceleration Timer     │ │
+│ │  • SoftAP ("Dashboard_Config") & Multi-SSID STA   │ │ │  • Trip Average Speed      │ │
+│ │  • WebServer HTTP Handlers (8 REST Endpoints)     │ │ │  • Safe Thread Sync via    │ │
+│ │  • ArduinoOTA Firmware Listener                   │ │ │    g_stateMutex            │ │
+│ │  • Serial Log Streaming API                       │ │ │ └────────────────────────────┘ │
+│ └───────────────────────────────────────────────────┘ │ ┌────────────────────────────┐ │
+│                                                        │ │ Main Loop (Priority 1)     │ │
+│                                                        │ │  • Dirty-Rendering Frame   │ │
+│                                                        │ │    Update Pipeline         │ │
+│                                                        │ │  • LovyanGFX SPI Display   │ │
+│                                                        │ │    Driver (@ 60 MHz)       │ │
+│                                                        │ │  • Sprite-Based Speed      │ │
+│                                                        │ │    Rendering (120px VLW)   │ │
+│                                                        │ │  • Hysteresis Dynamic CPU  │ │
+│                                                        │ │    Scaling (80/160/240 MHz) │ │
+│                                                        │ │  • Auto Night-Mode Backlight│ │
+│                                                        │ │    PWM Control             │ │
+│                                                        │ │  • Ignition Sense Deep     │ │
+│                                                        │ │    Sleep State Machine     │ │
+│                                                        │ │  • Telemetry Logging to    │ │
+│                                                        │ │    4KB Ring Buffer         │ │
+│                                                        │ └────────────────────────────┘ │
 └───────────────────────────────────────────────────────┴────────────────────────────────┘
-                                           │
-                                           ▼
-                      ┌────────────────────────────────────────┐
-                      │ Mutex Protected Structure:             │
-                      │ SensorSnapshot g_sensorData            │
-                      └────────────────────────────────────────┘
 ```
+
+> [!NOTE]
+> The GNSS task sits on Core 0 **below** the WiFi/HTTPD/LWIP stack on purpose: the module streams
+> ~1.1KB/s continuously and the drain is I/O-gated at the byte arrival rate, so it can never
+> out-run the stream. GPS is 1Hz-tolerant data, so if the network preempts the drain, only GPS
+> values lag — the vehicle sensors and the screen are never touched.
 
 ---
 
@@ -402,7 +415,7 @@ Dashboard++ for ESP32/
     ├── main.cpp           # System setup(), dual FreeRTOS task spawns, main display loop
     ├── config.cpp         # NVS parameter storage, JSON serialization/deserialization engine
     ├── gfx.cpp            # LovyanGFX display device class, VLW font loader, AA primitives, icons
-    ├── sensors.cpp        # Hall ISR, GPS speed fusion, QMC5883L compass, ADC sensor task
+    ├── sensors.cpp        # Core 0 GPS task (bulk UART drain, TinyGPS++/UBX parser, speed fusion, odo, time-sync) + Core 1 sensor task (Hall ISR, QMC5883L compass, ADC sensors, snapshot)
     ├── ui.cpp             # Dirty-rendering dashboard visual layout engine
     └── web.cpp            # SoftAP/STA WiFi manager, REST API handlers, embedded Web UI
 ```
@@ -473,6 +486,16 @@ In Demo Mode:
 - Speed oscillates synthetically between 10 km/h and 110 km/h using sinusoidal formulas.
 - Engine temperature, fuel level, battery voltage, compass heading, satellite count, instant/avg KM/L, and average speed simulate active riding telemetry.
 - Speed source indicator badge automatically cycles between `HAL`, `GPS`, and `G+H` every 2 seconds.
+
+---
+
+## Changelog
+
+### V1.1.6 — GNSS stutter fix (task quarantine + bulk UART read)
+- **Root cause:** the GNSS module streams ~1.1KB/s continuously, and a one-byte-at-a-time UART drain can never get ahead of the ring buffer — measured ~1s of wall time per 1024 bytes, ~920µs of it spent inside each `read()` call while parsing itself only took 9µs/byte. On the old single sensor task this froze every real-time value for seconds and, on the display core, stalled rendering (`SLOW FRAME` / `sMaxGap` spikes with the webui client connected).
+- **GPS quarantine:** parsing moved to its own `gpsTask` on **Core 0** (prio 2, below the WiFi/HTTPD/LWIP stack). GPS is 1Hz-tolerant, so a stream backlog only ever lags GPS values — the vehicle sensors and the screen (Core 1) are never touched.
+- **Bulk read:** the UART is now drained in one `readBytes()` call per tick (exact available count, 1024 B/tick cap) instead of 1024 individual `read()` calls, collapsing the ~1s drains to microseconds; `setTimeout(20)` bounds any driver wait.
+- **Result:** steady 62.5 FPS with 0 frames over 24ms, sensor task ticking every ~20ms, live GPS values.
 
 ---
 

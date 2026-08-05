@@ -534,6 +534,7 @@ float accelResultTime = 0.0f;
 
 SensorSnapshot g_sensorData;
 SemaphoreHandle_t g_stateMutex = NULL;
+volatile unsigned long g_sensorLastTickMs = 0;
 
 // ----------------------------------------------------------------------------
 // Hall sensor (ISR + speed)
@@ -988,9 +989,103 @@ static void ubxParseByte(uint8_t b) {
 }
 
 // ----------------------------------------------------------------------------
-// Sensor task
+// Demo-mode data override.
+// Generates the demo values from millis() on the DISPLAY core (called from the
+// display loop right after the mutex snapshot). The sensor task generates demo
+// data on core 0 at priority 2, which the WiFi/TCP stack (priorities 16-23,
+// same core) preempts for the whole duration of any HTTP/TLS transfer
+// (weather fetch, OTA check, browser polling). When that happens the sensor
+// task freezes and the dashboard shows frozen values for SECONDS while the
+// loop keeps drawing 60 fps. Regenerating here means demo animation can never
+// be stalled by core-0 network activity.
 // ----------------------------------------------------------------------------
-void sensorTask(void *pvParameters) {
+void demoSnapshotOverride(SensorSnapshot &snap) {
+  unsigned long t = millis();
+  float simSpeed = 60.0f + 50.0f * sinf(t / 2000.0f);
+  snap.currentSpeed = (simSpeed < 0.0f) ? 0.0f : simSpeed;
+  snap.fuelLiters = 5.0f + 5.0f * sinf(t / 5000.0f);
+  snap.fuelPercentage = (int)((snap.fuelLiters / 10.0f) * 100.0f);
+  snap.batteryVoltage = 12.5f + 1.5f * sinf(t / 3000.0f);
+  snap.engineTemperature = 10.0f + 100.0f * (0.5f + 0.5f * sinf(t / 8000.0f));
+  snap.satellites = 8 + (int)(3.0f * sinf(t / 10000.0f));
+  snap.totalDistanceKm = totalDistanceKm + (t / 10000.0);
+  snap.accelResultTime = 4.5f;
+  snap.accelState = FINISHED;
+  static float demoInstKml = 15.0f;
+  static float demoAvgKml = 18.5f;
+  static unsigned long lastDemoKmlUpdate = 0;
+  if (t - lastDemoKmlUpdate >= 1000) {
+    lastDemoKmlUpdate = t;
+    demoInstKml = 15.0f + 5.0f * cosf(t / 2000.0f);
+    demoAvgKml = 18.0f + 2.0f * sinf(t / 6000.0f);
+  }
+  snap.instantKml = demoInstKml;
+  snap.averageKml = demoAvgKml;
+  snap.averageSpeed = simSpeed * 0.8f;
+  snap.timeValid = true;
+  snap.dateValid = true;
+  snap.isGpsSpeedValid = true;
+  snap.speedSourceMode = 1;
+  snap.heading = fmodf((float)t * 0.02f, 360.0f); // steady 20°/s rotation
+  ambientLightValue = 500 + (int)(2500.0f * (0.5f + 0.5f * sinf(t / 3000.0f)));
+  snap.localHour = 10;
+  snap.minute = (t / 1000) % 60;
+  snap.day = 16;
+  snap.month = 7;
+  snap.year = 26;
+}
+
+// ----------------------------------------------------------------------------
+// Shared local-time computation. Returns false when the system clock has not
+// been set yet. Used both by the sensor task (once per tick) and by the
+// display loop (every frame), so the on-screen clock keeps ticking even if the
+// sensor task is stalled by core-0 network work.
+// ----------------------------------------------------------------------------
+bool systemTimeToLocal(int &hour, int &minute, int &day, int &month,
+                       int &year) {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  if (tv.tv_sec <= 1000000000) return false;
+  time_t local = tv.tv_sec;
+  struct tm *loc_tm = gmtime(&local);
+  int dst = 0;
+  if (TZ_DST_ENABLED) {
+    int euroOff = getEuropeanOffset(loc_tm->tm_year + 1900, loc_tm->tm_mon + 1,
+                                    loc_tm->tm_mday, loc_tm->tm_hour);
+    dst = euroOff - 1;
+  }
+  local += ((TZ_OFFSET_HOURS + dst) * 3600);
+  loc_tm = gmtime(&local);
+  hour = loc_tm->tm_hour;
+  minute = loc_tm->tm_min;
+  day = loc_tm->tm_mday;
+  month = loc_tm->tm_mon + 1;
+  year = loc_tm->tm_year % 100;
+  return true;
+}
+
+// ----------------------------------------------------------------------------
+// Stage timing diagnostics. Logs any single sensor-driver stage that runs
+// >200ms (I2C bus hang, NVS/flash commit, serial burst, ADC stall) so a
+// core-0 stall can be attributed to the exact driver instead of guessing from
+// the display-side sMaxGap.
+// ----------------------------------------------------------------------------
+static void sensorStageDiag(const char *name, unsigned long startMs) {
+  unsigned long ms = millis() - startMs;
+  if (ms > 200)
+    logPrintf("SENS SLOW: %s %lums\n", name, (unsigned long)ms);
+}
+
+// ----------------------------------------------------------------------------
+// GPS task. Quarantined on core 0 beside the WiFi stack. The UBX module
+// streams ~1.1KB/s continuously, so a one-byte-at-a-time drain can never get
+// ahead of the ring: a tick can park ~1s per 1024 bytes blocked in the read.
+// On the old single sensor task that case froze every real-world value, and on
+// core 1 it also starved the display. Here the httpd/TCP/IP/WiFi tasks (prios
+// 5/18/23) preempt this task at will - GPS is 1Hz-tolerant data, so a stale
+// drain only lags GPS values, never the sensors or the screen.
+// ----------------------------------------------------------------------------
+void gpsTask(void *pvParameters) {
   static bool gpsWatchdogLogged = false;
   static bool ubxDiagLogged = false;
   static bool rawDumpLogged = false;
@@ -998,13 +1093,58 @@ void sensorTask(void *pvParameters) {
   static uint8_t gpsRawBuf[256];
   static uint8_t gpsRawIdx = 0;
   for (;;) {
-    while (gpsSerial.available() > 0) {
-      uint8_t b = gpsSerial.read();
-      if (gpsRawIdx < sizeof(gpsRawBuf))
-        gpsRawBuf[gpsRawIdx++] = b;
-      gpsRxBytes++;
-      gps.encode((char)b);
-      ubxParseByte(b);
+    // Cap GPS bytes parsed per tick. A module burst (baud mismatch, buffer
+    // backlog, message dump) can otherwise keep the drain loop running for
+    // SECONDS, freezing the whole sensor task (and every real-mode value with
+    // it). 1024 B/tick = 51KB/s, >4x the 115200 baud peak, so normal-rate data
+    // is never delayed - a flood just drains over a few ticks instead of
+    // stalling one tick.
+    // Bulk-read the ring in ONE driver call (capped at 1024 B/tick, so a
+    // module burst drains over a few ticks instead of stalling one tick).
+    // v13 instrumentation showed the per-byte wall cost was ~920us INSIDE
+    // read()/uartReadBytes (encode/parse was 9us/byte and preemption-clean),
+    // so 1024 individual reads could park this task ~1s even with data
+    // available. One readBytes() for the exact available count is non-blocking
+    // (all requested bytes are already in the ring) and costs ~us.
+    unsigned long tGps = millis();
+    uint32_t gpsBytesStart = gpsRxBytes;
+    int64_t tGpsUs = esp_timer_get_time();
+    uint32_t gpsReadLoopTotal = 0;
+    uint32_t gpsEncUsTotal = 0;
+    int gpsSlowestByteUs = 0;
+    uint8_t gpsBuf[1024];
+    size_t gpsAvail = (size_t)gpsSerial.available();
+    if (gpsAvail > sizeof(gpsBuf)) gpsAvail = sizeof(gpsBuf);
+    if (gpsAvail > 0) {
+      int64_t t0 = esp_timer_get_time();
+      size_t got = gpsSerial.readBytes(gpsBuf, gpsAvail);
+      int64_t t1 = esp_timer_get_time();
+      gpsReadLoopTotal += (uint32_t)(t1 - t0);
+      for (size_t j = 0; j < got; j++) {
+        uint8_t b = gpsBuf[j];
+        if (gpsRawIdx < sizeof(gpsRawBuf))
+          gpsRawBuf[gpsRawIdx++] = b;
+        gpsRxBytes++;
+        int64_t t2 = esp_timer_get_time();
+        gps.encode((char)b);
+        ubxParseByte(b);
+        int64_t t3 = esp_timer_get_time();
+        gpsEncUsTotal += (uint32_t)(t3 - t2);
+        int byt = (int)(t3 - t0);
+        if (byt > gpsSlowestByteUs) gpsSlowestByteUs = byt;
+      }
+    }
+    {
+      unsigned long gpsMs = millis() - tGps;
+      int64_t gpsUs = esp_timer_get_time() - tGpsUs;
+      if (gpsMs > 200)
+        logPrintf("SENS SLOW: gpsParse %lums (drained=%lu avail=%d "
+                  "loopUs=%llu readAvg=%luus encAvg=%luus slowestByte=%dus)\n",
+                  (unsigned long)gpsMs, (unsigned long)(gpsRxBytes - gpsBytesStart),
+                  (int)gpsSerial.available(), (unsigned long long)gpsUs,
+                  (unsigned long)(gpsReadLoopTotal / (gpsRxBytes - gpsBytesStart)),
+                  (unsigned long)(gpsEncUsTotal / (gpsRxBytes - gpsBytesStart)),
+                  gpsSlowestByteUs);
     }
     if (gpsWatchdogStart == 0)
       gpsWatchdogStart = millis();
@@ -1040,25 +1180,8 @@ void sensorTask(void *pvParameters) {
       }
     }
     updateFilteredSpeed();
-    processCompassSensor();
-    processLightSensor();
-    processFuelSensor();
-    processTemperatureSensor();
     updateGPSOdometer();
-    updateAccelTimer();
 
-    static unsigned long lastSlowRead = 0;
-    static unsigned long lastVerySlowRead = 0;
-    unsigned long nowSensor = millis();
-    if (nowSensor - lastSlowRead >= 500) {
-      lastSlowRead = nowSensor;
-      processBatterySensor();
-    }
-    if (nowSensor - lastVerySlowRead >= 1000) {
-      lastVerySlowRead = nowSensor;
-      processFuelConsumption();
-      updateAverageSpeed();
-    }
     // GNSS date/time is only applied while a real position fix is valid AND
     // the module clock has been observed ticking in step with real time
     // (3 consecutive advances of ~1s). Receivers without a fix (or with a
@@ -1102,6 +1225,52 @@ void sensorTask(void *pvParameters) {
         tv.tv_usec = 0;
         settimeofday(&tv, NULL);
       }
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Sensor task - core 1 beside the display loop. GPS parsing lives in gpsTask
+// (core 0); this task only owns the short I2C/ADC sensors and the mutex
+// snapshot, finishing in a few ms per 20ms tick, so it can never hold the
+// display hostage like the old GPS drain did.
+// ----------------------------------------------------------------------------
+void sensorTask(void *pvParameters) {
+  for (;;) {
+    {
+      unsigned long tStage = millis();
+      processCompassSensor();
+      sensorStageDiag("compass", tStage);
+    }
+    {
+      unsigned long tStage = millis();
+      processLightSensor();
+      sensorStageDiag("light", tStage);
+    }
+    {
+      unsigned long tStage = millis();
+      processFuelSensor();
+      sensorStageDiag("fuel", tStage);
+    }
+    {
+      unsigned long tStage = millis();
+      processTemperatureSensor();
+      sensorStageDiag("temp", tStage);
+    }
+    updateAccelTimer();
+
+    static unsigned long lastSlowRead = 0;
+    static unsigned long lastVerySlowRead = 0;
+    unsigned long nowSensor = millis();
+    if (nowSensor - lastSlowRead >= 500) {
+      lastSlowRead = nowSensor;
+      processBatterySensor();
+    }
+    if (nowSensor - lastVerySlowRead >= 1000) {
+      lastVerySlowRead = nowSensor;
+      processFuelConsumption();
+      updateAverageSpeed();
     }
 
     if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
@@ -1155,28 +1324,11 @@ void sensorTask(void *pvParameters) {
         g_sensorData.averageSpeed = averageSpeed;
         g_sensorData.heading = currentHeading;
 
-        struct timeval tv;
-        gettimeofday(&tv, NULL);
-        if (tv.tv_sec > 1000000000) {
+        if (systemTimeToLocal(g_sensorData.localHour, g_sensorData.minute,
+                              g_sensorData.day, g_sensorData.month,
+                              g_sensorData.year)) {
           g_sensorData.timeValid = true;
           g_sensorData.dateValid = true;
-          time_t local = tv.tv_sec;
-          struct tm *loc_tm = gmtime(&local);
-          int dst = 0;
-          if (TZ_DST_ENABLED) {
-            int euroOff = getEuropeanOffset(loc_tm->tm_year + 1900, loc_tm->tm_mon + 1,
-                                            loc_tm->tm_mday, loc_tm->tm_hour);
-            dst = euroOff - 1;
-          }
-          int offset = TZ_OFFSET_HOURS + dst;
-          local += (offset * 3600);
-          loc_tm = gmtime(&local);
-
-          g_sensorData.localHour = loc_tm->tm_hour;
-          g_sensorData.minute = loc_tm->tm_min;
-          g_sensorData.day = loc_tm->tm_mday;
-          g_sensorData.month = loc_tm->tm_mon + 1;
-          g_sensorData.year = loc_tm->tm_year % 100;
         } else {
           g_sensorData.timeValid = false;
           g_sensorData.dateValid = false;
@@ -1201,7 +1353,10 @@ void sensorTask(void *pvParameters) {
         }
       }
       xSemaphoreGive(g_stateMutex);
+    } else {
+      logPrintf("SENS SKIP: state mutex busy\n");
     }
+    g_sensorLastTickMs = millis();
     vTaskDelay(pdMS_TO_TICKS(20));
   }
 }

@@ -30,7 +30,7 @@ uint16_t c_fuel_norm, c_fuel_warn, c_fuel_crit;
 String GHOST_COLOR_STR = "#666666";
 uint16_t ghost_color;
 
-uint32_t SPI_BUS_SPEED = 60000000;
+uint32_t SPI_BUS_SPEED = 80000000;
 int DISPLAY_WIDTH = 480;
 int DISPLAY_HEIGHT = 320;
 
@@ -128,6 +128,13 @@ bool SHOW_ELEMENT_AVG_KML = true;
 bool SHOW_ELEMENT_AVG_SPEED = true;
 bool SHOW_ELEMENT_FUEL_LTRS = true;
 bool SHOW_ELEMENT_COMPASS = true;
+bool SHOW_ELEMENT_WEATHER = true;
+int OFFSET_WEATHER_X = 0;
+int OFFSET_WEATHER_Y = 146;
+String WEATHER_CITY = "Singapore";
+float WEATHER_LAT = 1.3521f;
+float WEATHER_LON = 103.8198f;
+WeatherData g_weatherData;
 bool ENABLE_POWER_SENSE = false;
 bool ENABLE_CIRCLE_TEST = false;
 bool ENABLE_DEMO_MODE = true;
@@ -225,7 +232,7 @@ bool TZ_DST_ENABLED = true;
 bool OTA_PULL_ENABLED = true;
 String OTA_PULL_URL = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-String OTA_CURRENT_VERSION = "1.1.5";
+String OTA_CURRENT_VERSION = "1.1.6";
 
 // Optional PIN protecting the web config page and admin API (empty = disabled)
 String CONFIG_PIN = "";
@@ -305,7 +312,7 @@ void processConfig(int mode, JsonDocument *doc) {
     pref.begin("cfg", false);
 
   CFG_INT(DISPLAY_ROTATION, "DISP_ROT", 1);
-  CFG_INT(SPI_BUS_SPEED, "SPI_FREQ", 60000000);
+  CFG_INT(SPI_BUS_SPEED, "SPI_FREQ", 80000000);
   CFG_INT(DISPLAY_WIDTH, "DISP_W", 480);
   CFG_INT(DISPLAY_HEIGHT, "DISP_H", 320);
   CFG_INT(TARGET_FPS, "TGT_FPS", 60);
@@ -426,6 +433,12 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(SHOW_ELEMENT_AVG_SPEED, "SH_AVG_SPD", true);
   CFG_BOOL(SHOW_ELEMENT_FUEL_LTRS, "SH_FUL", true);
   CFG_BOOL(SHOW_ELEMENT_COMPASS, "SH_CMP", true);
+  CFG_BOOL(SHOW_ELEMENT_WEATHER, "SH_WEATH", true);
+  CFG_INT(OFFSET_WEATHER_X, "O_WEATH_X", 0);
+  CFG_INT(OFFSET_WEATHER_Y, "O_WEATH_Y", 146);
+  CFG_STR(WEATHER_CITY, "WEATH_CITY", "Singapore");
+  CFG_FLT(WEATHER_LAT, "WEATH_LAT", 1.3521f);
+  CFG_FLT(WEATHER_LON, "WEATH_LON", 103.8198f);
   CFG_BOOL(ENABLE_POWER_SENSE, "PWR_SNS", false);
   CFG_BOOL(ENABLE_CIRCLE_TEST, "CIRC_TST", false);
   CFG_BOOL(ENABLE_DEMO_MODE, "DEMO_MODE", true);
@@ -494,7 +507,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", true);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
   CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.1.5");
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.1.6");
 
   // CONFIG_PIN is handled manually: never serialized back (mode 1) so the web
   // config API cannot leak it. Mode 2 accepts a new 4-16 char PIN, or clears

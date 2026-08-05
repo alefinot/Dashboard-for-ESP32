@@ -38,6 +38,82 @@ static SemaphoreHandle_t otaStatusMutex = NULL;
 static bool otaPullTaskRunning = false;
 static bool otaPullManualFlag = false;
 
+// ----------------------------------------------------------------------------
+// Background Weather Fetch
+// ----------------------------------------------------------------------------
+static bool weatherTaskRunning = false;
+
+void updateWeather() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+  HTTPClient http;
+  
+  double lat = WEATHER_LAT;
+  double lon = WEATHER_LON;
+  if (gps.location.isValid()) {
+    lat = gps.location.lat();
+    lon = gps.location.lng();
+  }
+  
+  char url[256];
+  snprintf(url, sizeof(url),
+           "http://api.open-meteo.com/v1/forecast?latitude=%.6f&longitude=%.6f&current=temperature_2m,relative_humidity_2m,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m&daily=sunset&timezone=auto&forecast_days=1",
+           lat, lon);
+           
+  logPrintf("Weather: fetching from %s\n", url);
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (!error) {
+      if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        g_weatherData.temperature = doc["current"]["temperature_2m"] | 0.0f;
+        g_weatherData.humidity = doc["current"]["relative_humidity_2m"] | 0;
+        g_weatherData.weatherCode = doc["current"]["weather_code"] | 0;
+        g_weatherData.cloudCover = doc["current"]["cloud_cover"] | 0;
+        g_weatherData.windSpeed = doc["current"]["wind_speed_10m"] | 0.0f;
+        g_weatherData.windDirection = doc["current"]["wind_direction_10m"] | 0.0f;
+        
+        if (doc["daily"]["sunset"].is<JsonArray>()) {
+          const char* sunset = doc["daily"]["sunset"][0] | "";
+          if (strlen(sunset) >= 16) {
+            g_weatherData.sunsetTime = String(sunset).substring(11);
+          } else {
+            g_weatherData.sunsetTime = "--:--";
+          }
+        } else {
+          g_weatherData.sunsetTime = "--:--";
+        }
+        g_weatherData.valid = true;
+        g_weatherData.lastUpdated = millis();
+        xSemaphoreGive(g_stateMutex);
+      }
+      logPrintf("Weather: success! Temp=%.1fC, Hum=%d%%\n", 
+                g_weatherData.temperature, g_weatherData.humidity);
+    } else {
+      logPrintf("Weather JSON error: %s\n", error.c_str());
+    }
+  } else {
+    logPrintf("Weather HTTP error: %d\n", httpCode);
+  }
+  http.end();
+}
+
+void weatherFetchTask(void *pvParameters) {
+  updateWeather();
+  weatherTaskRunning = false;
+  vTaskDelete(NULL);
+}
+
+void startWeatherFetch() {
+  if (weatherTaskRunning) return;
+  weatherTaskRunning = true;
+  xTaskCreatePinnedToCore(weatherFetchTask, "WeatherFetchTask", 6144, NULL, 1, NULL, 0);
+}
+
 void setOtaPullStatus(const char *status) {
   if (otaStatusMutex) xSemaphoreTake(otaStatusMutex, portMAX_DELAY);
   otaPullStatus = status;
@@ -1159,7 +1235,8 @@ const iconSVG = {
     sensors: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
     gnss: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
     layout: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>',
-    security: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+    security: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+    weather: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M6.34 17.66l-1.41 1.41"/><path d="M19.07 4.93l-1.41 1.41"/><circle cx="12" cy="12" r="4"/></svg>'
 };
 const configMap = [
     {
@@ -1265,6 +1342,19 @@ const configMap = [
             { id: "OTA_PULL_URL", label: "Firmware Manifest URL" },
             { id: "OTA_PULL_INTERVAL_HOURS", label: "Check Interval", unit: "hours" },
             { id: "OTA_CURRENT_VERSION", label: "Current Firmware Version" }
+        ]
+    },
+    {
+        title: "Weather Widget", icon: iconSVG.weather,
+        items: [
+            { type: "card_header", label: "Weather Options" },
+            { id: "SHOW_ELEMENT_WEATHER", label: "Show Weather Widget on Dashboard" },
+            { id: "WEATHER_CITY", label: "City Name" },
+            { id: "WEATHER_LAT", label: "Location Latitude (Fallback)" },
+            { id: "WEATHER_LON", label: "Location Longitude (Fallback)" },
+            { type: "card_header", label: "Widget Position" },
+            { type: "xy", label: "Widget Position Offsets", idX: "OFFSET_WEATHER_X", idY: "OFFSET_WEATHER_Y" },
+            { type: "note", label: "If GPS is active, coordinates are updated automatically from the satellite feed. Otherwise, the fallback coordinates are used to fetch local weather from Open-Meteo." }
         ]
     },
     {
@@ -2778,6 +2868,7 @@ void webServerTask(void *pvParameters) {
 
     if (staDone && staConnected && !staFinalized) {
       staFinalized = true;
+      startWeatherFetch();
       if (MDNS.begin("dashboard-pp")) {
         MDNS.addService("http", "tcp", 80);
         logPrintf("mDNS: http://dashboard-pp.local\n");
@@ -2826,6 +2917,17 @@ void webServerTask(void *pvParameters) {
       lastClientTime = millis();
     }
 
+    static unsigned long lastWeatherCheck = 0;
+    if (WiFi.status() == WL_CONNECTED) {
+      if (lastWeatherCheck == 0) {
+        lastWeatherCheck = millis();
+      }
+      if (millis() - lastWeatherCheck >= 600000) {
+        lastWeatherCheck = millis();
+        startWeatherFetch();
+      }
+    }
+
     // Allow 10 minutes before disabling the STA uplink (for testing) - the
     // AP and the config web server always stay alive so the config page
     // keeps working even after the LAN connection idles out.
@@ -2853,6 +2955,18 @@ void webServerTask(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(500));
         ESP.restart();
       }
+    }
+
+    // Diagnostics: flag any web-task iteration that runs long (DNS/TLS/API
+    // work) - such bursts can stall the other core's frames via flash cache.
+    // Gated to steady state (boot does NTP sync with multi-second delays).
+    if (millis() > 30000) {
+      static unsigned long webIterLast = 0;
+      unsigned long webIterMs = millis() - webIterLast;
+      webIterLast = millis();
+      if (webIterMs > 100)
+        logPrintf("WEB SLOW: iteration %lums heap=%lu\n",
+                  (unsigned long)webIterMs, (unsigned long)ESP.getFreeHeap());
     }
 
     vTaskDelay(pdMS_TO_TICKS(10));
