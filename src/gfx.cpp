@@ -49,44 +49,22 @@ void LGFX_ST7789_4::applyBusConfig() {
 #include "Conthrax_SemiBold12pt7b.h"
 #include "Conthrax_SemiBold7pt7b.h"
 #include "Conthrax_SemiBold4pt7b.h"
+#include "DS_DIGIT_120px_vlw.h"
 
-// Cached VLW file buffer for the 120px speed digits (~45KB) and the index of
-// the currently loaded VLW font on the display. Both are released cooperatively
-// before an OTA check frees the heap for the TLS handshake (see
-// processOtaMemRelease in ui.cpp) and rebuilt lazily on the next frame.
-static std::vector<uint8_t> g_vlw120Buf;
+// Index of the currently loaded VLW font on the display.
+// The 120px VLW font is compiled directly into Flash memory (PROGMEM) via
+// include/DS_DIGIT_120px_vlw.h, so it streams from Flash mapped memory and
+// consumes ZERO bytes of DRAM.
 static int g_lastVLWFont = -1;
 static bool g_vlw120Loaded = false;
 
 VFontData getVLWData120() {
-  if (g_vlw120Buf.empty()) {
-    fs::File f = LittleFS.open("/Fonts/DS-DIGIT_120px.vlw", "r");
-    if (f) {
-      size_t sz = f.size();
-      // This 45KB contiguous allocation used to throw std::bad_alloc on a
-      // fragmented heap (e.g. right after an OTA rollback boot with mem-saver
-      // active), which the display task never caught: std::terminate -> abort.
-      // Pre-check the largest free block and guard the resize so a low-heap
-      // frame degrades to "no 120px font" instead of crashing.
-      if (sz > 0 && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= sz &&
-          ESP.getFreeHeap() >= sz + 8192) {
-        try {
-          g_vlw120Buf.resize(sz);
-          f.read(g_vlw120Buf.data(), g_vlw120Buf.size());
-        } catch (...) {
-          std::vector<uint8_t>().swap(g_vlw120Buf);
-        }
-      }
-      f.close();
-    }
-  }
-  return { g_vlw120Buf.empty() ? nullptr : g_vlw120Buf.data(), g_vlw120Buf.size() };
+  return { DS_DIGIT_120px_vlw, (size_t)DS_DIGIT_120px_vlw_len };
 }
 
 bool isVLW120FontReady() { return g_vlw120Loaded; }
 
 void freeVLWData120() {
-  std::vector<uint8_t>().swap(g_vlw120Buf);
   g_vlw120Loaded = false;
 }
 
@@ -564,7 +542,7 @@ void drawSplashBase() {
   display.print("DASHBOARD++");
   display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
   display.setTextColor(TFT_WHITE);
-  display.getTextBounds(SPLASH_SIGNATURE.c_str(), 0, 0, &x1, &y1, &w, &h);
+  display.getTextBounds(SPLASH_SIGNATURE, 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 185 - y1);
   display.print(SPLASH_SIGNATURE);
   int barX = DISPLAY_WIDTH / 2 - (260 / 2);
@@ -616,17 +594,17 @@ void showGoodbyeScreen(bool isSleep) {
 
   int16_t x1, y1;
   uint16_t w, h;
-  String title = isSleep ? "SEE YOU SOON" : "REBOOTING...";
+  const char *title = isSleep ? "SEE YOU SOON" : "REBOOTING...";
 
   display.startWrite();
   display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
   display.setTextColor(TFT_WHITE);
-  display.getTextBounds(title.c_str(), 0, 0, &x1, &y1, &w, &h);
+  display.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 120 - y1);
   display.print(title);
   display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
   display.setTextColor(TFT_WHITE);
-  display.getTextBounds(REBOOT_SIGNATURE.c_str(), 0, 0, &x1, &y1, &w, &h);
+  display.getTextBounds(REBOOT_SIGNATURE, 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 185 - y1);
   display.print(REBOOT_SIGNATURE);
   int barX = DISPLAY_WIDTH / 2 - (260 / 2);
@@ -724,17 +702,17 @@ void showUpdatingScreen() {
   display.startWrite();
   display.fillScreen(TFT_BLACK);
 
-  String title = "UPDATING...";
+  const char *title = "UPDATING...";
   display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
   display.setTextColor(TFT_WHITE);
-  display.getTextBounds(title.c_str(), 0, 0, &x1, &y1, &w, &h);
+  display.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 120 - y1);
   display.print(title);
 
   display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
   display.setTextColor(TFT_WHITE);
-  String msg = "DO NOT TURN OFF THE DEVICE";
-  display.getTextBounds(msg.c_str(), 0, 0, &x1, &y1, &w, &h);
+  const char *msg = "DO NOT TURN OFF THE DEVICE";
+  display.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
   display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, 185 - y1);
   display.print(msg);
   int barX = DISPLAY_WIDTH / 2 - (260 / 2);

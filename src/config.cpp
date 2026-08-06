@@ -5,9 +5,9 @@
 // ----------------------------------------------------------------------------
 int DISPLAY_ROTATION = 1;
 
-String SPLASH_SIGNATURE = "by @ale.finot";
-String REBOOT_SIGNATURE = "Dashboard++ by @ale.finot";
-String DASHBOARD_SIGNATURE = "<<<<<<    Dashboard++ by @ale.finot    >>>>>>";
+char SPLASH_SIGNATURE[48] = "by @ale.finot";
+char REBOOT_SIGNATURE[48] = "Dashboard++ by @ale.finot";
+char DASHBOARD_SIGNATURE[96] = "<<<<<<    Dashboard++ by @ale.finot    >>>>>>";
 
 int TEMP_BAR_MIN = 10;
 int TEMP_BAR_MAX = 110;
@@ -17,17 +17,17 @@ int TEMP_WARN_GRN = 50;
 int FUEL_WARN_RED = 20;
 int FUEL_WARN_YEL = 45;
 
-String COLOR_TEMP_NORM = "#00ffff";
-String COLOR_TEMP_WARN = "#ff8c00";
-String COLOR_TEMP_CRIT = "#ff0000";
+char COLOR_TEMP_NORM[8] = "#00ffff";
+char COLOR_TEMP_WARN[8] = "#ff8c00";
+char COLOR_TEMP_CRIT[8] = "#ff0000";
 
-String COLOR_FUEL_NORM = "#00ff00";
-String COLOR_FUEL_WARN = "#ffff00";
-String COLOR_FUEL_CRIT = "#ff0000";
+char COLOR_FUEL_NORM[8] = "#00ff00";
+char COLOR_FUEL_WARN[8] = "#ffff00";
+char COLOR_FUEL_CRIT[8] = "#ff0000";
 
 uint16_t c_temp_norm, c_temp_warn, c_temp_crit;
 uint16_t c_fuel_norm, c_fuel_warn, c_fuel_crit;
-String GHOST_COLOR_STR = "#666666";
+char GHOST_COLOR_STR[8] = "#666666";
 uint16_t ghost_color;
 
 uint32_t SPI_BUS_SPEED = 80000000;
@@ -56,8 +56,8 @@ bool GPS_ONLY_MODE = false;
 float ACCEL_START_SPEED = 1.0f;
 float ACCEL_TARGET_SPEED = 50.0f;
 float ACCEL_MAX_TIME = 9.99f;
-String ACCEL_BADGE_LINE1 = "0-50";
-String ACCEL_BADGE_LINE2 = "km/h";
+char ACCEL_BADGE_LINE1[16] = "0-50";
+char ACCEL_BADGE_LINE2[16] = "km/h";
 
 int OFFSET_BIG_TIME_X = -98;
 int OFFSET_BIG_TIME_Y = -78;
@@ -131,7 +131,7 @@ bool SHOW_ELEMENT_COMPASS = true;
 bool SHOW_ELEMENT_WEATHER = true;
 int OFFSET_WEATHER_X = 0;
 int OFFSET_WEATHER_Y = 146;
-String WEATHER_CITY = "Singapore";
+char WEATHER_CITY[48] = "Singapore";
 float WEATHER_LAT = 1.3521f;
 float WEATHER_LON = 103.8198f;
 WeatherData g_weatherData;
@@ -211,31 +211,31 @@ float ADC_VOLTS_FACTOR;
 bool showFpsCounter = true;
 bool showGpsDebug = false;
 
-String WIFI_SSID = "Xiaomi 15";
-String WIFI_PASSWORD = "GDk2DxjVDc";
-String WIFI_SSID_1 = "D-Link-627F3B";
-String WIFI_PASSWORD_1 = "";
-String WIFI_SSID_2 = "TP-Link_F3EB";
-String WIFI_PASSWORD_2 = "";
-String WIFI_SSID_3 = "";
-String WIFI_PASSWORD_3 = "";
-String WIFI_SSID_4 = "";
-String WIFI_PASSWORD_4 = "";
+char WIFI_SSID[64] = "Xiaomi 15";
+char WIFI_PASSWORD[64] = "GDk2DxjVDc";
+char WIFI_SSID_1[64] = "D-Link-627F3B";
+char WIFI_PASSWORD_1[64] = "";
+char WIFI_SSID_2[64] = "TP-Link_F3EB";
+char WIFI_PASSWORD_2[64] = "";
+char WIFI_SSID_3[64] = "";
+char WIFI_PASSWORD_3[64] = "";
+char WIFI_SSID_4[64] = "";
+char WIFI_PASSWORD_4[64] = "";
 int WIFI_TX_POWER_DBM = 20;
 bool WIFI_AUTO_OFF_ENABLED = false;
 
 bool NTP_ENABLED = true;
-String NTP_SERVER = "pool.ntp.org";
+char NTP_SERVER[64] = "pool.ntp.org";
 int TZ_OFFSET_HOURS = 1;
 bool TZ_DST_ENABLED = true;
 
 bool OTA_PULL_ENABLED = true;
-String OTA_PULL_URL = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
+char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-String OTA_CURRENT_VERSION = "1.2.0";
+char OTA_CURRENT_VERSION[32] = "1.2.1";
 
 // Optional PIN protecting the web config page and admin API (empty = disabled)
-String CONFIG_PIN = "";
+char CONFIG_PIN[17] = "";
 
 int FUEL_TOUCH_POINTS = 8;
 int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400};
@@ -263,13 +263,26 @@ int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400};
     pref.putFloat(nvsKey, var);                                                \
   }
 
+// String config values live in fixed char[] buffers (no String objects, no
+// per-request heap allocations in the save/load path). mode 1 serializes the
+// buffer, mode 2 writes the posted value in place. The load in mode 0 uses
+// the getString(key, char*, maxLen) buffer overload (nvs_get_str): getBytes
+// reads via nvs_get_blob, which returns TYPE_MISMATCH for values stored with
+// putString (nvs_set_str), silently falling back to the default on every
+// boot and making saved settings appear to vanish.
 #define CFG_STR(var, nvsKey, defVal)                                           \
   if (mode == 0) {                                                             \
-    var = pref.getString(nvsKey, defVal);                                      \
+    size_t cfgLen = pref.getString(nvsKey, var, sizeof(var));                  \
+    if (cfgLen == 0) {                                                         \
+      strncpy(var, defVal, sizeof(var) - 1);                                   \
+      var[sizeof(var) - 1] = 0;                                                \
+    } else {                                                                   \
+      var[sizeof(var) - 1] = 0;                                                \
+    }                                                                          \
   } else if (mode == 1) {                                                      \
     (*doc)[#var] = var;                                                        \
-  } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
-    var = (*doc)[#var].as<String>();                                           \
+  } else if (mode == 2 && (*doc)[#var].is<const char *>()) {                   \
+    snprintf(var, sizeof(var), "%s", (*doc)[#var].as<const char *>());         \
     pref.putString(nvsKey, var);                                               \
   }
 
@@ -283,12 +296,12 @@ int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400};
     pref.putBool(nvsKey, var);                                                 \
   }
 
-uint16_t hexToRGB565(String hex) {
-  if (hex.length() == 0)
+uint16_t hexToRGB565(const char *hex) {
+  if (hex == nullptr || hex[0] == 0)
     return 0xFFFF;
   if (hex[0] == '#')
-    hex = hex.substring(1);
-  long rgb = strtol(hex.c_str(), nullptr, 16);
+    hex++;
+  long rgb = strtol(hex, nullptr, 16);
   uint8_t r = (rgb >> 16) & 0xFF;
   uint8_t g = (rgb >> 8) & 0xFF;
   uint8_t b = rgb & 0xFF;
@@ -507,23 +520,28 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", true);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
   CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.1.6");
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.2.1");
 
   // CONFIG_PIN is handled manually: never serialized back (mode 1) so the web
   // config API cannot leak it. Mode 2 accepts a new 4-16 char PIN, or clears
   // it when CONFIG_PIN_REMOVE is true.
   if (mode == 0) {
-    CONFIG_PIN = pref.getString("CONFIG_PIN", "");
+    size_t cb = pref.getString("CONFIG_PIN", CONFIG_PIN, sizeof(CONFIG_PIN));
+    if (cb == 0)
+      CONFIG_PIN[0] = 0;
+    else
+      CONFIG_PIN[sizeof(CONFIG_PIN) - 1] = 0;
   } else if (mode == 1) {
     (*doc)["CONFIG_PIN_REMOVE"] = false;
   } else if (mode == 2) {
     if ((*doc)["CONFIG_PIN_REMOVE"].as<bool>()) {
-      CONFIG_PIN = "";
+      CONFIG_PIN[0] = 0;
       pref.putString("CONFIG_PIN", "");
-    } else if (!(*doc)["CONFIG_PIN"].isNull()) {
-      String newPin = (*doc)["CONFIG_PIN"].as<String>();
-      if (newPin.length() >= 4 && newPin.length() <= 16) {
-        CONFIG_PIN = newPin;
+    } else if ((*doc)["CONFIG_PIN"].is<const char *>()) {
+      const char *newPin = (*doc)["CONFIG_PIN"].as<const char *>();
+      size_t newPinLen = newPin ? strlen(newPin) : 0;
+      if (newPinLen >= 4 && newPinLen <= 16) {
+        snprintf(CONFIG_PIN, sizeof(CONFIG_PIN), "%s", newPin);
         pref.putString("CONFIG_PIN", CONFIG_PIN);
       }
     }
@@ -532,8 +550,8 @@ void processConfig(int mode, JsonDocument *doc) {
   // WiFi passwords: mode 1 sends empty strings so they never leave the device,
   // mode 2 keeps the stored value when the posted password is empty.
   {
-    String *pwds[5] = { &WIFI_PASSWORD, &WIFI_PASSWORD_1, &WIFI_PASSWORD_2,
-                        &WIFI_PASSWORD_3, &WIFI_PASSWORD_4 };
+    char *pwds[5] = { WIFI_PASSWORD, WIFI_PASSWORD_1, WIFI_PASSWORD_2,
+                      WIFI_PASSWORD_3, WIFI_PASSWORD_4 };
     const char *keys[5] = { "WIFI_PASSWORD", "WIFI_PASSWORD_1",
                             "WIFI_PASSWORD_2", "WIFI_PASSWORD_3",
                             "WIFI_PASSWORD_4" };
@@ -542,14 +560,20 @@ void processConfig(int mode, JsonDocument *doc) {
     const char *defs[5] = { "GDk2DxjVDc", "", "", "", "" };
     for (int i = 0; i < 5; i++) {
       if (mode == 0) {
-        *pwds[i] = pref.getString(nvs[i], defs[i]);
+        size_t cb = pref.getString(nvs[i], pwds[i], 64);
+        pwds[i][63] = 0;
+        if (cb == 0) {
+          strncpy(pwds[i], defs[i], 63);
+          pwds[i][63] = 0;
+        }
       } else if (mode == 1) {
         (*doc)[keys[i]] = "";
-      } else if (mode == 2 && !(*doc)[keys[i]].isNull()) {
-        String v = (*doc)[keys[i]].as<String>();
-        if (v.length() > 0) {
-          *pwds[i] = v;
-          pref.putString(nvs[i], v);
+      } else if (mode == 2 && (*doc)[keys[i]].is<const char *>()) {
+        const char *v = (*doc)[keys[i]].as<const char *>();
+        if (v && strlen(v) > 0) {
+          strncpy(pwds[i], v, 63);
+          pwds[i][63] = 0;
+          pref.putString(nvs[i], pwds[i]);
         }
       }
     }

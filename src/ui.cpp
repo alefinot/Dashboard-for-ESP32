@@ -21,8 +21,9 @@ static constexpr unsigned long FRAME_DEFER_MS = 10;
 // odo + sidebars + middle row + compass no longer stack into one 35ms frame.
 #define IN_BAND_BUDGET ((millis() - tFrame0) < (unsigned long)FRAME_DEFER_MS)
 
-// Pre-rendered speed-digit sprite (~40KB), the cached 120px VLW file buffer
-// (~45KB) and the loaded 120px glyph tables (~30KB). Freed by the display task
+// Pre-rendered 4-bit speed-digit sprite (~10KB framebuffer) plus its loaded
+// 120px glyph tables (~30KB), the cached 120px VLW file buffer (~45KB).
+// Freed by the display task
 // itself (safe point, see processOtaMemRelease) before an OTA pull check so
 // the TLS handshake gets big contiguous heap blocks; rebuilt after the check
 // finishes.
@@ -81,12 +82,32 @@ static void ensureSpeedMetrics() {
   vlw120Ready = true;
 }
 
+// The speed sprite stores the glyphs as true 8-bit grayscale, NOT as a 4-bit
+// palette. In LovyanGFX, palette sprites convert a glyph pixel's blended color
+// to a stored index with convert_uint32_to_palette4(c) = (c & 0x0F) * 0x11
+// (the low 4 bits of the RGB value are grabbed as-is). Along an antialiased
+// edge the gray steps wrap around (0xE0 -> index 0 = black, 0xCF -> index 15,
+// 0xD0 -> index 0 ...), so the AA ramp is non-monotonic and the digit edges
+// render as salt-and-pepper "snow". grayscale_8bit instead stores the
+// luminance color_convert<grayscale_t, rgb888_t> directly, which keeps the
+// full 256-level AA ramp smooth. Ghost and white are both grayscale (matches
+// the default GHOST_COLOR_STR "#666666"); the colored-ghost palette approach
+// is dropped because the pixel index it produced is the noisy low-nibble
+// above.
+static void applySpeedSpritePaint() {
+  // 8-bit grayscale needs no palette setup.
+}
+
 // Rebuilds the pre-rendered speed-digit sprite after an OTA check or a
 // low-heap release dropped it. Runs from loop() at a safe point between frames
-// (never inside updateBigDisplay), does a single VLW parse into the sprite
+// (never during updateBigDisplay), does a single VLW parse into the sprite
 // (the digit metrics are cached), and skips the build while an OTA/TLS window
 // or memory-saver mode is active. spBuildAttempted latches so a failed
-// allocation is retried only after the next release, never every frame.
+// allocation is only retried after the next release, never every frame.
+// The sprite is 8-bit grayscale (twice the ~13KB 4-bit framebuffer, still a
+// fraction of the 120px VLW buffers) so the antialiased glyph edges get a
+// full 256-level luminance ramp instead of the noisy low-nibble truncation of
+// a 4-bit palette sprite.
 void ensureSpeedSprite() {
   if (!SHOW_ELEMENT_SPEED || spValid || spBuildAttempted || memSaverActive ||
       otaMemReleaseRequested || otaUpdateInProgress)
@@ -95,13 +116,16 @@ void ensureSpeedSprite() {
   ensureSpeedMetrics();
   auto vfd = getVLWData120();
   if (!vfd.data) return;
-  sp.setColorDepth(8);
+  sp.setColorDepth(lgfx::color_depth_t::grayscale_8bit);
   sp.setTextDatum(lgfx::textdatum_t::baseline_left);
-  if (sp.createSprite(w_speed3_max + 12, h_speed_max + 6) &&
-      sp.loadFont(vfd.data, lgfx::v1::IFont::font_type_t::ft_vlw)) {
-    spValid = true;
-    logPrintf("Speed sprite rebuilt (%dx%d, heap=%lu)\n", w_speed3_max + 12,
-              h_speed_max + 6, (unsigned long)ESP.getFreeHeap());
+  if (sp.createSprite(w_speed3_max + 12, h_speed_max + 6)) {
+    applySpeedSpritePaint();
+    if (sp.loadFont(vfd.data, lgfx::v1::IFont::font_type_t::ft_vlw)) {
+      spValid = true;
+      logPrintf("Speed sprite rebuilt (%dx%d depth=%d, heap=%lu)\n",
+                w_speed3_max + 12, h_speed_max + 6,
+                (int)sp.getColorDepth(), (unsigned long)ESP.getFreeHeap());
+    }
   }
 }
 
@@ -344,7 +368,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     if (SHOW_ELEMENT_SIGNATURE) {
       display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
       display.setTextColor(display.color565(150, 150, 150));
-      display.getTextBounds(DASHBOARD_SIGNATURE.c_str(), 0, 0, &x1, &y1, &w, &h);
+      display.getTextBounds(DASHBOARD_SIGNATURE, 0, 0, &x1, &y1, &w, &h);
       int sigX = BIG_CENTER_X + OFFSET_BIG_SIGNATURE_X,
           sigY = BIG_CENTER_Y + OFFSET_BIG_SIGNATURE_Y;
       display.fillRect(sigX - (w / 2) - 3, sigY - 3, w + 6, h + 6, TFT_BLACK);
@@ -629,7 +653,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
           !otaMemReleaseRequested && (forceDraw || now - lastFallbackDraw >= 33);
       if (canFallback) {
         lastFallbackDraw = now;
-        if (!vlw120Ready) {
+if (!vlw120Ready) {
           // In mem-saver mode the 45KB VLW120 buffer must stay freed (that is
           // the whole point of the mode); reloading it here used to re-run the
           // allocation on a fragmented heap and crash (bad_alloc -> abort).
@@ -1004,7 +1028,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       h_bat_max = h_v_unit;
     uint16_t bw1, bh1;
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-    display.getTextBounds(ACCEL_BADGE_LINE1.c_str(), 0, 0, &bx1, &by1, &bw1,
+    display.getTextBounds(ACCEL_BADGE_LINE1, 0, 0, &bx1, &by1, &bw1,
                           &bh1);
     int iconSize = 16;
     w_badge_max = ((bw1 + 8) > iconSize) ? (bw1 + 8) : iconSize;
@@ -1126,7 +1150,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     int16_t bx1_b, by1_b;
     uint16_t bw1_b, bh1_b;
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-    display.getTextBounds(ACCEL_BADGE_LINE1.c_str(), 0, 0, &bx1_b, &by1_b,
+    display.getTextBounds(ACCEL_BADGE_LINE1, 0, 0, &bx1_b, &by1_b,
                           &bw1_b, &bh1_b);
     int badgeClearH = ((19 + by1_b + bh1_b) > 17) ? (19 + by1_b + bh1_b) : 17;
     display.fillRect(badgeX - 1, tmrY - 2, w_badge_max + 2, badgeClearH + 4, TFT_BLACK);
@@ -1870,7 +1894,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   static int lastHum = -1;
   static int lastCode = -1;
   static String lastSunset = "";
-  static String lastCity = "";
+  static char lastCity[48] = "";
 
   int wx = BIG_CENTER_X + OFFSET_WEATHER_X - 240;
   int wy = BIG_CENTER_Y + OFFSET_WEATHER_Y - 14;
@@ -1884,7 +1908,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
                          g_weatherData.humidity != lastHum ||
                          g_weatherData.weatherCode != lastCode ||
                          g_weatherData.sunsetTime != lastSunset ||
-                         WEATHER_CITY != lastCity);
+                         strcmp(WEATHER_CITY, lastCity) != 0);
 
   if (showWeather) {
     if (weatherChanged || lastWx != wx || lastWy != wy || lastWeatherShow != showWeather || forceDraw) {
@@ -1892,7 +1916,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       lastHum = g_weatherData.humidity;
       lastCode = g_weatherData.weatherCode;
       lastSunset = g_weatherData.sunsetTime;
-      lastCity = WEATHER_CITY;
+      strncpy(lastCity, WEATHER_CITY, sizeof(lastCity) - 1);
+      lastCity[sizeof(lastCity) - 1] = 0;
       lastWx = wx;
       lastWy = wy;
       lastWeatherShow = showWeather;
@@ -2066,9 +2091,10 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
   display.setTextColor(TFT_WHITE);
   display.setCursor(wx + 28, wy + 20);
   
-  String dispCity = WEATHER_CITY;
-  if (dispCity.length() > 12) {
-    dispCity = dispCity.substring(0, 11) + "..";
+  char dispCity[48];
+  snprintf(dispCity, sizeof(dispCity), "%s", WEATHER_CITY);
+  if (strlen(dispCity) > 12) {
+    snprintf(dispCity, sizeof(dispCity), "%.11s..", WEATHER_CITY);
   }
   display.print(dispCity);
   

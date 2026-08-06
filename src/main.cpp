@@ -124,11 +124,14 @@ void setup() {
   }
   {
     unsigned long resetDeadline = millis() + 2000;
-    String bootInput = "";
+    char bootInput[256];
+    int bootInputLen = 0;
+    bootInput[0] = 0;
     while (millis() < resetDeadline) {
-      while (Serial.available()) {
-        bootInput += (char)Serial.read();
-        if (bootInput.indexOf("RESET") >= 0) {
+      while (Serial.available() && bootInputLen < (int)sizeof(bootInput) - 1) {
+        bootInput[bootInputLen++] = (char)Serial.read();
+        bootInput[bootInputLen] = 0;
+        if (strstr(bootInput, "RESET")) {
           logPrintf("Serial factory reset command received\n");
           factoryResetConfig();
           logPrintf("Factory reset done, rebooting\n");
@@ -267,10 +270,10 @@ void setup() {
 // sensorTask (core 1, prio 2 > loopTask prio 1) owns only the short I2C/ADC
 // reads + snapshot: a few ms per 20ms tick, preempting the display briefly
 // then sleeping, so rendering keeps its ~62.5fps while values stay live.
-  xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore1", 10240, NULL, 2, NULL,
+  xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore1", 4096, NULL, 2, NULL,
                            1);
-  xTaskCreatePinnedToCore(gpsTask, "GpsTaskCore0", 10240, NULL, 2, NULL, 0);
-  xTaskCreatePinnedToCore(webServerTask, "WebTaskCore0", 12288, NULL, 1, NULL,
+  xTaskCreatePinnedToCore(gpsTask, "GpsTaskCore0", 4096, NULL, 2, NULL, 0);
+  xTaskCreatePinnedToCore(webServerTask, "WebTaskCore0", 6144, NULL, 1, NULL,
                            0);
 
   logPrintf("Setup done\n");
@@ -655,6 +658,13 @@ void loop() {
 
   // Web-task heartbeat watchdog: if the web server task stops advancing its
   // counter, the config page would be unreachable forever. Reboot to recover.
+  // Disarmed only for the duration of a fast-reboot storm: the permanent
+  // disarming let a later web wedge stay dead forever, so re-arm 3 minutes
+  // after boot.
+  if (watchdogDisabled && millis() > 180000) {
+    watchdogDisabled = false;
+    logPrintf("Web watchdog re-armed\n");
+  }
   static unsigned long lastWebLoop = 0;
   static unsigned long webWatchdogDue = 0;
   if (webWatchdogDue == 0) webWatchdogDue = millis() + 60000;

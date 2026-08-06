@@ -105,9 +105,9 @@ constexpr int HALL_SENSOR_PIN = 33;
 // Configuration constants & runtime variables
 // ----------------------------------------------------------------------------
 extern int DISPLAY_ROTATION;
-extern String SPLASH_SIGNATURE;
-extern String REBOOT_SIGNATURE;
-extern String DASHBOARD_SIGNATURE;
+extern char SPLASH_SIGNATURE[48];
+extern char REBOOT_SIGNATURE[48];
+extern char DASHBOARD_SIGNATURE[96];
 
 extern int TEMP_BAR_MIN;
 extern int TEMP_BAR_MAX;
@@ -117,17 +117,17 @@ extern int TEMP_WARN_GRN;
 extern int FUEL_WARN_RED;
 extern int FUEL_WARN_YEL;
 
-extern String COLOR_TEMP_NORM;
-extern String COLOR_TEMP_WARN;
-extern String COLOR_TEMP_CRIT;
-extern String COLOR_FUEL_NORM;
-extern String COLOR_FUEL_WARN;
-extern String COLOR_FUEL_CRIT;
+extern char COLOR_TEMP_NORM[8];
+extern char COLOR_TEMP_WARN[8];
+extern char COLOR_TEMP_CRIT[8];
+extern char COLOR_FUEL_NORM[8];
+extern char COLOR_FUEL_WARN[8];
+extern char COLOR_FUEL_CRIT[8];
 
 extern uint16_t c_temp_norm, c_temp_warn, c_temp_crit;
 extern uint16_t c_fuel_norm, c_fuel_warn, c_fuel_crit;
 extern uint16_t ghost_color;
-extern String GHOST_COLOR_STR;
+extern char GHOST_COLOR_STR[8];
 
 extern int DISPLAY_WIDTH;
 extern int DISPLAY_HEIGHT;
@@ -155,8 +155,8 @@ extern bool GPS_ONLY_MODE;
 extern float ACCEL_START_SPEED;
 extern float ACCEL_TARGET_SPEED;
 extern float ACCEL_MAX_TIME;
-extern String ACCEL_BADGE_LINE1;
-extern String ACCEL_BADGE_LINE2;
+extern char ACCEL_BADGE_LINE1[16];
+extern char ACCEL_BADGE_LINE2[16];
 
 extern int OFFSET_BIG_TIME_X;
 extern int OFFSET_BIG_TIME_Y;
@@ -307,29 +307,29 @@ extern float ADC_VOLTS_FACTOR;
 extern bool showFpsCounter;
 extern bool showGpsDebug;
 
-extern String WIFI_SSID;
-extern String WIFI_PASSWORD;
-extern String WIFI_SSID_1;
-extern String WIFI_PASSWORD_1;
-extern String WIFI_SSID_2;
-extern String WIFI_PASSWORD_2;
-extern String WIFI_SSID_3;
-extern String WIFI_PASSWORD_3;
-extern String WIFI_SSID_4;
-extern String WIFI_PASSWORD_4;
+extern char WIFI_SSID[64];
+extern char WIFI_PASSWORD[64];
+extern char WIFI_SSID_1[64];
+extern char WIFI_PASSWORD_1[64];
+extern char WIFI_SSID_2[64];
+extern char WIFI_PASSWORD_2[64];
+extern char WIFI_SSID_3[64];
+extern char WIFI_PASSWORD_3[64];
+extern char WIFI_SSID_4[64];
+extern char WIFI_PASSWORD_4[64];
 extern int WIFI_TX_POWER_DBM;
 extern bool WIFI_AUTO_OFF_ENABLED;
 
 extern bool NTP_ENABLED;
-extern String NTP_SERVER;
+extern char NTP_SERVER[64];
 extern int TZ_OFFSET_HOURS;
 extern bool TZ_DST_ENABLED;
 
 extern bool OTA_PULL_ENABLED;
-extern String OTA_PULL_URL;
+extern char OTA_PULL_URL[192];
 extern int OTA_PULL_INTERVAL_HOURS;
-extern String OTA_CURRENT_VERSION;
-extern String CONFIG_PIN;
+extern char OTA_CURRENT_VERSION[32];
+extern char CONFIG_PIN[17];
 
 // ----------------------------------------------------------------------------
 // Fuel touch table
@@ -457,7 +457,7 @@ extern SensorSnapshot g_sensorData;
 void applyColors();
 void processConfig(int mode, JsonDocument *doc = nullptr);
 void recalculateDerivedParams();
-uint16_t hexToRGB565(String hex);
+uint16_t hexToRGB565(const char *hex);
 
 // ----------------------------------------------------------------------------
 // GFX / drawing API
@@ -558,7 +558,6 @@ bool tapeSpriteValid();
 bool isSpeedFallback();
 extern volatile unsigned long webLoopCount;
 void factoryResetConfig();
-extern const char *index_html;
 
 // ----------------------------------------------------------------------------
 // Weather Widget API & Data
@@ -579,7 +578,7 @@ extern WeatherData g_weatherData;
 extern bool SHOW_ELEMENT_WEATHER;
 extern int OFFSET_WEATHER_X;
 extern int OFFSET_WEATHER_Y;
-extern String WEATHER_CITY;
+extern char WEATHER_CITY[48];
 extern float WEATHER_LAT;
 extern float WEATHER_LON;
 
