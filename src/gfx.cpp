@@ -1,5 +1,7 @@
 #include "dashboard.h"
 #include <vector>
+#include <new>
+#include <esp_heap_caps.h>
 
 // ----------------------------------------------------------------------------
 // Display device (ILI9488 4-inch TFT)
@@ -54,21 +56,38 @@ void LGFX_ST7789_4::applyBusConfig() {
 // processOtaMemRelease in ui.cpp) and rebuilt lazily on the next frame.
 static std::vector<uint8_t> g_vlw120Buf;
 static int g_lastVLWFont = -1;
+static bool g_vlw120Loaded = false;
 
 VFontData getVLWData120() {
   if (g_vlw120Buf.empty()) {
     fs::File f = LittleFS.open("/Fonts/DS-DIGIT_120px.vlw", "r");
     if (f) {
-      g_vlw120Buf.resize(f.size());
-      f.read(g_vlw120Buf.data(), g_vlw120Buf.size());
+      size_t sz = f.size();
+      // This 45KB contiguous allocation used to throw std::bad_alloc on a
+      // fragmented heap (e.g. right after an OTA rollback boot with mem-saver
+      // active), which the display task never caught: std::terminate -> abort.
+      // Pre-check the largest free block and guard the resize so a low-heap
+      // frame degrades to "no 120px font" instead of crashing.
+      if (sz > 0 && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= sz &&
+          ESP.getFreeHeap() >= sz + 8192) {
+        try {
+          g_vlw120Buf.resize(sz);
+          f.read(g_vlw120Buf.data(), g_vlw120Buf.size());
+        } catch (...) {
+          std::vector<uint8_t>().swap(g_vlw120Buf);
+        }
+      }
       f.close();
     }
   }
   return { g_vlw120Buf.empty() ? nullptr : g_vlw120Buf.data(), g_vlw120Buf.size() };
 }
 
+bool isVLW120FontReady() { return g_vlw120Loaded; }
+
 void freeVLWData120() {
   std::vector<uint8_t>().swap(g_vlw120Buf);
+  g_vlw120Loaded = false;
 }
 
 void resetVLWFontCache() {
@@ -91,11 +110,21 @@ void LGFX_ST7789_4::loadVLWFont(const char *path) {
   if (is120) {
     auto vfd = getVLWData120();
     if (vfd.data) {
-      if (!loadFont(vfd.data, lgfx::v1::IFont::font_type_t::ft_vlw))
+      try {
+        g_vlw120Loaded = loadFont(vfd.data, lgfx::v1::IFont::font_type_t::ft_vlw);
+      } catch (...) {
+        g_vlw120Loaded = false;
+      }
+      if (!g_vlw120Loaded)
         logPrintf("Font load failed (parse): %s\n", path);
     } else {
+      g_vlw120Loaded = false;
       logPrintf("Font load failed (open): %s\n", path);
     }
+    // Don't cache a failed load: the next frame retries once the heap recovers
+    // (e.g. after a mem-saver release), instead of drawing speed digits with a
+    // stale, wrong-sized font.
+    if (!g_vlw120Loaded) g_lastVLWFont = -1;
   } else if (isDs28) {
     setFont(&DS_DIGIT15pt7b);
   } else if (isCon28) {
@@ -723,7 +752,12 @@ void showUpdatingScreen() {
 
 void updateOTAProgress(int progress, int total) {
   int targetW = (260L * progress) / total;
-  if (targetW > 260) targetW = 260;
+  // Cap the streaming bar just below full so the display can never restart
+  // the board on its own: fillW >= 258 (the reboot point in loop()) is only
+  // reachable via otaProgressTarget = 258, which the OTA task sets AFTER
+  // Update.end(true) succeeds. A reboot during the last 0.8% used to flash
+  // a truncated image and roll back on the next boot.
+  if (targetW > 254) targetW = 254;
   if (targetW > otaProgressTarget)
     otaProgressTarget = targetW;
 }

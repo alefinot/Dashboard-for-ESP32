@@ -506,7 +506,7 @@ void loop() {
         display.fillRect(barX, 160, fillW, 8, TFT_CYAN);
         display.endWrite();
       }
-      if (fillW >= 258 && !otaRebootShown) {
+      if (otaUpdateSuccess && fillW >= 258 && !otaRebootShown) {
         otaRebootShown = true;
         delay(100);
         ESP.restart();

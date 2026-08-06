@@ -232,7 +232,7 @@ bool TZ_DST_ENABLED = true;
 bool OTA_PULL_ENABLED = true;
 String OTA_PULL_URL = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-String OTA_CURRENT_VERSION = "1.1.6";
+String OTA_CURRENT_VERSION = "1.2.0";
 
 // Optional PIN protecting the web config page and admin API (empty = disabled)
 String CONFIG_PIN = "";

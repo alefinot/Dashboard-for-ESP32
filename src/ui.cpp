@@ -630,19 +630,26 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       if (canFallback) {
         lastFallbackDraw = now;
         if (!vlw120Ready) {
-          display.loadVLWFont("/Fonts/DS-DIGIT_120px.vlw");
-          vlw120Ready = true;
+          // In mem-saver mode the 45KB VLW120 buffer must stay freed (that is
+          // the whole point of the mode); reloading it here used to re-run the
+          // allocation on a fragmented heap and crash (bad_alloc -> abort).
+          if (!memSaverActive) {
+            display.loadVLWFont("/Fonts/DS-DIGIT_120px.vlw");
+            vlw120Ready = isVLW120FontReady();
+          }
         }
-        display.setTextColor(TFT_WHITE);
-        for (int i = 0; i < len; i++) {
-          int d = speedStr[i] - '0';
-          int cellIdx = (spdCount - len) + i;
-          int cellRight = boxLeft + spdCellR[cellIdx];
-          int cx = cellRight - 2 - digitXOff[d] - digitWidth[d] + digitRightOff[d];
-          display.setCursor(cx, speedNumY - refY1);
-          display.print(speedStr[i]);
+        if (vlw120Ready) {
+          display.setTextColor(TFT_WHITE);
+          for (int i = 0; i < len; i++) {
+            int d = speedStr[i] - '0';
+            int cellIdx = (spdCount - len) + i;
+            int cellRight = boxLeft + spdCellR[cellIdx];
+            int cx = cellRight - 2 - digitXOff[d] - digitWidth[d] + digitRightOff[d];
+            display.setCursor(cx, speedNumY - refY1);
+            display.print(speedStr[i]);
+          }
+          drew = true;
         }
-        drew = true;
       }
     }
     if (drew) {
