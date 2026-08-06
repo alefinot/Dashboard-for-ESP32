@@ -48,7 +48,7 @@ static bool compassRead6(uint8_t addr, uint8_t startReg, bool msbFirst,
   Wire.beginTransmission(addr);
   Wire.write(startReg);
   if (Wire.endTransmission() != 0) return false;
-  if (Wire.requestFrom(addr, 6) < 6) return false;
+  if (Wire.requestFrom((int)addr, 6) < 6) return false;
   uint8_t b[6];
   for (int i = 0; i < 6; i++) b[i] = Wire.read();
   if (msbFirst) {
@@ -68,7 +68,7 @@ static void compassDumpRegs(uint8_t addr) {
     Wire.beginTransmission(addr);
     Wire.write(off);
     if (Wire.endTransmission() != 0) break;
-    Wire.requestFrom(addr, 16);
+    Wire.requestFrom((int)addr, 16);
     uint8_t buf[16];
     uint8_t n = 0;
     while (Wire.available() && n < 16) buf[n++] = Wire.read();
@@ -115,7 +115,7 @@ static bool compassScanBus(uint8_t sdaPin, uint8_t sclPin) {
       Wire.beginTransmission(addr);
       Wire.write(QMC5883P_CHIPID);
       if (Wire.endTransmission() != 0) return false;
-      Wire.requestFrom(addr, 1);
+      Wire.requestFrom((int)addr, 1);
       if (!Wire.available() || Wire.read() != 0x80) continue;
       if (!compassWriteReg(addr, QMC5883P_MODE, 0xCF) ||   // continuous 200 Hz
           !compassWriteReg(addr, QMC5883P_CONFIG, 0x08))   // +/-8G, set/reset

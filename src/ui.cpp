@@ -302,6 +302,29 @@ static void renderTapeStrip(T &d, int tapeW, int compassX, int yBase, int bandTo
 }
 
 // ----------------------------------------------------------------------------
+// Weather day/night state. Uses the fetched sunrise/sunset times when
+// available, otherwise falls back to the fixed NIGHT_MODE window.
+// ----------------------------------------------------------------------------
+static bool weatherIsNight(const SensorSnapshot &snap) {
+  int sunriseMin = -1, sunsetMin = -1;
+  if (g_weatherData.sunriseTime.length() >= 5) {
+    int h, m;
+    if (sscanf(g_weatherData.sunriseTime.c_str(), "%d:%d", &h, &m) == 2)
+      sunriseMin = h * 60 + m;
+  }
+  if (g_weatherData.sunsetTime.length() >= 5) {
+    int h, m;
+    if (sscanf(g_weatherData.sunsetTime.c_str(), "%d:%d", &h, &m) == 2)
+      sunsetMin = h * 60 + m;
+  }
+  if (sunriseMin >= 0 && sunsetMin >= 0) {
+    int nowMin = snap.localHour * 60 + snap.minute;
+    return (nowMin >= sunsetMin || nowMin < sunriseMin);
+  }
+  return (snap.localHour >= NIGHT_MODE_START_HOUR || snap.localHour < NIGHT_MODE_END_HOUR);
+}
+
+// ----------------------------------------------------------------------------
 // Main dashboard renderer
 // ----------------------------------------------------------------------------
 void updateBigDisplay(const SensorSnapshot &snap) {
@@ -1894,11 +1917,18 @@ if (!vlw120Ready) {
   static int lastHum = -1;
   static int lastCode = -1;
   static String lastSunset = "";
+  static String lastSunrise = "";
   static char lastCity[48] = "";
+  static bool lastWeatherNight = false;
 
   int wx = BIG_CENTER_X + OFFSET_WEATHER_X - 240;
   int wy = BIG_CENTER_Y + OFFSET_WEATHER_Y - 14;
   bool showWeather = SHOW_ELEMENT_WEATHER;
+
+  bool weatherNight = weatherIsNight(displaySnap);
+  bool weatherNightChanged = (weatherNight != lastWeatherNight);
+
+  const char *dispCitySrc = (g_weatherData.cityName.length() > 0) ? g_weatherData.cityName.c_str() : WEATHER_CITY;
 
   if ((lastWx != wx || lastWy != wy || lastWeatherShow != showWeather || forceDraw) && lastWeatherShow) {
     display.fillRect(lastWx - 2, lastWy - 2, 480 + 4, 28 + 4, TFT_BLACK);
@@ -1908,7 +1938,9 @@ if (!vlw120Ready) {
                          g_weatherData.humidity != lastHum ||
                          g_weatherData.weatherCode != lastCode ||
                          g_weatherData.sunsetTime != lastSunset ||
-                         strcmp(WEATHER_CITY, lastCity) != 0);
+                         g_weatherData.sunriseTime != lastSunrise ||
+                         strcmp(dispCitySrc, lastCity) != 0) ||
+                        weatherNightChanged;
 
   if (showWeather) {
     if (weatherChanged || lastWx != wx || lastWy != wy || lastWeatherShow != showWeather || forceDraw) {
@@ -1916,11 +1948,13 @@ if (!vlw120Ready) {
       lastHum = g_weatherData.humidity;
       lastCode = g_weatherData.weatherCode;
       lastSunset = g_weatherData.sunsetTime;
-      strncpy(lastCity, WEATHER_CITY, sizeof(lastCity) - 1);
+      lastSunrise = g_weatherData.sunriseTime;
+      strncpy(lastCity, dispCitySrc, sizeof(lastCity) - 1);
       lastCity[sizeof(lastCity) - 1] = 0;
       lastWx = wx;
       lastWy = wy;
       lastWeatherShow = showWeather;
+      lastWeatherNight = weatherNight;
       
       void drawWeatherWidget(int x, int y, const SensorSnapshot &snap, bool forceDraw);
       drawWeatherWidget(wx, wy, displaySnap, forceDraw);
@@ -2082,8 +2116,8 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
     return;
   }
   
-  bool isNight = snap.timeValid && (snap.localHour >= NIGHT_MODE_START_HOUR || snap.localHour < NIGHT_MODE_END_HOUR);
-  
+  bool isNight = weatherIsNight(snap);
+
   // Section 1: Weather Icon and City Name
   drawWeatherIcon(wx + 16, wy + 14, 16, g_weatherData.weatherCode, isNight);
   
@@ -2092,9 +2126,10 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
   display.setCursor(wx + 28, wy + 20);
   
   char dispCity[48];
-  snprintf(dispCity, sizeof(dispCity), "%s", WEATHER_CITY);
+  const char *citySrc = (g_weatherData.cityName.length() > 0) ? g_weatherData.cityName.c_str() : WEATHER_CITY;
+  snprintf(dispCity, sizeof(dispCity), "%s", citySrc);
   if (strlen(dispCity) > 12) {
-    snprintf(dispCity, sizeof(dispCity), "%.11s..", WEATHER_CITY);
+    snprintf(dispCity, sizeof(dispCity), "%.11s..", citySrc);
   }
   display.print(dispCity);
   

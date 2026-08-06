@@ -134,6 +134,7 @@ int OFFSET_WEATHER_Y = 146;
 char WEATHER_CITY[48] = "Singapore";
 float WEATHER_LAT = 1.3521f;
 float WEATHER_LON = 103.8198f;
+int WEATHER_REFRESH_MIN = 10;
 WeatherData g_weatherData;
 bool ENABLE_POWER_SENSE = false;
 bool ENABLE_CIRCLE_TEST = false;
@@ -452,6 +453,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_STR(WEATHER_CITY, "WEATH_CITY", "Singapore");
   CFG_FLT(WEATHER_LAT, "WEATH_LAT", 1.3521f);
   CFG_FLT(WEATHER_LON, "WEATH_LON", 103.8198f);
+  CFG_INT(WEATHER_REFRESH_MIN, "WEATH_RFR", 10);
   CFG_BOOL(ENABLE_POWER_SENSE, "PWR_SNS", false);
   CFG_BOOL(ENABLE_CIRCLE_TEST, "CIRC_TST", false);
   CFG_BOOL(ENABLE_DEMO_MODE, "DEMO_MODE", true);
@@ -582,6 +584,8 @@ void processConfig(int mode, JsonDocument *doc) {
   if (mode == 0 || mode == 2) {
     if (FUEL_TOUCH_POINTS < 2) FUEL_TOUCH_POINTS = 2;
     if (FUEL_TOUCH_POINTS > MAX_TOUCH_POINTS) FUEL_TOUCH_POINTS = MAX_TOUCH_POINTS;
+    if (WEATHER_REFRESH_MIN < 1) WEATHER_REFRESH_MIN = 1;
+    if (WEATHER_REFRESH_MIN > 1440) WEATHER_REFRESH_MIN = 1440;
   }
 
   if (mode == 0) {

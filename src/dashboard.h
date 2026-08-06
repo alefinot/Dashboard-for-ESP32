@@ -570,6 +570,8 @@ struct WeatherData {
   int weatherCode = 0;
   int cloudCover = 0;
   String sunsetTime = "";
+  String sunriseTime = "";
+  String cityName = "";
   bool valid = false;
   unsigned long lastUpdated = 0;
 };
@@ -581,6 +583,7 @@ extern int OFFSET_WEATHER_Y;
 extern char WEATHER_CITY[48];
 extern float WEATHER_LAT;
 extern float WEATHER_LON;
+extern int WEATHER_REFRESH_MIN;
 
 void startWeatherFetch();
 void updateWeather();

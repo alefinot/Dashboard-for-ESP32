@@ -919,6 +919,7 @@ const configMap = [
             { id: "WEATHER_CITY", label: "City Name" },
             { id: "WEATHER_LAT", label: "Location Latitude (Fallback)" },
             { id: "WEATHER_LON", label: "Location Longitude (Fallback)" },
+            { id: "WEATHER_REFRESH_MIN", label: "Refresh Interval", type: "range", min: 1, max: 60, step: 1, unit: "min" },
             { type: "card_header", label: "Widget Position" },
             { type: "xy", label: "Widget Position Offsets", idX: "OFFSET_WEATHER_X", idY: "OFFSET_WEATHER_Y" },
             { type: "note", label: "If GPS is active, coordinates are updated automatically from the satellite feed. Otherwise, the fallback coordinates are used to fetch local weather from Open-Meteo." }

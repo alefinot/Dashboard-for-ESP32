@@ -48,6 +48,43 @@ static volatile bool otaPullDownloading = false;
 // ----------------------------------------------------------------------------
 static bool weatherTaskRunning = false;
 
+// Reverse-geocode a coordinate into a short display name (city/locality/region).
+// Free keyless BigDataCloud lookup; returns true and fills `out` on success.
+static bool reverseGeocode(double lat, double lon, String &out) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  char url[192];
+  snprintf(url, sizeof(url),
+           "http://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.6f&longitude=%.6f&localityLanguage=en",
+           lat, lon);
+
+  HTTPClient http;
+  if (!http.begin(url)) return false;
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    logPrintf("Weather: geocode HTTP error %d\n", httpCode);
+    http.end();
+    return false;
+  }
+  String payload = http.getString();
+  http.end();
+
+  JsonDocument doc;
+  if (deserializeJson(doc, payload)) return false;
+  const char *city     = doc["city"] | "";
+  const char *locality = doc["locality"] | "";
+  const char *region   = doc["principalSubdivision"] | "";
+  const char *country  = doc["countryName"] | "";
+  String name;
+  if (strlen(city) > 0)       name = city;
+  else if (strlen(locality) > 0) name = locality;
+  else if (strlen(region) > 0)   name = region;
+  else if (strlen(country) > 0)  name = country;
+  if (name.length() == 0) return false;
+  out = name;
+  logPrintf("Weather: geocoded to \"%s\"\n", out.c_str());
+  return true;
+}
+
 void updateWeather() {
   if (WiFi.status() != WL_CONNECTED) {
     return;
@@ -56,14 +93,20 @@ void updateWeather() {
   
   double lat = WEATHER_LAT;
   double lon = WEATHER_LON;
-  if (gps.location.isValid()) {
+  bool gpsFix = gps.location.isValid();
+  if (gpsFix) {
     lat = gps.location.lat();
     lon = gps.location.lng();
   }
+
+  // City name follows the coordinates: only reverse-geocode a live GPS fix,
+  // otherwise fall back to the saved WEATHER_CITY derived from WEATHER_LAT/LON.
+  String resolvedCity;
+  if (gpsFix) reverseGeocode(lat, lon, resolvedCity);
   
   char url[256];
   snprintf(url, sizeof(url),
-           "http://api.open-meteo.com/v1/forecast?latitude=%.6f&longitude=%.6f&current=temperature_2m,relative_humidity_2m,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m&daily=sunset&timezone=auto&forecast_days=1",
+           "http://api.open-meteo.com/v1/forecast?latitude=%.6f&longitude=%.6f&current=temperature_2m,relative_humidity_2m,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m&daily=sunrise,sunset&timezone=auto&forecast_days=1",
            lat, lon);
            
   logPrintf("Weather: fetching from %s\n", url);
@@ -98,6 +141,16 @@ void updateWeather() {
         g_weatherData.windSpeed = doc["current"]["wind_speed_10m"] | 0.0f;
         g_weatherData.windDirection = doc["current"]["wind_direction_10m"] | 0.0f;
         
+        if (doc["daily"]["sunrise"].is<JsonArray>()) {
+          const char* sunrise = doc["daily"]["sunrise"][0] | "";
+          if (strlen(sunrise) >= 16) {
+            g_weatherData.sunriseTime = String(sunrise).substring(11);
+          } else {
+            g_weatherData.sunriseTime = "--:--";
+          }
+        } else {
+          g_weatherData.sunriseTime = "--:--";
+        }
         if (doc["daily"]["sunset"].is<JsonArray>()) {
           const char* sunset = doc["daily"]["sunset"][0] | "";
           if (strlen(sunset) >= 16) {
@@ -110,6 +163,7 @@ void updateWeather() {
         }
         g_weatherData.valid = true;
         g_weatherData.lastUpdated = millis();
+        g_weatherData.cityName = (resolvedCity.length() > 0) ? resolvedCity : String(WEATHER_CITY);
         xSemaphoreGive(g_stateMutex);
       }
       logPrintf("Weather: success! Temp=%.1fC, Hum=%d%%\n", 
@@ -1259,7 +1313,8 @@ void webServerTask(void *pvParameters) {
       if (lastWeatherCheck == 0) {
         lastWeatherCheck = millis();
       }
-      if (millis() - lastWeatherCheck >= 600000) {
+      unsigned long weatherIntervalMs = (unsigned long)WEATHER_REFRESH_MIN * 60000UL;
+      if (millis() - lastWeatherCheck >= weatherIntervalMs) {
         lastWeatherCheck = millis();
         startWeatherFetch();
       }
