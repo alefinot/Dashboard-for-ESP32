@@ -584,6 +584,7 @@ extern char WEATHER_CITY[48];
 extern float WEATHER_LAT;
 extern float WEATHER_LON;
 extern int WEATHER_REFRESH_MIN;
+extern char WEATHER_LOCALE[16];
 
 void startWeatherFetch();
 void updateWeather();

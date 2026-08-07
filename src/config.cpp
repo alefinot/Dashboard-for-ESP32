@@ -135,6 +135,7 @@ char WEATHER_CITY[48] = "Singapore";
 float WEATHER_LAT = 1.3521f;
 float WEATHER_LON = 103.8198f;
 int WEATHER_REFRESH_MIN = 10;
+char WEATHER_LOCALE[16] = "it";
 WeatherData g_weatherData;
 bool ENABLE_POWER_SENSE = false;
 bool ENABLE_CIRCLE_TEST = false;
@@ -213,9 +214,9 @@ bool showFpsCounter = true;
 bool showGpsDebug = false;
 
 char WIFI_SSID[64] = "Xiaomi 15";
-char WIFI_PASSWORD[64] = "GDk2DxjVDc";
+char WIFI_PASSWORD[64] = "";
 char WIFI_SSID_1[64] = "D-Link-627F3B";
-char WIFI_PASSWORD_1[64] = "";
+char WIFI_PASSWORD_1[64] = "GDk2DxjVDc";
 char WIFI_SSID_2[64] = "TP-Link_F3EB";
 char WIFI_PASSWORD_2[64] = "";
 char WIFI_SSID_3[64] = "";
@@ -454,6 +455,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_FLT(WEATHER_LAT, "WEATH_LAT", 1.3521f);
   CFG_FLT(WEATHER_LON, "WEATH_LON", 103.8198f);
   CFG_INT(WEATHER_REFRESH_MIN, "WEATH_RFR", 10);
+  CFG_STR(WEATHER_LOCALE, "WEATH_LOCALE", "it");
   CFG_BOOL(ENABLE_POWER_SENSE, "PWR_SNS", false);
   CFG_BOOL(ENABLE_CIRCLE_TEST, "CIRC_TST", false);
   CFG_BOOL(ENABLE_DEMO_MODE, "DEMO_MODE", true);
@@ -559,7 +561,7 @@ void processConfig(int mode, JsonDocument *doc) {
                             "WIFI_PASSWORD_4" };
     const char *nvs[5] = { "WIFI_PWD", "WIFI_P1", "WIFI_P2", "WIFI_P3",
                            "WIFI_P4" };
-    const char *defs[5] = { "GDk2DxjVDc", "", "", "", "" };
+    const char *defs[5] = { "", "GDk2DxjVDc", "", "", "" };
     for (int i = 0; i < 5; i++) {
       if (mode == 0) {
         size_t cb = pref.getString(nvs[i], pwds[i], 64);

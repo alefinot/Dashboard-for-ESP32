@@ -18,14 +18,34 @@ volatile unsigned long webLoopCount = 0;
 
 // Wipes the configuration NVS namespaces. Used by /api/reset and by the
 // physical recovery gesture (hold BOOT for 8 seconds after boot).
+//
+// The WiFi join credentials (SSIDs, passwords, TX power) survive the reset:
+// the reset exists to recover from a forgotten config PIN or web lockout, and
+// wiping the network creds would leave the device stranded in AP-only mode
+// exactly when a recovery reset is needed. The SSID/password values written
+// back are the ones loaded from NVS at boot (mode 0), never the compiled
+// defaults.
 void factoryResetConfig() {
+  const char *wifiKeys[] = {
+      "WIFI_SSID", "WIFI_S1", "WIFI_S2", "WIFI_S3", "WIFI_S4",
+      "WIFI_PWD",  "WIFI_P1", "WIFI_P2", "WIFI_P3", "WIFI_P4",
+      "WIFI_TXP"};
+  const int wifiKeyCount = sizeof(wifiKeys) / sizeof(wifiKeys[0]);
   Preferences pref;
   pref.begin("cfg", false);
+  String saved[11];
+  for (int i = 0; i < wifiKeyCount && i < 11; i++)
+    saved[i] = pref.getString(wifiKeys[i], "");
   pref.clear();
+  for (int i = 0; i < wifiKeyCount && i < 11; i++) {
+    if (saved[i].length() > 0)
+      pref.putString(wifiKeys[i], saved[i].c_str());
+  }
   pref.end();
   pref.begin("dashboard", false);
   pref.clear();
   pref.end();
+  logPrintf("Factory reset done (WiFi credentials preserved)\n");
 }
 
 volatile bool otaUpdateSuccess = false;
@@ -53,9 +73,15 @@ static bool weatherTaskRunning = false;
 static bool reverseGeocode(double lat, double lon, String &out) {
   if (WiFi.status() != WL_CONNECTED) return false;
   char url[192];
-  snprintf(url, sizeof(url),
-           "http://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.6f&longitude=%.6f&localityLanguage=en",
-           lat, lon);
+  if (WEATHER_LOCALE[0] != 0) {
+    snprintf(url, sizeof(url),
+             "http://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.6f&longitude=%.6f&localityLanguage=%s",
+             lat, lon, WEATHER_LOCALE);
+  } else {
+    snprintf(url, sizeof(url),
+             "http://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.6f&longitude=%.6f",
+             lat, lon);
+  }
 
   HTTPClient http;
   if (!http.begin(url)) return false;
