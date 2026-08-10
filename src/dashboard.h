@@ -230,6 +230,7 @@ extern bool SHOW_ELEMENT_AVG_KML;
 extern bool SHOW_ELEMENT_AVG_SPEED;
 extern bool SHOW_ELEMENT_FUEL_LTRS;
 extern bool SHOW_ELEMENT_COMPASS;
+extern bool SHOW_GHOST_DIGITS;
 extern bool ENABLE_POWER_SENSE;
 extern bool ENABLE_CIRCLE_TEST;
 extern bool ENABLE_DEMO_MODE;
@@ -266,12 +267,9 @@ extern int REFRESH_BAT_MS;
 extern int REFRESH_INST_MS;
 extern int REFRESH_AVG_MS;
 extern int REFRESH_FUEL_MS;
-extern int REFRESH_ODO_MS;
 extern int REFRESH_TIME_MS;
 extern int REFRESH_SIDEBAR_TEMP_MS;
 extern int REFRESH_SIDEBAR_FUEL_MS;
-extern int REFRESH_AVG_SPEED_MS;
-extern int REFRESH_COMPASS_MS;
 extern float COMPASS_DECLINATION_DEG;
 
 extern int SPEED_DIGITS;
@@ -329,7 +327,6 @@ extern bool OTA_PULL_ENABLED;
 extern char OTA_PULL_URL[192];
 extern int OTA_PULL_INTERVAL_HOURS;
 extern char OTA_CURRENT_VERSION[32];
-extern char CONFIG_PIN[17];
 
 // ----------------------------------------------------------------------------
 // Fuel touch table
@@ -485,6 +482,7 @@ int getEuropeanOffset(int year, int month, int day, int hour);
 void drawCalendarIcon(int x, int y, uint16_t color);
 void drawClockIcon(int x, int y, uint16_t color);
 void drawStopwatchIcon(int x, int y, uint16_t color);
+void drawSatelliteIcon(int x, int y, uint16_t color);
 void drawLocationIcon(int x, int y, uint16_t color);
 void drawWifiIcon(int x, int y, uint16_t color, bool filled = false);
 void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color);

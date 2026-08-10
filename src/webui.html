@@ -59,35 +59,13 @@ body {
 
 /* Header & Connectivity Bar */
 .header {
-    text-align: center;
-    margin-bottom: 16px;
-    position: relative;
-}
-
-.brand-badge {
-    display: inline-flex;
+    display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 8px;
-    padding: 4px 12px;
-    background: rgba(0, 229, 255, 0.1);
-    border: 1px solid rgba(0, 229, 255, 0.25);
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    color: var(--accent-cyan);
-    text-transform: uppercase;
-    margin-bottom: 8px;
-}
-
-.brand-badge::before {
-    content: '';
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent-cyan);
-    box-shadow: 0 0 8px var(--accent-cyan);
+    gap: 14px;
+    text-align: center;
+    margin-bottom: 14px;
+    position: relative;
 }
 
 h2 {
@@ -95,7 +73,7 @@ h2 {
     background: linear-gradient(135deg, #ffffff 30%, #00e5ff 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    margin: 0 0 6px 0;
+    margin: 0;
     font-size: 26px;
     font-weight: 800;
     letter-spacing: -0.5px;
@@ -104,7 +82,7 @@ h2 {
 p.subtitle {
     color: var(--text-muted);
     font-size: 13px;
-    margin: 0 0 12px 0;
+    margin: 0;
     font-weight: 500;
 }
 
@@ -140,8 +118,7 @@ p.subtitle {
     font-weight: 600;
     font-size: 13px;
     margin-bottom: 14px;
-    min-height: 24px;
-    display: flex;
+    min-height: 24px;    display: flex;
     align-items: center;
     justify-content: center;
     border-radius: 8px;
@@ -158,22 +135,49 @@ p.subtitle {
 
 .msg-success { color: var(--accent-emerald) !important; border-color: rgba(0, 230, 118, 0.3) !important; background: rgba(0, 230, 118, 0.08) !important; }
 .msg-error { color: var(--accent-rose) !important; border-color: rgba(255, 23, 68, 0.3) !important; background: rgba(255, 23, 68, 0.08) !important; }
+.msg-warning { color: var(--accent-amber) !important; border-color: rgba(255, 145, 0, 0.3) !important; background: rgba(255, 145, 0, 0.08) !important; }
 
 /* Quick Control Actions Top Toolbar */
 .bottom-toolbar {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    margin-top: 20px;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 14px;
+    margin-top: 14px;
+}
+
+/* Row 1: Save Settings, Backup, Import (3 buttons, 2 units each) */
+.bottom-toolbar button:nth-child(-n+3) {
+    grid-row: 1;
+    grid-column: span 2;
+}
+
+/* Row 2: Reboot, Deep Sleep (same total width as row 1) */
+.bottom-toolbar button:nth-child(4) {
+    grid-row: 2;
+    grid-column: span 3;
+}
+
+.bottom-toolbar button:nth-child(5) {
+    grid-row: 2;
+    grid-column: span 3;
+}
+
+.bottom-toolbar button:nth-child(6) {
+    grid-row: 3;
 }
 
 .btn-reset-wide {
     grid-column: 1 / -1;
 }
 
+.bottom-toolbar button {
+    padding: 14px 16px;
+    font-size: 13px;
+}
+
 .bottom-toolbar button svg {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     stroke-width: 2;
     flex-shrink: 0;
 }
@@ -259,7 +263,7 @@ button:active {
 /* Search Box */
 .search-wrapper {
     position: relative;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
 }
 
 #searchBar {
@@ -312,10 +316,16 @@ details {
     backdrop-filter: var(--glass-blur);
     border: 1px solid var(--border-color);
     border-radius: 12px;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
     box-shadow: var(--card-shadow);
     overflow: hidden;
     transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* No accordion animation: the body is always laid out at full height and
+   simply hidden/shown with the native <details> behavior. */
+.acc-collapser {
+    display: block;
 }
 
 details[open] {
@@ -408,9 +418,9 @@ details[open] summary .summary-chevron {
 .details-content {
     padding: 12px;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 10px;
-    overflow: hidden;
+    overflow: visible;
 }
 
 /* Card & Grouping Elements */
@@ -420,7 +430,7 @@ details[open] summary .summary-chevron {
     justify-content: center;
     background: rgba(22, 30, 46, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.05);
-    padding: 10px 12px;
+    padding: 12px 14px;
     border-radius: 8px;
     transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
 }
@@ -431,7 +441,7 @@ details[open] summary .summary-chevron {
 }
 
 .card h4 {
-    margin: 0 0 6px 0;
+    margin: 0 0 5px 0;
     color: var(--accent-cyan);
     font-family: 'Outfit', sans-serif;
     font-size: 13px;
@@ -440,7 +450,7 @@ details[open] summary .summary-chevron {
 }
 
 .section-title {
-    margin: 10px 0 4px 0;
+    margin: 10px 0 5px 0;
     color: var(--accent-cyan);
     font-size: 11px;
     font-weight: 700;
@@ -534,7 +544,7 @@ input[type="checkbox"]:checked::after {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 6px;
+    margin-bottom: 10px;
 }
 
 .xy-row:last-child { margin-bottom: 0; }
@@ -687,18 +697,117 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 
 #scrollTopBtn:active { transform: scale(0.95); }
 
+/* Reset-to-default icon on each setting row */
+.reset-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    margin-left: 8px;
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.reset-btn svg {
+    width: 13px;
+    height: 13px;
+    stroke-width: 2;
+}
+
+.reset-btn:hover {
+    background: rgba(0, 229, 255, 0.12);
+    border-color: rgba(0, 229, 255, 0.35);
+    color: var(--accent-cyan);
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
+    transform: none;
+}
+
+.reset-btn:active { transform: scale(0.9); }
+
+/* Invisible placeholder that occupies the same space as a reset button
+   so rows without one (e.g. password fields) stay aligned with the rest */
+.reset-spacer {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+
+/* Uniform setting row: label | spacer | controls | reset icon */
+.cfg-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding: 5px 0;
+}
+
+.cfg-row > label {
+    min-width: 170px;
+    flex-shrink: 0;
+}
+
+.cfg-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-left: auto;
+    width: auto;
+    min-width: 0;
+    justify-content: flex-end;
+}
+
+.cfg-controls input[type="text"],
+.cfg-controls input[type="number"],
+.cfg-controls input[type="password"] {
+    width: 85px;
+    margin-top: 0;
+    text-align: center;
+}
+
+.cfg-controls select { width: 100%; }
+
+/* Color rows: fixed-width control block so all color swatches line up,
+   regardless of whether a value input/spacer sits next to them */
+.cfg-color-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+    min-width: 165px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.cfg-color-controls input[type="color"] { flex-shrink: 0; }
+
 /* Responsive Tweaks */
 @media (max-width: 600px) {
     body { padding: 10px 8px 50px 8px; }
     .bottom-toolbar { grid-template-columns: repeat(2, 1fr); }
+    .bottom-toolbar button:nth-child(-n+3) { grid-column: span 1; }
+    .bottom-toolbar button:nth-child(3) { grid-row: 2; grid-column: 1; }
+    .bottom-toolbar button:nth-child(4) { grid-row: 2; grid-column: 2; }
+    .bottom-toolbar button:nth-child(5) { grid-row: 3; grid-column: 1 / -1; }
+    .bottom-toolbar button:nth-child(6) { grid-row: 4; }
     .details-content { grid-template-columns: 1fr; }
+    .cfg-row > label { min-width: 120px; }
+    .cfg-controls { width: auto; min-width: 0; }
 }
 </style>
 </head>
 <body>
 
 <div class="header">
-    <div class="brand-badge">ESP32 Telemetry Engine</div>
     <h2>Dashboard++ Setup</h2>
     <p class="subtitle">Device Configuration &amp; UI Layout Manager</p>
     <div class="ip-banner">
@@ -748,7 +857,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
             <h4>CPU Performance</h4>
             <div class="perf-row"><span class="perf-label">Frequency</span><span class="perf-value" id="p-cpu-freq">240 MHz</span></div>
             <div class="perf-row"><span class="perf-label">Mode</span><span class="perf-value" id="p-cpu-mode">Fixed 240 MHz</span></div>
-            <div class="perf-row"><span class="perf-label">Temperature</span><span class="perf-value" id="p-cpu-temp">50.0 ┬░C</span></div>
+            <div class="perf-row"><span class="perf-label">Temperature</span><span class="perf-value" id="p-cpu-temp">50.0 °C</span></div>
             <div style="margin-top:8px;">
                 <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:4px;">
                     <span>CPU Usage</span><span class="perf-value"><strong id="cpu-pct">100.0</strong>%</span>
@@ -783,38 +892,236 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 
 <div class="bottom-toolbar">
     <button onclick="save()" class="btn-primary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save Settings</button>
-    <button onclick="reboot()" class="btn-warning"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Reboot</button>
-    <button onclick="deepSleep()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17.8 1.2l.6 2.4 2.4.6-2.4.6-.6 2.4-.6-2.4-2.4-.6 2.4-.6.6-2.4z"/><path d="M12 2a10 10 0 1 0 10 10c0-2.5-.9-4.8-2.4-6.6"/></svg> Deep Sleep</button>
     <button onclick="exportBackup()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Backup</button>
     <button onclick="document.getElementById('importFile').click()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Import</button>
-    <button id="otaBtn" onclick="doOta()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Firmware OTA</button>
-    <button id="otaPullBtn" onclick="doOtaPull()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Check Updates</button>
-    <button onclick="factoryReset()" class="btn-danger btn-reset-wide"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Reset</button>
+    <button onclick="reboot()" class="btn-warning"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Reboot</button>
+    <button onclick="deepSleep()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/><text x="13" y="16" font-size="5" fill="currentColor" stroke="none" font-family="Arial, sans-serif" font-weight="bold">zz z</text></svg> Deep Sleep</button>
+    <button onclick="factoryReset()" class="btn-danger btn-reset-wide"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg> Factory Reset</button>
 </div>
 
 <button id="scrollTopBtn" onclick="window.scrollTo({top:0,behavior:&#39;smooth&#39;})" style="display: none;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></button>
 
 <script>
 const iconSVG = {
-    system: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+    system: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
     wifi: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>',
     display: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
     sensors: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
     gnss: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
     layout: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>',
-    security: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
     weather: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M6.34 17.66l-1.41 1.41"/><path d="M19.07 4.93l-1.41 1.41"/><circle cx="12" cy="12" r="4"/></svg>'
 };
+
+// Keep in sync with src/config.cpp CFG_* defaults.
+// Factory-default values used by the per-setting reset-to-default icon.
+const DEFAULTS = {
+    DISPLAY_ROTATION: 1,
+    SPI_BUS_SPEED: 80,
+    DISPLAY_WIDTH: 480,
+    DISPLAY_HEIGHT: 320,
+    TARGET_FPS: 60,
+    BACKLIGHT_BRIGHTNESS: 22,
+    ENABLE_AUTO_BRIGHTNESS: false,
+    LIGHT_SENSOR_DARK_VAL: 0,
+    LIGHT_SENSOR_BRIGHT_VAL: 3685,
+    AUTO_BRIGHT_DARK: 20,
+    AUTO_BRIGHT_LIGHT: 100,
+    AUTO_BRIGHT_FADE_MS: 4000,
+    FADE_DURATION_MS: 700,
+    SPLASH_SIGNATURE: "by @ale.finot",
+    REBOOT_SIGNATURE: "Dashboard++ by @ale.finot",
+    DASHBOARD_SIGNATURE: "<<<<<<    Dashboard++ by @ale.finot    >>>>>>",
+    TEMP_BAR_MIN: 10,
+    TEMP_BAR_MAX: 110,
+    TEMP_WARN_RED: 90,
+    TEMP_WARN_YEL: 45,
+    FUEL_WARN_RED: 20,
+    FUEL_WARN_YEL: 45,
+    COLOR_TEMP_NORM: "#00ffff",
+    COLOR_TEMP_WARN: "#ff8c00",
+    COLOR_TEMP_CRIT: "#ff0000",
+    COLOR_FUEL_NORM: "#00ff00",
+    COLOR_FUEL_WARN: "#ffff00",
+    COLOR_FUEL_CRIT: "#ff0000",
+    GHOST_COLOR_STR: "#666666",
+    SHOW_GHOST_DIGITS: true,
+    WHEEL_CIRCUMFERENCE_MM: 1650.0,
+    FUEL_FILTER_ALPHA: 0.08,
+    FUEL_TOUCH_POINTS: 8,
+    NTC_R_BALANCE: 10000.0,
+    NTC_BETA: 3950.0,
+    GPS_BAUD: 115200,
+    MIN_SATELLITES: 8,
+    OPTIMAL_SATELLITES: 12,
+    MAX_SPEED_DELTA_KMH: 5.0,
+    MIN_SPEED_THRESHOLD: 1.0,
+    GPS_START_KMH: 3.0,
+    GPS_STOP_SETTLE_MS: 1500,
+    GPS_MIN_DEV_KMH: 1.0,
+    GPS_ONLY_MODE: false,
+    ACCEL_START_SPEED: 1.0,
+    ACCEL_TARGET_SPEED: 50.0,
+    ACCEL_MAX_TIME: 9.99,
+    ACCEL_BADGE_LINE1: "0-50",
+    ACCEL_BADGE_LINE2: "km/h",
+    BIG_CENTER_X: 240,
+    BIG_CENTER_Y: 160,
+    OFFSET_BIG_TIME_X: -98,
+    OFFSET_BIG_TIME_Y: -78,
+    OFFSET_BIG_DATE_X: 118,
+    OFFSET_BIG_DATE_Y: -78,
+    OFFSET_BIG_SIGNATURE_X: 0,
+    OFFSET_BIG_SIGNATURE_Y: -65,
+    OFFSET_BIG_SPEED_NUM_X: -7,
+    OFFSET_BIG_SPEED_NUM_Y: 18,
+    OFFSET_BIG_SPEED_UNIT_X: 134,
+    OFFSET_BIG_SPEED_UNIT_Y: 74,
+    OFFSET_BIG_ODO_X: 15,
+    OFFSET_BIG_ODO_Y: 155,
+    OFFSET_BIG_SAT_X: -180,
+    OFFSET_BIG_SAT_Y: -78,
+    OFFSET_BIG_TMR_X: -53,
+    OFFSET_BIG_TMR_Y: -35,
+    OFFSET_BIG_BAT_X: -112,
+    OFFSET_BIG_BAT_Y: 149,
+    SIDEBAR_LEFT_X: 10,
+    SIDEBAR_LEFT_Y: 64,
+    SIDEBAR_RIGHT_X: 462,
+    SIDEBAR_RIGHT_Y: 64,
+    OFFSET_HALL_ICON_X: 0,
+    OFFSET_HALL_ICON_Y: -90,
+    OFFSET_WIFI_ICON_X: 195,
+    OFFSET_WIFI_ICON_Y: -106,
+    OFFSET_INST_KML_X: 60,
+    OFFSET_INST_KML_Y: -13,
+    OFFSET_AVG_KML_X: 160,
+    OFFSET_AVG_KML_Y: -13,
+    OFFSET_AVG_SPEED_X: -163,
+    OFFSET_AVG_SPEED_Y: -11,
+    OFFSET_COMPASS_X: 0,
+    OFFSET_COMPASS_Y: -130,
+    OFFSET_FUEL_LTRS_X: 132,
+    OFFSET_FUEL_LTRS_Y: 150,
+    COMPASS_DECLINATION_DEG: 0.0,
+    COMPASS_CAL_X: 0,
+    COMPASS_CAL_Y: 0,
+    COMPASS_CAL_Z: 0,
+    COMPASS_CAL_TX: 0,
+    COMPASS_CAL_TY: 0,
+    COMPASS_CAL_TZ: 32767,
+    SIDEBAR_BAR_WIDTH: 8,
+    SIDEBAR_BAR_HEIGHT: 250,
+    SHOW_ELEMENT_BOUNDS: false,
+    SHOW_ELEMENT_SPEED: true,
+    SHOW_ELEMENT_SPEED_UNIT: true,
+    SHOW_ELEMENT_SIGNATURE: true,
+    SHOW_ELEMENT_SPEED_SOURCE: true,
+    SHOW_ELEMENT_WIFI: true,
+    SHOW_ELEMENT_TIME: true,
+    SHOW_ELEMENT_DATE: true,
+    SHOW_ELEMENT_ODO: true,
+    SHOW_ELEMENT_SIDEBAR_TEMP: true,
+    SHOW_ELEMENT_SIDEBAR_FUEL: true,
+    SHOW_ELEMENT_SAT: true,
+    SHOW_ELEMENT_TMR: true,
+    SHOW_ELEMENT_BAT: true,
+    SHOW_ELEMENT_INST_KML: true,
+    SHOW_ELEMENT_AVG_KML: true,
+    SHOW_ELEMENT_AVG_SPEED: true,
+    SHOW_ELEMENT_FUEL_LTRS: true,
+    SHOW_ELEMENT_COMPASS: true,
+    SHOW_ELEMENT_WEATHER: true,
+    OFFSET_WEATHER_X: 0,
+    OFFSET_WEATHER_Y: 146,
+    WEATHER_CITY: "Singapore",
+    WEATHER_LAT: 1.3521,
+    WEATHER_LON: 103.8198,
+    WEATHER_REFRESH_MIN: 10,
+    WEATHER_LOCALE: "it",
+    ENABLE_POWER_SENSE: false,
+    ENABLE_CIRCLE_TEST: false,
+    ENABLE_DEMO_MODE: true,
+    ENABLE_ANTIALIASING: true,
+    AA_SHARPNESS: 0.2,
+    SHOW_FPS_COUNTER_DEFAULT: true,
+    GPS_DEBUG_DEFAULT: false,
+    ENABLE_DYNAMIC_CPU: false,
+    MANUAL_CPU_FREQ: 240,
+    ENABLE_CPU_THROTTLE: true,
+    CPU_THROTTLE_TEMP_WARN: 50,
+    CPU_THROTTLE_TEMP_CRIT: 60,
+    ENABLE_NIGHT_MODE: false,
+    NIGHT_MODE_START_HOUR: 23,
+    NIGHT_MODE_END_HOUR: 0,
+    DISPLAY_INVERT_COLORS: false,
+    OFFSET_BIG_FPS_X: 0,
+    OFFSET_BIG_FPS_Y: 0,
+    REFRESH_SPEED_MS: 250,
+    REFRESH_SAT_MS: 1000,
+    REFRESH_TMR_MS: 10,
+    REFRESH_BAT_MS: 2500,
+    REFRESH_INST_MS: 500,
+    REFRESH_AVG_MS: 5000,
+    REFRESH_FUEL_MS: 1000,
+    REFRESH_TIME_MS: 0,
+    REFRESH_SIDEBAR_TEMP_MS: 0,
+    REFRESH_SIDEBAR_FUEL_MS: 0,
+    SPEED_DIGITS: 3,
+    SAT_DIGITS: 2,
+    TMR_INT_DIGITS: 1,
+    TMR_DEC_DIGITS: 2,
+    BAT_INT_DIGITS: 2,
+    BAT_DEC_DIGITS: 1,
+    INST_INT_DIGITS: 2,
+    INST_DEC_DIGITS: 1,
+    AVG_INT_DIGITS: 2,
+    AVG_DEC_DIGITS: 1,
+    AVG_SPEED_INT_DIGITS: 3,
+    AVG_SPEED_DEC_DIGITS: 0,
+    HEADING_DIGITS: 3,
+    FUEL_INT_DIGITS: 1,
+    FUEL_DEC_DIGITS: 1,
+    ODO_INT_DIGITS: 5,
+    ODO_DEC_DIGITS: 1,
+    WIFI_TX_POWER_DBM: 20,
+    WIFI_AUTO_OFF_ENABLED: false,
+    NTP_ENABLED: true,
+    NTP_SERVER: "pool.ntp.org",
+    TZ_OFFSET_HOURS: 1,
+    TZ_DST_ENABLED: true,
+    OTA_PULL_ENABLED: true,
+    OTA_PULL_URL: "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
+    OTA_PULL_INTERVAL_HOURS: 24,
+    OTA_CURRENT_VERSION: "1.2.5",
+    touchTable: [950, 840, 750, 670, 600, 530, 460, 400]
+};
+
+const resetSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
+
+// Settings applied only at boot (see main.cpp setRotation/GPS UART, web.cpp
+// setTxPower/one-shot NTP sync). Changing these takes effect after a reboot.
+const REBOOT_REQUIRED_KEYS = ['DISPLAY_ROTATION', 'DISPLAY_WIDTH', 'DISPLAY_HEIGHT',
+    'GPS_BAUD', 'WIFI_TX_POWER_DBM', 'NTP_ENABLED', 'NTP_SERVER'];
+
+let __baseline = null;
+
+// True when at least one boot-only setting actually changed from the values
+// loaded at page load (the "baseline" captured by renderForm).
+function rebootRequiredChanged(payload) {
+    if (!__baseline || !payload) return false;
+    for (let i = 0; i < REBOOT_REQUIRED_KEYS.length; i++) {
+        let k = REBOOT_REQUIRED_KEYS[i];
+        if (!(k in payload)) continue;
+        if (String(payload[k]) !== String(__baseline[k])) return true;
+    }
+    return false;
+}
+
+function resetBtn(key) {
+    return '<button type="button" class="reset-btn" title="Reset to default" onclick="applyDefault(\'' + key + '\')">' + resetSVG + '</button>';
+}
+
 const configMap = [
-    {
-        title: "Security", icon: iconSVG.security,
-        items: [
-            { type: "card_header", label: "Config Page PIN" },
-            { type: "pin", id: "CONFIG_PIN", label: "New PIN (4-16 chars)" },
-            { id: "CONFIG_PIN_REMOVE", label: "Remove PIN" },
-            { type: "note", label: "When set, the config page and admin actions (reboot, reset, OTA, odo) require this PIN. Leave the field empty to keep the current PIN." }
-        ]
-    },
     {
         title: "System & General", icon: iconSVG.system,
         items: [
@@ -836,12 +1143,70 @@ const configMap = [
             },
             { id: "ENABLE_DYNAMIC_CPU", label: "Enable Dynamic CPU Frequency" },
             { id: "ENABLE_CPU_THROTTLE", label: "Enable Thermal Throttling" },
-            { id: "CPU_THROTTLE_TEMP_WARN", label: "Throttle to 160 MHz At", unit: "┬░C" },
-            { id: "CPU_THROTTLE_TEMP_CRIT", label: "Throttle to 80 MHz At", unit: "┬░C" },
+            { id: "CPU_THROTTLE_TEMP_WARN", label: "Throttle to 160 MHz At", unit: "°C" },
+            { id: "CPU_THROTTLE_TEMP_CRIT", label: "Throttle to 80 MHz At", unit: "°C" },
             { type: "card_header", label: "Custom Signatures" },
             { id: "SPLASH_SIGNATURE", label: "Boot Screen Signature" },
             { id: "REBOOT_SIGNATURE", label: "Reboot Screen Signature" },
             { id: "DASHBOARD_SIGNATURE", label: "Main Dashboard Watermark" },
+            { type: "card_header", label: "Firmware Update", content: `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <button id="otaBtn" onclick="doOta()" class="btn-secondary" style="font-size:11px;padding:5px 10px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:13px;height:13px;vertical-align:-2px;margin-right:4px;"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Firmware OTA</button>
+        <button id="otaPullBtn" onclick="doOtaPull()" class="btn-secondary" style="font-size:11px;padding:5px 10px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:13px;height:13px;vertical-align:-2px;margin-right:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Check Updates</button>
+    </div>` },
+            { id: "OTA_PULL_ENABLED", label: "Enable Automatic OTA Pull" },
+            { id: "OTA_PULL_URL", label: "Firmware Manifest URL" },
+            { id: "OTA_PULL_INTERVAL_HOURS", label: "Check Interval", unit: "hours" },
+            { id: "OTA_CURRENT_VERSION", label: "Current Firmware Version" }
+        ]
+    },
+    {
+        title: "WiFi and Connectivity", icon: iconSVG.wifi,
+        items: [
+            { type: "card_header", label: "Network Settings" },
+            { id: "WIFI_TX_POWER_DBM", label: "TX Power", type: "range", min: -1, max: 20, step: 1, unit: "dBm" },
+            { id: "WIFI_AUTO_OFF_ENABLED", label: "AUTO DISABLE WIFI" },
+            { type: "heading", label: "Primary Network" },
+            { id: "WIFI_SSID", label: "Network Name (SSID)" },
+            { id: "WIFI_PASSWORD", label: "Password" },
+            { type: "card_header", label: "Fallback Networks" },
+            { type: "section_header", label: "Network 1" },
+            { id: "WIFI_SSID_1", label: "Network Name (SSID)" },
+            { id: "WIFI_PASSWORD_1", label: "Password" },
+            { type: "section_header", label: "Network 2" },
+            { id: "WIFI_SSID_2", label: "Network Name (SSID)" },
+            { id: "WIFI_PASSWORD_2", label: "Password" },
+            { type: "section_header", label: "Network 3" },
+            { id: "WIFI_SSID_3", label: "Network Name (SSID)" },
+            { id: "WIFI_PASSWORD_3", label: "Password" },
+            { type: "section_header", label: "Network 4" },
+            { id: "WIFI_SSID_4", label: "Network Name (SSID)" },
+            { id: "WIFI_PASSWORD_4", label: "Password" },
+            { type: "card_header", label: "Weather Options" },
+            { id: "SHOW_ELEMENT_WEATHER", label: "Show Weather Widget on Dashboard" },
+            { id: "WEATHER_CITY", label: "City Name" },
+            { id: "WEATHER_LAT", label: "Location Latitude (Fallback)" },
+            { id: "WEATHER_LON", label: "Location Longitude (Fallback)" },
+            { id: "WEATHER_REFRESH_MIN", label: "Refresh Interval", type: "range", min: 1, max: 60, step: 1, unit: "min" },
+            { id: "WEATHER_LOCALE", label: "City Name Language", type: "select",
+                options: [
+                    { value: "it", label: "Italiano (default)" },
+                    { value: "en", label: "English" },
+                    { value: "fr", label: "Français" },
+                    { value: "de", label: "Deutsch" },
+                    { value: "es", label: "Español" },
+                    { value: "pt", label: "Português" },
+                    { value: "nl", label: "Nederlands" },
+                    { value: "pl", label: "Polski" },
+                    { value: "ru", label: "Русский" },
+                    { value: "tr", label: "Türkçe" },
+                    { value: "el", label: "Ελληνικά" },
+                    { value: "ar", label: "العربية" },
+                    { value: "he", label: "עברית" },
+                    { value: "ja", label: "日本語" },
+                    { value: "zh", label: "中文" },
+                    { value: "ko", label: "한국어" }
+                ] },
+            { type: "note", label: "If GPS is active, coordinates are updated automatically from the satellite feed. Otherwise, the fallback coordinates are used to fetch local weather from Open-Meteo." },
             { type: "card_header", label: "Time Settings" },
             { id: "NTP_ENABLED", label: "Enable NTP Time Sync" },
             { id: "NTP_SERVER", label: "NTP Server" },
@@ -883,68 +1248,6 @@ const configMap = [
         ]
     },
     {
-        title: "WiFi", icon: iconSVG.wifi,
-        items: [
-            { type: "card_header", label: "Network Settings" },
-            { id: "WIFI_TX_POWER_DBM", label: "TX Power", type: "range", min: -1, max: 20, step: 1, unit: "dBm" },
-            { id: "WIFI_AUTO_OFF_ENABLED", label: "AUTO DISABLE WIFI" },
-            { type: "heading", label: "Primary Network" },
-            { id: "WIFI_SSID", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD", label: "Password" },
-            { type: "card_header", label: "Fallback Networks" },
-            { type: "section_header", label: "Network 1" },
-            { id: "WIFI_SSID_1", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD_1", label: "Password" },
-            { type: "section_header", label: "Network 2" },
-            { id: "WIFI_SSID_2", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD_2", label: "Password" },
-            { type: "section_header", label: "Network 3" },
-            { id: "WIFI_SSID_3", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD_3", label: "Password" },
-            { type: "section_header", label: "Network 4" },
-            { id: "WIFI_SSID_4", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD_4", label: "Password" },
-            { type: "card_header", label: "OTA Pull Update" },
-            { id: "OTA_PULL_ENABLED", label: "Enable Automatic OTA Pull" },
-            { id: "OTA_PULL_URL", label: "Firmware Manifest URL" },
-            { id: "OTA_PULL_INTERVAL_HOURS", label: "Check Interval", unit: "hours" },
-            { id: "OTA_CURRENT_VERSION", label: "Current Firmware Version" }
-        ]
-    },
-    {
-        title: "Weather Widget", icon: iconSVG.weather,
-        items: [
-            { type: "card_header", label: "Weather Options" },
-            { id: "SHOW_ELEMENT_WEATHER", label: "Show Weather Widget on Dashboard" },
-            { id: "WEATHER_CITY", label: "City Name" },
-            { id: "WEATHER_LAT", label: "Location Latitude (Fallback)" },
-            { id: "WEATHER_LON", label: "Location Longitude (Fallback)" },
-            { id: "WEATHER_REFRESH_MIN", label: "Refresh Interval", type: "range", min: 1, max: 60, step: 1, unit: "min" },
-            { id: "WEATHER_LOCALE", label: "City Name Language", type: "select",
-                options: [
-                    { value: "it", label: "Italiano (default)" },
-                    { value: "en", label: "English" },
-                    { value: "fr", label: "Français" },
-                    { value: "de", label: "Deutsch" },
-                    { value: "es", label: "Español" },
-                    { value: "pt", label: "Português" },
-                    { value: "nl", label: "Nederlands" },
-                    { value: "pl", label: "Polski" },
-                    { value: "ru", label: "Русский" },
-                    { value: "tr", label: "Türkçe" },
-                    { value: "el", label: "Ελληνικά" },
-                    { value: "ar", label: "العربية" },
-                    { value: "he", label: "עברית" },
-                    { value: "ja", label: "日本語" },
-                    { value: "zh", label: "中文" },
-                    { value: "ko", label: "한국어" }
-                ] },
-            { type: "card_header", label: "Widget Position" },
-            { type: "xy", label: "Widget Position Offsets", idX: "OFFSET_WEATHER_X", idY: "OFFSET_WEATHER_Y" },
-            { type: "note", label: "If GPS is active, coordinates are updated automatically from the satellite feed. Otherwise, the fallback coordinates are used to fetch local weather from Open-Meteo." }
-        ]
-    },
-    {
         title: "Display & Colors", icon: iconSVG.display,
         items: [
             { type: "subtitle", label: "Display" },
@@ -961,26 +1264,14 @@ const configMap = [
             { id: "ENABLE_AUTO_BRIGHTNESS", label: "Enable Auto Brightness" },
             { id: "ENABLE_NIGHT_MODE", label: "Enable Night Mode" },
             { id: "NIGHT_MODE_START_HOUR", label: "Start Time", unit: "Hour" },
-            { id: "NIGHT_MODE_END_HOUR", label: "End Time", unit: "Hour" },
-            { type: "card_header", label: "Thresholds & Colors" },
-            { type: "section_header", label: "Engine Temperature" },
-            { type: "threshold-row", label: "Low", colorId: "COLOR_TEMP_NORM", valueId: "TEMP_BAR_MIN", unit: "┬░C" },
-            { type: "threshold-row", label: "Normal", colorId: "COLOR_TEMP_WARN", valueId: "TEMP_WARN_YEL", unit: "┬░C" },
-            { type: "threshold-row", label: "Critical", colorId: "COLOR_TEMP_CRIT", valueId: "TEMP_WARN_RED", unit: "┬░C" },
-            { id: "TEMP_BAR_MAX", label: "Max", unit: "┬░C" },
-            { type: "section_header", label: "Fuel Level" },
-            { type: "threshold-row", label: "Normal", colorId: "COLOR_FUEL_NORM" },
-            { type: "threshold-row", label: "Warning", colorId: "COLOR_FUEL_WARN", valueId: "FUEL_WARN_YEL", unit: "%" },
-            { type: "threshold-row", label: "Critical", colorId: "COLOR_FUEL_CRIT", valueId: "FUEL_WARN_RED", unit: "%" },
-            { type: "section_header", label: "General" },
-            { id: "GHOST_COLOR_STR", label: "Ghost Digit Color", type: "color" }
+            { id: "NIGHT_MODE_END_HOUR", label: "End Time", unit: "Hour" }
         ]
     },
     {
         title: "Sensors Tuning", icon: iconSVG.sensors,
         items: [
             { type: "touch-table", label: "Fuel Level Mapping Table", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable" },
-            { type: "card_header", label: "Auto Brightness Sensor", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+            { type: "card_header", label: "Auto Brightness Sensor", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
         <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="ambient-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span>
         <div style="display:flex;gap:6px;">
             <button onclick="calibrateDark()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Capture Dark</button>
@@ -1002,7 +1293,7 @@ const configMap = [
             { id: "ACCEL_BADGE_LINE1", label: "Badge Line 1 (e.g., '0-50')" },
             { id: "ACCEL_BADGE_LINE2", label: "Badge Line 2 (e.g., 'km/h')" },
             { type: "subtitle", label: "Miscellaneous" },
-            { type: "card_header", label: "Odometer (km)", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+            { type: "card_header", label: "Odometer (km)", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
         <span style="font-size:12px;color:var(--text-muted);">Current value: <strong id="odo-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> km</span>
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
@@ -1018,34 +1309,8 @@ const configMap = [
             { id: "REFRESH_TMR_MS", label: "Accel Timer", type: "number", unit: "ms" },
             { id: "REFRESH_BAT_MS", label: "Battery Voltage", type: "number", unit: "ms" },
             { id: "REFRESH_AVG_MS", label: "Average KM/L", type: "number", unit: "ms" },
-            { id: "REFRESH_AVG_SPEED_MS", label: "Average Speed", type: "number", unit: "ms" },
             { id: "REFRESH_FUEL_MS", label: "Fuel Liters", type: "number", unit: "ms" },
-            { id: "REFRESH_ODO_MS", label: "Odometer", type: "number", unit: "ms" },
-            { id: "REFRESH_COMPASS_MS", label: "Compass Heading", type: "number", unit: "ms" },
-            { type: "card_header", label: "Digit Count Configuration" },
-            { id: "SPEED_DIGITS", label: "Speed Digits" },
-            { id: "SAT_DIGITS", label: "Satellites Digits" },
-            { id: "TMR_INT_DIGITS", label: "Timer Integer Digits" },
-            { id: "TMR_DEC_DIGITS", label: "Timer Decimal Digits" },
-            { id: "BAT_INT_DIGITS", label: "Battery Integer Digits" },
-            { id: "BAT_DEC_DIGITS", label: "Battery Decimal Digits" },
-            { id: "INST_INT_DIGITS", label: "Instant KM/L Integer Digits" },
-            { id: "INST_DEC_DIGITS", label: "Instant KM/L Decimal Digits" },
-            { id: "AVG_INT_DIGITS", label: "Average KM/L Integer Digits" },
-            { id: "AVG_DEC_DIGITS", label: "Average KM/L Decimal Digits" },
-            { id: "AVG_SPEED_INT_DIGITS", label: "Average Speed Integer Digits" },
-            { id: "AVG_SPEED_DEC_DIGITS", label: "Average Speed Decimal Digits" },
-            { id: "HEADING_DIGITS", label: "Compass Heading Digits" },
-            { id: "FUEL_INT_DIGITS", label: "Fuel Integer Digits" },
-            { id: "FUEL_DEC_DIGITS", label: "Fuel Decimal Digits" },
-            { id: "ODO_INT_DIGITS", label: "Odometer Integer Digits" },
-            { id: "ODO_DEC_DIGITS", label: "Odometer Decimal Digits" }
-        ]
-    },
-    {
-        title: "GNSS", icon: iconSVG.gnss,
-        items: [
-            { type: "card_header", label: "GNSS Settings" },
+            { type: "subtitle", label: "GNSS" },
             { id: "GPS_BAUD", label: "GNSS Baud Rate", unit: "baud" },
             { id: "MIN_SATELLITES", label: "Minimum Satellites Required" },
             { id: "OPTIMAL_SATELLITES", label: "Optimal Satellites Count" },
@@ -1055,7 +1320,7 @@ const configMap = [
             { id: "GPS_START_KMH", label: "GPS Start Speed", unit: "km/h" },
             { id: "GPS_STOP_SETTLE_MS", label: "GPS Stop Settle Time", unit: "ms" },
             { id: "GPS_DEBUG_DEFAULT", label: "Show GPS Debug Overlay" },
-            { type: "card_header", label: "Compass", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+            { type: "card_header", label: "Compass", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
         <span style="font-size:12px;color:var(--text-muted);">Status: <strong id="compass-cal-status" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span>
         <div style="display:flex;gap:6px;">
             <button onclick="compassCalStart()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Start Calibration (30s)</button>
@@ -1079,6 +1344,9 @@ const configMap = [
             { type: "note", label: "The Visible checkbox next to each element controls what is drawn on the display. Sensors, GPS, odometer and all calculations keep running regardless." },
             { type: "section_header", label: "Viewport Center" },
             { type: 'xy', idX: "BIG_CENTER_X", idY: "BIG_CENTER_Y", label: "Position" },
+            { type: "section_header", label: "Ghost Digits" },
+            { id: "SHOW_GHOST_DIGITS", label: "Show Ghost Digits" },
+            { id: "GHOST_COLOR_STR", label: "Ghost Digit Color", type: "color" },
             { type: "section_header", label: "FPS Counter" },
             { id: "SHOW_FPS_COUNTER_DEFAULT", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_FPS_X", idY: "OFFSET_BIG_FPS_Y", label: "Position" },
@@ -1088,34 +1356,49 @@ const configMap = [
             { type: "card_header", label: "Speed & Odometer" },
             { type: "section_header", label: "Acceleration Timer" },
             { id: "SHOW_ELEMENT_TMR", label: "Visible" },
+            { id: "TMR_INT_DIGITS", label: "Integer Digits" },
+            { id: "TMR_DEC_DIGITS", label: "Decimal Digits" },
             { type: 'xy', idX: "OFFSET_BIG_TMR_X", idY: "OFFSET_BIG_TMR_Y", label: "Position" },
             { type: "section_header", label: "Speed Source Icon" },
             { id: "SHOW_ELEMENT_SPEED_SOURCE", label: "Visible" },
             { type: 'xy', idX: "OFFSET_HALL_ICON_X", idY: "OFFSET_HALL_ICON_Y", label: "Position" },
             { type: "section_header", label: "Main Speed Number" },
             { id: "SHOW_ELEMENT_SPEED", label: "Visible" },
+            { id: "SPEED_DIGITS", label: "Digits" },
             { type: 'xy', idX: "OFFSET_BIG_SPEED_NUM_X", idY: "OFFSET_BIG_SPEED_NUM_Y", label: "Position" },
             { type: "section_header", label: "Speed Unit" },
             { id: "SHOW_ELEMENT_SPEED_UNIT", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_SPEED_UNIT_X", idY: "OFFSET_BIG_SPEED_UNIT_Y", label: "Position" },
             { type: "section_header", label: "Odometer" },
             { id: "SHOW_ELEMENT_ODO", label: "Visible" },
+            { id: "ODO_INT_DIGITS", label: "Integer Digits" },
+            { id: "ODO_DEC_DIGITS", label: "Decimal Digits" },
             { type: 'xy', idX: "OFFSET_BIG_ODO_X", idY: "OFFSET_BIG_ODO_Y", label: "Position" },
             { type: "card_header", label: "Fuel & Battery" },
             { type: "section_header", label: "Average KM/L" },
             { id: "SHOW_ELEMENT_AVG_KML", label: "Visible" },
+            { id: "AVG_INT_DIGITS", label: "Integer Digits" },
+            { id: "AVG_DEC_DIGITS", label: "Decimal Digits" },
             { type: 'xy', idX: "OFFSET_AVG_KML_X", idY: "OFFSET_AVG_KML_Y", label: "Position" },
             { type: "section_header", label: "Average Speed" },
             { id: "SHOW_ELEMENT_AVG_SPEED", label: "Visible" },
+            { id: "AVG_SPEED_INT_DIGITS", label: "Integer Digits" },
+            { id: "AVG_SPEED_DEC_DIGITS", label: "Decimal Digits" },
             { type: 'xy', idX: "OFFSET_AVG_SPEED_X", idY: "OFFSET_AVG_SPEED_Y", label: "Position" },
             { type: "section_header", label: "Instant KM/L" },
             { id: "SHOW_ELEMENT_INST_KML", label: "Visible" },
+            { id: "INST_INT_DIGITS", label: "Integer Digits" },
+            { id: "INST_DEC_DIGITS", label: "Decimal Digits" },
             { type: 'xy', idX: "OFFSET_INST_KML_X", idY: "OFFSET_INST_KML_Y", label: "Position" },
             { type: "section_header", label: "Fuel Liters" },
             { id: "SHOW_ELEMENT_FUEL_LTRS", label: "Visible" },
+            { id: "FUEL_INT_DIGITS", label: "Integer Digits" },
+            { id: "FUEL_DEC_DIGITS", label: "Decimal Digits" },
             { type: 'xy', idX: "OFFSET_FUEL_LTRS_X", idY: "OFFSET_FUEL_LTRS_Y", label: "Position" },
             { type: "section_header", label: "Battery" },
             { id: "SHOW_ELEMENT_BAT", label: "Visible" },
+            { id: "BAT_INT_DIGITS", label: "Integer Digits" },
+            { id: "BAT_DEC_DIGITS", label: "Decimal Digits" },
             { type: 'xy', idX: "OFFSET_BIG_BAT_X", idY: "OFFSET_BIG_BAT_Y", label: "Position" },
             { type: "card_header", label: "Clock & Date" },
             { type: "section_header", label: "Clock" },
@@ -1127,6 +1410,7 @@ const configMap = [
             { type: "card_header", label: "WiFi & Satellites" },
             { type: "section_header", label: "Satellites" },
             { id: "SHOW_ELEMENT_SAT", label: "Visible" },
+            { id: "SAT_DIGITS", label: "Digits" },
             { type: 'xy', idX: "OFFSET_BIG_SAT_X", idY: "OFFSET_BIG_SAT_Y", label: "Position" },
             { type: "section_header", label: "WiFi Icon" },
             { id: "SHOW_ELEMENT_WIFI", label: "Visible" },
@@ -1134,14 +1418,26 @@ const configMap = [
             { type: "card_header", label: "Compass" },
             { type: "section_header", label: "Heading Indicator" },
             { id: "SHOW_ELEMENT_COMPASS", label: "Visible" },
+            { id: "HEADING_DIGITS", label: "Digits" },
             { type: 'xy', idX: "OFFSET_COMPASS_X", idY: "OFFSET_COMPASS_Y", label: "Position" },
+            { type: "card_header", label: "Weather Widget" },
+            { type: 'xy', idX: "OFFSET_WEATHER_X", idY: "OFFSET_WEATHER_Y", label: "Position" },
             { type: "card_header", label: "Sidebars" },
             { type: "section_header", label: "Left Bar (Engine Temp)" },
             { id: "SHOW_ELEMENT_SIDEBAR_TEMP", label: "Visible" },
             { type: 'xy', idX: "SIDEBAR_LEFT_X", idY: "SIDEBAR_LEFT_Y", label: "Position" },
+            { type: "section_header", label: "Engine Temperature Thresholds" },
+            { type: "threshold-row", label: "Low", colorId: "COLOR_TEMP_NORM", valueId: "TEMP_BAR_MIN", unit: "°C" },
+            { type: "threshold-row", label: "Normal", colorId: "COLOR_TEMP_WARN", valueId: "TEMP_WARN_YEL", unit: "°C" },
+            { type: "threshold-row", label: "Critical", colorId: "COLOR_TEMP_CRIT", valueId: "TEMP_WARN_RED", unit: "°C" },
+            { id: "TEMP_BAR_MAX", label: "Max", unit: "°C" },
             { type: "section_header", label: "Right Bar (Fuel)" },
             { id: "SHOW_ELEMENT_SIDEBAR_FUEL", label: "Visible" },
             { type: 'xy', idX: "SIDEBAR_RIGHT_X", idY: "SIDEBAR_RIGHT_Y", label: "Position" },
+            { type: "section_header", label: "Fuel Level Thresholds" },
+            { type: "threshold-row", label: "Normal", colorId: "COLOR_FUEL_NORM" },
+            { type: "threshold-row", label: "Warning", colorId: "COLOR_FUEL_WARN", valueId: "FUEL_WARN_YEL", unit: "%" },
+            { type: "threshold-row", label: "Critical", colorId: "COLOR_FUEL_CRIT", valueId: "FUEL_WARN_RED", unit: "%" },
             { type: "section_header", label: "Bar Dimensions" },
             { id: "SIDEBAR_BAR_WIDTH", label: "Width", unit: "px" },
             { id: "SIDEBAR_BAR_HEIGHT", label: "Height", unit: "px" }
@@ -1151,31 +1447,11 @@ const configMap = [
 
 document.addEventListener('DOMContentLoaded', function() {
     fetch('/api/config').then(r => {
-        if (r.status === 401) throw { auth: true };
         if (!r.ok) throw { status: r.status };
         return r.json();
     }).then(d => {
         renderForm(d);
     }).catch(e => {
-        if (e && e.auth) {
-            // A PIN is set but the browser has no credentials cached. Navigate
-            // to a protected resource to trigger the browser's Basic-auth
-            // dialog once; after signing in, the reloaded page works.
-            let msgBox = document.getElementById('msg');
-            msgBox.className = 'msg-error';
-            msgBox.innerText = 'Configuration PIN required.';
-            document.getElementById('form-container').innerHTML =
-                '<div style="grid-column:1/-1;padding:24px;text-align:center;color:var(--text-muted);border:1px dashed var(--border-color);border-radius:10px;">' +
-                '<div style="font-size:28px;margin-bottom:8px;">&#128274;</div>' +
-                '<div style="font-weight:600;color:var(--text-main);margin-bottom:4px;">Configuration PIN required</div>' +
-                '<div style="font-size:12px;line-height:1.6;">A PIN protects the settings. Click below, enter the PIN when asked,<br>' +
-                'then you will be returned to the configuration page.</div><br>' +
-                '<a href="/api/config" onclick="event.preventDefault();window.location.href=\'/api/config\';setTimeout(function(){window.location.href=\'/\';},1200);" ' +
-                'style="color:var(--accent-blue);font-weight:600;">Sign in with PIN</a><br>' +
-                '<div style="font-size:11px;margin-top:8px;color:var(--text-dim);">Forgot the PIN? Hold the BOOT button for 8 seconds after boot to reset the device (factory reset).</div>' +
-                '</div>';
-            return;
-        }
         if (!sessionStorage.getItem('cfgRetried')) {
             // One automatic retry: the device may still be freeing its big UI
             // sprites (memory-saver) right after boot. Only retries once per
@@ -1225,6 +1501,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function renderForm(d) {
     let html = '';
+    __baseline = d;
     const maxW = d.DISPLAY_WIDTH || 480;
     const maxH = d.DISPLAY_HEIGHT || 320;
 
@@ -1248,41 +1525,43 @@ function renderForm(d) {
             if (iType === 'card_header' || iType === 'subtitle') {
                 hasItems = true;
                 closeSubCard();
-                groupHtml += `<div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">${item.label}</h4><div style="display:flex;flex-direction:column;gap:6px;">`;
+                groupHtml += `<div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 5px 0;color:var(--accent-cyan);font-size:13px;">${item.label}</h4><div style="display:flex;flex-direction:column;gap:0;">`;
                 if (item.content) groupHtml += item.content;
                 inCardSubCard = true;
             } else if (iType === 'section_header' || iType === 'heading') {
                 hasItems = true;
-                groupHtml += `</div><div class="section-title">${item.label}</div><div style="display:flex;flex-direction:column;gap:6px;">`;
+                groupHtml += `</div><div class="section-title">${item.label}</div><div style="display:flex;flex-direction:column;gap:0;">`;
             } else if (iType === 'select') {
                 if (d.hasOwnProperty(item.id)) {
                     hasItems = true;
                     let val = d[item.id];
                     let opts = item.options.map(o => `<option value="${o.value}" ${o.value == val ? 'selected' : ''}>${o.label}</option>`).join('');
                     if (inCardSubCard) {
-                        groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><label style="font-size:12px;">${item.label}</label><select id="${item.id}" style="width:auto;min-width:120px;">${opts}</select></div>`;
+                        groupHtml += `<div class="cfg-row"><label>${item.label}</label><div class="cfg-controls"><select id="${item.id}" style="width:auto;min-width:120px;flex-shrink:0;">${opts}</select>${resetBtn(item.id)}</div></div>`;
                     } else {
                         closeSubCard();
-                        groupHtml += `<div class="card"><label>${item.label}</label><select id="${item.id}" style="margin-top:4px;">${opts}</select></div>`;
+                        groupHtml += `<div class="card"><div class="cfg-row"><label>${item.label}</label><div class="cfg-controls" style="width:auto;flex:1;justify-content:flex-end;"><select id="${item.id}">${opts}</select>${resetBtn(item.id)}</div></div></div>`;
                     }
                 }
             } else if (iType === 'threshold-row') {
                 if (d.hasOwnProperty(item.colorId)) {
                     hasItems = true;
                     let valHtml = '';
+                    let resetKeys = item.colorId;
                     if (item.valueId && d.hasOwnProperty(item.valueId)) {
                         let unitHtml = item.unit ? `<span class="unit">${item.unit}</span>` : '';
                         valHtml = `${unitHtml}<input type="number" id="${item.valueId}" value="${d[item.valueId]}" step="any" style="width:85px;text-align:center;">`;
+                        resetKeys = item.colorId + ',' + item.valueId;
                     } else {
                         valHtml = `<span style="display:inline-block;width:115px;"></span>`;
                     }
-                    groupHtml += `<div style="display:flex;align-items:center;padding:3px 0;"><label style="min-width:170px;">${item.label}</label><div style="display:flex;align-items:center;gap:10px;margin-left:auto;width:200px;justify-content:flex-end;"><input type="color" id="${item.colorId}" value="${d[item.colorId]}">${valHtml}</div></div>`;
+                    groupHtml += `<div class="cfg-row"><label>${item.label}</label><div class="cfg-color-controls">${valHtml}<input type="color" id="${item.colorId}" value="${d[item.colorId]}"></div>${resetBtn(resetKeys)}</div>`;
                 }
             } else if (iType === 'color') {
                 if (d.hasOwnProperty(item.id)) {
                     hasItems = true;
                     let val = d[item.id];
-                    groupHtml += `<div style="display:flex;align-items:center;padding:3px 0;"><label style="min-width:170px;">${item.label}</label><div style="display:flex;align-items:center;gap:10px;margin-left:auto;width:200px;justify-content:flex-end;"><input type="color" id="${item.id}" value="${val}"><span style="display:inline-block;width:115px;"></span></div></div>`;
+                    groupHtml += `<div class="cfg-row"><label>${item.label}</label><div class="cfg-color-controls"><span style="display:inline-block;width:115px;"></span><input type="color" id="${item.id}" value="${val}"></div>${resetBtn(item.id)}</div>`;
                 }
             } else if (iType === 'range') {
                 if (d.hasOwnProperty(item.id)) {
@@ -1294,7 +1573,7 @@ function renderForm(d) {
                         <label style="font-size:12px;display:block;margin-bottom:4px;">${item.label}</label>
                         <div class="xy-row">
                             <input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value">
-                            ${unitHtml}<input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value">
+                            ${unitHtml}<input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value">${resetBtn(item.id)}
                         </div>
                     </div>`;
                     groupHtml += sliderHtml;
@@ -1314,19 +1593,16 @@ function renderForm(d) {
                         <div class="xy-row">
                             <label>X</label>
                             <input type="range" id="${item.idX}_slider" min="${minX}" max="${maxX}" value="${valX}" oninput="document.getElementById('${item.idX}').value = this.value">
-                            <input type="number" id="${item.idX}" value="${valX}" step="1" oninput="document.getElementById('${item.idX}_slider').value = this.value">
+                            <input type="number" id="${item.idX}" value="${valX}" step="1" oninput="document.getElementById('${item.idX}_slider').value = this.value">${resetBtn(item.idX)}
                         </div>
                         <div class="xy-row">
                             <label>Y</label>
                             <input type="range" id="${item.idY}_slider" min="${minY}" max="${maxY}" value="${valY}" oninput="document.getElementById('${item.idY}').value = this.value">
-                            <input type="number" id="${item.idY}" value="${valY}" step="1" oninput="document.getElementById('${item.idY}_slider').value = this.value">
+                            <input type="number" id="${item.idY}" value="${valY}" step="1" oninput="document.getElementById('${item.idY}_slider').value = this.value">${resetBtn(item.idY)}
                         </div>
                     </div>`;
                     groupHtml += xyContent;
                 }
-            } else if (iType === 'pin') {
-                hasItems = true;
-                groupHtml += `<div class="card"><div style="display:flex;align-items:center;gap:8px;"><label style="min-width:170px;">${item.label}</label><div style="display:flex;align-items:center;gap:4px;margin-left:auto;width:135px;justify-content:flex-end;"><input type="password" id="${item.id}" placeholder="leave empty = keep" style="width:85px;text-align:center;"></div></div></div>`;
             } else if (iType === 'note') {
                 hasItems = true;
                 groupHtml += `<div style="font-size:11px;color:var(--text-dim);padding:2px 2px 8px 2px;">${item.label}</div>`;
@@ -1339,36 +1615,37 @@ function renderForm(d) {
                     <h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">${item.label}</h4>
                     <label style="font-size:11px;">Number of points (tank capacity + 1):</label>
                     <div style="display:flex; align-items:center; gap:8px; margin:6px 0 10px 0;">
-                        <input type="number" id="${item.pointCount}" value="${tableArr.length}" min="2" max="20" style="width:70px;">
-                        <button onclick="save();setTimeout(() => location.reload(), 500)" class="btn-secondary" style="padding:5px 10px; font-size:11px;">Ôå╗ Refresh Table</button>
+                        <input type="number" id="${item.pointCount}" value="${tableArr.length}" min="2" max="20" style="width:70px;">${resetBtn(item.pointCount)}
+                        <button onclick="save();setTimeout(() => location.reload(), 500)" class="btn-secondary" style="padding:5px 10px; font-size:11px;">↻ Refresh Table</button>
                     </div>
                     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:6px 12px; align-items:center;">`;
                 
                 tableArr.forEach((val, idx) => {
-                    tableHtml += `<div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:'JetBrains Mono',monospace;">#${idx}</span><input type="number" id="TT_${idx}" value="${val}" style="width:100%;"></div>`;
+                    tableHtml += `<div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:'JetBrains Mono',monospace;">#${idx}</span><input type="number" id="TT_${idx}" value="${val}" style="width:100%;">${resetBtn('TT_' + idx)}</div>`;
                 });
                 tableHtml += `</div></div>`;
                 groupHtml += tableHtml;
             } else {
                 if (d.hasOwnProperty(item.id)) {
                     hasItems = true;
-                    let val = d[item.id];
+                    let val = (item.id === 'SPI_BUS_SPEED' && typeof d[item.id] === 'number') ? d[item.id] / 1000000 : d[item.id];
                     let isBool = (typeof val === 'boolean');
                     let isPwd = /^WIFI_PASSWORD(_\d+)?$/.test(item.id);
+                    let skipReset = isPwd;
                     let inputType = isPwd ? 'password' : (typeof val === 'number' ? 'number' : 'text');
 
                     if (inCardSubCard) {
                         if (isBool) {
-                            groupHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;"><label>${item.label}</label><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div>`;
+                            groupHtml += `<div class="cfg-row"><label>${item.label}</label><div class="cfg-controls"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
                         } else {
-                            groupHtml += `<div style="display:flex;align-items:center;padding:3px 0;"><label style="min-width:170px;">${item.label}</label><div style="display:flex;align-items:center;gap:4px;margin-left:auto;width:135px;justify-content:flex-end;">${item.unit ? `<span class="unit">${item.unit}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? 'ÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇó' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any" style="width:85px;text-align:center;"></div></div>`;
+                            groupHtml += `<div class="cfg-row"><label>${item.label}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${item.unit}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any">${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div>`;
                         }
                     } else {
                         closeSubCard();
                         if (isBool) {
-                            groupHtml += `<div class="card checkbox-card"><label>${item.label}</label><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div>`;
+                            groupHtml += `<div class="card checkbox-card"><label>${item.label}</label><div style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
                         } else {
-                            groupHtml += `<div class="card"><div style="display:flex;align-items:center;gap:8px;"><label style="min-width:170px;">${item.label}</label><div style="display:flex;align-items:center;gap:4px;margin-left:auto;width:135px;justify-content:flex-end;">${item.unit ? `<span class="unit">${item.unit}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? 'ÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇóÔÇó' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any" style="width:85px;text-align:center;"></div></div></div>`;
+                            groupHtml += `<div class="card"><div class="cfg-row"><label>${item.label}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${item.unit}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any">${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div></div>`;
                         }
                     }
                 }
@@ -1387,7 +1664,7 @@ function renderForm(d) {
                     </div>
                     <svg class="summary-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
                 </summary>
-                ${groupHtml}
+                <div class="acc-collapser">${groupHtml}</div>
             </details>`;
         }
     });
@@ -1470,6 +1747,7 @@ function filterConfig() {
         });
         d.style.display = (!q || visible > 0 || d.querySelector('summary').textContent.toLowerCase().includes(q)) ? '' : 'none';
         if (q) d.open = true;
+        else d.open = false;
     });
 }
 
@@ -1490,38 +1768,76 @@ function save() {
         } else if (el.type === 'checkbox') out[el.id] = el.checked;
         else if (el.type === 'number' || el.tagName.toLowerCase() === 'select') {
             let val = parseFloat(el.value);
+            if (el.id === 'SPI_BUS_SPEED') val *= 1000000;
             out[el.id] = isNaN(val) ? el.value : val;
         } else if (el.type === 'password') {
             // Masked/bullet values mean "unchanged": keep the stored one.
             // Only a freshly typed value is sent to the device.
-            if (el.value !== '' && !/^ÔÇó+$/.test(el.value)) out[el.id] = el.value;
+            if (el.value !== '' && !/^•+$/.test(el.value)) out[el.id] = el.value;
         } else out[el.id] = el.value;
     });
     let msgBox = document.getElementById('msg');
     msgBox.className = ''; msgBox.innerText = "Saving settings to device...";
     fetch('/api/config', {method:'POST', body:JSON.stringify(out)})
-    .then(r => {
-        if (r.status === 401) throw { auth: true };
-        return r.json();
-    }).then(r => {
+    .then(r => r.json()).then(r => {
         if (r && r.status === 'ok') {
-            msgBox.className = 'msg-success';
-            msgBox.innerText = "Configuration saved successfully! Display updated.";
+            if (rebootRequiredChanged(out)) {
+                msgBox.className = 'msg-warning';
+                msgBox.innerText = "Reboot Required: changes will take effect after the device restarts.";
+            } else {
+                msgBox.className = 'msg-success';
+                msgBox.innerText = "Configuration saved successfully! Display updated.";
+            }
         } else {
             msgBox.className = 'msg-error';
             msgBox.innerText = 'The device rejected the settings: ' + (r && r.error ? r.error : 'unknown error') + '. Nothing was saved.';
         }
     }).catch(e => {
-        if (e && e.auth) {
-            msgBox.className = 'msg-error';
-            msgBox.innerText = "PIN required. Sign in first: open /api/config in this tab, enter the PIN, then save again. Nothing was saved.";
-        } else {
-            msgBox.className = 'msg-error'; msgBox.innerText = "Error communicating with the device. Nothing was saved.";
-        }
+        msgBox.className = 'msg-error'; msgBox.innerText = "Error communicating with the device. Nothing was saved.";
     }).finally(() => {
         saveInFlight = false;
         if (saveQueued) { saveQueued = false; setTimeout(save, 250); }
     });
+}
+
+// Resets one (or several, comma-separated) settings back to their factory
+// default values, then saves. Handles every row type: plain inputs, sliders,
+// checkboxes, selects, XY offset pairs and touch-table cells (TT_n).
+function applyDefault(keyString) {
+    keyString.split(',').forEach(key => {
+        key = key.trim();
+        if (key.startsWith('TT_')) {
+            let idx = parseInt(key.substring(3), 10);
+            let def = (DEFAULTS.touchTable && DEFAULTS.touchTable[idx] !== undefined) ? DEFAULTS.touchTable[idx] : 0;
+            let el = document.getElementById(key);
+            if (el) { el.value = def; el.dispatchEvent(new Event('input', {bubbles: true})); }
+            return;
+        }
+        if (key === 'FUEL_TOUCH_POINTS') {
+            let el = document.getElementById(key);
+            if (el) el.value = DEFAULTS.FUEL_TOUCH_POINTS;
+            return;
+        }
+        if (!(key in DEFAULTS)) return;
+        let def = DEFAULTS[key];
+        let base = document.getElementById(key);
+        if (!base) return;
+        if (base.type === 'checkbox') {
+            base.checked = !!def;
+            base.dispatchEvent(new Event('change', {bubbles: true}));
+        } else {
+            base.value = def;
+            base.dispatchEvent(new Event('input', {bubbles: true}));
+        }
+        let slider = document.getElementById(key + '_slider');
+        if (slider) slider.value = def;
+        if (key === 'ENABLE_DYNAMIC_CPU') updateCpuMode();
+        if (key === 'ENABLE_POWER_SENSE') {
+            let cb = document.getElementById('ENABLE_POWER_SENSE');
+            if (cb) cb.checked = !!def;
+        }
+    });
+    save();
 }
 
 function reboot() {
@@ -1869,7 +2185,7 @@ function updatePerf() {
         function set(id, v) { let el = document.getElementById(id); if (el) el.textContent = v; }
         set('p-cpu-freq', d.cpu_freq + ' MHz');
         set('p-cpu-mode', d.cpu_dynamic ? 'Dynamic' : 'Fixed ' + d.cpu_freq + ' MHz');
-        set('p-cpu-temp', d.cpu_temp.toFixed(1) + ' ┬░C');
+        set('p-cpu-temp', d.cpu_temp.toFixed(1) + ' °C');
         let cPct = Math.min(d.cpu_usage, 100);
         let cBar = document.getElementById('cpu-used-bar');
         if (cBar) {
@@ -1945,6 +2261,5 @@ document.getElementById('perf-panel').addEventListener('toggle', function() {
     }
 });
 </script>
-
 
 </body></html>

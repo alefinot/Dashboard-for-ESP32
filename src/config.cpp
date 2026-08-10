@@ -128,6 +128,7 @@ bool SHOW_ELEMENT_AVG_KML = true;
 bool SHOW_ELEMENT_AVG_SPEED = true;
 bool SHOW_ELEMENT_FUEL_LTRS = true;
 bool SHOW_ELEMENT_COMPASS = true;
+bool SHOW_GHOST_DIGITS = true;
 bool SHOW_ELEMENT_WEATHER = true;
 int OFFSET_WEATHER_X = 0;
 int OFFSET_WEATHER_Y = 146;
@@ -159,12 +160,9 @@ int REFRESH_BAT_MS = 2500;
 int REFRESH_INST_MS = 500;
 int REFRESH_AVG_MS = 5000;
 int REFRESH_FUEL_MS = 1000;
-int REFRESH_ODO_MS = 0;
 int REFRESH_TIME_MS = 0;
 int REFRESH_SIDEBAR_TEMP_MS = 0;
 int REFRESH_SIDEBAR_FUEL_MS = 0;
-int REFRESH_AVG_SPEED_MS = 0;
-int REFRESH_COMPASS_MS = 100;
 float COMPASS_DECLINATION_DEG = 0.0f;
 
 int SPEED_DIGITS = 3;
@@ -234,10 +232,7 @@ bool TZ_DST_ENABLED = true;
 bool OTA_PULL_ENABLED = true;
 char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-char OTA_CURRENT_VERSION[32] = "1.2.1";
-
-// Optional PIN protecting the web config page and admin API (empty = disabled)
-char CONFIG_PIN[17] = "";
+char OTA_CURRENT_VERSION[32] = "1.2.5";
 
 int FUEL_TOUCH_POINTS = 8;
 int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400};
@@ -448,6 +443,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(SHOW_ELEMENT_AVG_SPEED, "SH_AVG_SPD", true);
   CFG_BOOL(SHOW_ELEMENT_FUEL_LTRS, "SH_FUL", true);
   CFG_BOOL(SHOW_ELEMENT_COMPASS, "SH_CMP", true);
+  CFG_BOOL(SHOW_GHOST_DIGITS, "SH_GHOST", true);
   CFG_BOOL(SHOW_ELEMENT_WEATHER, "SH_WEATH", true);
   CFG_INT(OFFSET_WEATHER_X, "O_WEATH_X", 0);
   CFG_INT(OFFSET_WEATHER_Y, "O_WEATH_Y", 146);
@@ -482,12 +478,9 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(REFRESH_INST_MS, "R_INST", 500);
   CFG_INT(REFRESH_AVG_MS, "R_AVG", 5000);
   CFG_INT(REFRESH_FUEL_MS, "R_FUEL", 1000);
-  CFG_INT(REFRESH_ODO_MS, "R_ODO", 0);
   CFG_INT(REFRESH_TIME_MS, "R_TIME", 0);
   CFG_INT(REFRESH_SIDEBAR_TEMP_MS, "R_SB_T", 0);
   CFG_INT(REFRESH_SIDEBAR_FUEL_MS, "R_SB_F", 0);
-  CFG_INT(REFRESH_AVG_SPEED_MS, "R_AVG_SPD", 0);
-  CFG_INT(REFRESH_COMPASS_MS, "R_CMP", 100);
 
   CFG_INT(SPEED_DIGITS, "SPD_DIG", 3);
   CFG_INT(SAT_DIGITS, "SAT_DIG", 2);
@@ -524,32 +517,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", true);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
   CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.2.1");
-
-  // CONFIG_PIN is handled manually: never serialized back (mode 1) so the web
-  // config API cannot leak it. Mode 2 accepts a new 4-16 char PIN, or clears
-  // it when CONFIG_PIN_REMOVE is true.
-  if (mode == 0) {
-    size_t cb = pref.getString("CONFIG_PIN", CONFIG_PIN, sizeof(CONFIG_PIN));
-    if (cb == 0)
-      CONFIG_PIN[0] = 0;
-    else
-      CONFIG_PIN[sizeof(CONFIG_PIN) - 1] = 0;
-  } else if (mode == 1) {
-    (*doc)["CONFIG_PIN_REMOVE"] = false;
-  } else if (mode == 2) {
-    if ((*doc)["CONFIG_PIN_REMOVE"].as<bool>()) {
-      CONFIG_PIN[0] = 0;
-      pref.putString("CONFIG_PIN", "");
-    } else if ((*doc)["CONFIG_PIN"].is<const char *>()) {
-      const char *newPin = (*doc)["CONFIG_PIN"].as<const char *>();
-      size_t newPinLen = newPin ? strlen(newPin) : 0;
-      if (newPinLen >= 4 && newPinLen <= 16) {
-        snprintf(CONFIG_PIN, sizeof(CONFIG_PIN), "%s", newPin);
-        pref.putString("CONFIG_PIN", CONFIG_PIN);
-      }
-    }
-  }
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.2.5");
 
   // WiFi passwords: mode 1 sends empty strings so they never leave the device,
   // mode 2 keeps the stored value when the posted password is empty.

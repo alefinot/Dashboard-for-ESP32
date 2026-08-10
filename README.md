@@ -402,11 +402,8 @@ Dashboard++ for ESP32/
 │       ├── Conthrax_SemiBold_16px.vlw # 16px label font
 │       └── Conthrax_SemiBold_10px.vlw # 10px micro label font
 ├── include/
-│   ├── Conthrax_SemiBold12pt7b.h # GFXfont fallback (Medium header size)
 │   ├── Conthrax_SemiBold7pt7b.h  # GFXfont fallback (Small badge size)
-│   ├── Conthrax_SemiBold4pt7b.h  # GFXfont fallback (Micro label size)
-│   ├── DS_DIGIT50pt7b.h          # GFXfont fallback (50 pt 7-segment)
-│   └── DS_DIGIT15pt7b.h          # GFXfont fallback (15 pt 7-segment)
+│   └── Conthrax_SemiBold4pt7b.h  # GFXfont fallback (Micro label size)
 ├── lib/
 │   ├── ArduinoJson/       # Optimized embedded JSON parser/serializer library
 │   └── TinyGPSPlus/       # NMEA 0183 GPS stream parser library

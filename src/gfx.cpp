@@ -45,16 +45,17 @@ void LGFX_ST7789_4::applyBusConfig() {
   _bus_instance.config(cfg);
 }
 
-#include "DS_DIGIT15pt7b.h"
-#include "Conthrax_SemiBold12pt7b.h"
 #include "Conthrax_SemiBold7pt7b.h"
 #include "Conthrax_SemiBold4pt7b.h"
 #include "DS_DIGIT_120px_vlw.h"
+#include "DS_DIGIT_28px_vlw.h"
+#include "Conthrax_SemiBold_10px_vlw.h"
+#include "Conthrax_SemiBold_16px_vlw.h"
+#include "Conthrax_SemiBold_28px_vlw.h"
 
 // Index of the currently loaded VLW font on the display.
-// The 120px VLW font is compiled directly into Flash memory (PROGMEM) via
-// include/DS_DIGIT_120px_vlw.h, so it streams from Flash mapped memory and
-// consumes ZERO bytes of DRAM.
+// The VLW fonts are compiled directly into Flash memory (PROGMEM) via headers in include/,
+// so they stream from Flash mapped memory and consume ZERO bytes of DRAM.
 static int g_lastVLWFont = -1;
 static bool g_vlw120Loaded = false;
 
@@ -86,29 +87,13 @@ void LGFX_ST7789_4::loadVLWFont(const char *path) {
   g_lastVLWFont = cur;
 
   if (is120) {
-    auto vfd = getVLWData120();
-    if (vfd.data) {
-      try {
-        g_vlw120Loaded = loadFont(vfd.data, lgfx::v1::IFont::font_type_t::ft_vlw);
-      } catch (...) {
-        g_vlw120Loaded = false;
-      }
-      if (!g_vlw120Loaded)
-        logPrintf("Font load failed (parse): %s\n", path);
-    } else {
-      g_vlw120Loaded = false;
-      logPrintf("Font load failed (open): %s\n", path);
-    }
-    // Don't cache a failed load: the next frame retries once the heap recovers
-    // (e.g. after a mem-saver release), instead of drawing speed digits with a
-    // stale, wrong-sized font.
-    if (!g_vlw120Loaded) g_lastVLWFont = -1;
+    g_vlw120Loaded = loadFont(DS_DIGIT_120px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
   } else if (isDs28) {
-    setFont(&DS_DIGIT15pt7b);
+    loadFont(DS_DIGIT_28px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
   } else if (isCon28) {
-    setFont(&Conthrax_SemiBold12pt7b);
+    loadFont(Conthrax_SemiBold_28px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
   } else if (isCon16) {
-    setFont(&Conthrax_SemiBold7pt7b);
+    loadFont(Conthrax_SemiBold_16px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
   } else {
     setFont(&Conthrax_SemiBold4pt7b);
   }
@@ -457,32 +442,61 @@ void drawStopwatchIcon(int x, int y, uint16_t color) {
   drawAALine(display, (float)(x + 8), (float)(y + 8), (float)(x + 12), (float)(y + 4), color);
 }
 
+void drawSatelliteIcon(int x, int y, uint16_t color) {
+  // --- Wing 1: Top-Left Solar Panel (Grid 3x2) ---
+  drawAALine(display, (float)(x + 3), (float)(y + 0), (float)(x + 0), (float)(y + 3), color);
+  drawAALine(display, (float)(x + 0), (float)(y + 3), (float)(x + 4), (float)(y + 7), color);
+  drawAALine(display, (float)(x + 4), (float)(y + 7), (float)(x + 7), (float)(y + 4), color);
+  drawAALine(display, (float)(x + 7), (float)(y + 4), (float)(x + 3), (float)(y + 0), color);
+
+  // Wing 1 inner grid dividers
+  drawAALine(display, (float)(x + 2), (float)(y + 2), (float)(x + 5), (float)(y + 5), color);
+  drawAALine(display, (float)(x + 1), (float)(y + 4), (float)(x + 4), (float)(y + 1), color);
+  drawAALine(display, (float)(x + 3), (float)(y + 6), (float)(x + 6), (float)(y + 3), color);
+
+  // Wing 1 Strut to main body
+  drawAALine(display, (float)(x + 5), (float)(y + 5), (float)(x + 6), (float)(y + 6), color);
+
+  // --- Wing 2: Bottom-Right Solar Panel (Grid 3x2) ---
+  drawAALine(display, (float)(x + 11), (float)(y + 8), (float)(x + 8), (float)(y + 11), color);
+  drawAALine(display, (float)(x + 8), (float)(y + 11), (float)(x + 12), (float)(y + 15), color);
+  drawAALine(display, (float)(x + 12), (float)(y + 15), (float)(x + 15), (float)(y + 12), color);
+  drawAALine(display, (float)(x + 15), (float)(y + 12), (float)(x + 11), (float)(y + 8), color);
+
+  // Wing 2 inner grid dividers
+  drawAALine(display, (float)(x + 10), (float)(y + 10), (float)(x + 13), (float)(y + 13), color);
+  drawAALine(display, (float)(x + 9), (float)(y + 12), (float)(x + 12), (float)(y + 9), color);
+  drawAALine(display, (float)(x + 11), (float)(y + 14), (float)(x + 14), (float)(y + 11), color);
+
+  // Wing 2 Strut to main body
+  drawAALine(display, (float)(x + 9), (float)(y + 9), (float)(x + 10), (float)(y + 10), color);
+
+  // --- Central Body (Cylinder, 45-degree angle) ---
+  drawAALine(display, (float)(x + 5), (float)(y + 7), (float)(x + 8), (float)(y + 4), color);
+  drawAALine(display, (float)(x + 8), (float)(y + 4), (float)(x + 11), (float)(y + 7), color);
+  drawAALine(display, (float)(x + 11), (float)(y + 7), (float)(x + 8), (float)(y + 10), color);
+  drawAALine(display, (float)(x + 8), (float)(y + 10), (float)(x + 5), (float)(y + 7), color);
+
+  // Dome Cap on top-right end
+  drawAALine(display, (float)(x + 8), (float)(y + 4), (float)(x + 10), (float)(y + 3), color);
+  drawAALine(display, (float)(x + 10), (float)(y + 3), (float)(x + 12), (float)(y + 5), color);
+  drawAALine(display, (float)(x + 12), (float)(y + 5), (float)(x + 11), (float)(y + 7), color);
+
+  // Parabolic Dish / Antenna on bottom-left end
+  drawAALine(display, (float)(x + 5), (float)(y + 7), (float)(x + 3), (float)(y + 9), color);
+  drawAALine(display, (float)(x + 3), (float)(y + 9), (float)(x + 4), (float)(y + 11), color);
+  drawAALine(display, (float)(x + 4), (float)(y + 11), (float)(x + 6), (float)(y + 12), color);
+  drawAALine(display, (float)(x + 6), (float)(y + 12), (float)(x + 8), (float)(y + 10), color);
+
+  // Dish feed horn stem & tip knob
+  drawAALine(display, (float)(x + 4), (float)(y + 11), (float)(x + 2), (float)(y + 13), color);
+  display.drawPixel(x + 1, y + 14, color);
+  display.drawPixel(x + 2, y + 14, color);
+  display.drawPixel(x + 1, y + 13, color);
+}
+
 void drawLocationIcon(int x, int y, uint16_t color) {
-  int cx = x + 8, cy = y + 5, r = 6;
-  int px = r, py = 0;
-  auto plotUpper = [&](int dx, int dy, float a) {
-    if (a <= 0.0f) return;
-    uint16_t c = blendColorWithBlack(color, a);
-    display.drawPixel(cx + dx, cy - dy, c);
-    display.drawPixel(cx - dx, cy - dy, c);
-  };
-  plotUpper(r, 0, 1.0f);
-  plotUpper(0, r, 1.0f);
-  while (px > py) {
-    py++;
-    float x_exact = sqrtf((float)(r * r - py * py));
-    px = (int)ceilf(x_exact);
-    float T_val = (float)px - x_exact;
-    float a1 = powf(1.0f - T_val, AA_SHARPNESS);
-    float a2 = powf(T_val, AA_SHARPNESS);
-    plotUpper(px, py, a1);
-    if (px > 1) plotUpper(px - 1, py, a2);
-    plotUpper(py, px, a1);
-    if (px > 1) plotUpper(py, px - 1, a2);
-  }
-  drawAALine(display, (float)(x + 14), (float)(y + 5), (float)(x + 8), (float)(y + 16), color);
-  drawAALine(display, (float)(x + 8), (float)(y + 16), (float)(x + 2), (float)(y + 5), color);
-  drawAACircle(display, cx, cy, 2, color);
+  drawSatelliteIcon(x, y, color);
 }
 
 void drawWifiIcon(int x, int y, uint16_t color, bool filled) {
@@ -509,6 +523,8 @@ void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color) {
   int badgeW = w + 16, badgeH = h + 8;
   int x = (BIG_CENTER_X + offsetX) - (badgeW / 2);
   int y = (BIG_CENTER_Y + offsetY) - (badgeH / 2);
+  // The erase covers the widest badge this element can show, drawn in the same
+  // transaction as the badge so it never flashes.
   display.fillRect(x - 3, y - 3, badgeW + 6, badgeH + 6, TFT_BLACK);
   drawAARoundRect(display, x, y, badgeW, badgeH, 4, color);
   drawDebugBox(display, x - 3, y - 3, badgeW + 6, badgeH + 6);

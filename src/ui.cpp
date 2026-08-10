@@ -1,6 +1,8 @@
 #include "dashboard.h"
 #include "Conthrax_SemiBold7pt7b.h"
 #include "Conthrax_SemiBold4pt7b.h"
+#include "Conthrax_SemiBold_10px_vlw.h"
+#include "Conthrax_SemiBold_16px_vlw.h"
 
 #define MAX_CELLS 16
 
@@ -198,6 +200,52 @@ static void measureDs15Cells(int *cells, int &totalW, int count, int decimalPos)
   totalW = cumX - G;
 }
 
+// DS-DIGIT_28px digit metrics, measured once per boot before the time/date
+// row uses them for fixed-slot positioning.
+static bool ds15Measured = false;
+static int ds15_digitWidth[10] = {0}, ds15_digitXOff[10] = {0};
+static int16_t ds15_refY1 = 0;
+static uint16_t ds15_dotWidth = 0;
+static int16_t ds15_dotXOff = 0;
+
+// Time/date rows: each digit is right-anchored into a fixed 15px slot
+// (DS-DIGIT xAdvance) so values, ghosts and separators never shift when the
+// digits change ('1' is much narrower than '8' but shares the same slot).
+static void drawDsGhostPair(LGFX_ST7789_4 &g, int baseX, int y) {
+  g.setTextColor(ghost_color, TFT_BLACK);
+  for (int i = 0; i < 2; i++) {
+    int slotRight = baseX + 15 * (i + 1);
+    int cx = slotRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+    g.setCursor(cx, y);
+    g.print('8');
+  }
+}
+
+static void drawDsDigitPair(LGFX_ST7789_4 &g, const char *str, int baseX, int y) {
+  for (int i = 0; i < 2; i++) {
+    char c = (str[i] != '\0') ? str[i] : '-';
+    int slotRight = baseX + 15 * (i + 1);
+    if (!SHOW_GHOST_DIGITS) {
+      // No ghosts: erase the full slot with the widest glyph ('8') in black
+      // before drawing the value, so a narrow digit ('1') never leaves
+      // residue from a previously wider one.
+      int ex = slotRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+      g.setTextColor(TFT_BLACK);
+      g.setCursor(ex, y);
+      g.print('8');
+    }
+    if (c == '-') continue;  // blank placeholder: keep the ghost '8' visible
+    int d = c - '0';
+    int cx = slotRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
+    if (SHOW_GHOST_DIGITS)
+      g.setTextColor(TFT_WHITE);
+    else
+      g.setTextColor(TFT_WHITE, TFT_BLACK);
+    g.setCursor(cx, y);
+    g.print(c);
+  }
+}
+
 // ----------------------------------------------------------------------------
 // Compass tape dynamic layer (scrolling ticks)
 // ----------------------------------------------------------------------------
@@ -228,7 +276,11 @@ static inline void tapeSetFont(LGFX_ST7789_4 &d, const lgfx::IFont *f) {
 }
 template <typename T>
 static inline void tapeSetFont(T &d, const lgfx::IFont *f) {
-  d.setFont(f);
+  if (f == &Conthrax_SemiBold7pt7b) {
+    d.loadFont(Conthrax_SemiBold_16px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
+  } else {
+    d.setFont(f);
+  }
 }
 
 template <typename T>
@@ -371,6 +423,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     forceFullRedraw = false;
   }
   bool componentUpdated = false;
+  bool weatherPaintedFrame = false;
   int16_t x1, y1, tx1, ty1;
   uint16_t w, h;
 
@@ -390,11 +443,10 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   if (forceDraw) {
     if (SHOW_ELEMENT_SIGNATURE) {
       display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
-      display.setTextColor(display.color565(150, 150, 150));
+      display.setTextColor(display.color565(150, 150, 150), TFT_BLACK);
       display.getTextBounds(DASHBOARD_SIGNATURE, 0, 0, &x1, &y1, &w, &h);
       int sigX = BIG_CENTER_X + OFFSET_BIG_SIGNATURE_X,
           sigY = BIG_CENTER_Y + OFFSET_BIG_SIGNATURE_Y;
-      display.fillRect(sigX - (w / 2) - 3, sigY - 3, w + 6, h + 6, TFT_BLACK);
       display.setCursor(sigX - (w / 2) - x1, sigY - y1);
       display.print(DASHBOARD_SIGNATURE);
       drawDebugBox(display, sigX - (w / 2) - 2, sigY - 2, w + 4, h + 4);
@@ -470,6 +522,25 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   // threshold but plainly visible as a 1Hz hitch). 125ms places the 1Hz
   // redraw midway between the 250ms speed redraws.
   constexpr unsigned long TIME_REDRAW_PHASE_MS = 125;
+  // Measure DS-DIGIT_28px digit metrics once, before the time/date row uses
+  // them for fixed-slot positioning (this also loads the VLW font the row
+  // needs).
+  if (!ds15Measured) {
+    ds15Measured = true;
+    int16_t bx1, by1;
+    uint16_t bw, bh;
+    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
+    char buf[2] = "0";
+    for (int i = 0; i < 10; i++) {
+      buf[0] = '0' + i;
+      display.getTextBounds(buf, 0, 0, &bx1, &by1, &bw, &bh);
+      ds15_digitWidth[i] = bw;
+      ds15_digitXOff[i] = bx1;
+    }
+    display.getTextBounds("0", 0, 0, &bx1, &ds15_refY1, &bw, &bh);
+    display.getTextBounds(".", 0, 0, &bx1, &by1, &ds15_dotWidth, &bh);
+    ds15_dotXOff = bx1;
+  }
   bool timeRowChanged = displaySnap.localHour != lastHour ||
                         displaySnap.minute != lastMin ||
                         displaySnap.day != lastDay;
@@ -494,7 +565,6 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       snprintf(monthStr, 4, "%02d", displaySnap.month);
       snprintf(yearStr, 4, "%02d", displaySnap.year);
     }
-    uint16_t w_h, h_h, w_m, h_m, w_d, h_d, w_mo, h_mo, w_y, h_y;
     static uint16_t w_sep_t = 0, h_sep_t = 0, w_sep_d = 0, h_sep_d = 0;
     static int16_t tx1_sep_t = 0, tx1_sep_d = 0;
     static int16_t ty1_sep_t = 0, ty1_sep_d = 0;
@@ -504,41 +574,44 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       display.getTextBounds("/", 0, 0, &tx1_sep_d, &ty1_sep_d, &w_sep_d, &h_sep_d);
     }
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    display.getTextBounds(hourStr, 0, 0, &tx1, &ty1, &w_h, &h_h);
-    int16_t save_h_x1 = tx1;
-    display.getTextBounds(minStr, 0, 0, &tx1, &ty1, &w_m, &h_m);
-    display.getTextBounds(dayStr, 0, 0, &tx1, &ty1, &w_d, &h_d);
-    int16_t save_d_x1 = tx1;
-    display.getTextBounds(monthStr, 0, 0, &tx1, &ty1, &w_mo, &h_mo);
-    display.getTextBounds(yearStr, 0, 0, &tx1, &ty1, &w_y, &h_y);
+    uint16_t w_h, h_h;
+    display.getTextBounds("88", 0, 0, &tx1, &ty1, &w_h, &h_h);
     int16_t digitTY1 = ty1;
-
-    int timeW = 16 + 6 + w_h + w_sep_t + w_m;
+    // Every digit gets a fixed 15px slot (DS-DIGIT xAdvance) and is
+    // right-anchored inside it, so digits, ghosts and separators never shift
+    // when values change ('1' is much narrower than '8' but fills the same
+    // slot).
+    const int dSlot = 15;
+    // Every separator sits in a fixed 4px gap between the glyph edges of the
+    // digit groups, so the spacing around ":" and "/" is even on both sides
+    // and never shifts when the digits change.
+    const int sepGap = 4;
+    int timeW = 16 + 6 + (2 * dSlot - 2 + sepGap + w_sep_t + sepGap + 1) + (2 * dSlot - 2);
     int timeX = (BIG_CENTER_X + OFFSET_BIG_TIME_X) - (timeW / 2);
     int timeY = BIG_CENTER_Y + OFFSET_BIG_TIME_Y;
+    int tDigitsX = timeX + 22;
+    int tColonX = tDigitsX + (2 * dSlot - 2) + sepGap - tx1_sep_t;
+    int tMinX = tColonX + w_sep_t + sepGap + 1;
 
-    int dateW = 16 + 6 + w_d + w_sep_d + w_mo + w_sep_d + w_y;
+    int dateW = 16 + 6 + (2 * dSlot - 2 + sepGap + w_sep_d + sepGap + 1) * 2 + (2 * dSlot - 2);
     int dateX = (BIG_CENTER_X + OFFSET_BIG_DATE_X) - (dateW / 2);
     int dateY = BIG_CENTER_Y + OFFSET_BIG_DATE_Y;
+    int dDayX = dateX + 22;
+    int dSep1X = dDayX + (2 * dSlot - 2) + sepGap - tx1_sep_d;
+    int dMonthX = dSep1X + w_sep_d + sepGap + 1;
+    int dSep2X = dMonthX + (2 * dSlot - 2) + sepGap - tx1_sep_d;
+    int dYearX = dSep2X + w_sep_d + sepGap + 1;
 
     int timeClearOfsY = std::min(std::min((int)-18, (int)digitTY1), (int)ty1_sep_t) - 4;
-    int timeClearH = std::max(std::max((int)-2, (int)digitTY1 + (int)max(h_h, h_m)), (int)ty1_sep_t + (int)h_sep_t) - std::min(std::min((int)-18, (int)digitTY1), (int)ty1_sep_t) + 8;
+    int timeClearH = std::max(std::max((int)-2, (int)digitTY1 + (int)h_h), (int)ty1_sep_t + (int)h_sep_t) - std::min(std::min((int)-18, (int)digitTY1), (int)ty1_sep_t) + 8;
 
     int dateClearOfsY = std::min(std::min((int)-18, (int)digitTY1), (int)ty1_sep_d) - 4;
-    int dateClearH = std::max(std::max((int)-2, (int)digitTY1 + (int)max(max(h_d, h_mo), h_y)), (int)ty1_sep_d + (int)h_sep_d) - std::min(std::min((int)-18, (int)digitTY1), (int)ty1_sep_d) + 8;
+    int dateClearH = std::max(std::max((int)-2, (int)digitTY1 + (int)h_h), (int)ty1_sep_d + (int)h_sep_d) - std::min(std::min((int)-18, (int)digitTY1), (int)ty1_sep_d) + 8;
 
     if (lastTimeStartX >= 0 && lastTimeY >= 0 && lastTimeY != timeY) {
       display.fillRect(lastTimeStartX - 8, lastTimeY + timeClearOfsY, lastTimeWidth + 16,
                         timeClearH, TFT_BLACK);
     }
-    int clearTimeX = timeX - 4, clearTimeW = timeW + 8;
-    if (lastTimeWidth > 0 && lastTimeStartX >= 0 && lastTimeY == timeY) {
-      clearTimeX = std::min(timeX, lastTimeStartX) - 4;
-      clearTimeW = std::max(timeX + timeW, lastTimeStartX + lastTimeWidth) + 4 -
-                   clearTimeX;
-    }
-    display.fillRect(clearTimeX - 4, timeY + timeClearOfsY, clearTimeW + 12, timeClearH,
-                     TFT_BLACK);
     lastTimeStartX = timeX;
     lastTimeWidth = timeW;
     lastTimeY = timeY;
@@ -547,14 +620,6 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       display.fillRect(lastDateStartX - 8, lastDateY + dateClearOfsY, lastDateWidth + 16,
                         dateClearH, TFT_BLACK);
     }
-    int clearDateX = dateX - 4, clearDateW = dateW + 8;
-    if (lastDateWidth > 0 && lastDateStartX >= 0 && lastDateY == dateY) {
-      clearDateX = std::min(dateX, lastDateStartX) - 4;
-      clearDateW = std::max(dateX + dateW, lastDateStartX + lastDateWidth) + 4 -
-                   clearDateX;
-    }
-    display.fillRect(clearDateX - 4, dateY + dateClearOfsY, clearDateW + 12, dateClearH,
-                     TFT_BLACK);
     lastDateStartX = dateX;
     lastDateWidth = dateW;
     lastDateY = dateY;
@@ -562,65 +627,44 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     if (SHOW_ELEMENT_TIME) {
       drawClockIcon(timeX, timeY - 18, TFT_WHITE);
       display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-      display.setTextColor(TFT_WHITE);
-      display.setCursor(timeX + 22 - save_h_x1, timeY);
-      display.print(hourStr);
-      display.setCursor(timeX + 22 - save_h_x1 + w_h + 4 + w_sep_t + 4, timeY);
-      display.print(minStr);
+      if (SHOW_GHOST_DIGITS) {
+        drawDsGhostPair(display, tDigitsX, timeY);
+        drawDsGhostPair(display, tMinX, timeY);
+      }
+      drawDsDigitPair(display, hourStr, tDigitsX, timeY);
+      drawDsDigitPair(display, minStr, tMinX, timeY);
       drawDebugBox(display, timeX - 2, timeY + timeClearOfsY + 2, timeW + 12, timeClearH - 4);
     }
 
     if (SHOW_ELEMENT_DATE) {
       drawCalendarIcon(dateX, dateY - 18, TFT_WHITE);
       display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-      display.setCursor(dateX + 22 - save_d_x1, dateY);
-      display.print(dayStr);
-      display.setCursor(dateX + 22 - save_d_x1 + w_d + w_sep_d, dateY);
-      display.print(monthStr);
-      display.setCursor(dateX + 22 - save_d_x1 + w_d + w_sep_d + w_mo + w_sep_d, dateY);
-      display.print(yearStr);
+      if (SHOW_GHOST_DIGITS) {
+        drawDsGhostPair(display, dDayX, dateY);
+        drawDsGhostPair(display, dMonthX, dateY);
+        drawDsGhostPair(display, dYearX, dateY);
+      }
+      drawDsDigitPair(display, dayStr, dDayX, dateY);
+      drawDsDigitPair(display, monthStr, dMonthX, dateY);
+      drawDsDigitPair(display, yearStr, dYearX, dateY);
     }
 
     // Draw separators in Conthrax font (single switch)
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
-    display.setTextColor(TFT_WHITE);
+    display.setTextColor(TFT_WHITE, TFT_BLACK);
     if (SHOW_ELEMENT_TIME) {
-      display.setCursor(timeX + 22 - save_h_x1 + w_h + 4, timeY);
+      display.setCursor(tColonX, timeY);
       display.print(":");
     }
     if (SHOW_ELEMENT_DATE) {
-      display.setCursor(dateX + 22 - save_d_x1 + w_d, dateY);
+      display.setCursor(dSep1X, dateY);
       display.print("/");
-      display.setCursor(dateX + 22 - save_d_x1 + w_d + w_sep_d + w_mo, dateY);
+      display.setCursor(dSep2X, dateY);
       display.print("/");
       drawDebugBox(display, dateX - 2, dateY + dateClearOfsY + 2, dateW + 4, dateClearH - 4);
     }
   }
   tClockMs = millis() - tClock0;
-
-  // --- DS_DIGIT15pt7b digit metrics (measured once) ---
-  static bool ds15Measured = false;
-  static int ds15_digitWidth[10] = {0}, ds15_digitXOff[10] = {0};
-  static int16_t ds15_refY1 = 0;
-  static uint16_t ds15_dotWidth = 0;
-  static int16_t ds15_dotXOff = 0;
-
-  if (!ds15Measured) {
-    ds15Measured = true;
-    int16_t bx1, by1;
-    uint16_t bw, bh;
-    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    char buf[2] = "0";
-    for (int i = 0; i < 10; i++) {
-      buf[0] = '0' + i;
-      display.getTextBounds(buf, 0, 0, &bx1, &by1, &bw, &bh);
-      ds15_digitWidth[i] = bw;
-      ds15_digitXOff[i] = bx1;
-    }
-    display.getTextBounds("0", 0, 0, &bx1, &ds15_refY1, &bw, &bh);
-    display.getTextBounds(".", 0, 0, &bx1, &by1, &ds15_dotWidth, &bh);
-    ds15_dotXOff = bx1;
-  }
 
   int currentSpeed = (int)displaySnap.currentSpeed;
   static unsigned long lastSpeedUpdate = 0;
@@ -647,11 +691,13 @@ void updateBigDisplay(const SensorSnapshot &snap) {
     if (spValid) {
       unsigned long tSpr0 = millis();
       sp.fillSprite(TFT_BLACK);
-      sp.setTextColor(ghost_color);
-      for (int ci = 0; ci < spdCount; ci++) {
-        int cx = spdCellR[ci] + 4 - digitXOff[8] - digitWidth[8];
-        sp.setCursor(cx, 2 - refY1);
-        sp.print('8');
+      if (SHOW_GHOST_DIGITS) {
+        sp.setTextColor(ghost_color);
+        for (int ci = 0; ci < spdCount; ci++) {
+          int cx = spdCellR[ci] + 4 - digitXOff[8] - digitWidth[8];
+          sp.setCursor(cx, 2 - refY1);
+          sp.print('8');
+        }
       }
       sp.setTextColor(TFT_WHITE);
       for (int i = 0; i < len; i++) {
@@ -686,7 +732,27 @@ if (!vlw120Ready) {
           }
         }
         if (vlw120Ready) {
-          display.setTextColor(TFT_WHITE);
+          if (SHOW_GHOST_DIGITS) {
+            display.setTextColor(ghost_color, TFT_BLACK);
+            for (int ci = 0; ci < spdCount; ci++) {
+              int cx = boxLeft + spdCellR[ci] - 2 - digitXOff[8] - digitWidth[8];
+              display.setCursor(cx, speedNumY - refY1);
+              display.print('8');
+            }
+          } else {
+            // No ghosts: erase every cell with an invisible black '8' so a
+            // narrow digit never leaves residue from a wider one.
+            display.setTextColor(TFT_BLACK);
+            for (int ci = 0; ci < spdCount; ci++) {
+              int cx = boxLeft + spdCellR[ci] - 2 - digitXOff[8] - digitWidth[8];
+              display.setCursor(cx, speedNumY - refY1);
+              display.print('8');
+            }
+          }
+          if (SHOW_GHOST_DIGITS)
+            display.setTextColor(TFT_WHITE);
+          else
+            display.setTextColor(TFT_WHITE, TFT_BLACK);
           for (int i = 0; i < len; i++) {
             int d = speedStr[i] - '0';
             int cellIdx = (spdCount - len) + i;
@@ -717,14 +783,15 @@ if (!vlw120Ready) {
     display.endWrite();
     unsigned long tFrameEnd = millis();
     if (tFrameEnd - tFrame0 > 33) {
-      logPrintf("SLOW FRAME %lums: time+spd=%lu odo=%lu sb=%lu mid=%lu cmp=%lu wx+tail=%lu clk=%lu spr=%lu heap=%lu maxAlloc=%lu sp=%d fallback=%d\n",
+      logPrintf("SLOW FRAME %lums: time+spd=%lu sb=%lu mid=%lu cmp=%lu wx=%lu odo=%lu tail=%lu clk=%lu spr=%lu heap=%lu maxAlloc=%lu sp=%d fallback=%d\n",
                 (unsigned long)(tFrameEnd - tFrame0),
                 (unsigned long)(tAfterSpeed - tFrame0),
-                (unsigned long)(tAfterOdo - tAfterSpeed),
-                (unsigned long)(tAfterSb - tAfterOdo),
+                (unsigned long)(tAfterSb - tAfterSpeed),
                 (unsigned long)(tAfterMid - tAfterSb),
                 (unsigned long)(tAfterCompass - tAfterMid),
-                (unsigned long)(tFrameEnd - tAfterWeather),
+                (unsigned long)(tAfterWeather - tAfterCompass),
+                (unsigned long)(tAfterOdo - tAfterWeather),
+                (unsigned long)(tFrameEnd - tAfterOdo),
                 (unsigned long)tClockMs, (unsigned long)tSprMs,
                 (unsigned long)ESP.getFreeHeap(),
                 (unsigned long)ESP.getMaxAllocHeap(),
@@ -748,85 +815,10 @@ if (!vlw120Ready) {
     return;
   }
 
-  double displayOdo = displaySnap.totalDistanceKm;
-  static unsigned long lastOdoUpdate = 0;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_ODO && ((fabs(displayOdo - lastDispOdo) >= 0.1 &&
-      (REFRESH_ODO_MS == 0 || now - lastOdoUpdate >= (unsigned long)REFRESH_ODO_MS)) || forceDraw))) {
-    lastOdoUpdate = now;
-    lastDispOdo = displayOdo;
-    componentUpdated = true;
-    static uint16_t w_odo_unit_max = 0, h_odo_max = 0;
-    static bool odoLayoutInit = false;
-    if (!odoLayoutInit) {
-      odoLayoutInit = true;
-      int16_t tx1, ty1;
-      uint16_t tw1, th1, tw2, th2;
-      display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-      display.getTextBounds("999999.9", 0, 0, &tx1, &ty1, &tw1, &th1);
-      h_odo_max = th1;
-      display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
-      display.getTextBounds(" KM", 0, 0, &tx1, &ty1, &tw2, &th2);
-      w_odo_unit_max = tw2;
-      if (th2 > h_odo_max) h_odo_max = th2;
-    }
-    static int odoCells[MAX_CELLS] = {0};
-    static int odoCellW = 0, odoCellsCount = 0;
-    if (odoCellsCount == 0) {
-      odoCellsCount = ODO_INT_DIGITS + 1 + ODO_DEC_DIGITS;
-      measureDs15Cells(odoCells, odoCellW, odoCellsCount, ODO_INT_DIGITS);
-    }
-    int odoCellX = BIG_CENTER_X + OFFSET_BIG_ODO_X - ((odoCellW + 4 + w_odo_unit_max) / 2);
-    int odoUnitX = odoCellX + odoCellW + 4;
-
-    char odoNumStr[20];
-    snprintf(odoNumStr, sizeof(odoNumStr), "%.*f", ODO_DEC_DIGITS, displayOdo);
-    int len = strlen(odoNumStr);
-
-    int16_t odoY = (BIG_CENTER_Y + OFFSET_BIG_ODO_Y) - h_odo_max - ds15_refY1;
-    int odoClearY = odoY + ds15_refY1 - 2;
-    int odoClearW = odoCellW + 4 + w_odo_unit_max + 4;
-    display.fillRect(odoCellX - 2, odoClearY, odoClearW, h_odo_max + 4, TFT_BLACK);
-
-    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    display.setTextColor(ghost_color);
-    for (int ci = 0; ci < odoCellsCount; ci++) {
-      int cellRight = odoCellX + odoCells[ci];
-      char gc = (ci == ODO_INT_DIGITS) ? '.' : '8';
-      int cx;
-      if (gc == '.') {
-        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
-      } else {
-        cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
-      }
-      display.setCursor(cx, odoY);
-      display.print(gc);
-    }
-    display.setTextColor(TFT_WHITE);
-    for (int i = 0; i < len; i++) {
-      char c = odoNumStr[i];
-      int cellIdx = (odoCellsCount - len) + i;
-      int cellRight = odoCellX + odoCells[cellIdx];
-      int cx;
-      if (c == '.') {
-        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
-      } else {
-        int d = c - '0';
-        cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
-      }
-      display.setCursor(cx, odoY);
-      display.print(c);
-    }
-
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
-    display.setCursor(odoUnitX, odoY);
-    display.print(" KM");
-    drawDebugBox(display, odoCellX - 2, odoClearY, odoClearW, h_odo_max + 4);
-  }
-  tAfterOdo = millis();
-
   // --- SIDEBARS: Engine Temp & Fuel ---
   static int lastFuelPct = -1;
   static int lastEngineTemp = -999;
+  static int lastTempValW = 0;
   static float animTempFill = 0.0f;
   static float animFuelFill = 0.0f;
   static int lastTempFillH = 0;
@@ -867,8 +859,15 @@ if (!vlw120Ready) {
     lastFuelFillH = 0;
   }
 
-  // Start a new ease when the target changes
-  if (fabsf(targetTempPct - easeTempTo) > 0.001f) {
+  // Hysteresis deadband: the NTC value can still sit on an integer boundary
+  // after smoothing, and every ±1°C sensor tick used to restart the ease and
+  // redraw the number every frame (flicker). Only react to changes of at
+  // least one full step.
+  static constexpr int SIDEBAR_TEMP_DEADBAND_C = 2;
+  bool tempSigChanged = abs(currentTemp - lastEngineTemp) >= SIDEBAR_TEMP_DEADBAND_C;
+
+  // Start a new ease when the target changes significantly
+  if (tempSigChanged && fabsf(targetTempPct - easeTempTo) > 0.001f) {
     easeTempFrom = animTempFill;
     easeTempTo = targetTempPct;
     easeTempStart = now;
@@ -901,9 +900,9 @@ if (!vlw120Ready) {
   static unsigned long lastSideTempUpdate = 0;
   bool tempMoving = (now - easeTempStart) < SIDEBAR_EASE_MS;
   if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_SIDEBAR_TEMP &&
-      (((currentTemp != lastEngineTemp || tempMoving) && (tempMoving || REFRESH_SIDEBAR_TEMP_MS == 0 || now - lastSideTempUpdate >= (unsigned long)REFRESH_SIDEBAR_TEMP_MS)) || forceDraw))) {
+      (((tempSigChanged || tempMoving) && (tempMoving || REFRESH_SIDEBAR_TEMP_MS == 0 || now - lastSideTempUpdate >= (unsigned long)REFRESH_SIDEBAR_TEMP_MS)) || forceDraw))) {
     lastSideTempUpdate = now;
-    lastEngineTemp = currentTemp;
+    if (tempSigChanged) lastEngineTemp = currentTemp;
 
     int barX = SIDEBAR_LEFT_X, barY = SIDEBAR_LEFT_Y, barW = SIDEBAR_BAR_WIDTH, barH = SIDEBAR_BAR_HEIGHT;
 
@@ -940,23 +939,33 @@ if (!vlw120Ready) {
     snprintf(tBuf, sizeof(tBuf), "%d", currentTemp);
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
     int tempTextW = display.textWidth(tBuf);
-    int tempH = display.fontHeight();
-    int cTextW = display.textWidth("c");
-    int totalW = tempTextW + 1 + 3 + 6 + cTextW;
 
     int numStartX = barX + barW + 6;
-    display.fillRect(numStartX - 4, barY + barH - 2 - tempH - 4, totalW + 8,
-                     tempH + 8, TFT_BLACK);
 
-    display.setTextColor(tempColor);
-    display.setTextDatum(BL_DATUM);
-    display.drawString(tBuf, numStartX, barY + barH);
+    char valBuf[20];
+    snprintf(valBuf, sizeof(valBuf), "%d  c", currentTemp);
+    int valW = display.textWidth(valBuf);
+    int unitW = valW - tempTextW;   // gap + "c"
+    // Redraw the number/unit only when the value changed: repainting it on
+    // every ease frame makes the digits blink. The unit band (from the new
+    // number's right edge) is cleared before redrawing so a narrower value
+    // leaves no residue; the number cells repaint themselves via their own
+    // glyph backgrounds.
+    int pad = ((lastTempValW > tempTextW) ? lastTempValW : tempTextW) + unitW + 6;
+    if (tempSigChanged || forceDraw) {
+      lastTempValW = tempTextW;
+      int circleX = numStartX + tempTextW + 5;
+      display.fillRect(numStartX + tempTextW, barY + barH - 12, pad - tempTextW, 13, TFT_BLACK);
+      display.setTextColor(tempColor, TFT_BLACK);
+      display.setTextDatum(BL_DATUM);
+      display.setTextPadding(0);
+      display.drawString(valBuf, numStartX, barY + barH);
 
-    int cStartX = numStartX + tempTextW + 1;
-
-    drawAACircle(display, cStartX + 3, barY + barH - 10, 2, tempColor);
-    display.drawString("c", cStartX + 6, barY + barH);
-    drawDebugBox(display, barX - 2, barY - 2, barW + 4 + 6 + totalW, barH + 4);
+      // Degree circle centered in the 10 px gap between number and "c";
+      // drawn last so nothing repaints over it.
+      drawAACircle(display, circleX, barY + barH - 10, 2, tempColor);
+    }
+    drawDebugBox(display, barX - 2, barY - 2, barW + 4 + 6 + pad, barH + 4);
   }
 
   // Right Sidebar: Fuel
@@ -1134,20 +1143,23 @@ if (!vlw120Ready) {
     int len = strlen(satStr);
     int satClearTop = satY + ds15_refY1 - 2;
     int satClearH = h_sat_max + 4;
-    display.fillRect(satX - 1, satClearTop, w_sat_max + 2, satClearH,
-                     TFT_BLACK);
-    int iconCY = satY + ds15_refY1 + (h_sat_max / 2);
-    drawLocationIcon(satX, iconCY - 7, TFT_WHITE);
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
 
-    display.setTextColor(ghost_color);
-    for (int ci = 0; ci < satCellsCount; ci++) {
-      int cellRight = satX + 22 + satCells[ci];
-      int cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
-      display.setCursor(cx, satY);
-      display.print('8');
+    if (SHOW_GHOST_DIGITS) {
+      display.setTextColor(ghost_color, TFT_BLACK);
+      for (int ci = 0; ci < satCellsCount; ci++) {
+        int cellRight = satX + 22 + satCells[ci];
+        int cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+        display.setCursor(cx, satY);
+        display.print('8');
+      }
+    } else {
+      display.fillRect(satX - 1, satClearTop, w_sat_max + 2, satClearH, TFT_BLACK);
     }
-    display.setTextColor(TFT_WHITE);
+    if (SHOW_GHOST_DIGITS)
+      display.setTextColor(TFT_WHITE);
+    else
+      display.setTextColor(TFT_WHITE, TFT_BLACK);
     for (int i = 0; i < len; i++) {
       int d = satStr[i] - '0';
       int cellIdx = (satCellsCount - len) + i;
@@ -1156,6 +1168,8 @@ if (!vlw120Ready) {
       display.setCursor(cx, satY);
       display.print(satStr[i]);
     }
+    int iconCY = satY + ds15_refY1 + (h_sat_max / 2);
+    drawSatelliteIcon(satX, iconCY - 7, TFT_WHITE);
     drawDebugBox(display, satX - 1, satClearTop, w_sat_max + 2, satClearH);
   }
 
@@ -1175,14 +1189,12 @@ if (!vlw120Ready) {
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
     display.getTextBounds(ACCEL_BADGE_LINE1, 0, 0, &bx1_b, &by1_b,
                           &bw1_b, &bh1_b);
-    int badgeClearH = ((19 + by1_b + bh1_b) > 17) ? (19 + by1_b + bh1_b) : 17;
-    display.fillRect(badgeX - 1, tmrY - 2, w_badge_max + 2, badgeClearH + 4, TFT_BLACK);
     int iconX = badgeX + (w_badge_max - 16) / 2;
-    drawStopwatchIcon(iconX, tmrY + 1, timerColor);
-    display.setTextColor(timerColor);
+    display.setTextColor(timerColor, TFT_BLACK);
     display.setCursor(badgeX + (w_badge_max - bw1_b) / 2 - bx1_b,
                       tmrY + 19 - by1_b);
     display.print(ACCEL_BADGE_LINE1);
+    drawStopwatchIcon(iconX, tmrY + 1, timerColor);
   }
 
   // -- Timer --
@@ -1210,24 +1222,28 @@ if (!vlw120Ready) {
             ? TFT_YELLOW
             : ((displayAccelState == FINISHED) ? TFT_GREEN : TFT_WHITE);
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    display.fillRect(tmrX - 1, tmrY - 1, w_tmr_max + 2, h_tmr_max + 2,
-                     TFT_BLACK);
-
-    display.setTextColor(ghost_color);
-    for (int ci = 0; ci < tmrCellsCount; ci++) {
-      int cellRight = tmrX + tmrCells[ci];
-      char gc = (ci == TMR_INT_DIGITS) ? '.' : '8';
-      int cx;
-      if (gc == '.') {
-        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
-      } else {
-        cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+    if (SHOW_GHOST_DIGITS) {
+      display.setTextColor(ghost_color, TFT_BLACK);
+      for (int ci = 0; ci < tmrCellsCount; ci++) {
+        int cellRight = tmrX + tmrCells[ci];
+        char gc = (ci == TMR_INT_DIGITS) ? '.' : '8';
+        int cx;
+        if (gc == '.') {
+          cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+        } else {
+          cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+        }
+        display.setCursor(cx, tmrY - ds15_refY1);
+        display.print(gc);
       }
-      display.setCursor(cx, tmrY - ds15_refY1);
-      display.print(gc);
+    } else {
+      display.fillRect(tmrX - 1, tmrY - 1, w_tmr_max + 2, h_tmr_max + 2, TFT_BLACK);
     }
     int len = strlen(tmrStr);
-    display.setTextColor(timerColor);
+    if (SHOW_GHOST_DIGITS)
+      display.setTextColor(timerColor);
+    else
+      display.setTextColor(timerColor, TFT_BLACK);
     for (int i = 0; i < len; i++) {
       char c = tmrStr[i];
       int cellIdx = (tmrCellsCount - len) + i;
@@ -1243,6 +1259,7 @@ if (!vlw120Ready) {
       display.print(c);
     }
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+    display.setTextColor(timerColor, TFT_BLACK);
     int sRight = tmrX + tmrCells[tmrCellsCount - 1];
     int sCx = sRight - 2;
     display.setCursor(sCx, tmrY - ds15_refY1);
@@ -1276,27 +1293,30 @@ if (!vlw120Ready) {
       batColor = TFT_WHITE;
     int batClearTop = batY + ds15_refY1 - 3;
     int batClearH = h_bat_max + 6;
-    display.fillRect(batX, batClearTop, w_bat_max, batClearH,
-                     TFT_BLACK);
-    int iconCY = batY + ds15_refY1 + (h_bat_max / 2);
-    drawBatteryIcon(batX, iconCY - 9, displayBat, batColor);
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
 
-    display.setTextColor(ghost_color);
-    for (int ci = 0; ci < batCellsCount; ci++) {
-      int cellRight = (batX + 14) + batCells[ci];
-      char gc = (ci == BAT_INT_DIGITS) ? '.' : '8';
-      int cx;
-      if (gc == '.') {
-        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
-      } else {
-        cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+    if (SHOW_GHOST_DIGITS) {
+      display.setTextColor(ghost_color, TFT_BLACK);
+      for (int ci = 0; ci < batCellsCount; ci++) {
+        int cellRight = (batX + 14) + batCells[ci];
+        char gc = (ci == BAT_INT_DIGITS) ? '.' : '8';
+        int cx;
+        if (gc == '.') {
+          cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+        } else {
+          cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+        }
+        display.setCursor(cx, batY);
+        display.print(gc);
       }
-      display.setCursor(cx, batY);
-      display.print(gc);
+    } else {
+      display.fillRect(batX, batClearTop, w_bat_max, batClearH, TFT_BLACK);
     }
     int len = strlen(batStr);
-    display.setTextColor(batColor);
+    if (SHOW_GHOST_DIGITS)
+      display.setTextColor(batColor);
+    else
+      display.setTextColor(batColor, TFT_BLACK);
     for (int i = 0; i < len; i++) {
       char c = batStr[i];
       int cellIdx = (batCellsCount - len) + i;
@@ -1312,8 +1332,12 @@ if (!vlw120Ready) {
       display.print(c);
     }
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
-    display.setTextColor(batColor);
+    int batRight = (batX + 14) + batCells[batCellsCount - 1];
+    display.setCursor(batRight - 2, batY);
+    display.setTextColor(batColor, TFT_BLACK);
     display.print(" V");
+    int iconCY = batY + ds15_refY1 + (h_bat_max / 2);
+    drawBatteryIcon(batX, iconCY - 9, displayBat, batColor);
     drawDebugBox(display, batX, batClearTop, w_bat_max, batClearH);
   }
 
@@ -1367,27 +1391,33 @@ if (!vlw120Ready) {
     int instNumAreaX = applyAlign(instCenterX, currentInstWidth, ALIGN_INST_KML);
 
     int clearInstH = ds15_fontH + 8;
-    int clearInstW = instCellW + 4 + w_right_ist;
-    int clearInstX = instCenterX - (clearInstW / 2) - 4;
-    display.fillRect(clearInstX, instY - clearInstH + 4, clearInstW + 8, clearInstH,
-                     TFT_BLACK);
 
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    display.setTextColor(ghost_color);
-    for (int ci = 0; ci < instCellsCount; ci++) {
-      int cellRight = instNumAreaX + instCells[ci];
-      char gc = (ci == INST_INT_DIGITS) ? '.' : '8';
-      int cx;
-      if (gc == '.') {
-        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
-      } else {
-        cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+    if (SHOW_GHOST_DIGITS) {
+      display.setTextColor(ghost_color, TFT_BLACK);
+      for (int ci = 0; ci < instCellsCount; ci++) {
+        int cellRight = instNumAreaX + instCells[ci];
+        char gc = (ci == INST_INT_DIGITS) ? '.' : '8';
+        int cx;
+        if (gc == '.') {
+          cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+        } else {
+          cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+        }
+        display.setCursor(cx, instY);
+        display.print(gc);
       }
-      display.setCursor(cx, instY);
-      display.print(gc);
+    } else {
+      // Erase only the digit cells; the static badge/unit column to the right
+      // must never be covered (it is drawn once on forceDraw, not per update).
+      display.fillRect(instNumAreaX - 2, instY - clearInstH + 4, instCellW + 4,
+                       clearInstH, TFT_BLACK);
     }
     int instLen = strlen(instStr);
-    display.setTextColor(TFT_CYAN);
+    if (SHOW_GHOST_DIGITS)
+      display.setTextColor(TFT_CYAN);
+    else
+      display.setTextColor(TFT_CYAN, TFT_BLACK);
     for (int i = 0; i < instLen; i++) {
       char c = instStr[i];
       int cellIdx = (instCellsCount - instLen) + i;
@@ -1403,22 +1433,26 @@ if (!vlw120Ready) {
       display.print(c);
     }
 
-    int rightColInstX = instNumAreaX + instCellW + 4;
-    int instBadgeX = rightColInstX + (w_right_ist - badgeW_ist) / 2;
-    int instBadgeY = instY - 18;
-    drawAARoundRect(display, instBadgeX, instBadgeY, badgeW_ist, badgeH_ist, 2,
-                    TFT_CYAN);
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-    display.setTextColor(TFT_CYAN);
-    display.setCursor(instBadgeX + 3 - badgeBx_ist,
-                      instBadgeY - badgeBy_ist + 2);
-    display.print("IST");
+    // Static badge + unit: drawn once (boot / layout change), never on value
+    // updates.
+    if (forceDraw) {
+      int rightColInstX = instNumAreaX + instCellW + 4;
+      int instBadgeX = rightColInstX + (w_right_ist - badgeW_ist) / 2;
+      int instBadgeY = instY - 18;
+      drawAARoundRect(display, instBadgeX, instBadgeY, badgeW_ist, badgeH_ist, 2,
+                      TFT_CYAN);
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.setTextColor(TFT_CYAN);
+      display.setCursor(instBadgeX + 3 - badgeBx_ist,
+                        instBadgeY - badgeBy_ist + 2);
+      display.print("IST");
 
-    int kmlInstX = rightColInstX + (w_right_ist - w_kml_unit) / 2;
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-    display.setTextColor(TFT_CYAN);
-    display.setCursor(kmlInstX, instY - 1);
-    display.print("KM/L");
+      int kmlInstX = rightColInstX + (w_right_ist - w_kml_unit) / 2;
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.setTextColor(TFT_CYAN);
+      display.setCursor(kmlInstX, instY - 1);
+      display.print("KM/L");
+    }
 
     if (SHOW_ELEMENT_BOUNDS) {
       int instTop = instY + std::min((int)ds15_refY1, -18);
@@ -1475,26 +1509,33 @@ if (!vlw120Ready) {
     int avgNumAreaX = applyAlign(avgCenterX, currentAvgWidth, ALIGN_AVG_KML);
 
     int clearAvgH = ds15_fontH + 8;
-    int clearAvgW = avgCellW + 4 + w_right_avg;
-    int clearAvgX = avgCenterX - (clearAvgW / 2) - 4;
-    display.fillRect(clearAvgX, avgY - clearAvgH + 4, clearAvgW + 8, clearAvgH, TFT_BLACK);
 
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    display.setTextColor(ghost_color);
-    for (int ci = 0; ci < avgCellsCount; ci++) {
-      int cellRight = avgNumAreaX + avgCells[ci];
-      char gc = (ci == AVG_INT_DIGITS) ? '.' : '8';
-      int cx;
-      if (gc == '.') {
-        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
-      } else {
-        cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+    if (SHOW_GHOST_DIGITS) {
+      display.setTextColor(ghost_color, TFT_BLACK);
+      for (int ci = 0; ci < avgCellsCount; ci++) {
+        int cellRight = avgNumAreaX + avgCells[ci];
+        char gc = (ci == AVG_INT_DIGITS) ? '.' : '8';
+        int cx;
+        if (gc == '.') {
+          cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+        } else {
+          cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+        }
+        display.setCursor(cx, avgY);
+        display.print(gc);
       }
-      display.setCursor(cx, avgY);
-      display.print(gc);
+    } else {
+      // Erase only the digit cells; the static badge/unit column to the right
+      // must never be covered (it is drawn once on forceDraw, not per update).
+      display.fillRect(avgNumAreaX - 2, avgY - clearAvgH + 4, avgCellW + 4,
+                       clearAvgH, TFT_BLACK);
     }
     int avgLen = strlen(avgStr);
-    display.setTextColor(TFT_YELLOW);
+    if (SHOW_GHOST_DIGITS)
+      display.setTextColor(TFT_YELLOW);
+    else
+      display.setTextColor(TFT_YELLOW, TFT_BLACK);
     for (int i = 0; i < avgLen; i++) {
       char c = avgStr[i];
       int cellIdx = (avgCellsCount - avgLen) + i;
@@ -1510,21 +1551,25 @@ if (!vlw120Ready) {
       display.print(c);
     }
 
-    int rightColAvgX = avgNumAreaX + avgCellW + 4;
-    int avgBadgeX = rightColAvgX + (w_right_avg - badgeW_avg) / 2;
-    int avgBadgeY = avgY - 18;
-    drawAARoundRect(display, avgBadgeX, avgBadgeY, badgeW_avg, badgeH_avg, 2,
-                    TFT_YELLOW);
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-    display.setTextColor(TFT_YELLOW);
-    display.setCursor(avgBadgeX + 3 - badgeBx_avg, avgBadgeY - badgeBy_avg + 2);
-    display.print("AVG");
+    // Static badge + unit: drawn once (boot / layout change), never on value
+    // updates.
+    if (forceDraw) {
+      int rightColAvgX = avgNumAreaX + avgCellW + 4;
+      int avgBadgeX = rightColAvgX + (w_right_avg - badgeW_avg) / 2;
+      int avgBadgeY = avgY - 18;
+      drawAARoundRect(display, avgBadgeX, avgBadgeY, badgeW_avg, badgeH_avg, 2,
+                      TFT_YELLOW);
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.setTextColor(TFT_YELLOW);
+      display.setCursor(avgBadgeX + 3 - badgeBx_avg, avgBadgeY - badgeBy_avg + 2);
+      display.print("AVG");
 
-    int kmlAvgX = rightColAvgX + (w_right_avg - w_kml_unit_avg) / 2;
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-    display.setTextColor(TFT_YELLOW);
-    display.setCursor(kmlAvgX, avgY - 1);
-    display.print("KM/L");
+      int kmlAvgX = rightColAvgX + (w_right_avg - w_kml_unit_avg) / 2;
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.setTextColor(TFT_YELLOW);
+      display.setCursor(kmlAvgX, avgY - 1);
+      display.print("KM/L");
+    }
 
     if (SHOW_ELEMENT_BOUNDS) {
       int avgTop = avgY + std::min((int)ds15_refY1, -18);
@@ -1537,11 +1582,9 @@ if (!vlw120Ready) {
   // --- Average Speed (3 int digits, no decimal) ---
   float displayAvgSpd = displaySnap.averageSpeed;
   static float lastDispAvgSpd = -1.0f;
-  static unsigned long lastAvgSpdUpdate = 0;
   bool avgSpdChanged = fabsf(displayAvgSpd - lastDispAvgSpd) >= 1.0f;
   if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_AVG_SPEED &&
-      ((avgSpdChanged && (REFRESH_AVG_SPEED_MS == 0 || now - lastAvgSpdUpdate >= (unsigned long)REFRESH_AVG_SPEED_MS)) || forceDraw))) {
-    lastAvgSpdUpdate = now;
+      (avgSpdChanged || forceDraw))) {
     lastDispAvgSpd = displayAvgSpd;
     componentUpdated = true;
 
@@ -1584,55 +1627,81 @@ if (!vlw120Ready) {
     int avgSpdNumAreaX = applyAlign(avgSpdCenterX, currentAvgSpdWidth, ALIGN_AVG_SPEED);
 
     int clearAvgSpdH = ds15_fontH + 8;
-    int clearAvgSpdW = avgSpdCellW + 4 + w_right_avgSpd;
-    int clearAvgSpdX = avgSpdCenterX - (clearAvgSpdW / 2) - 4;
-    display.fillRect(clearAvgSpdX, avgSpdY - clearAvgSpdH + 4, clearAvgSpdW + 8, clearAvgSpdH, TFT_BLACK);
 
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    display.setTextColor(ghost_color);
-    for (int ci = 0; ci < avgSpdCellsCount; ci++) {
-      int cellRight = avgSpdNumAreaX + avgSpdCells[ci];
-      char gc = (AVG_SPEED_DEC_DIGITS > 0 && ci == AVG_SPEED_INT_DIGITS) ? '.' : '8';
-      int cx;
-      if (gc == '.') {
-        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
-      } else {
-        cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
-      }
-      display.setCursor(cx, avgSpdY);
-      display.print(gc);
-    }
     int avgSpdLen = strlen(avgSpdStr);
-    display.setTextColor(TFT_YELLOW);
-    for (int i = 0; i < avgSpdLen; i++) {
-      char c = avgSpdStr[i];
-      int cellIdx = (avgSpdCellsCount - avgSpdLen) + i;
-      int cellRight = avgSpdNumAreaX + avgSpdCells[cellIdx];
-      int cx;
-      if (c == '.') {
-        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
-      } else {
-        int d = c - '0';
-        cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
+    if (SHOW_GHOST_DIGITS) {
+      // Single merged pass per cell: the ghost '8' (solid black, erases the
+      // cell) is painted first, then the value digit transparently on top, so
+      // the dim ghost stays visible around the digit and no intermediate
+      // all-ghosts frame exists.
+      int leadingGap = avgSpdCellsCount - avgSpdLen;
+      for (int ci = 0; ci < avgSpdCellsCount; ci++) {
+        char gc = (AVG_SPEED_DEC_DIGITS > 0 && ci == AVG_SPEED_INT_DIGITS) ? '.' : '8';
+        int cellRight = avgSpdNumAreaX + avgSpdCells[ci];
+        int cx;
+        if (gc == '.') {
+          cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+        } else {
+          cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+        }
+        display.setTextColor(ghost_color, TFT_BLACK);
+        display.setCursor(cx, avgSpdY);
+        display.print(gc);
+        if (ci >= leadingGap) {
+          char c = avgSpdStr[ci - leadingGap];
+          int cx2;
+          if (c == '.') {
+            cx2 = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+          } else {
+            int d = c - '0';
+            cx2 = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
+          }
+          display.setTextColor(TFT_YELLOW);
+          display.setCursor(cx2, avgSpdY);
+          display.print(c);
+        }
       }
-      display.setCursor(cx, avgSpdY);
-      display.print(c);
+    } else {
+      // Erase only the digit cells; the static badge/unit column to the right
+      // must never be covered (it is drawn once on forceDraw, not per update).
+      display.fillRect(avgSpdNumAreaX - 2, avgSpdY - clearAvgSpdH + 4,
+                       avgSpdCellW + 4, clearAvgSpdH, TFT_BLACK);
+      display.setTextColor(TFT_YELLOW, TFT_BLACK);
+      for (int i = 0; i < avgSpdLen; i++) {
+        char c = avgSpdStr[i];
+        int cellIdx = (avgSpdCellsCount - avgSpdLen) + i;
+        int cellRight = avgSpdNumAreaX + avgSpdCells[cellIdx];
+        int cx;
+        if (c == '.') {
+          cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+        } else {
+          int d = c - '0';
+          cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
+        }
+        display.setCursor(cx, avgSpdY);
+        display.print(c);
+      }
     }
 
-    int rightColAvgSpdX = avgSpdNumAreaX + avgSpdCellW + 4;
-    int avgSpdBadgeX = rightColAvgSpdX + (w_right_avgSpd - badgeW_avgSpd) / 2;
-    int avgSpdBadgeY = avgSpdY - 18;
-    drawAARoundRect(display, avgSpdBadgeX, avgSpdBadgeY, badgeW_avgSpd, badgeH_avgSpd, 2, TFT_YELLOW);
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-    display.setTextColor(TFT_YELLOW);
-    display.setCursor(avgSpdBadgeX + 3 - badgeBx_avgSpd, avgSpdBadgeY - badgeBy_avgSpd + 2);
-    display.print("AVG");
+    // Static badge + unit: drawn once (boot / layout change), never on value
+    // updates.
+    if (forceDraw) {
+      int rightColAvgSpdX = avgSpdNumAreaX + avgSpdCellW + 4;
+      int avgSpdBadgeX = rightColAvgSpdX + (w_right_avgSpd - badgeW_avgSpd) / 2;
+      int avgSpdBadgeY = avgSpdY - 18;
+      drawAARoundRect(display, avgSpdBadgeX, avgSpdBadgeY, badgeW_avgSpd, badgeH_avgSpd, 2, TFT_YELLOW);
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.setTextColor(TFT_YELLOW);
+      display.setCursor(avgSpdBadgeX + 3 - badgeBx_avgSpd, avgSpdBadgeY - badgeBy_avgSpd + 2);
+      display.print("AVG");
 
-    int kmhAvgX = rightColAvgSpdX + (w_right_avgSpd - w_kmh_unit) / 2;
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-    display.setTextColor(TFT_YELLOW);
-    display.setCursor(kmhAvgX, avgSpdY - 1);
-    display.print("KM/H");
+      int kmhAvgX = rightColAvgSpdX + (w_right_avgSpd - w_kmh_unit) / 2;
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.setTextColor(TFT_YELLOW);
+      display.setCursor(kmhAvgX, avgSpdY - 1);
+      display.print("KM/H");
+    }
 
     if (SHOW_ELEMENT_BOUNDS) {
       int avgSpdTop = avgSpdY + std::min((int)ds15_refY1, -18);
@@ -1681,24 +1750,30 @@ if (!vlw120Ready) {
     int clearY = fuelY + std::min((int)ds15_refY1, -18) - 2;
     int clearW = fuelCellW + 4 + w_fuel_unit;
     int clearX = fuelCenterX - (clearW / 2) - 4;
-    display.fillRect(clearX, clearY, clearW + 8, ds15_fontH + 12, TFT_BLACK);
 
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    display.setTextColor(ghost_color);
-    for (int ci = 0; ci < fuelCellsCount; ci++) {
-      int cellRight = fuelNumAreaX + fuelCells[ci];
-      char gc = (ci == FUEL_INT_DIGITS) ? '.' : '8';
-      int cx;
-      if (gc == '.') {
-        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
-      } else {
-        cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+    if (SHOW_GHOST_DIGITS) {
+      display.setTextColor(ghost_color, TFT_BLACK);
+      for (int ci = 0; ci < fuelCellsCount; ci++) {
+        int cellRight = fuelNumAreaX + fuelCells[ci];
+        char gc = (ci == FUEL_INT_DIGITS) ? '.' : '8';
+        int cx;
+        if (gc == '.') {
+          cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+        } else {
+          cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+        }
+        display.setCursor(cx, fuelY);
+        display.print(gc);
       }
-      display.setCursor(cx, fuelY);
-      display.print(gc);
+    } else {
+      display.fillRect(clearX, clearY, clearW + 8, ds15_fontH + 12, TFT_BLACK);
     }
     int fuelLen = strlen(fuelStr);
-    display.setTextColor(TFT_CYAN);
+    if (SHOW_GHOST_DIGITS)
+      display.setTextColor(TFT_CYAN);
+    else
+      display.setTextColor(TFT_CYAN, TFT_BLACK);
     for (int i = 0; i < fuelLen; i++) {
       char c = fuelStr[i];
       int cellIdx = (fuelCellsCount - fuelLen) + i;
@@ -1715,7 +1790,7 @@ if (!vlw120Ready) {
     }
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
     display.setCursor(unitX, fuelY - 1);
-    display.setTextColor(TFT_CYAN);
+    display.setTextColor(TFT_CYAN, TFT_BLACK);
     display.print("L");
 
     if (SHOW_ELEMENT_BOUNDS)
@@ -1730,7 +1805,6 @@ if (!vlw120Ready) {
   static int lastTapePix = -1;
   static bool compassStaticDrawn = false;
   static bool lastHeadValid = false;
-  static unsigned long lastCompassUpdate = 0;
   int currentHeadingInt = ((int)displayHeading + 360) % 360;
 
   int compassX = display.width() / 2;
@@ -1742,13 +1816,10 @@ if (!vlw120Ready) {
 
   // With the tape sprite active, render EVERY frame the heading moves: the
   // strip is painted in RAM and pushed in one DMA burst, so the tape rolls
-  // smoothly (1-2 px/frame) instead of stepping every REFRESH_COMPASS_MS
-  // (10 Hz updates made the labels visibly jump). The throttle still applies
-  // to the direct-panel fallback, where per-pixel SPI writes would eat the
-  // frame budget at 60 FPS.
+  // smoothly (1-2 px/frame). The compass polling rate is hardcoded to 0 ms,
+  // so no time throttle applies to the direct-panel fallback either.
   bool tapeMoved = tapePix != lastTapePix;
-  bool tapeThrottleOk = (REFRESH_COMPASS_MS == 0 || tapeSpriteReady ||
-                         (now - lastCompassUpdate >= (unsigned long)REFRESH_COMPASS_MS));
+  bool tapeThrottleOk = true;
   // The tape is the one component that wants a redraw every frame. On frames
   // that are already over the band budget it drops to every-other-frame
   // (alternation) so it can't stack on top of odo/sidebars/middle-row draws.
@@ -1773,7 +1844,6 @@ if (!vlw120Ready) {
   }
 
   if (tapeWants && tapeBudgetOk) {
-    lastCompassUpdate = now;
     lastTapePix = tapePix;
     componentUpdated = true;
 
@@ -1854,10 +1924,14 @@ if (!vlw120Ready) {
       // (nullptr until createSprite allocates one), NOT a bool. It must be
       // called as a statement - inside a bool expression the null return
       // short-circuits && and createSprite would never run.
-      // 8-bit RGB332 primary (halves RAM vs 16-bit; ticks/labels are
-      // grayscale so the palette loss is invisible), 4-bit as a last resort.
-      tapeSprite.setColorDepth(8);
+      // 16-bit RGB565 primary (full antialiased line & vector font blending),
+      // 8-bit RGB332 secondary, 4-bit as a last resort.
+      tapeSprite.setColorDepth(16);
       tapeSpriteReady = tapeSprite.createSprite(tapeW, stripH);
+      if (!tapeSpriteReady) {
+        tapeSprite.setColorDepth(8);
+        tapeSpriteReady = tapeSprite.createSprite(tapeW, stripH);
+      }
       if (!tapeSpriteReady) {
         tapeSprite.setColorDepth(4);
         tapeSpriteReady = tapeSprite.createSprite(tapeW, stripH);
@@ -1896,7 +1970,6 @@ if (!vlw120Ready) {
   if (!SHOW_ELEMENT_COMPASS && compassStaticDrawn) {
     compassStaticDrawn = false;
     lastTapePix = -1;
-    lastCompassUpdate = 0;
     int eCompassY = BIG_CENTER_Y + OFFSET_COMPASS_Y;
     int eBandTop = eCompassY - 7;
     int eLabelTop = std::min(eBandTop - 10 + (int)labelY1,
@@ -1958,11 +2031,93 @@ if (!vlw120Ready) {
       
       void drawWeatherWidget(int x, int y, const SensorSnapshot &snap, bool forceDraw);
       drawWeatherWidget(wx, wy, displaySnap, forceDraw);
+      weatherPaintedFrame = true;
     }
   } else {
     lastWeatherShow = false;
   }
   tAfterWeather = millis();
+
+  double displayOdo = displaySnap.totalDistanceKm;
+  if (forceDraw || (SHOW_ELEMENT_ODO && (fabs(displayOdo - lastDispOdo) >= 0.1 ||
+      weatherPaintedFrame))) {
+    lastDispOdo = displayOdo;
+    componentUpdated = true;
+    static uint16_t w_odo_unit_max = 0, h_odo_max = 0;
+    static bool odoLayoutInit = false;
+    if (!odoLayoutInit) {
+      odoLayoutInit = true;
+      int16_t tx1, ty1;
+      uint16_t tw1, th1, tw2, th2;
+      display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
+      display.getTextBounds("999999.9", 0, 0, &tx1, &ty1, &tw1, &th1);
+      h_odo_max = th1;
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+      display.getTextBounds(" KM", 0, 0, &tx1, &ty1, &tw2, &th2);
+      w_odo_unit_max = tw2;
+      if (th2 > h_odo_max) h_odo_max = th2;
+    }
+    static int odoCells[MAX_CELLS] = {0};
+    static int odoCellW = 0, odoCellsCount = 0;
+    if (odoCellsCount == 0) {
+      odoCellsCount = ODO_INT_DIGITS + 1 + ODO_DEC_DIGITS;
+      measureDs15Cells(odoCells, odoCellW, odoCellsCount, ODO_INT_DIGITS);
+    }
+    int odoCellX = BIG_CENTER_X + OFFSET_BIG_ODO_X - ((odoCellW + 4 + w_odo_unit_max) / 2);
+    int odoUnitX = odoCellX + odoCellW + 4;
+
+    char odoNumStr[20];
+    snprintf(odoNumStr, sizeof(odoNumStr), "%.*f", ODO_DEC_DIGITS, displayOdo);
+    int len = strlen(odoNumStr);
+
+    int16_t odoY = (BIG_CENTER_Y + OFFSET_BIG_ODO_Y) - h_odo_max - ds15_refY1;
+    int odoClearY = odoY + ds15_refY1 - 2;
+    int odoClearW = odoCellW + 4 + w_odo_unit_max + 4;
+
+    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
+    if (SHOW_GHOST_DIGITS) {
+      display.setTextColor(ghost_color, TFT_BLACK);
+      for (int ci = 0; ci < odoCellsCount; ci++) {
+        int cellRight = odoCellX + odoCells[ci];
+        char gc = (ci == ODO_INT_DIGITS) ? '.' : '8';
+        int cx;
+        if (gc == '.') {
+          cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+        } else {
+          cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+        }
+        display.setCursor(cx, odoY);
+        display.print(gc);
+      }
+    } else {
+      display.fillRect(odoCellX - 2, odoClearY, odoClearW, h_odo_max + 4, TFT_BLACK);
+    }
+    if (SHOW_GHOST_DIGITS)
+      display.setTextColor(TFT_WHITE);
+    else
+      display.setTextColor(TFT_WHITE, TFT_BLACK);
+    for (int i = 0; i < len; i++) {
+      char c = odoNumStr[i];
+      int cellIdx = (odoCellsCount - len) + i;
+      int cellRight = odoCellX + odoCells[cellIdx];
+      int cx;
+      if (c == '.') {
+        cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+      } else {
+        int d = c - '0';
+        cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
+      }
+      display.setCursor(cx, odoY);
+      display.print(c);
+    }
+
+    display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+    display.setTextColor(TFT_WHITE, TFT_BLACK);
+    display.setCursor(odoUnitX, odoY);
+    display.print(" KM");
+    drawDebugBox(display, odoCellX - 2, odoClearY, odoClearW, h_odo_max + 4);
+  }
+  tAfterOdo = millis();
 
   finishFrame();
 }

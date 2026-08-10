@@ -735,13 +735,8 @@ void webServerTask(void *pvParameters) {
   ArduinoOTA.begin();
   logPrintf("ArduinoOTA ready\n");
 
-  // Config page PIN: when set, the config page and admin API require HTTP
-  // basic auth (user "admin", PIN as password). Read-only monitoring endpoints
-  // (/api/serial, /api/perf, /api/ambient) stay open.
-  auto configAuthed = []() {
-    if (CONFIG_PIN[0] == 0) return true;
-    return server.authenticate("admin", CONFIG_PIN);
-  };
+  // Config page PIN enforcement is disabled: the config page and admin API
+  // are open. A previously stored PIN in NVS is ignored.
 
   server.on("/", HTTP_GET, []() {
     // The page itself is always served without PIN: it contains no secrets.
@@ -764,11 +759,7 @@ void webServerTask(void *pvParameters) {
     server.send(200, "text/plain", buf);
   });
 
-  server.on("/api/config", HTTP_GET, [&configAuthed]() {
-    if (!configAuthed()) {
-      server.requestAuthentication();
-      return;
-    }
+  server.on("/api/config", HTTP_GET, []() {
     // The full-config serialization needs ~30-40KB of transient heap
     // (JsonDocument + JSON text). Fully-loaded steady state with WiFi is only
     // ~40-50KB free (see the HB log), so when a fetch lands in that band we
@@ -800,20 +791,16 @@ void webServerTask(void *pvParameters) {
     doc["ambientLightValue"] = ambientLightValue;
     String out;
     serializeJson(doc, out);
-    logPrintf("GW: entry=%lu heap=%lu wait=%lums auth=%d mem_active=%d keys=%lu over=%d out=%u\n",
+    logPrintf("GW: entry=%lu heap=%lu wait=%lums mem_active=%d keys=%lu over=%d out=%u\n",
               (unsigned long)fh0, (unsigned long)ESP.getFreeHeap(),
               (unsigned long)(millis() - memT0),
-              configAuthed() ? 1 : 0, memSaverActive ? 1 : 0,
+              memSaverActive ? 1 : 0,
               (unsigned long)doc.size(), (int)doc.overflowed(),
               (unsigned int)out.length());
     server.send(200, "application/json", out);
   });
 
-  server.on("/api/config", HTTP_POST, [&configAuthed]() {
-    if (!configAuthed()) {
-      server.requestAuthentication();
-      return;
-    }
+  server.on("/api/config", HTTP_POST, []() {
     if (!server.hasArg("plain")) {
       server.send(400);
       return;
@@ -881,11 +868,7 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", out);
   });
 
-  server.on("/api/odo", HTTP_POST, [&configAuthed]() {
-    if (!configAuthed()) {
-      server.requestAuthentication();
-      return;
-    }
+  server.on("/api/odo", HTTP_POST, []() {
     if (!server.hasArg("plain")) {
       server.send(400);
       return;
@@ -905,29 +888,17 @@ void webServerTask(void *pvParameters) {
     }
   });
 
-  server.on("/api/reboot", HTTP_POST, [&configAuthed]() {
-    if (!configAuthed()) {
-      server.requestAuthentication();
-      return;
-    }
+  server.on("/api/reboot", HTTP_POST, []() {
     server.send(200, "application/json", "{\"status\":\"ok\"}");
     pendingReboot = true;
   });
 
-  server.on("/api/sleep", HTTP_POST, [&configAuthed]() {
-    if (!configAuthed()) {
-      server.requestAuthentication();
-      return;
-    }
+  server.on("/api/sleep", HTTP_POST, []() {
     server.send(200, "application/json", "{\"status\":\"ok\"}");
     pendingSleep = true;
   });
 
-  server.on("/api/reset", HTTP_POST, [&configAuthed]() {
-    if (!configAuthed()) {
-      server.requestAuthentication();
-      return;
-    }
+  server.on("/api/reset", HTTP_POST, []() {
     factoryResetConfig();
     server.send(200, "application/json", "{\"status\":\"ok\"}");
     logPrintf("Factory reset, rebooting\n");
@@ -959,8 +930,7 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", buf);
   });
 
-  server.on("/api/compass/cal-start", HTTP_POST, [&configAuthed]() {
-    if (!configAuthed()) { server.requestAuthentication(); return; }
+  server.on("/api/compass/cal-start", HTTP_POST, []() {
     if (!compassReady) {
       server.send(200, "application/json",
                   "{\"status\":\"error\",\"error\":\"Compass not detected\"}");
@@ -970,8 +940,7 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", "{\"status\":\"ok\"}");
   });
 
-  server.on("/api/compass/cal-cancel", HTTP_POST, [&configAuthed]() {
-    if (!configAuthed()) { server.requestAuthentication(); return; }
+  server.on("/api/compass/cal-cancel", HTTP_POST, []() {
     compassCalCancel();
     server.send(200, "application/json", "{\"status\":\"ok\"}");
   });
@@ -992,11 +961,7 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", buf);
   });
 
-  server.on("/api/ota", HTTP_POST, [&configAuthed]() {
-    if (!configAuthed()) {
-      server.requestAuthentication();
-      return;
-    }
+  server.on("/api/ota", HTTP_POST, []() {
     if (otaUpdateSuccess) {
       server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Update OK\"}");
       delay(100);
@@ -1040,11 +1005,7 @@ void webServerTask(void *pvParameters) {
     }
   });
 
-  server.on("/api/ota/pull", HTTP_POST, [&configAuthed]() {
-    if (!configAuthed()) {
-      server.requestAuthentication();
-      return;
-    }
+  server.on("/api/ota/pull", HTTP_POST, []() {
     if (otaUpdateInProgress || otaPullTaskRunning) {
       char buf[96];
       snprintf(buf, sizeof(buf),

@@ -635,17 +635,28 @@ void processBatterySensor() {
 }
 
 void processTemperatureSensor() {
+  static float filteredEngineTemp = -1000.0f;
   int rawADC = analogRead(TEMP_SENSE_PIN);
   rawTempADC = rawADC;
   if (rawADC <= 100 || rawADC >= 4000) {
+    filteredEngineTemp = -1000.0f;
     engineTemperature = 0.0f;
     return;
   }
   float vOut = (float)rawADC * ADC_VOLTS_FACTOR;
   float resistance = NTC_R_BALANCE * (vOut / (3.3f - vOut));
-  engineTemperature = (1.0f / (logf(resistance / NTC_R_ROOM) / NTC_BETA +
+  float instantTemp = (1.0f / (logf(resistance / NTC_R_ROOM) / NTC_BETA +
                                NTC_INV_ROOM_KELVIN)) -
                       273.15f;
+  // EMA smoothing (same pattern as the light sensor): the raw NTC ADC jitters
+  // by a few °C per 20ms read, which made the sidebar number flicker between
+  // adjacent values at full redraw rate.
+  static const float alpha = 0.2f;
+  if (filteredEngineTemp < -500.0f)
+    filteredEngineTemp = instantTemp;
+  else
+    filteredEngineTemp = (instantTemp * alpha) + (filteredEngineTemp * (1.0f - alpha));
+  engineTemperature = filteredEngineTemp;
 }
 
 void processLightSensor() {
