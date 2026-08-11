@@ -485,7 +485,7 @@ void drawStopwatchIcon(int x, int y, uint16_t color);
 void drawSatelliteIcon(int x, int y, uint16_t color);
 void drawLocationIcon(int x, int y, uint16_t color);
 void drawWifiIcon(int x, int y, uint16_t color, bool filled = false);
-void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color);
+void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color, int fixedW = 0);
 
 inline int applyAlign(int anchorX, int elementW, int align) {
   if (align == ALIGN_LEFT) return anchorX;
@@ -584,7 +584,7 @@ extern float WEATHER_LON;
 extern int WEATHER_REFRESH_MIN;
 extern char WEATHER_LOCALE[16];
 
-void startWeatherFetch();
+bool startWeatherFetch();
 void updateWeather();
 
 // ----------------------------------------------------------------------------

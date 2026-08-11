@@ -67,6 +67,10 @@ static volatile bool otaPullDownloading = false;
 // Background Weather Fetch
 // ----------------------------------------------------------------------------
 static bool weatherTaskRunning = false;
+static unsigned long weatherTaskStartedMs = 0;
+// Set when a config save changes the weather location/city/interval so the
+// fetch loop re-queries immediately instead of waiting for the next interval.
+static volatile bool weatherRefreshRequested = false;
 
 // Reverse-geocode a coordinate into a short display name (city/locality/region).
 // Free keyless BigDataCloud lookup; returns true and fills `out` on success.
@@ -203,16 +207,28 @@ void updateWeather() {
   http.end();
 }
 
+static TaskHandle_t weatherTaskHandle = NULL;
+
 void weatherFetchTask(void *pvParameters) {
   updateWeather();
   weatherTaskRunning = false;
+  weatherTaskHandle = NULL;
   vTaskDelete(NULL);
 }
 
-void startWeatherFetch() {
-  if (weatherTaskRunning) return;
+bool startWeatherFetch() {
+  if (weatherTaskRunning) return true;
   weatherTaskRunning = true;
-  xTaskCreatePinnedToCore(weatherFetchTask, "WeatherFetchTask", 6144, NULL, 1, NULL, 0);
+  weatherTaskStartedMs = millis();
+  BaseType_t res = xTaskCreatePinnedToCore(weatherFetchTask, "WeatherFetchTask",
+                                           8192, NULL, 1, &weatherTaskHandle, 0);
+  if (res != pdPASS) {
+    logPrintf("Weather: task creation failed, will retry\n");
+    weatherTaskRunning = false;
+    weatherTaskHandle = NULL;
+    return false;
+  }
+  return true;
 }
 
 void setOtaPullStatus(const char *status) {
@@ -829,6 +845,14 @@ void webServerTask(void *pvParameters) {
     processConfig(2, &doc);
     recalculateDerivedParams();
     display.applyBusConfig();
+    // If the save touched the weather location/city/locale/interval, ask the
+    // fetch loop to refresh right away so the widget shows the new city's
+    // weather immediately instead of after the next scheduled interval.
+    if (!doc["WEATHER_CITY"].isNull() || !doc["WEATHER_LAT"].isNull() ||
+        !doc["WEATHER_LON"].isNull() || !doc["WEATHER_REFRESH_MIN"].isNull() ||
+        !doc["WEATHER_LOCALE"].isNull()) {
+      weatherRefreshRequested = true;
+    }
     // Apply CPU frequency immediately
     {
       uint32_t freq = ENABLE_DYNAMIC_CPU ? 240 : MANUAL_CPU_FREQ;
@@ -1296,7 +1320,32 @@ void webServerTask(void *pvParameters) {
     }
 
     static unsigned long lastWeatherCheck = 0;
+    static unsigned long lastWeatherAttemptMs = 0;
     if (WiFi.status() == WL_CONNECTED && !otaPullDownloading) {
+      // Config save changed the weather settings: fetch now. If the task
+      // could not be created (low heap), retry with a 2s backoff so a
+      // failing fetch can never spin xTaskCreate every loop tick; the flag
+      // is dropped only once a fetch actually starts, and a fetch already
+      // in flight is left alone.
+      if (weatherRefreshRequested) {
+        lastWeatherCheck = millis();
+        if (!weatherTaskRunning && millis() - lastWeatherAttemptMs >= 2000) {
+          lastWeatherAttemptMs = millis();
+          if (startWeatherFetch())
+            weatherRefreshRequested = false;
+        }
+      }
+      // Hung-fetch guard: if the HTTP request ever sticks longer than 30s,
+      // abandon the task so the interval and future refreshes can retry
+      // instead of the weather widget dying permanently.
+      if (weatherTaskRunning && millis() - weatherTaskStartedMs > 30000) {
+        logPrintf("Weather: fetch task hung >30s, terminating task\n");
+        if (weatherTaskHandle != NULL) {
+          vTaskDelete(weatherTaskHandle);
+          weatherTaskHandle = NULL;
+        }
+        weatherTaskRunning = false;
+      }
       if (lastWeatherCheck == 0) {
         lastWeatherCheck = millis();
       }

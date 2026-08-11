@@ -516,11 +516,12 @@ void drawWifiIcon(int x, int y, uint16_t color, bool filled) {
   }
 }
 
-void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color) {
+void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color, int fixedW) {
   int16_t tx1, ty1;
   uint16_t w, h;
   display.getTextBounds(text, 0, 0, &tx1, &ty1, &w, &h);
-  int badgeW = w + 16, badgeH = h + 8;
+  int badgeW = (fixedW > 0) ? fixedW : (w + 16);
+  int badgeH = h + 8;
   int x = (BIG_CENTER_X + offsetX) - (badgeW / 2);
   int y = (BIG_CENTER_Y + offsetY) - (badgeH / 2);
   // The erase covers the widest badge this element can show, drawn in the same

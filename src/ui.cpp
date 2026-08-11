@@ -471,7 +471,21 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       color = TFT_GREEN;
     }
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
-    drawBadge(label, OFFSET_HALL_ICON_X, OFFSET_HALL_ICON_Y, color);
+    // Measure the widest of the three source labels once so the badge keeps a
+    // constant size no matter which source is active (HAL / GPS / G+H).
+    static int srcBadgeW = 0;
+    if (srcBadgeW == 0) {
+      const char *labels[3] = {"HAL", "GPS", "G+H"};
+      int16_t bx, by;
+      uint16_t bw, bh;
+      srcBadgeW = 0;
+      for (int i = 0; i < 3; i++) {
+        display.getTextBounds(labels[i], 0, 0, &bx, &by, &bw, &bh);
+        if ((int)bw > srcBadgeW) srcBadgeW = bw;
+      }
+      srcBadgeW += 16;
+    }
+    drawBadge(label, OFFSET_HALL_ICON_X, OFFSET_HALL_ICON_Y, color, srcBadgeW);
   }
 
   static int lastWifiState = -1;
@@ -899,8 +913,8 @@ if (!vlw120Ready) {
   // Left Sidebar: Engine Temp
   static unsigned long lastSideTempUpdate = 0;
   bool tempMoving = (now - easeTempStart) < SIDEBAR_EASE_MS;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_SIDEBAR_TEMP &&
-      (((tempSigChanged || tempMoving) && (tempMoving || REFRESH_SIDEBAR_TEMP_MS == 0 || now - lastSideTempUpdate >= (unsigned long)REFRESH_SIDEBAR_TEMP_MS)) || forceDraw))) {
+  if (SHOW_ELEMENT_SIDEBAR_TEMP && (forceDraw || (IN_BAND_BUDGET &&
+      (((tempSigChanged || tempMoving) && (tempMoving || REFRESH_SIDEBAR_TEMP_MS == 0 || now - lastSideTempUpdate >= (unsigned long)REFRESH_SIDEBAR_TEMP_MS)) || forceDraw)))) {
     lastSideTempUpdate = now;
     if (tempSigChanged) lastEngineTemp = currentTemp;
 
@@ -971,8 +985,8 @@ if (!vlw120Ready) {
   // Right Sidebar: Fuel
   static unsigned long lastSideFuelUpdate = 0;
   bool fuelMoving = (now - easeFuelStart) < SIDEBAR_EASE_MS;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_SIDEBAR_FUEL &&
-      (((currentFuel != lastFuelPct || fuelMoving) && (fuelMoving || REFRESH_SIDEBAR_FUEL_MS == 0 || now - lastSideFuelUpdate >= (unsigned long)REFRESH_SIDEBAR_FUEL_MS)) || forceDraw))) {
+  if (SHOW_ELEMENT_SIDEBAR_FUEL && (forceDraw || (IN_BAND_BUDGET &&
+      (((currentFuel != lastFuelPct || fuelMoving) && (fuelMoving || REFRESH_SIDEBAR_FUEL_MS == 0 || now - lastSideFuelUpdate >= (unsigned long)REFRESH_SIDEBAR_FUEL_MS)) || forceDraw)))) {
     lastSideFuelUpdate = now;
     lastFuelPct = currentFuel;
 
@@ -1036,16 +1050,14 @@ if (!vlw120Ready) {
     bottomRowLayoutInit = true;
     int16_t bx1, by1;
     uint16_t bw, bh;
-    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    int satCells = SAT_DIGITS;
-    char satPat[16];
-    for (int i = 0; i < satCells; i++) satPat[i] = '8';
-    satPat[satCells] = 0;
+    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+    char satPat[8] = "88";
     display.getTextBounds(satPat, 0, 0, &bx1, &by1, &bw, &bh);
-    w_sat_max = 16 + 6 + bw;
-    h_sat_max = (bh > 15) ? bh : 15;
+    w_sat_max = ((bw + 8) > 16) ? (bw + 8) : 16;
+    h_sat_max = 16 + 2 + bh + 2;
 
     int batCells = BAT_INT_DIGITS + 1 + BAT_DEC_DIGITS;
+    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
     char batPat[16];
     for (int i = 0; i < batCells; i++) batPat[i] = (i == BAT_INT_DIGITS) ? '.' : '8';
     batPat[batCells] = 0;
@@ -1124,59 +1136,33 @@ if (!vlw120Ready) {
 
   tAfterSb = millis();
 
-  // -- Satellite count --
-  static int satCells[MAX_CELLS] = {0};
-  static int satCellW = 0, satCellsCount = 0;
-  if (layoutReset) satCellsCount = 0;
-  if (satCellsCount == 0) {
-    satCellsCount = SAT_DIGITS;
-    measureDs15Cells(satCells, satCellW, satCellsCount, -1);
-  }
+  // -- Satellite count (icon with the count rendered below in Conthrax 10px,
+  // same compact style as the accel badge) --
   static unsigned long lastSatUpdate = 0;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_SAT &&
-      ((displaySat != lastSat && (REFRESH_SAT_MS == 0 || now - lastSatUpdate >= (unsigned long)REFRESH_SAT_MS)) || forceDrawSat))) {
+  if (SHOW_ELEMENT_SAT && (forceDraw || (IN_BAND_BUDGET &&
+      ((displaySat != lastSat && (REFRESH_SAT_MS == 0 || now - lastSatUpdate >= (unsigned long)REFRESH_SAT_MS)) || forceDrawSat)))) {
     lastSatUpdate = now;
     lastSat = displaySat;
     componentUpdated = true;
     char satStr[8];
     snprintf(satStr, sizeof(satStr), "%d", displaySat);
-    int len = strlen(satStr);
-    int satClearTop = satY + ds15_refY1 - 2;
-    int satClearH = h_sat_max + 4;
-    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-
-    if (SHOW_GHOST_DIGITS) {
-      display.setTextColor(ghost_color, TFT_BLACK);
-      for (int ci = 0; ci < satCellsCount; ci++) {
-        int cellRight = satX + 22 + satCells[ci];
-        int cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
-        display.setCursor(cx, satY);
-        display.print('8');
-      }
-    } else {
-      display.fillRect(satX - 1, satClearTop, w_sat_max + 2, satClearH, TFT_BLACK);
-    }
-    if (SHOW_GHOST_DIGITS)
-      display.setTextColor(TFT_WHITE);
-    else
-      display.setTextColor(TFT_WHITE, TFT_BLACK);
-    for (int i = 0; i < len; i++) {
-      int d = satStr[i] - '0';
-      int cellIdx = (satCellsCount - len) + i;
-      int cellRight = satX + 22 + satCells[cellIdx];
-      int cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
-      display.setCursor(cx, satY);
-      display.print(satStr[i]);
-    }
-    int iconCY = satY + ds15_refY1 + (h_sat_max / 2);
-    drawSatelliteIcon(satX, iconCY - 7, TFT_WHITE);
-    drawDebugBox(display, satX - 1, satClearTop, w_sat_max + 2, satClearH);
+    int16_t bx1_s, by1_s;
+    uint16_t bw1_s, bh1_s;
+    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+    display.getTextBounds(satStr, 0, 0, &bx1_s, &by1_s, &bw1_s, &bh1_s);
+    int iconX = satX + (w_sat_max - 16) / 2;
+    display.fillRect(satX - 1, satY - 1, w_sat_max + 2, h_sat_max + 2, TFT_BLACK);
+    drawSatelliteIcon(iconX, satY + 1, TFT_WHITE);
+    display.setTextColor(TFT_WHITE, TFT_BLACK);
+    display.setCursor(satX + (w_sat_max - bw1_s) / 2 - bx1_s, satY + 19 - by1_s);
+    display.print(satStr);
+    drawDebugBox(display, satX - 1, satY - 1, w_sat_max + 2, h_sat_max + 2);
   }
 
   // -- Accel badge --
   static unsigned long lastBadgeUpdate = 0;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_TMR &&
-      ((displayAccelState != lastState && (REFRESH_TMR_MS == 0 || now - lastBadgeUpdate >= (unsigned long)REFRESH_TMR_MS)) || forceDrawTmr))) {
+  if (SHOW_ELEMENT_TMR && (forceDraw || (IN_BAND_BUDGET &&
+      ((displayAccelState != lastState && (REFRESH_TMR_MS == 0 || now - lastBadgeUpdate >= (unsigned long)REFRESH_TMR_MS)) || forceDrawTmr)))) {
     lastBadgeUpdate = now;
     lastState = displayAccelState;
     componentUpdated = true;
@@ -1211,8 +1197,8 @@ if (!vlw120Ready) {
   static TimerState lastStateTimer = READY;
   static unsigned long lastTmrUpdate = 0;
   bool tmrChanged = strcmp(tmrStr, lastTmrStr) != 0 || displayAccelState != lastStateTimer;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_TMR &&
-      ((tmrChanged && (REFRESH_TMR_MS == 0 || now - lastTmrUpdate >= (unsigned long)REFRESH_TMR_MS)) || forceDrawTmr))) {
+  if (SHOW_ELEMENT_TMR && (forceDraw || (IN_BAND_BUDGET &&
+      ((tmrChanged && (REFRESH_TMR_MS == 0 || now - lastTmrUpdate >= (unsigned long)REFRESH_TMR_MS)) || forceDrawTmr)))) {
     lastTmrUpdate = now;
     strcpy(lastTmrStr, tmrStr);
     lastStateTimer = displayAccelState;
@@ -1279,8 +1265,8 @@ if (!vlw120Ready) {
   snprintf(batStr, sizeof(batStr), "%.*f", BAT_DEC_DIGITS, displayBat);
   static char lastBatStr[12] = "";
   static unsigned long lastBatUpdate = 0;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_BAT &&
-      ((strcmp(batStr, lastBatStr) != 0 && (REFRESH_BAT_MS == 0 || now - lastBatUpdate >= (unsigned long)REFRESH_BAT_MS)) || forceDrawBat))) {
+  if (SHOW_ELEMENT_BAT && (forceDraw || (IN_BAND_BUDGET &&
+      ((strcmp(batStr, lastBatStr) != 0 && (REFRESH_BAT_MS == 0 || now - lastBatUpdate >= (unsigned long)REFRESH_BAT_MS)) || forceDrawBat)))) {
     lastBatUpdate = now;
     strcpy(lastBatStr, batStr);
     componentUpdated = true;
@@ -1346,8 +1332,8 @@ if (!vlw120Ready) {
   static float lastDispInstKml = -1.0f;
   static unsigned long lastInstUpdate = 0;
   bool instChanged = fabsf(displayInstKml - lastDispInstKml) >= 0.1f;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_INST_KML &&
-      ((instChanged && (REFRESH_INST_MS == 0 || now - lastInstUpdate >= (unsigned long)REFRESH_INST_MS)) || forceDraw))) {
+  if (SHOW_ELEMENT_INST_KML && (forceDraw || (IN_BAND_BUDGET &&
+      ((instChanged && (REFRESH_INST_MS == 0 || now - lastInstUpdate >= (unsigned long)REFRESH_INST_MS)) || forceDraw)))) {
     lastInstUpdate = now;
     lastDispInstKml = displayInstKml;
     componentUpdated = true;
@@ -1467,8 +1453,8 @@ if (!vlw120Ready) {
   static float lastDispAvgKml = -1.0f;
   static unsigned long lastAvgUpdate = 0;
   bool avgChanged = fabsf(displayAvgKml - lastDispAvgKml) >= 0.1f;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_AVG_KML &&
-      ((avgChanged && (REFRESH_AVG_MS == 0 || now - lastAvgUpdate >= (unsigned long)REFRESH_AVG_MS)) || forceDraw))) {
+  if (SHOW_ELEMENT_AVG_KML && (forceDraw || (IN_BAND_BUDGET &&
+      ((avgChanged && (REFRESH_AVG_MS == 0 || now - lastAvgUpdate >= (unsigned long)REFRESH_AVG_MS)) || forceDraw)))) {
     lastAvgUpdate = now;
     lastDispAvgKml = displayAvgKml;
     componentUpdated = true;
@@ -1583,8 +1569,8 @@ if (!vlw120Ready) {
   float displayAvgSpd = displaySnap.averageSpeed;
   static float lastDispAvgSpd = -1.0f;
   bool avgSpdChanged = fabsf(displayAvgSpd - lastDispAvgSpd) >= 1.0f;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_AVG_SPEED &&
-      (avgSpdChanged || forceDraw))) {
+  if (SHOW_ELEMENT_AVG_SPEED && (forceDraw || (IN_BAND_BUDGET &&
+      (avgSpdChanged || forceDraw)))) {
     lastDispAvgSpd = displayAvgSpd;
     componentUpdated = true;
 
@@ -1715,8 +1701,8 @@ if (!vlw120Ready) {
   float displayFuelLtrs = displaySnap.fuelLiters;
   static float lastDispFuelLtrs = -1.0f;
   static unsigned long lastFuelUpdate = 0;
-  if (forceDraw || (IN_BAND_BUDGET && SHOW_ELEMENT_FUEL_LTRS &&
-      ((fabsf(displayFuelLtrs - lastDispFuelLtrs) >= 0.1f && (REFRESH_FUEL_MS == 0 || now - lastFuelUpdate >= (unsigned long)REFRESH_FUEL_MS)) || forceDraw))) {
+  if (SHOW_ELEMENT_FUEL_LTRS && (forceDraw || (IN_BAND_BUDGET &&
+      ((fabsf(displayFuelLtrs - lastDispFuelLtrs) >= 0.1f && (REFRESH_FUEL_MS == 0 || now - lastFuelUpdate >= (unsigned long)REFRESH_FUEL_MS)) || forceDraw)))) {
     lastFuelUpdate = now;
     lastDispFuelLtrs = displayFuelLtrs;
     componentUpdated = true;
@@ -1824,7 +1810,7 @@ if (!vlw120Ready) {
   // that are already over the band budget it drops to every-other-frame
   // (alternation) so it can't stack on top of odo/sidebars/middle-row draws.
   static bool tapeDeferredLast = false;
-  bool tapeWants = (SHOW_ELEMENT_COMPASS && tapeMoved && tapeThrottleOk) || forceDraw;
+  bool tapeWants = SHOW_ELEMENT_COMPASS && ((tapeMoved && tapeThrottleOk) || forceDraw);
   bool tapeBudgetOk = (millis() - tFrame0) < FRAME_DEFER_MS || !tapeDeferredLast;
   tapeDeferredLast = tapeWants && !tapeBudgetOk;
 
@@ -2039,7 +2025,7 @@ if (!vlw120Ready) {
   tAfterWeather = millis();
 
   double displayOdo = displaySnap.totalDistanceKm;
-  if (forceDraw || (SHOW_ELEMENT_ODO && (fabs(displayOdo - lastDispOdo) >= 0.1 ||
+  if (SHOW_ELEMENT_ODO && (forceDraw || (fabs(displayOdo - lastDispOdo) >= 0.1 ||
       weatherPaintedFrame))) {
     lastDispOdo = displayOdo;
     componentUpdated = true;
@@ -2272,24 +2258,116 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
   }
   
   bool isNight = weatherIsNight(snap);
-
-  // Section 1: Weather Icon and City Name
-  drawWeatherIcon(wx + 16, wy + 14, 16, g_weatherData.weatherCode, isNight);
-  
   display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
-  display.setTextColor(TFT_WHITE);
-  display.setCursor(wx + 28, wy + 20);
-  
+
   char dispCity[48];
   const char *citySrc = (g_weatherData.cityName.length() > 0) ? g_weatherData.cityName.c_str() : WEATHER_CITY;
   snprintf(dispCity, sizeof(dispCity), "%s", citySrc);
-  if (strlen(dispCity) > 12) {
-    snprintf(dispCity, sizeof(dispCity), "%.11s..", citySrc);
+
+  char tempStr[16];
+  snprintf(tempStr, sizeof(tempStr), "%.0f", g_weatherData.temperature);
+  char humStr[16];
+  snprintf(humStr, sizeof(humStr), "%d%%", g_weatherData.humidity);
+  char windStr[24];
+  float msWind = g_weatherData.windSpeed / 3.6f;
+  const char* windDir = getWindCardinal(g_weatherData.windDirection);
+  snprintf(windStr, sizeof(windStr), "%.1f %s", msWind, windDir);
+  const char *sunsetStr = g_weatherData.sunsetTime.length() > 0 ? g_weatherData.sunsetTime.c_str() : "--:--";
+
+  // Measure every text so the row can be spaced equally at runtime.
+  int16_t bx1, by1; uint16_t tw, th;
+  display.getTextBounds(dispCity, 0, 0, &bx1, &by1, &tw, &th);
+  int cityW = tw;
+  display.getTextBounds(tempStr, 0, 0, &bx1, &by1, &tw, &th);
+  int tempNumW = tw;
+  // The Conthrax VLW fonts only carry ASCII, so the degree symbol is drawn as
+  // a small ring: account for it (3px) plus the trailing "C" in the span.
+  display.getTextBounds("C", 0, 0, &bx1, &by1, &tw, &th);
+  int tempW = tempNumW + 3 + tw;
+  display.getTextBounds(humStr, 0, 0, &bx1, &by1, &tw, &th);
+  int humW = tw;
+  display.getTextBounds(windStr, 0, 0, &bx1, &by1, &tw, &th);
+  int windW = tw;
+  display.getTextBounds(sunsetStr, 0, 0, &bx1, &by1, &tw, &th);
+  int sunsetW = tw;
+
+  // Icon extents (pixels right of the icon anchor) + 12px icon-to-text gap.
+  const int tempIconW = 8, humIconW = 8, windIconW = 11, sunsetIconW = 13;
+  int span0 = (tempIconW + 12 + tempW) + (humIconW + 12 + humW)
+            + (windIconW + 12 + windW) + (sunsetIconW + 12 + sunsetW);
+
+  // Equal gap across the 4 slots (city->temp, temp->hum, hum->wind,
+  // wind->sunset). The weather group is right-anchored so the sunset text
+  // always ends 6px inside the card; a gap too tight for the city is absorbed
+  // by the city-name fade below, so nothing can leave the screen.
+  // Cap city width in gap calculation so the right-side weather stats stay properly spaced.
+  int availW = (w - 6) - 28 - span0;
+  int targetCityW = (cityW > 130) ? 130 : cityW;
+  int gInt = (availW - targetCityW) / 4;
+  if (gInt > 24) gInt = 24;
+  if (gInt < 12) gInt = 12;
+
+  int iconX4 = (wx + w - 6) - (sunsetIconW + 12 + sunsetW);
+  int iconX3 = iconX4 - gInt - (windIconW + 12 + windW);
+  int iconX2 = iconX3 - gInt - (humIconW + 12 + humW);
+  int iconX1 = iconX2 - gInt - (tempIconW + 12 + tempW);
+
+  // Section 1: Weather Icon and City Name (fades out gracefully before temperature section)
+  drawWeatherIcon(wx + 16, wy + 14, 16, g_weatherData.weatherCode, isNight);
+
+  int fadeX1 = iconX1 - 6;
+  int fadeX0 = fadeX1 - 45;
+  if (fadeX0 < wx + 48) fadeX0 = wx + 48;
+
+  if (fadeX1 > wx + 20) {
+    display.setClipRect(wx + 20, wy + 2, fadeX1 - (wx + 20), h - 4);
+
+    int curX = wx + 28;
+    int len = strlen(dispCity);
+    int i = 0;
+    while (i < len) {
+      unsigned char c = (unsigned char)dispCity[i];
+      int charBytes = 1;
+      if ((c & 0x80) == 0x00) charBytes = 1;
+      else if ((c & 0xE0) == 0xC0) charBytes = 2;
+      else if ((c & 0xF0) == 0xE0) charBytes = 3;
+      else if ((c & 0xF8) == 0xF0) charBytes = 4;
+
+      if (i + charBytes > len) charBytes = len - i;
+
+      char cStr[8];
+      memcpy(cStr, &dispCity[i], charBytes);
+      cStr[charBytes] = '\0';
+      i += charBytes;
+
+      int cW = display.textWidth(cStr);
+
+      if (curX + cW <= fadeX0) {
+        display.setTextColor(TFT_WHITE, cardBg);
+      } else if (curX < fadeX1) {
+        float f = (float)(fadeX1 - curX) / (float)(fadeX1 - fadeX0);
+        if (f < 0.0f) f = 0.0f;
+        if (f > 1.0f) f = 1.0f;
+        // Square the ratio to create a stronger, more pronounced quadratic fade-out
+        f = f * f;
+        display.setTextColor(blendColor(TFT_WHITE, cardBg, f), cardBg);
+      } else {
+        break;
+      }
+
+      display.setCursor(curX, wy + 20);
+      display.print(cStr);
+      curX += cW;
+    }
+
+    display.clearClipRect();
   }
-  display.print(dispCity);
-  
+  display.setTextColor(TFT_WHITE, cardBg);
+
+
+
   // Section 2: Temperature
-  int iconX1 = wx + 140, iconY1 = wy + 6;
+  int iconY1 = wy + 6;
   display.fillCircle(iconX1 + 4, iconY1 + 11, 2, TFT_RED);
   display.fillRect(iconX1 + 3, iconY1 + 3, 2, 6, TFT_RED);
   display.drawCircle(iconX1 + 4, iconY1 + 11, 3, TFT_WHITE);
@@ -2297,43 +2375,39 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
   
   display.setTextColor(display.color565(255, 120, 120));
   display.setCursor(iconX1 + 12, wy + 20);
-  char tempStr[16];
-  snprintf(tempStr, sizeof(tempStr), "%.0fC", g_weatherData.temperature);
   display.print(tempStr);
+  int degX = iconX1 + 12 + tempNumW + 2;
+  display.drawCircle(degX, wy + 20 - 8, 2, display.color565(255, 120, 120));
+  display.setCursor(degX + 3, wy + 20);
+  display.print("C");
   
   // Section 3: Humidity
-  int iconX2 = wx + 215, iconY2 = wy + 6;
+  int iconY2 = wy + 6;
   display.fillCircle(iconX2 + 4, iconY2 + 9, 3, display.color565(100, 180, 255));
   display.fillTriangle(iconX2 + 4, iconY2 + 2, iconX2 + 1, iconY2 + 8, iconX2 + 7, iconY2 + 8, display.color565(100, 180, 255));
   
   display.setTextColor(display.color565(150, 200, 255));
   display.setCursor(iconX2 + 12, wy + 20);
-  char humStr[16];
-  snprintf(humStr, sizeof(humStr), "%d%%", g_weatherData.humidity);
   display.print(humStr);
   
   // Section 4: Wind
-  int iconX3 = wx + 290, iconY3 = wy + 6;
+  int iconY3 = wy + 6;
   display.fillRect(iconX3 + 1, iconY3 + 2, 1, 12, TFT_WHITE);
   display.fillRoundRect(iconX3 + 2, iconY3 + 3, 8, 4, 1, TFT_ORANGE);
   display.fillRect(iconX3 + 4, iconY3 + 3, 2, 4, TFT_WHITE);
   
   display.setTextColor(display.color565(180, 255, 180));
   display.setCursor(iconX3 + 12, wy + 20);
-  char windStr[24];
-  float msWind = g_weatherData.windSpeed / 3.6f;
-  const char* windDir = getWindCardinal(g_weatherData.windDirection);
-  snprintf(windStr, sizeof(windStr), "%.1f %s", msWind, windDir);
   display.print(windStr);
   
   // Section 5: Sunset
-  int iconX4 = wx + 380, iconY4 = wy + 6;
-  display.fillCircle(iconX4 + 4, iconY4 + 8, 3, TFT_YELLOW);
-  display.fillRect(iconX4, iconY4 + 8, 8, 4, cardBg);
-  display.drawFastHLine(iconX4 - 1, iconY4 + 8, 10, TFT_ORANGE);
-  display.drawFastVLine(iconX4 + 4, iconY4 + 2, 2, TFT_RED);
+  int iconY4 = wy + 15;
+  display.fillCircle(iconX4, iconY4, 4, TFT_YELLOW);
+  display.fillRect(iconX4 - 4, iconY4 + 1, 8, 4, cardBg);
+  display.drawFastHLine(iconX4 - 6, iconY4 + 1, 12, TFT_ORANGE);
+  display.drawFastVLine(iconX4, iconY4 - 7, 3, TFT_RED);
   
   display.setTextColor(display.color565(255, 200, 100));
   display.setCursor(iconX4 + 12, wy + 20);
-  display.print(g_weatherData.sunsetTime.length() > 0 ? g_weatherData.sunsetTime : "--:--");
+  display.print(sunsetStr);
 }
