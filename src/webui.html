@@ -1084,7 +1084,8 @@ const DEFAULTS = {
     ODO_INT_DIGITS: 5,
     ODO_DEC_DIGITS: 1,
     WIFI_TX_POWER_DBM: 20,
-    WIFI_AUTO_OFF_ENABLED: false,
+    WIFI_RETRY_MODE: 0,
+    WIFI_RETRY_SECONDS: 60,
     NTP_ENABLED: true,
     NTP_SERVER: "pool.ntp.org",
     TZ_OFFSET_HOURS: 1,
@@ -1164,7 +1165,13 @@ const configMap = [
         items: [
             { type: "card_header", label: "Network Settings" },
             { id: "WIFI_TX_POWER_DBM", label: "TX Power", type: "range", min: -1, max: 20, step: 1, unit: "dBm" },
-            { id: "WIFI_AUTO_OFF_ENABLED", label: "AUTO DISABLE WIFI" },
+            { id: "WIFI_RETRY_MODE", label: "WiFi Search Behavior", type: "select",
+                options: [
+                    { value: 0, label: "Stop after one cycle" },
+                    { value: 1, label: "Search for a fixed time" },
+                    { value: 2, label: "Search forever" }
+                ] },
+            { id: "WIFI_RETRY_SECONDS", label: "Search Timeout", unit: "seconds" },
             { type: "heading", label: "Primary Network" },
             { id: "WIFI_SSID", label: "Network Name (SSID)" },
             { id: "WIFI_PASSWORD", label: "Password" },

@@ -726,8 +726,12 @@ void webServerTask(void *pvParameters) {
   bool staInFlight = false;
   bool staDone = false;
   bool staFinalized = false;
+  bool staHasConnectedBefore = false;
   unsigned long staDeadline = 0;
   unsigned long staRetryAt = 0;
+  // Start of the current search episode (boot or the last link loss). Mode 1
+  // (fixed search window) counts from here; reset on every re-arm.
+  unsigned long staSearchStart = 0;
 
   ArduinoOTA.onStart([]() {
     logPrintf("OTA started\n");
@@ -1175,7 +1179,6 @@ void webServerTask(void *pvParameters) {
             (unsigned long)ESP.getFreeHeap(),
             (unsigned long)ESP.getMaxAllocHeap());
 
-  unsigned long lastClientTime = millis();
   unsigned long webStartMs = millis();
 
   for (;;) {
@@ -1234,9 +1237,46 @@ void webServerTask(void *pvParameters) {
     // flash write ends.
     else { webLoopCount++; vTaskDelay(pdMS_TO_TICKS(20)); }
 
+    // A joined uplink that drops (router reboot, range loss, DHCP expiry) is
+    // not the end of the world: re-arm the search so the saved networks are
+    // tried again under the same policy. Failed begin() attempts also move
+    // WiFi.status() away from WL_CONNECTED, but staConnected is only true
+    // after a real join, so only genuine link losses reach this path.
+    if (staConnected && WiFi.status() != WL_CONNECTED) {
+      logPrintf("STA link lost (status=%d), re-searching networks\n",
+                (int)WiFi.status());
+      staConnected = false;
+      staDone = false;
+      staInFlight = false;
+      staNetIdx = 0;
+      staSearchStart = 0;
+      staRetryAt = millis() + 500;
+    }
+
     // Non-blocking STA connect: try each configured network for up to 5s,
     // while the config server keeps serving AP clients. mDNS/NTP run once
-    // after a network is joined.
+    // after a network is joined. The search policy (WIFI_RETRY_MODE, read
+    // live from config so WebUI changes apply immediately) decides whether
+    // a failed cycle is the end of the search:
+    //   0 = stop after one cycle through the saved networks
+    //   1 = keep cycling until WIFI_RETRY_SECONDS have elapsed
+    //   2 = keep searching forever
+    // The same policy governs reconnects after a lost link.
+    if (!staDone) {
+      if (staSearchStart == 0) {
+        int configuredNets = 0;
+        for (int i = 0; i < wifiNetCount; i++) {
+          if (strlen(wifiNets[i].ssid) > 0) configuredNets++;
+        }
+        if (configuredNets == 0) {
+          // Nothing to search for: never busy-loop on empty SSID entries.
+          staDone = true;
+          logPrintf("No WiFi networks configured, using AP only\n");
+        } else {
+          staSearchStart = millis();
+        }
+      }
+    }
     if (!staDone) {
       if (staRetryAt && millis() < staRetryAt) {
         // backoff between attempts
@@ -1263,20 +1303,50 @@ void webServerTask(void *pvParameters) {
           staRetryAt = millis() + 200;
         }
       } else {
-        staDone = true;
-        logPrintf("All WiFi networks failed, using AP only\n");
+        // A full cycle through every saved network finished without a join.
+        bool giveUp = false;
+        if (WIFI_RETRY_MODE == 0) {
+          giveUp = true;
+          logPrintf("All WiFi networks failed, using AP only\n");
+        } else if (WIFI_RETRY_MODE == 1 &&
+                   millis() - staSearchStart >=
+                       (unsigned long)WIFI_RETRY_SECONDS * 1000UL) {
+          giveUp = true;
+          logPrintf("WiFi search timed out after %ds, using AP only\n",
+                    WIFI_RETRY_SECONDS);
+        }
+        if (giveUp) {
+          staDone = true;
+        } else {
+          // Mode 1 (still inside the window) or mode 2 (forever): run the
+          // next cycle after a short backoff so the radio is not hammered.
+          logPrintf("WiFi cycle failed, retrying...\n");
+          staNetIdx = 0;
+          staRetryAt = millis() + 2000;
+        }
       }
     }
 
     if (staDone && staConnected && !staFinalized) {
       staFinalized = true;
       startWeatherFetch();
+      // mDNS/NTP are one-shot services: running them again on every reconnect
+      // would block this loop (NTP wait) or fail (MDNS.begin() double start).
+      // On reconnects only the weather fetch is re-armed; mDNS is re-bound so
+      // it advertises the freshly-assigned IP instead of a stale one.
       if (MDNS.begin("dashboard-pp")) {
         MDNS.addService("http", "tcp", 80);
         logPrintf("mDNS: http://dashboard-pp.local\n");
+      } else if (staHasConnectedBefore) {
+        // Already started once: tear down and rebind for the new IP.
+        MDNS.end();
+        if (MDNS.begin("dashboard-pp")) {
+          MDNS.addService("http", "tcp", 80);
+          logPrintf("mDNS re-bound: http://dashboard-pp.local\n");
+        }
       }
 
-      if (NTP_ENABLED) {
+      if (!staHasConnectedBefore && NTP_ENABLED) {
         logPrintf("Syncing time via NTP: %s\n", NTP_SERVER);
         configTime(0, 0, NTP_SERVER);
         time_t now = 0;
@@ -1297,6 +1367,7 @@ void webServerTask(void *pvParameters) {
           logPrintf("NTP time sync failed after %d retries\n", retry);
         }
       }
+      staHasConnectedBefore = true;
     }
 
     if (lastOtaPullCheck == 0) {
@@ -1309,14 +1380,6 @@ void webServerTask(void *pvParameters) {
         lastOtaPullCheck = millis();
         startOtaPull(false);
       }
-    }
-
-    if (WiFi.softAPgetStationNum() > 0) {
-      lastClientTime = millis();
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-      lastClientTime = millis();
     }
 
     static unsigned long lastWeatherCheck = 0;
@@ -1354,15 +1417,6 @@ void webServerTask(void *pvParameters) {
         lastWeatherCheck = millis();
         startWeatherFetch();
       }
-    }
-
-    // Allow 10 minutes before disabling the STA uplink (for testing) - the
-    // AP and the config web server always stay alive so the config page
-    // keeps working even after the LAN connection idles out.
-    if (WIFI_AUTO_OFF_ENABLED && WiFi.status() == WL_CONNECTED &&
-        millis() - lastClientTime > 600000) {
-      logPrintf("WiFi STA timeout, disconnecting LAN uplink (AP stays up)\n");
-      WiFi.disconnect();
     }
 
     // Low-heap watchdog: the display keeps speed sprite + tape sprite + the

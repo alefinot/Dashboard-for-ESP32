@@ -316,7 +316,8 @@ extern char WIFI_PASSWORD_3[64];
 extern char WIFI_SSID_4[64];
 extern char WIFI_PASSWORD_4[64];
 extern int WIFI_TX_POWER_DBM;
-extern bool WIFI_AUTO_OFF_ENABLED;
+extern int WIFI_RETRY_MODE;
+extern int WIFI_RETRY_SECONDS;
 
 extern bool NTP_ENABLED;
 extern char NTP_SERVER[64];
