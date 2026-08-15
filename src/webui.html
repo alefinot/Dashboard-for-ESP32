@@ -145,24 +145,21 @@ p.subtitle {
     margin-top: 14px;
 }
 
-/* Row 1: Save Settings, Backup, Import (3 buttons, 2 units each) */
-.bottom-toolbar button:nth-child(-n+3) {
+/* Row 1: Save Settings, Reboot (same total width as row 2) */
+.bottom-toolbar button:nth-child(-n+2) {
     grid-row: 1;
-    grid-column: span 2;
+    grid-column: span 3;
 }
 
-/* Row 2: Reboot, Deep Sleep (same total width as row 1) */
+/* Row 2: Backup, Import */
+.bottom-toolbar button:nth-child(3),
 .bottom-toolbar button:nth-child(4) {
     grid-row: 2;
     grid-column: span 3;
 }
 
+/* Row 3: Factory Reset (full width) */
 .bottom-toolbar button:nth-child(5) {
-    grid-row: 2;
-    grid-column: span 3;
-}
-
-.bottom-toolbar button:nth-child(6) {
     grid-row: 3;
 }
 
@@ -559,7 +556,11 @@ input[type="checkbox"]:checked::after {
 }
 
 input[type="range"] {
-    touch-action: none;
+    touch-action: pan-y;
+}
+
+body.range-scroll-lock input[type="range"] {
+    pointer-events: none;
 }
 
 .xy-row input[type="range"] {
@@ -794,11 +795,8 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 @media (max-width: 600px) {
     body { padding: 10px 8px 50px 8px; }
     .bottom-toolbar { grid-template-columns: repeat(2, 1fr); }
-    .bottom-toolbar button:nth-child(-n+3) { grid-column: span 1; }
-    .bottom-toolbar button:nth-child(3) { grid-row: 2; grid-column: 1; }
-    .bottom-toolbar button:nth-child(4) { grid-row: 2; grid-column: 2; }
+    .bottom-toolbar button:nth-child(-n+4) { grid-column: span 1; }
     .bottom-toolbar button:nth-child(5) { grid-row: 3; grid-column: 1 / -1; }
-    .bottom-toolbar button:nth-child(6) { grid-row: 4; }
     .details-content { grid-template-columns: 1fr; }
     .cfg-row > label { min-width: 120px; }
     .cfg-controls { width: auto; min-width: 0; }
@@ -892,10 +890,9 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 
 <div class="bottom-toolbar">
     <button onclick="save()" class="btn-primary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save Settings</button>
+    <button onclick="reboot()" class="btn-warning"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Reboot</button>
     <button onclick="exportBackup()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Backup</button>
     <button onclick="document.getElementById('importFile').click()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Import</button>
-    <button onclick="reboot()" class="btn-warning"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Reboot</button>
-    <button onclick="deepSleep()" class="btn-secondary"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/><text x="13" y="16" font-size="5" fill="currentColor" stroke="none" font-family="Arial, sans-serif" font-weight="bold">zz z</text></svg> Deep Sleep</button>
     <button onclick="factoryReset()" class="btn-danger btn-reset-wide"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg> Factory Reset</button>
 </div>
 
@@ -916,15 +913,15 @@ const iconSVG = {
 // Factory-default values used by the per-setting reset-to-default icon.
 const DEFAULTS = {
     DISPLAY_ROTATION: 1,
-    SPI_BUS_SPEED: 80,
+    SPI_BUS_SPEED: 60,
     DISPLAY_WIDTH: 480,
     DISPLAY_HEIGHT: 320,
     TARGET_FPS: 60,
-    BACKLIGHT_BRIGHTNESS: 22,
-    ENABLE_AUTO_BRIGHTNESS: false,
-    LIGHT_SENSOR_DARK_VAL: 0,
-    LIGHT_SENSOR_BRIGHT_VAL: 3685,
-    AUTO_BRIGHT_DARK: 20,
+    BACKLIGHT_BRIGHTNESS: 100,
+    ENABLE_AUTO_BRIGHTNESS: true,
+    LIGHT_SENSOR_DARK_VAL: 432,
+    LIGHT_SENSOR_BRIGHT_VAL: 2851,
+    AUTO_BRIGHT_DARK: 13,
     AUTO_BRIGHT_LIGHT: 100,
     AUTO_BRIGHT_FADE_MS: 4000,
     FADE_DURATION_MS: 700,
@@ -943,10 +940,11 @@ const DEFAULTS = {
     COLOR_FUEL_NORM: "#00ff00",
     COLOR_FUEL_WARN: "#ffff00",
     COLOR_FUEL_CRIT: "#ff0000",
-    GHOST_COLOR_STR: "#666666",
+    GHOST_COLOR_STR: "#474747",
     SHOW_GHOST_DIGITS: true,
     WHEEL_CIRCUMFERENCE_MM: 1650.0,
     FUEL_FILTER_ALPHA: 0.08,
+    REFUEL_RESET_LITERS: 2,
     FUEL_TOUCH_POINTS: 8,
     NTC_R_BALANCE: 10000.0,
     NTC_BETA: 3950.0,
@@ -958,7 +956,7 @@ const DEFAULTS = {
     GPS_START_KMH: 3.0,
     GPS_STOP_SETTLE_MS: 1500,
     GPS_MIN_DEV_KMH: 1.0,
-    GPS_ONLY_MODE: false,
+    GPS_ONLY_MODE: true,
     ACCEL_START_SPEED: 1.0,
     ACCEL_TARGET_SPEED: 50.0,
     ACCEL_MAX_TIME: 9.99,
@@ -966,51 +964,51 @@ const DEFAULTS = {
     ACCEL_BADGE_LINE2: "km/h",
     BIG_CENTER_X: 240,
     BIG_CENTER_Y: 160,
-    OFFSET_BIG_TIME_X: -98,
-    OFFSET_BIG_TIME_Y: -78,
-    OFFSET_BIG_DATE_X: 118,
-    OFFSET_BIG_DATE_Y: -78,
+    OFFSET_BIG_TIME_X: 107,
+    OFFSET_BIG_TIME_Y: -91,
+    OFFSET_BIG_DATE_X: -131,
+    OFFSET_BIG_DATE_Y: -91,
     OFFSET_BIG_SIGNATURE_X: 0,
-    OFFSET_BIG_SIGNATURE_Y: -65,
-    OFFSET_BIG_SPEED_NUM_X: -7,
-    OFFSET_BIG_SPEED_NUM_Y: 18,
-    OFFSET_BIG_SPEED_UNIT_X: 134,
-    OFFSET_BIG_SPEED_UNIT_Y: 74,
-    OFFSET_BIG_ODO_X: 15,
-    OFFSET_BIG_ODO_Y: 155,
-    OFFSET_BIG_SAT_X: -180,
-    OFFSET_BIG_SAT_Y: -78,
+    OFFSET_BIG_SIGNATURE_Y: -75,
+    OFFSET_BIG_SPEED_NUM_X: 0,
+    OFFSET_BIG_SPEED_NUM_Y: -3,
+    OFFSET_BIG_SPEED_UNIT_X: 106,
+    OFFSET_BIG_SPEED_UNIT_Y: 56,
+    OFFSET_BIG_ODO_X: 22,
+    OFFSET_BIG_ODO_Y: 126,
+    OFFSET_BIG_SAT_X: 179,
+    OFFSET_BIG_SAT_Y: -114,
     OFFSET_BIG_TMR_X: -53,
-    OFFSET_BIG_TMR_Y: -35,
+    OFFSET_BIG_TMR_Y: -46,
     OFFSET_BIG_BAT_X: -112,
-    OFFSET_BIG_BAT_Y: 149,
+    OFFSET_BIG_BAT_Y: 123,
     SIDEBAR_LEFT_X: 10,
-    SIDEBAR_LEFT_Y: 64,
+    SIDEBAR_LEFT_Y: 95,
     SIDEBAR_RIGHT_X: 462,
-    SIDEBAR_RIGHT_Y: 64,
+    SIDEBAR_RIGHT_Y: 95,
     OFFSET_HALL_ICON_X: 0,
-    OFFSET_HALL_ICON_Y: -90,
-    OFFSET_WIFI_ICON_X: 195,
-    OFFSET_WIFI_ICON_Y: -106,
+    OFFSET_HALL_ICON_Y: -100,
+    OFFSET_WIFI_ICON_X: 204,
+    OFFSET_WIFI_ICON_Y: -108,
     OFFSET_INST_KML_X: 60,
-    OFFSET_INST_KML_Y: -13,
+    OFFSET_INST_KML_Y: -25,
     OFFSET_AVG_KML_X: 160,
-    OFFSET_AVG_KML_Y: -13,
+    OFFSET_AVG_KML_Y: -25,
     OFFSET_AVG_SPEED_X: -163,
-    OFFSET_AVG_SPEED_Y: -11,
+    OFFSET_AVG_SPEED_Y: -25,
     OFFSET_COMPASS_X: 0,
     OFFSET_COMPASS_Y: -130,
     OFFSET_FUEL_LTRS_X: 132,
-    OFFSET_FUEL_LTRS_Y: 150,
+    OFFSET_FUEL_LTRS_Y: 123,
     COMPASS_DECLINATION_DEG: 0.0,
-    COMPASS_CAL_X: 0,
-    COMPASS_CAL_Y: 0,
-    COMPASS_CAL_Z: 0,
-    COMPASS_CAL_TX: 0,
-    COMPASS_CAL_TY: 0,
-    COMPASS_CAL_TZ: 32767,
+    COMPASS_CAL_X: -79,
+    COMPASS_CAL_Y: -2040,
+    COMPASS_CAL_Z: -515,
+    COMPASS_CAL_TX: -15193,
+    COMPASS_CAL_TY: -26464,
+    COMPASS_CAL_TZ: 11935,
     SIDEBAR_BAR_WIDTH: 8,
-    SIDEBAR_BAR_HEIGHT: 250,
+    SIDEBAR_BAR_HEIGHT: 190,
     SHOW_ELEMENT_BOUNDS: false,
     SHOW_ELEMENT_SPEED: true,
     SHOW_ELEMENT_SPEED_UNIT: true,
@@ -1033,40 +1031,34 @@ const DEFAULTS = {
     SHOW_ELEMENT_WEATHER: true,
     OFFSET_WEATHER_X: 0,
     OFFSET_WEATHER_Y: 146,
-    WEATHER_CITY: "Singapore",
-    WEATHER_LAT: 1.3521,
-    WEATHER_LON: 103.8198,
-    WEATHER_REFRESH_MIN: 10,
+    WEATHER_CITY: "Mestre",
+    WEATHER_LAT: 45.4939,
+    WEATHER_LON: 12.2414,
+    WEATHER_REFRESH_MIN: 1,
     WEATHER_LOCALE: "it",
     ENABLE_POWER_SENSE: false,
     ENABLE_CIRCLE_TEST: false,
-    ENABLE_DEMO_MODE: true,
+    ENABLE_DEMO_MODE: false,
     ENABLE_ANTIALIASING: true,
     AA_SHARPNESS: 0.2,
-    SHOW_FPS_COUNTER_DEFAULT: true,
+    SHOW_FPS_COUNTER_DEFAULT: false,
     GPS_DEBUG_DEFAULT: false,
     ENABLE_DYNAMIC_CPU: false,
     MANUAL_CPU_FREQ: 240,
-    ENABLE_CPU_THROTTLE: true,
+    ENABLE_CPU_THROTTLE: false,
     CPU_THROTTLE_TEMP_WARN: 50,
     CPU_THROTTLE_TEMP_CRIT: 60,
     ENABLE_NIGHT_MODE: false,
     NIGHT_MODE_START_HOUR: 23,
     NIGHT_MODE_END_HOUR: 0,
     DISPLAY_INVERT_COLORS: false,
-    OFFSET_BIG_FPS_X: 0,
-    OFFSET_BIG_FPS_Y: 0,
+    OFFSET_BIG_FPS_X: -9,
+    OFFSET_BIG_FPS_Y: -7,
     REFRESH_SPEED_MS: 250,
-    REFRESH_SAT_MS: 1000,
-    REFRESH_TMR_MS: 10,
     REFRESH_BAT_MS: 2500,
     REFRESH_INST_MS: 500,
-    REFRESH_AVG_MS: 5000,
     REFRESH_FUEL_MS: 1000,
-    REFRESH_TIME_MS: 0,
-    REFRESH_SIDEBAR_TEMP_MS: 0,
-    REFRESH_SIDEBAR_FUEL_MS: 0,
-    SPEED_DIGITS: 3,
+    SPEED_DIGITS: 2,
     SAT_DIGITS: 2,
     TMR_INT_DIGITS: 1,
     TMR_DEC_DIGITS: 2,
@@ -1076,7 +1068,7 @@ const DEFAULTS = {
     INST_DEC_DIGITS: 1,
     AVG_INT_DIGITS: 2,
     AVG_DEC_DIGITS: 1,
-    AVG_SPEED_INT_DIGITS: 3,
+    AVG_SPEED_INT_DIGITS: 2,
     AVG_SPEED_DEC_DIGITS: 0,
     HEADING_DIGITS: 3,
     FUEL_INT_DIGITS: 1,
@@ -1084,13 +1076,13 @@ const DEFAULTS = {
     ODO_INT_DIGITS: 5,
     ODO_DEC_DIGITS: 1,
     WIFI_TX_POWER_DBM: 20,
-    WIFI_RETRY_MODE: 0,
+    WIFI_RETRY_MODE: 1,
     WIFI_RETRY_SECONDS: 60,
     NTP_ENABLED: true,
     NTP_SERVER: "pool.ntp.org",
     TZ_OFFSET_HOURS: 1,
     TZ_DST_ENABLED: true,
-    OTA_PULL_ENABLED: true,
+    OTA_PULL_ENABLED: false,
     OTA_PULL_URL: "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
     OTA_PULL_INTERVAL_HOURS: 24,
     OTA_CURRENT_VERSION: "1.2.6",
@@ -1277,7 +1269,9 @@ const configMap = [
     {
         title: "Sensors Tuning", icon: iconSVG.sensors,
         items: [
-            { type: "touch-table", label: "Fuel Level Mapping Table", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable" },
+            { type: "touch-table", label: "Fuel Sensor", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable", rows: [
+                { id: "REFUEL_RESET_LITERS", label: "Refuel Reset Threshold (fuel rise in L resets trip consumption)", unit: "L" }
+            ] },
             { type: "card_header", label: "Auto Brightness Sensor", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
         <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="ambient-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span>
         <div style="display:flex;gap:6px;">
@@ -1299,7 +1293,6 @@ const configMap = [
             { id: "ACCEL_MAX_TIME", label: "Timer Max Time (0 = off)", unit: "sec" },
             { id: "ACCEL_BADGE_LINE1", label: "Badge Line 1 (e.g., '0-50')" },
             { id: "ACCEL_BADGE_LINE2", label: "Badge Line 2 (e.g., 'km/h')" },
-            { type: "subtitle", label: "Miscellaneous" },
             { type: "card_header", label: "Odometer (km)", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
         <span style="font-size:12px;color:var(--text-muted);">Current value: <strong id="odo-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> km</span>
     </div>
@@ -1312,10 +1305,8 @@ const configMap = [
             { id: "FUEL_FILTER_ALPHA", label: "Fuel Sensor Smoothing Alpha" },
             { type: "subtitle", label: "Polling Rates" },
             { id: "REFRESH_SPEED_MS", label: "Speed", type: "number", unit: "ms" },
-            { id: "REFRESH_SAT_MS", label: "Satellites", type: "number", unit: "ms" },
-            { id: "REFRESH_TMR_MS", label: "Accel Timer", type: "number", unit: "ms" },
             { id: "REFRESH_BAT_MS", label: "Battery Voltage", type: "number", unit: "ms" },
-            { id: "REFRESH_AVG_MS", label: "Average KM/L", type: "number", unit: "ms" },
+            { id: "REFRESH_INST_MS", label: "Instant KM/L", type: "number", unit: "ms" },
             { id: "REFRESH_FUEL_MS", label: "Fuel Liters", type: "number", unit: "ms" },
             { type: "subtitle", label: "GNSS" },
             { id: "GPS_BAUD", label: "GNSS Baud Rate", unit: "baud" },
@@ -1376,6 +1367,11 @@ const configMap = [
             { type: "section_header", label: "Speed Unit" },
             { id: "SHOW_ELEMENT_SPEED_UNIT", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_SPEED_UNIT_X", idY: "OFFSET_BIG_SPEED_UNIT_Y", label: "Position" },
+            { type: "section_header", label: "Average Speed" },
+            { id: "SHOW_ELEMENT_AVG_SPEED", label: "Visible" },
+            { id: "AVG_SPEED_INT_DIGITS", label: "Integer Digits" },
+            { id: "AVG_SPEED_DEC_DIGITS", label: "Decimal Digits" },
+            { type: 'xy', idX: "OFFSET_AVG_SPEED_X", idY: "OFFSET_AVG_SPEED_Y", label: "Position" },
             { type: "section_header", label: "Odometer" },
             { id: "SHOW_ELEMENT_ODO", label: "Visible" },
             { id: "ODO_INT_DIGITS", label: "Integer Digits" },
@@ -1387,11 +1383,6 @@ const configMap = [
             { id: "AVG_INT_DIGITS", label: "Integer Digits" },
             { id: "AVG_DEC_DIGITS", label: "Decimal Digits" },
             { type: 'xy', idX: "OFFSET_AVG_KML_X", idY: "OFFSET_AVG_KML_Y", label: "Position" },
-            { type: "section_header", label: "Average Speed" },
-            { id: "SHOW_ELEMENT_AVG_SPEED", label: "Visible" },
-            { id: "AVG_SPEED_INT_DIGITS", label: "Integer Digits" },
-            { id: "AVG_SPEED_DEC_DIGITS", label: "Decimal Digits" },
-            { type: 'xy', idX: "OFFSET_AVG_SPEED_X", idY: "OFFSET_AVG_SPEED_Y", label: "Position" },
             { type: "section_header", label: "Instant KM/L" },
             { id: "SHOW_ELEMENT_INST_KML", label: "Visible" },
             { id: "INST_INT_DIGITS", label: "Integer Digits" },
@@ -1630,7 +1621,16 @@ function renderForm(d) {
                 tableArr.forEach((val, idx) => {
                     tableHtml += `<div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:'JetBrains Mono',monospace;">#${idx}</span><input type="number" id="TT_${idx}" value="${val}" style="width:100%;">${resetBtn('TT_' + idx)}</div>`;
                 });
-                tableHtml += `</div></div>`;
+                tableHtml += `</div>`;
+                if (item.rows) {
+                    item.rows.forEach(row => {
+                        if (d.hasOwnProperty(row.id)) {
+                            let val = d[row.id];
+                            tableHtml += `<div class="cfg-row"><label>${row.label}</label><div class="cfg-controls">${row.unit ? `<span class="unit">${row.unit}</span>` : ''}<input type="number" id="${row.id}" value="${val}" autocomplete="off" step="any">${resetBtn(row.id)}</div></div>`;
+                        }
+                    });
+                }
+                tableHtml += `</div>`;
                 groupHtml += tableHtml;
             } else {
                 if (d.hasOwnProperty(item.id)) {
@@ -1728,8 +1728,72 @@ function bindPowerSense() {
     });
 }
 
+let rangeScrollLockTimer = null;
+let rangeTouchActive = false;
+let rangeTouchSlider = null;
+let rangeTouchStartValue = '';
+let scrollFiredDuringTouch = false;
 window.addEventListener('scroll', function() {
     document.getElementById('scrollTopBtn').style.display = window.scrollY > 300 ? 'flex' : 'none';
+    if (rangeTouchActive) scrollFiredDuringTouch = true;
+    if (!document.body.classList.contains('range-scroll-lock')) {
+        document.querySelectorAll('input[type="range"]').forEach(slider => {
+            slider.dataset.rangeScrollPrev = slider.value;
+        });
+        document.body.classList.add('range-scroll-lock');
+    }
+    clearTimeout(rangeScrollLockTimer);
+    rangeScrollLockTimer = setTimeout(function() {
+        document.body.classList.remove('range-scroll-lock');
+    }, 120);
+});
+
+document.addEventListener('touchstart', function(event) {
+    const target = event.target;
+    if (target && target.type === 'range') {
+        rangeTouchSlider = target;
+        rangeTouchActive = true;
+        rangeTouchStartValue = target.value;
+        scrollFiredDuringTouch = false;
+    }
+}, true);
+
+function endRangeTouch(event) {
+    if (!rangeTouchActive) return;
+    if (event.target === rangeTouchSlider) {
+        if (scrollFiredDuringTouch) {
+            rangeTouchSlider.value = rangeTouchStartValue;
+            rangeTouchSlider.dataset.rangeScrollPrev = rangeTouchStartValue;
+            const paired = document.getElementById(rangeTouchSlider.id.replace('_slider', ''));
+            if (paired) paired.value = rangeTouchStartValue;
+            rangeTouchSlider.dispatchEvent(new Event('input', {bubbles: true}));
+            rangeTouchSlider.blur();
+        }
+    }
+    rangeTouchActive = false;
+    rangeTouchSlider = null;
+}
+document.addEventListener('touchend', endRangeTouch, true);
+document.addEventListener('touchcancel', endRangeTouch, true);
+
+function restoreRangeLocked(slider) {
+    if (slider.dataset.rangeScrollPrev === undefined) return;
+    slider.value = slider.dataset.rangeScrollPrev;
+    const paired = document.getElementById(slider.id.replace('_slider', ''));
+    if (paired) paired.value = slider.dataset.rangeScrollPrev;
+    slider.blur();
+}
+
+document.addEventListener('input', function(event) {
+    const target = event.target;
+    if (!(target && target.type === 'range')) return;
+    if (document.body.classList.contains('range-scroll-lock')) restoreRangeLocked(target);
+});
+
+document.addEventListener('change', function(event) {
+    const target = event.target;
+    if (!(target && target.type === 'range')) return;
+    if (document.body.classList.contains('range-scroll-lock')) restoreRangeLocked(target);
 });
 
 let autosaveTimer = null;
@@ -1857,17 +1921,6 @@ function reboot() {
     }).catch(() => {
         msgBox.className = 'msg-error'; msgBox.innerText = "Connection lost during reboot. Please refresh shortly.";
         setTimeout(() => location.reload(), 4000);
-    });
-}
-
-function deepSleep() {
-    if (!confirm("Put device into deep sleep?")) return;
-    let msgBox = document.getElementById('msg');
-    msgBox.className = ''; msgBox.innerText = 'Device going to sleep...';
-    fetch('/api/sleep', {method:'POST'}).then(() => {
-        msgBox.className = 'msg-success'; msgBox.innerText = 'Device is now sleeping.';
-    }).catch(() => {
-        msgBox.className = 'msg-error'; msgBox.innerText = 'Connection lost (device is sleeping).';
     });
 }
 

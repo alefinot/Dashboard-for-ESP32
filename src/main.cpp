@@ -53,52 +53,20 @@ void setup() {
   delay(50);
 
   processConfig(0);
-  // Upgrade NVS defaults on first boot with optimized firmware
+  // Factory-default seeding (supersedes the CFG_VER 1..4 migrations): any
+  // unit whose config has not yet been seeded (CFG_VER < 5, including a
+  // brand-new NVS) adopts the dashboard_backup.json values — first boot
+  // behaves like a factory reset, and a previously configured unit gets the
+  // reference backup applied once (CFG_VER -> 5). The historical v2/v3/v4
+  // one-shot fixes (80 MHz SPI, dynamic CPU off, 60 FPS) are all covered by
+  // the factory values, so the old migration chain is no longer needed.
   {
     Preferences pref;
     pref.begin("cfg", false);
-    if (!pref.isKey("CFG_VER")) {
-      SPI_BUS_SPEED = 80000000;
-      TARGET_FPS = 60;
-      ENABLE_DYNAMIC_CPU = false;
-      pref.putInt("SPI_FREQ", SPI_BUS_SPEED);
-      pref.putInt("TGT_FPS", TARGET_FPS);
-      pref.putBool("DYN_CPU", ENABLE_DYNAMIC_CPU);
-      pref.putInt("CFG_VER", 1);
-    }
-    // v2: raise the SPI write bus from 60MHz to 80MHz (cuts every panel write
-    // ~25%, the main lever against redraw stutter). Only bumps when the stored
-    // value is still the old 60MHz default, so a manual web-UI speed choice is
-    // never overwritten.
-    if (pref.getInt("CFG_VER", -1) == 1 &&
-        pref.getInt("SPI_FREQ", 80000000) == 60000000) {
-      SPI_BUS_SPEED = 80000000;
-      pref.putInt("SPI_FREQ", SPI_BUS_SPEED);
-      pref.putInt("CFG_VER", 2);
-    }
-    // v3: force dynamic CPU scaling off. setCpuFrequencyMhz() recalibrates the
-    // APB clock that the SPI bus and ALL timers derive from, and the scaler
-    // downsteps to 160MHz whenever average fps exceeds ~85% of target — a
-    // known source of periodic refresh glitches that no component setting can
-    // disable. Old builds could leave DYN_CPU=true saved; override it once.
-    if (pref.getInt("CFG_VER", -1) == 2 && pref.getBool("DYN_CPU", false)) {
-      ENABLE_DYNAMIC_CPU = false;
-      pref.putBool("DYN_CPU", false);
-      logPrintf("Config v3: dynamic CPU scaling disabled\n");
-    }
-    if (pref.getInt("CFG_VER", -1) == 2)
-      pref.putInt("CFG_VER", 3);
-    // v4: a saved TGT_FPS of 30 (or 0) paces every frame at 33ms — half-speed
-    // animation that reads as "lag" on a speedometer. Reset to 60 once; a
-    // deliberate web-UI choice can still be re-applied.
-    if (pref.getInt("CFG_VER", -1) == 3 && pref.getInt("TGT_FPS", 60) != 60) {
-      TARGET_FPS = 60;
-      pref.putInt("TGT_FPS", 60);
-      logPrintf("Config v4: target FPS reset to 60\n");
-    }
-    if (pref.getInt("CFG_VER", -1) == 3)
-      pref.putInt("CFG_VER", 4);
+    int cfgVer = pref.getInt("CFG_VER", -1);
     pref.end();
+    if (cfgVer < 5)
+      seedNVSWithFactoryDefaults();
   }
   recalculateDerivedParams();
 
@@ -397,16 +365,11 @@ void loop() {
     snap = g_sensorData;
     xSemaphoreGive(g_stateMutex);
   }
-  // Demo values are regenerated HERE on the display core, never on core 0:
-  // WiFi/HTTP/TLS work preempts the priority-2 sensor task for whole seconds,
-  // which would freeze every demo value (and the whole screen with it). The
-  // display loop is never starved, so demo animation cannot stall.
-  if (ENABLE_DEMO_MODE)
-    demoSnapshotOverride(snap);
-  else {
-    // Real mode: refresh the clock/date from the system clock directly (the
-    // sensor task keeps it synced from GPS/NTP). If the sensor task is stalled
-    // by core-0 network work the on-screen clock keeps ticking.
+  // Refresh the clock/date from the system clock directly (the sensor task
+  // keeps it synced from GPS/NTP; in demo mode the simulated GPS time is
+  // never applied, so this is always the real clock). If the sensor task is
+  // stalled by core-0 network work the on-screen clock keeps ticking.
+  {
     int hh, mm, dd, mo, yy;
     if (systemTimeToLocal(hh, mm, dd, mo, yy)) {
       snap.localHour = hh;
@@ -414,6 +377,17 @@ void loop() {
       snap.day = dd;
       snap.month = mo;
       snap.year = yy;
+      snap.timeValid = true;
+      snap.dateValid = true;
+    } else if (ENABLE_DEMO_MODE) {
+      // Demo without a synced clock: fall back to a simulated wall clock so
+      // the demo still shows time/date.
+      unsigned long s = 10UL * 3600UL + millis() / 1000UL;
+      snap.localHour = (s / 3600) % 24;
+      snap.minute = (s / 60) % 60;
+      snap.day = 16;
+      snap.month = 7;
+      snap.year = 26;
       snap.timeValid = true;
       snap.dateValid = true;
     }

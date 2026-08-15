@@ -138,6 +138,7 @@ extern int BIG_CENTER_Y;
 
 extern float WHEEL_CIRCUMFERENCE_MM;
 extern float FUEL_FILTER_ALPHA;
+extern float REFUEL_RESET_LITERS;
 
 extern float NTC_R_BALANCE;
 extern float NTC_R_ROOM;
@@ -261,15 +262,9 @@ extern int FADE_DURATION_MS;
 extern int currentBrightnessTarget;
 
 extern int REFRESH_SPEED_MS;
-extern int REFRESH_SAT_MS;
-extern int REFRESH_TMR_MS;
 extern int REFRESH_BAT_MS;
 extern int REFRESH_INST_MS;
-extern int REFRESH_AVG_MS;
 extern int REFRESH_FUEL_MS;
-extern int REFRESH_TIME_MS;
-extern int REFRESH_SIDEBAR_TEMP_MS;
-extern int REFRESH_SIDEBAR_FUEL_MS;
 extern float COMPASS_DECLINATION_DEG;
 
 extern int SPEED_DIGITS;
@@ -454,6 +449,7 @@ extern SensorSnapshot g_sensorData;
 // ----------------------------------------------------------------------------
 void applyColors();
 void processConfig(int mode, JsonDocument *doc = nullptr);
+void seedNVSWithFactoryDefaults();
 void recalculateDerivedParams();
 uint16_t hexToRGB565(const char *hex);
 
@@ -597,7 +593,7 @@ void checkNightMode(const SensorSnapshot &snap);
 // ----------------------------------------------------------------------------
 // Sensor API
 // ----------------------------------------------------------------------------
-void demoSnapshotOverride(SensorSnapshot &snap);
+void simulateRawSensors();
 bool systemTimeToLocal(int &hour, int &minute, int &day, int &month, int &year);
 extern volatile unsigned long g_sensorLastTickMs;
 
