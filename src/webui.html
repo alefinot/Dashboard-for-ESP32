@@ -1256,9 +1256,9 @@ const configMap = [
         title: "Sensors Tuning", icon: iconSVG.sensors,
         items: [
             { type: "touch-table", label: "Fuel Sensor", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable", rows: [
-                { id: "REFUEL_RESET_LITERS", label: "Refuel Reset Threshold (fuel rise in L resets trip consumption)", unit: "L" }
+                { id: "REFUEL_RESET_LITERS", label: "Refuel Reset Threshold (fuel rise in L resets trip consumption)", unit: "L" },
+                { id: "FUEL_FILTER_ALPHA", label: "Smoothing Factor" }
             ] },
-            { id: "FUEL_FILTER_ALPHA", label: "Fuel Sensor Smoothing Alpha" },
             { type: "subtitle", label: "Temperature Sensor" },
             { id: "NTC_R_BALANCE", label: "NTC Balance Resistor", unit: "Ohms" },
             { id: "NTC_BETA", label: "NTC Beta Value" },
@@ -2184,59 +2184,6 @@ function doOtaPull() {
 }
 
 let perfTimer = null;
-function buildPerfPanel() {
-    let grid = document.getElementById('perf-grid');
-    if (!grid || grid.children.length > 0) return;
-    grid.innerHTML = `
-        <div class="perf-card">
-<h4>Display</h4>
-            <div class="perf-row"><span class="perf-label">Current FPS</span><span class="perf-value" id="p-fps-cur">--</span></div>
-            <div class="perf-row"><span class="perf-label">Average FPS</span><span class="perf-value" id="p-fps-avg">--</span></div>
-            <div class="perf-row"><span class="perf-label">Target FPS</span><span class="perf-value" id="p-fps-tgt">--</span></div>
-            <div class="perf-row"><span class="perf-label">Refresh</span><span class="perf-value" id="p-refresh">--</span></div>
-            <div class="perf-row"><span class="perf-label">Resolution</span><span class="perf-value" id="p-resolution">--</span></div>
-        </div>
-        <div class="perf-card">
-<h4>System</h4>
-            <div class="perf-row"><span class="perf-label">Uptime</span><span class="perf-value" id="p-uptime">--</span></div>
-            <div class="perf-row"><span class="perf-label">WiFi Clients</span><span class="perf-value" id="p-wifi">--</span></div>
-            <div class="perf-row"><span class="perf-label">SPI Bus</span><span class="perf-value" id="p-spi">--</span></div>
-            <div class="perf-row"><span class="perf-label">Heap</span><span class="perf-value" id="p-heap">--</span></div>
-        </div>
-        <div class="perf-card" style="grid-column:1/-1;">
-<h4>CPU Performance</h4>
-            <div class="perf-row"><span class="perf-label">Frequency</span><span class="perf-value" id="p-cpu-freq">--</span></div>
-            <div class="perf-row"><span class="perf-label">Mode</span><span class="perf-value" id="p-cpu-mode">--</span></div>
-            <div class="perf-row"><span class="perf-label">Temperature</span><span class="perf-value" id="p-cpu-temp">--</span></div>
-            <div style="margin-top:8px;">
-                <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:4px;">
-                    <span>CPU Usage</span><span class="perf-value"><strong id="cpu-pct">--</strong>%</span>
-                </div>
-                <div class="perf-bar">
-                    <div id="cpu-used-bar" class="perf-bar-fill" style="width:0;background:var(--accent-emerald);"></div>
-                </div>
-            </div>
-        </div>
-        <div class="perf-card" style="grid-column:1/-1;">
-            <h4>Memory &amp; Storage</h4>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:flex;justify-content:space-between;">
-                <span>RAM Usage</span><span><strong id="mem-used" style="color:#fff;">--</strong> / <strong id="mem-total" style="color:#fff;">--</strong> KB (<strong id="mem-pct" style="color:#fff;">--</strong>%)</span>
-            </div>
-            <div class="perf-bar" style="margin-bottom:8px;">
-                <div id="mem-used-bar" class="perf-bar-fill" style="width:0;background:var(--accent-emerald);"></div>
-            </div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:flex;justify-content:space-between;">
-                <span>Flash Storage</span><span><strong id="fl-used" style="color:#fff;">--</strong> / <strong id="fl-total" style="color:#fff;">--</strong> KB (<strong id="fl-pct" style="color:#fff;">--</strong>%)</span>
-            </div>
-            <div class="perf-bar">
-                <div id="fl-used-bar" class="perf-bar-fill" style="width:0;background:var(--accent-blue);"></div>
-            </div>
-        </div>
-        <div class="perf-card" style="grid-column:1/-1;">
-            <h4>Serial Output Monitor</h4>
-            <div id="serial-out">Waiting for data...</div>
-        </div>`;
-}
 
 function updatePerf() {
     if (tabHidden) return;
