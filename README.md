@@ -60,20 +60,23 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 │    CORE 0  (GNSS Stream & Network)     │  CORE 1  (Vehicle Sensors & Display)   │
 ├────────────────────────────────────────┼────────────────────────────────────────┤
 │┌──────────────────────────────────────┐│┌──────────────────────────────────────┐│
-││Task: GpsTaskCore0 (Prio 2, 10KB)     │││Task: SensorTaskCore1 (Prio 2, 10KB)  ││
+││ Task: GpsTaskCore0 (Prio 2, 10KB)    │││ Task: SensorTaskCore1 (Prio 2, 10KB) ││
+││                                      │││                                      ││
 ││• UART2 @ 115200 bulk ring drain      │││• Hall Sensor GPIO33 ISR              ││
 ││  (readBytes() batch, 1024 B/tick cap)│││• QMC5883L Magnetometer               ││
 ││• TinyGPS++ NMEA + UBX NAV-PVT parse  │││  (I2C @ 200 Hz)                      ││
 ││• Speed Fusion & Odometer calc        │││• ADC: Fuel (32), Temp (36), Bat (35) ││
-││• GNSS Epoch Time Sync -> settimeofday()│││• Fuel Economy & Accel Timer          ││
+││• GNSS Epoch Time Sync -> settimeofday│││• Fuel Economy & Accel Timer          ││
 ││• Safe Thread Sync via g_stateMutex   │││• Trip Average Speed                  ││
-││Task: WebTaskCore0 (Prio 1, 12KB)     │││• Safe Thread Sync via g_stateMutex   ││
-││• SoftAP (Dashboard_Config) & STA     │││Main Loop (Priority 1)                ││
-││• WebServer HTTP Handlers             │││• Dirty-Rendering Frame Pipeline      ││
-││• ArduinoOTA Firmware Listener        │││• LovyanGFX SPI Driver (60 MHz)       ││
-││• Serial Log Streaming API            │││• Sprite-Based Speed (120px VLW)      ││
-│└──────────────────────────────────────┘││• Hysteresis CPU Scaling (80/160/240) ││
-│                                        ││• Auto Night-Mode Backlight PWM       ││
+││                                      │││• Safe Thread Sync via g_stateMutex   ││
+││──────────────────────────────────────│││──────────────────────────────────────││
+││ Task: WebTaskCore0 (Prio 1, 12KB)    │││ Main Loop (Priority 1)               ││
+││                                      │││                                      ││
+││• SoftAP (Dashboard_Config) & STA     │││• Dirty-Rendering Frame Pipeline      ││
+││• WebServer HTTP Handlers             │││• LovyanGFX SPI Driver (60 MHz)       ││
+││• ArduinoOTA Firmware Listener        │││• Sprite-Based Speed (120px VLW)      ││
+││• Serial Log Streaming API            │││• Hysteresis CPU Scaling (80/160/240) ││
+│└──────────────────────────────────────┘││• Auto Night-Mode Backlight PWM       ││
 │                                        ││• Ignition Deep Sleep State Machine   ││
 │                                        ││• Telemetry Logging to 4KB Ring       ││
 │                                        │└──────────────────────────────────────┘│
