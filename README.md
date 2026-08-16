@@ -54,45 +54,30 @@ Dashboard++ replaces legacy analog or basic digital gauges with an automotive-gr
 The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks to guarantee deterministic sensor sampling without visual stuttering or UI delays.
 
 ```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                 ESP32 WROOM-32 DUAL-CORE                               │
-├───────────────────────────────────────────────────────┬────────────────────────────────┤
-│                      CORE 0                           │             CORE 1             │
-│            (GNSS Stream & Network)                    │   (Vehicle Sensors & Display)  │
-├───────────────────────────────────────────────────────┼────────────────────────────────┤
-│ ┌───────────────────────────────────────────────────┐ │ ┌────────────────────────────┐ │
-│ │ Task: GpsTaskCore0 (Priority 2, Stack 10KB)       │ │ │ Task: SensorTaskCore1      │ │
-│ │  • UART2 @ 115200 bulk ring-buffer drain          │ │ │  (Priority 2, Stack 10KB)  │ │
-│ │    (readBytes() batch, 1024 B/tick cap)           │ │ │  • Hall Sensor GPIO33 ISR  │ │
-│ │  • TinyGPS++ NMEA + UBX NAV-PVT Parser            │ │ │    & Microsecond Timing    │ │
-│ │  • Speed Fusion & Odometer Distance Calculation   │ │ │  • QMC5883L Magnetometer   │ │
-│ │  • GNSS Epoch Time Sync → settimeofday()          │ │ │    (I2C @ 200 Hz)          │ │
-│ │  • Safe Thread Sync via g_stateMutex              │ │ │  • ADC Sampling: Fuel (32),│ │
-│ │ └───────────────────────────────────────────────────┘ │ │    Temp (36), Bat (35)     │ │
-│ ┌───────────────────────────────────────────────────┐ │ │  • Fuel Economy &          │ │
-│ │ Task: WebTaskCore0 (Priority 1, Stack 12KB)       │ │ │    Acceleration Timer     │ │
-│ │  • SoftAP ("Dashboard_Config") & Multi-SSID STA   │ │ │  • Trip Average Speed      │ │
-│ │  • WebServer HTTP Handlers (8 REST Endpoints)     │ │ │  • Safe Thread Sync via    │ │
-│ │  • ArduinoOTA Firmware Listener                   │ │ │    g_stateMutex            │ │
-│ │  • Serial Log Streaming API                       │ │ │ └────────────────────────────┘ │
-│ └───────────────────────────────────────────────────┘ │ ┌────────────────────────────┐ │
-│                                                        │ │ Main Loop (Priority 1)     │ │
-│                                                        │ │  • Dirty-Rendering Frame   │ │
-│                                                        │ │    Update Pipeline         │ │
-│                                                        │ │  • LovyanGFX SPI Display   │ │
-│                                                        │ │    Driver (@ 60 MHz)       │ │
-│                                                        │ │  • Sprite-Based Speed      │ │
-│                                                        │ │    Rendering (120px VLW)   │ │
-│                                                        │ │  • Hysteresis Dynamic CPU  │ │
-│                                                        │ │    Scaling (80/160/240 MHz) │ │
-│                                                        │ │  • Auto Night-Mode Backlight│ │
-│                                                        │ │    PWM Control             │ │
-│                                                        │ │  • Ignition Sense Deep     │ │
-│                                                        │ │    Sleep State Machine     │ │
-│                                                        │ │  • Telemetry Logging to    │ │
-│                                                        │ │    4KB Ring Buffer         │ │
-│                                                        │ └────────────────────────────┘ │
-└───────────────────────────────────────────────────────┴────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            ESP32 WROOM-32 DUAL-CORE                             │
+├────────────────────────────────────────┼────────────────────────────────────────┤
+│    CORE 0  (GNSS Stream & Network)     │  CORE 1  (Vehicle Sensors & Display)   │
+├────────────────────────────────────────┼────────────────────────────────────────┤
+│┌──────────────────────────────────────┐│┌──────────────────────────────────────┐│
+││Task: GpsTaskCore0 (Prio 2, 10KB)     │││Task: SensorTaskCore1 (Prio 2, 10KB)  ││
+││• UART2 @ 115200 bulk ring drain      │││• Hall Sensor GPIO33 ISR              ││
+││  (readBytes() batch, 1024 B/tick cap)│││• QMC5883L Magnetometer               ││
+││• TinyGPS++ NMEA + UBX NAV-PVT parse  │││  (I2C @ 200 Hz)                      ││
+││• Speed Fusion & Odometer calc        │││• ADC: Fuel (32), Temp (36), Bat (35) ││
+││• GNSS Epoch Time Sync -> settimeofday()│││• Fuel Economy & Accel Timer          ││
+││• Safe Thread Sync via g_stateMutex   │││• Trip Average Speed                  ││
+││Task: WebTaskCore0 (Prio 1, 12KB)     │││• Safe Thread Sync via g_stateMutex   ││
+││• SoftAP (Dashboard_Config) & STA     │││Main Loop (Priority 1)                ││
+││• WebServer HTTP Handlers             │││• Dirty-Rendering Frame Pipeline      ││
+││• ArduinoOTA Firmware Listener        │││• LovyanGFX SPI Driver (60 MHz)       ││
+││• Serial Log Streaming API            │││• Sprite-Based Speed (120px VLW)      ││
+│└──────────────────────────────────────┘││• Hysteresis CPU Scaling (80/160/240) ││
+│                                        ││• Auto Night-Mode Backlight PWM       ││
+│                                        ││• Ignition Deep Sleep State Machine   ││
+│                                        ││• Telemetry Logging to 4KB Ring       ││
+│                                        │└──────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 > [!NOTE]
@@ -538,25 +523,51 @@ In Demo Mode:
 
 ## Changelog
 
-### V1.2.7 — Fuel smoothing alpha
-- Fuel-level EMA smoothing alpha is now configurable in the Fuel Sensor card (live tuning without reflashing).
+### V1.2.7 — Fuel smoothing alpha + web UI reorganization
+- **Fuel smoothing alpha** — fuel-level EMA smoothing alpha is now configurable live in the Fuel Sensor card (tune it without a reflash).
+- **Web UI settings reorganization** — settings regrouped into the five card groups (System & General, WiFi and Connectivity, Display & Colors, Sensors Tuning, UI Layout); time, weather, auto-brightness, and fuel-alpha controls each moved to their correct home.
+- **Factory-default seeding** — new `CFG_VER 5` factory-default seeding pulls initial values from `dashboard_backup.json` on first boot.
+- **Configurable WiFi search policy** — new `WIFI_RETRY_MODE` (one cycle / fixed time / search forever) with auto-reconnect on lost link; the old "AUTO DISABLE WIFI" setting is removed (STA is always on).
+- **Web UI cleanup** — removed the dead `buildPerfPanel` JS from the pre-gzipped webui.
 
 ### V1.2.6 — Dynamic weather widget layout
-- Weather widget renders with a dynamic layout (speed-source badge, satellite-count badge).
+- **Weather widget layout** — temp/humidity/wind/sunset stats render with an equal-spaced layout, plus a quadratic city-name fade and an ASCII-safe degree ring.
+- **Instant weather refetch** — saving a weather config triggers an instant refetch with a 2 s retry backoff.
+- **Hung-fetch guard** — a 30 s guard kills stuck weather-fetch tasks.
+- **Fixed-width source badge** — the speed-source badge (HAL / GPS / G+H) is now fixed-width so the layout doesn't shift.
+- **Satellite-count badge** — satellite count renders as an icon + Conthrax 10px badge.
+- **Budget optimization** — hidden UI elements now skip the frame budget calculation entirely.
 
 ### V1.2.5 — PROGMEM fonts + weather geocoding
-- All VLW fonts moved to PROGMEM (zero DRAM per glyph).
-- Ghost-digit config, satellite GPS icon, GPS-geocoded weather city + locale, day/night weather icon.
+- **PROGMEM VLW fonts** — all VLW fonts (10/16/28px) streamed from PROGMEM headers (zero DRAM per glyph), generated from the `.vlw` sources by `scripts/vlw_to_header.py`.
+- **Ghost-digit time/date** — fixed-slot ghost-digit rendering for the time/date row, with a configurable `SH_GHOST` alpha.
+- **NTC temp EMA smoothing** — smooths the sidebar temperature and kills the flicker.
+- **Satellite GPS icon** — a satellite-count GPS icon.
+- **Configurable weather city language** — new `WEATHER_LOCALE` param.
+- **Factory reset** — now preserves WiFi credentials across resets; the hardcoded WiFi password default is removed.
+- **GPS-geocoded weather city** — the weather city is geocoded from the GPS position, with a configurable fetch interval.
+- **Day/night weather icon** — real sunrise/sunset-based day/night icon.
+- **Dropped** — web config PIN auth and legacy pt7b font fallbacks.
 
 ### V1.2.1 — Low-RAM overhaul
-- PROGMEM 120px font, 8-bit grayscale speed sprite, pre-gzipped webui.
+- **Zero-DRAM 120px font** — the 120px speed digit font is now a PROGMEM header (no DRAM).
+- **Pre-gzipped webui** — the webui HTML is pre-gzipped, slashing the config-page transfer by ~75 KB of flash.
+- **Fixed char buffers** — all config `String`s converted to fixed char buffers (no per-request heap allocation).
+- **8-bit grayscale speed sprite** — the speed sprite is now true 8-bit grayscale, fixing the AA snow-edge artifacts.
+- **Web watchdog auto re-arm** — the web watchdog auto re-arms 3 min after a boot-storm disarm.
 
-### V1.2.0 — Automatic cloud OTA pull hardening
-- Resumable TLS, 32 KB pull task, flash-safe reboot.
+### V1.2.0 — Cloud OTA pull hardening
+- **Resumable TLS downloads** — OTA pulls now resume on TLS failures.
+- **Static 32 KB pull task** — the OTA pull runs in a static 32 KB task.
+- **Flash-safe reboot** — the streaming bar is capped so only verified flashes reboot; the web loop yields the radio during flash.
+- **Manifest phase scoping** — the manifest phase is scoped to compact heap before the handshake; a 1-min recheck throttle.
+- **VLW120 font alloc crash-guard** — the 120px font allocation is crash-guarded (mem-saver safe).
 
 ### V1.1.6 — Open-Meteo weather widget + task-level CPU isolation
-- Open-Meteo live weather widget (city, lat/lon, refresh interval, locale, day/night icon).
-- GNSS task quarantine (Core 0, prio 2) + bulk UART read.
+- **Open-Meteo weather widget** — live weather widget (city, lat/lon, refresh interval, locale, day/night icon) fetched by a dedicated Core-0 task.
+- **GNSS task quarantine** — GPS parsing quarantined into its own Core-0 task (below the WiFi stack), with bulk `readBytes()` ring drain and a 1024 B/tick cap (the per-byte read cost was ~920 µs).
+- **Sensor task** — moved back to Core 1 beside the display.
+- **Frame-budget deferral** — frame-budget deferral so the display never blocks on network I/O.
 
 ---
 
