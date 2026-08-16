@@ -8,7 +8,7 @@
 
 **Dashboard++** is an ultra-high-performance, production-grade automotive digital instrument cluster and telemetry solution designed for motorcycles, cars, and custom electric/combustion vehicles powered by the **ESP32 WROOM-32** dual-core microcontroller.
 
-Featuring a 4.0-inch ILI9488 TFT display (480×320 resolution) driven over a 60 MHz SPI bus using **LovyanGFX** with VLW font rendering from LittleFS, Dashboard++ blends real-time multi-sensor fusion algorithms, sprite-based anti-aliased digit rendering, dirty-rendering optimizations, hysteresis-based dynamic CPU frequency scaling, persistent NVS configuration management, and a complete single-page Web application served over WiFi with REST API control, backup/restore, and ArduinoOTA updates.
+Featuring a 4.0-inch ILI9488 TFT display (480×320 resolution) driven over a 60 MHz SPI bus using **LovyanGFX** with PROGMEM-mapped VLW fonts, Dashboard++ blends real-time multi-sensor fusion algorithms, sprite-based anti-aliased digit rendering, dirty-rendering optimizations, hysteresis-based dynamic CPU frequency scaling, persistent NVS configuration management, an Open-Meteo live weather widget, and a complete single-page Web application served over WiFi with REST API control, NVS backup/restore, and automatic cloud OTA pull.
 
 ---
 
@@ -39,12 +39,12 @@ Dashboard++ replaces legacy analog or basic digital gauges with an automotive-gr
 
 - **Dual Speed Fusion (Hall Effect + GNSS):** Dynamically fuses microsecond-level hardware interrupt pulses with NMEA GPS speed vectors, adjusting confidence based on satellite lock quality ($N_{\text{sat}}$) and cross-checking delta errors.
 - **Sprite-Based Anti-Aliased Speed Rendering:** The main speed readout is pre-rendered to an off-screen LGFX_Sprite using a 120px VLW 7-segment digital font, then pushed to the display in a single DMA transfer — reducing SPI bus contention and eliminating per-digit draw calls.
-- **VLW Font System:** All fonts (Conthrax SemiBold and DS-DIGIT variants) are stored on LittleFS in VLW format, loaded at runtime via `loadVLWFont()`. This removes compiled-in font data bloat and enables flexible font sizing.
+- **PROGMEM VLW Font System:** All fonts (Conthrax SemiBold and DS-DIGIT variants) are compiled into flash as PROGMEM byte arrays (generated from the `.vlw` sources in `data/Fonts/` by `scripts/vlw_to_header.py`), loaded at build time via `loadVLWFont()` — zero DRAM per glyph, no runtime filesystem lookups.
 - **Dirty-Rendering Frame Pipeline:** Element state tracking ensures only mutated visual regions are drawn to the SPI bus, with dedicated per-element refresh rate throttles for speed, satellite count, timer, battery, fuel economy, and average speed.
 - **Configurable 7-Segment Digital Fonts:** 120px (sprite) and 28px (direct) seven-segment fonts with background "ghost digit" rendering (888 backdrop effect) and fully user-configurable integer and decimal digit boundaries for all telemetry counters.
 - **Full Sensor Suite Integration:** Precise fuel level monitoring (20-point piecewise linear calibration table + EMA filtering), engine coolant thermistor telemetry (Steinhart-Hart equation), battery voltage divider monitoring, 3-axis I2C digital compass heading, trip fuel economy tracking, and **trip average speed** display.
 - **FreeRTOS Dual-Core Multitasking:** Strict core isolation — the continuous ~1.1KB/s GNSS UART stream is quarantined in its own Core 0 task (bulk ring-buffer read, bounded per tick, sitting below the WiFi stack), while the vehicle sensor suite and UI rendering run on Core 1, so a GPS stream backlog can never stall the dashboard or freeze any real-time value.
-- **Embedded Web Management Portal:** Embedded single-page Web application accessible over SoftAP or local WiFi network featuring grouped card-based configuration UI with live search, real-time performance telemetry panel (FPS, CPU frequency/temp, RAM, flash storage), interactive sliders, color pickers, NVS backup/restore, web serial terminal stream, and HTTP file upload OTA firmware updating.
+- **Embedded Web Management Portal:** Embedded single-page Web application accessible over SoftAP or local WiFi network featuring grouped card-based configuration UI with live search, real-time performance telemetry panel (FPS, CPU frequency/temp, RAM, flash storage), interactive sliders, color pickers, NVS backup/restore, web serial terminal stream, cloud OTA pull, and HTTP file upload OTA firmware updating.
 - **Hysteresis-Based Dynamic CPU Scaling:** Three-state frequency governor (240/160/80 MHz) with hysteresis deadbands prevents oscillation, and thermal throttling automatically caps frequency at configurable warning/critical temperature thresholds.
 
 ---
@@ -101,6 +101,12 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 > out-run the stream. GPS is 1Hz-tolerant data, so if the network preempts the drain, only GPS
 > values lag — the vehicle sensors and the screen are never touched.
 
+> [!NOTE]
+> The **weather fetch task** (Core 0, spawned by `startWeatherFetch()` on Core 1) polls the Open-Meteo
+> API on a configurable interval (`WEATHER_REFRESH_MIN`) and stores the result in a dedicated
+> `g_weatherData` struct. A 30 s hung-fetch guard kills stuck tasks; a config save triggers an
+> instant refetch with a 2 s retry backoff.
+
 ---
 
 ## Hardware Component Specifications
@@ -124,6 +130,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 
 | ESP32 Pin | Function Name | Peripheral Type | Signal Direction | Hardware Configuration & Notes |
 | :---: | :--- | :--- | :---: | :--- |
+| **GPIO4** | `POWER_SENSE_PIN` | Power Sense | Input (No Pull) | Ignition sense line; triggers EXT0 RTC wake up from deep sleep |
 | **GPIO5** | `CS_DISPLAY` | SPI Chip Select | Output | Hardware SPI CS for ILI9488 Display |
 | **GPIO12** | `BL_DISPLAY` | Backlight PWM | Output | Attached to ESP32 LEDC Channel 0 (1 kHz PWM) |
 | **GPIO14** | `SPI_RST` | Display Reset | Output | Active-Low hardware reset line for ILI9488 |
@@ -136,12 +143,15 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **GPIO27** | `SPI_DC` | Data / Command | Output | High = Data, Low = Command for ILI9488 controller |
 | **GPIO32** | `FUEL_TOUCH_PIN` | Fuel ADC | Input | Dedicated ADC1 Channel 4 pin for fuel level reading |
 | **GPIO33** | `HALL_SENSOR_PIN` | Hall Interrupt | Input (Pullup) | Falling-edge hardware interrupt for wheel magnet pulses |
-| **GPIO34** | `POWER_SENSE_PIN`| Power Sense | Input (No Pull) | Ignition sense line; triggers EXT0 RTC wake up from deep sleep |
+| **GPIO34** | `LIGHT_SENSOR_PIN` | Ambient Light | Input (No Pull) | LDR ambient light sensor for auto-brightness (calibrated via `/api/ambient/cal-dark` / `cal-bright`) |
 | **GPIO35** | `BATTERY_SENSE_PIN`| Battery ADC | Input (No Pull) | Connected to 5.7:1 precision resistor divider node |
 | **GPIO36** | `TEMP_SENSE_PIN` | Engine Temp ADC | Input (No Pull) | Connected to NTC thermistor / balance resistor divider node |
 
 > [!IMPORTANT]
 > GPIO32 is dedicated to the fuel ADC input to avoid pin-sharing conflicts with the GPIO33 Hall interrupt hardware line.
+
+> [!NOTE]
+> The current code carries temporary isolation-test pins for `RXD2` (GPIO16), `TXD2` (GPIO17), `COMPASS_SDA` (GPIO13), and `COMPASS_SCL` (GPIO15), as flagged in `dashboard.h`. The matrix above reflects the board's intended wiring (GPIO21/22 for compass I²C, GPIO25/26 for GNSS serial).
 
 ---
 
@@ -178,7 +188,7 @@ $$\Delta D_{\text{ram}} \ge 1.0\text{ km} \implies \text{Preferences.putDouble("
 
 ### 2. Anti-Aliased GFX Engine & 7-Segment Fonts
 
-Graphics rendering is built on `LovyanGFX` with specialized antialiasing routines and a VLW font system loaded from LittleFS.
+Graphics rendering is built on `LovyanGFX` with specialized antialiasing routines and a PROGMEM-mapped VLW font system (compiled into flash — no runtime filesystem lookups, zero DRAM per glyph).
 
 #### Alpha Blending Math
 Sub-pixel anti-aliased primitives draw edges with fractional coverage $\alpha \in [0, 1]$. Color blending uses fast integer arithmetic:
@@ -190,14 +200,14 @@ $$B_{\text{out}} = \lfloor (B_{\text{bg}} \cdot (256 - a) + B_{\text{fg}} \cdot 
 The main speed display is rendered to an off-screen `LGFX_Sprite` using the VLW 120px 7-segment digital font. Ghost digits (888 backdrop) and active digits are drawn once per frame into the sprite, then pushed to the display in a single DMA transfer — drastically reducing SPI bus transactions compared to per-digit draw calls.
 
 #### VLW Font System
-All typography is served from LittleFS (`/Fonts/` directory) in LovyanGFX VLW format:
-- `DS-DIGIT_120px.vlw` — Main speed readout (sprite-rendered)
-- `DS-DIGIT_28px.vlw` — Secondary digits (time, odometer, satellite, battery, fuel economy, average speed)
-- `Conthrax_SemiBold_28px.vlw` — Section headers and badges
-- `Conthrax_SemiBold_16px.vlw` — Unit labels and sidebar text
-- `Conthrax_SemiBold_10px.vlw` — Micro labels (AVG badge, IST badge)
+All typography is compiled into flash as PROGMEM byte arrays (`include/*.h`, generated from the `.vlw` sources in `data/Fonts/` by `scripts/vlw_to_header.py`):
+- `DS-DIGIT_120px.vlw` → `DS_DIGIT_120px_vlw.h` — Main speed readout (sprite-rendered)
+- `DS-DIGIT_28px.vlw` → `DS_DIGIT_28px_vlw.h` — Secondary digits (time, odometer, satellite, battery, fuel economy, average speed)
+- `Conthrax_SemiBold_28px.vlw` → `Conthrax_SemiBold_28px_vlw.h` — Section headers and badges
+- `Conthrax_SemiBold_16px.vlw` → `Conthrax_SemiBold_16px_vlw.h` — Unit labels and sidebar text
+- `Conthrax_SemiBold_10px.vlw` → `Conthrax_SemiBold_10px_vlw.h` — Micro labels (AVG badge, IST badge)
 
-Legacy compiled-in GFX font bitmaps are retained as fallbacks.
+Legacy compiled-in GFX font bitmaps (`Conthrax_SemiBold4pt7b`, `Conthrax_SemiBold7pt7b`) are retained as fallbacks for the badge/label sizes.
 
 ---
 
@@ -319,6 +329,9 @@ The management portal features a modern grouped card-based layout:
 - **Slider + number inputs** with mouse-wheel scroll protection for all range parameters
 - **XY offset controls** with linked sliders for UI element positioning
 - **Real-time performance panel** displaying FPS, CPU frequency/temperature, RAM usage, flash storage utilization, and live serial output monitor
+- **Weather Widget group** with city, latitude/longitude, refresh interval, locale, and a day/night icon
+- **Compass calibration** (start / cancel / live status) and **ambient light calibration** (dark / bright reference points)
+- **Cloud OTA pull** controls (enable, URL, interval) with live status polling
 - **OTA firmware upload** via file picker
 - **NVS backup/restore** (export/import JSON)
 
@@ -326,16 +339,28 @@ The management portal features a modern grouped card-based layout:
 
 | Endpoint | Method | Description | Request Payload / Params | Content-Type |
 | :--- | :---: | :--- | :--- | :--- |
-| `/` | `GET` | Serves embedded HTML/JS Web UI | None | `text/html` |
+| `/` | `GET` | Serves pre-gzipped single-page Web UI | None | `text/html` |
+| `/debug` | `GET` | Dump first bytes of the pre-gzipped UI buffer (build sanity check) | None | `text/plain` |
 | `/api/config` | `GET` | Exports complete NVS configuration | None | `application/json` |
 | `/api/config` | `POST` | Updates NVS parameters and applies changes | Config JSON object | `application/json` |
 | `/api/time` | `POST` | Syncs system clock from browser | `?epoch=1700000000` | `text/plain` |
+| `/api/odo` | `GET` | Reads odometer distance in km | None | `application/json` |
+| `/api/odo` | `POST` | Sets odometer distance | `{"km": 123.45}` | `application/json` |
 | `/api/reboot` | `POST` | Triggers graceful device restart | None | `text/plain` |
 | `/api/sleep` | `POST` | Triggers immediate deep sleep | None | `text/plain` |
 | `/api/reset` | `POST` | Performs factory reset (clears NVS) | None | `text/plain` |
+| `/api/ambient` | `GET` | Reads raw ambient light sensor value | None | `application/json` |
+| `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `text/plain` |
+| `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `text/plain` |
+| `/api/compass/cal-start` | `POST` | Starts a ~30 s two-sided compass calibration | None | `text/plain` |
+| `/api/compass/cal-cancel` | `POST` | Cancels an in-progress compass calibration | None | `text/plain` |
+| `/api/compass/cal-status` | `GET` | Live calibration state (min/max per axis, offsets, result) | None | `application/json` |
 | `/api/ota` | `POST` | Over-The-Air firmware binary upload | Binary `.bin` payload | `multipart/form-data` |
-| `/api/serial` | `GET` | Streams internal 4KB ring buffer logs | None | `text/plain` |
-| `/api/perf` | `GET` | Live telemetry (CPU, Heap, FPS, WiFi) | None | `application/json` |
+| `/api/ota/pull` | `POST` | Triggers cloud OTA pull (checks `OTA_PULL_URL`) | None | `text/plain` |
+| `/api/ota/check` | `GET` | Reports cloud OTA pull state (enabled, URL, version, status) | None | `application/json` |
+| `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
+| `/api/perf` | `GET` | Live telemetry (CPU, Heap, FPS, WiFi, partitions) | None | `application/json` |
+| `/api/health` | `GET` | Quick heap / mem-saver / uptime health probe | None | `application/json` |
 
 ---
 
@@ -378,6 +403,25 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `MAX_SPEED_DELTA_KMH` (default=5.0): Maximum allowable difference between GPS and Hall speed before falling back.
 - `ACCEL_MAX_TIME` (default=30.0): Acceleration timer maximum duration in seconds before auto-finish.
 
+#### Weather Widget (Open-Meteo)
+- `SHOW_ELEMENT_WEATHER` (default=true): Toggle the weather widget on/off.
+- `WEATHER_CITY` (default=""): City label shown in the widget (GPS-geocoded when empty).
+- `WEATHER_LAT` (default=0.0) and `WEATHER_LON` (default=0.0): Coordinates for the Open-Meteo forecast request.
+- `WEATHER_REFRESH_MIN` (default=15): Refresh interval in minutes.
+- `WEATHER_LOCALE` (default="en"): ISO locale code for weather-condition naming.
+
+#### WiFi & Cloud OTA
+- `WIFI_RETRY_MODE` (default=1): Search policy — `0` = one cycle, `1` = fixed-time (`WIFI_RETRY_SECONDS`), `2` = search forever. Same policy governs reconnects after a lost link.
+- `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
+- `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull.
+- `OTA_PULL_URL` (default=""): HTTPS URL of the target firmware binary.
+- `OTA_PULL_INTERVAL_HOURS` (default=24): How often the cloud pull checks for an update.
+- `OTA_CURRENT_VERSION` (default="1.2.6"): Version string compared against the cloud manifest.
+
+#### Ambient Light (Auto-Brightness)
+- `LIGHT_SENSOR_DARK_VAL`: Dark-reference ambient light value (calibrated via `/api/ambient/cal-dark`).
+- `LIGHT_SENSOR_BRIGHT_VAL`: Bright-reference ambient light value (calibrated via `/api/ambient/cal-bright`).
+
 #### Digit Boundaries (Configurable 7-Segment Formatting)
 - `SPEED_DIGITS`, `SAT_DIGITS`, `TMR_INT_DIGITS`, `TMR_DEC_DIGITS`, `BAT_INT_DIGITS`, `BAT_DEC_DIGITS`, `INST_INT_DIGITS`, `INST_DEC_DIGITS`, `AVG_INT_DIGITS`, `AVG_DEC_DIGITS`, `AVG_SPEED_INT_DIGITS`, `AVG_SPEED_DEC_DIGITS`, `FUEL_INT_DIGITS`, `FUEL_DEC_DIGITS`, `ODO_INT_DIGITS`, `ODO_DEC_DIGITS`: Configurable integer and decimal digit limits for all UI numerical readouts.
 
@@ -395,15 +439,23 @@ Dashboard++ for ESP32/
 ├── partitions.csv         # Custom flash partition table (OTA + LittleFS)
 ├── dashboard_backup.json  # Reference JSON configuration backup template
 ├── data/
-│   └── Fonts/             # VLW font files deployed to LittleFS
+│   └── Fonts/             # VLW font sources (compiled to PROGMEM by scripts/vlw_to_header.py)
 │       ├── DS-DIGIT_120px.vlw         # 120px 7-segment font (speed sprite)
 │       ├── DS-DIGIT_28px.vlw          # 28px 7-segment font (time/odo/telemetry)
 │       ├── Conthrax_SemiBold_28px.vlw # 28px header font
 │       ├── Conthrax_SemiBold_16px.vlw # 16px label font
 │       └── Conthrax_SemiBold_10px.vlw # 10px micro label font
+├── scripts/
+│   ├── gzip_webui.py      # Pre-gzips webui.html -> webui_html_gz.h (~93 KB raw -> ~20 KB)
+│   └── vlw_to_header.py   # Compiles .vlw font files into PROGMEM C headers
 ├── include/
 │   ├── Conthrax_SemiBold7pt7b.h  # GFXfont fallback (Small badge size)
-│   └── Conthrax_SemiBold4pt7b.h  # GFXfont fallback (Micro label size)
+│   ├── Conthrax_SemiBold4pt7b.h  # GFXfont fallback (Micro label size)
+│   ├── DS_DIGIT_120px_vlw.h      # 120px 7-segment VLW font (PROGMEM)
+│   ├── DS_DIGIT_28px_vlw.h       # 28px 7-segment VLW font (PROGMEM)
+│   ├── Conthrax_SemiBold_28px_vlw.h  # 28px VLW font (PROGMEM)
+│   ├── Conthrax_SemiBold_16px_vlw.h  # 16px VLW font (PROGMEM)
+│   └── Conthrax_SemiBold_10px_vlw.h  # 10px VLW font (PROGMEM)
 ├── lib/
 │   ├── ArduinoJson/       # Optimized embedded JSON parser/serializer library
 │   └── TinyGPSPlus/       # NMEA 0183 GPS stream parser library
@@ -411,10 +463,11 @@ Dashboard++ for ESP32/
     ├── dashboard.h        # Central global header, structure definitions, API declarations
     ├── main.cpp           # System setup(), dual FreeRTOS task spawns, main display loop
     ├── config.cpp         # NVS parameter storage, JSON serialization/deserialization engine
-    ├── gfx.cpp            # LovyanGFX display device class, VLW font loader, AA primitives, icons
+    ├── gfx.cpp            # LovyanGFX display device class, PROGMEM VLW font loader, AA primitives, icons
     ├── sensors.cpp        # Core 0 GPS task (bulk UART drain, TinyGPS++/UBX parser, speed fusion, odo, time-sync) + Core 1 sensor task (Hall ISR, QMC5883L compass, ADC sensors, snapshot)
     ├── ui.cpp             # Dirty-rendering dashboard visual layout engine
-    └── web.cpp            # SoftAP/STA WiFi manager, REST API handlers, embedded Web UI
+    ├── web.cpp            # SoftAP/STA WiFi manager, REST API handlers, cloud OTA pull, embedded Web UI
+    └── webui.html         # Single-page Web UI source (gzipped at build time by scripts/gzip_webui.py)
 ```
 
 ---
@@ -428,7 +481,7 @@ Dashboard++ for ESP32/
 ### Partition Table
 The project uses a custom `partitions.csv` with:
 - Two OTA app slots (0x1D0000 each)
-- A 320 KB LittleFS partition (0x50000) for font files
+- A 320 KB LittleFS partition (0x50000), retained only for `/api/health` byte reporting (fonts are now PROGMEM)
 
 ### Compiling & Flashing via USB
 
@@ -440,9 +493,6 @@ cd Dashboard-for-ESP32
 # Compile project source code
 platformio run
 
-# Build and upload LittleFS filesystem (fonts)
-platformio run --target uploadfs
-
 # Flash firmware binary to ESP32 over serial USB
 platformio run --target upload
 
@@ -450,8 +500,8 @@ platformio run --target upload
 platformio device monitor
 ```
 
-> [!IMPORTANT]
-> You **must** upload the LittleFS filesystem (`uploadfs`) at least once before or after flashing the firmware, otherwise fonts will not be available and the system will not display text.
+> [!NOTE]
+> Fonts are compiled into flash as PROGMEM arrays at build time (`scripts/vlw_to_header.py`), so no `uploadfs` step is needed for text. The LittleFS partition remains in `partitions.csv` (used only for `/api/health` byte reporting).
 
 ### Over-The-Air (OTA) Updates
 
@@ -488,11 +538,25 @@ In Demo Mode:
 
 ## Changelog
 
-### V1.1.6 — GNSS stutter fix (task quarantine + bulk UART read)
-- **Root cause:** the GNSS module streams ~1.1KB/s continuously, and a one-byte-at-a-time UART drain can never get ahead of the ring buffer — measured ~1s of wall time per 1024 bytes, ~920µs of it spent inside each `read()` call while parsing itself only took 9µs/byte. On the old single sensor task this froze every real-time value for seconds and, on the display core, stalled rendering (`SLOW FRAME` / `sMaxGap` spikes with the webui client connected).
-- **GPS quarantine:** parsing moved to its own `gpsTask` on **Core 0** (prio 2, below the WiFi/HTTPD/LWIP stack). GPS is 1Hz-tolerant, so a stream backlog only ever lags GPS values — the vehicle sensors and the screen (Core 1) are never touched.
-- **Bulk read:** the UART is now drained in one `readBytes()` call per tick (exact available count, 1024 B/tick cap) instead of 1024 individual `read()` calls, collapsing the ~1s drains to microseconds; `setTimeout(20)` bounds any driver wait.
-- **Result:** steady 62.5 FPS with 0 frames over 24ms, sensor task ticking every ~20ms, live GPS values.
+### V1.2.7 — Fuel smoothing alpha
+- Fuel-level EMA smoothing alpha is now configurable in the Fuel Sensor card (live tuning without reflashing).
+
+### V1.2.6 — Dynamic weather widget layout
+- Weather widget renders with a dynamic layout (speed-source badge, satellite-count badge).
+
+### V1.2.5 — PROGMEM fonts + weather geocoding
+- All VLW fonts moved to PROGMEM (zero DRAM per glyph).
+- Ghost-digit config, satellite GPS icon, GPS-geocoded weather city + locale, day/night weather icon.
+
+### V1.2.1 — Low-RAM overhaul
+- PROGMEM 120px font, 8-bit grayscale speed sprite, pre-gzipped webui.
+
+### V1.2.0 — Automatic cloud OTA pull hardening
+- Resumable TLS, 32 KB pull task, flash-safe reboot.
+
+### V1.1.6 — Open-Meteo weather widget + task-level CPU isolation
+- Open-Meteo live weather widget (city, lat/lon, refresh interval, locale, day/night icon).
+- GNSS task quarantine (Core 0, prio 2) + bulk UART read.
 
 ---
 
