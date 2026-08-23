@@ -1473,7 +1473,7 @@ const configMap = [
     {
         title: "Sensors Tuning", icon: iconSVG.sensors,
         items: [
-            { type: "touch-table", label: "Fuel Sensor", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable", rows: [
+            { type: "touch-table", label: "Fuel Sensor", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable", liveId: "fuel-reading", rows: [
                 { id: "REFUEL_RESET_LITERS", label: "Refuel Reset Threshold", unit: "L" },
                 { id: "FUEL_FILTER_ALPHA", label: "Smoothing Factor" }
             ] },
@@ -1689,6 +1689,8 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(pollAmbient, 2000);
     pollOdo();
     setInterval(pollOdo, 1000);
+    pollFuel();
+    setInterval(pollFuel, 1000);
     pollCompassCal();
     setInterval(pollCompassCal, 2000);
 
@@ -1814,9 +1816,10 @@ function renderForm(d) {
                 closeSubCard();
                 hasItems = true;
                 let tableArr = d[item.arrayId] || [950, 840, 750, 670, 600, 530, 460, 400];
+                let liveLine = item.liveId ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px 0;"><span style="font-size:12px;color:var(--text-muted);">Current sensor value (raw ADC): <strong id="${item.liveId}" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span></div>` : '';
                 let tableHtml = `
                 <div class="card" style="grid-column:1/-1;">
-                    <h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">${item.label}</h4>
+                    <h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">${item.label}</h4>${liveLine}
                     <label style="font-size:11px;">Number of points (tank capacity + 1):</label>
                     <div style="display:flex; align-items:center; gap:8px; margin:6px 0 10px 0;">
                         <input type="number" id="${item.pointCount}" value="${tableArr.length}" min="2" max="20" style="width:70px;">${resetBtn(item.pointCount)}
@@ -2572,6 +2575,14 @@ function pollOdo() {
     fetch('/api/odo').then(r => r.json()).then(d => {
         let el = document.getElementById('odo-reading');
         if (el) el.textContent = (CURRENT_UNITS_IMPERIAL ? d.km * KMH_TO_MPH : d.km).toFixed(1);
+    }).catch(() => {});
+}
+
+function pollFuel() {
+    if (tabHidden) return;
+    fetch('/api/fuel').then(r => r.json()).then(d => {
+        let el = document.getElementById('fuel-reading');
+        if (el) el.textContent = d.raw;
     }).catch(() => {});
 }
 

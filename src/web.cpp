@@ -914,6 +914,19 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", out);
   });
 
+  server.on("/api/fuel", HTTP_GET, []() {
+    char buf[96];
+    float liters = 0.0f;
+    int pct = 0;
+    if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+      liters = g_sensorData.fuelLiters;
+      pct = g_sensorData.fuelPercentage;
+      xSemaphoreGive(g_stateMutex);
+    }
+    snprintf(buf, sizeof(buf), "{\"raw\":%d,\"liters\":%.1f,\"pct\":%d}", rawFuelADC, liters, pct);
+    server.send(200, "application/json", buf);
+  });
+
   server.on("/api/odo", HTTP_POST, []() {
     if (!server.hasArg("plain")) {
       server.send(400);
