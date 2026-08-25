@@ -4,3 +4,6 @@ test/
 nul
 chips/
 compile_commands.json
+
+# Local-only: implementation plans never get committed/pushed
+Implementation plans/
