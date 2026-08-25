@@ -51,7 +51,7 @@ void factoryResetConfig() {
 volatile bool otaUpdateSuccess = false;
 
 // OTA Pull state
-static unsigned long lastOtaPullCheck = 0;
+static bool otaPullBootCheckDone = false;  // automatic check runs once per boot
 static char otaPullStatus[96] = "idle";
 static bool otaPullStatusUpdated = false;
 static SemaphoreHandle_t otaStatusMutex = NULL;
@@ -257,19 +257,20 @@ void setOtaPullStatus(const char *status) {
 }
 
 void otaPullTask(void *pvParameters) {
-  bool manual = (bool)(uintptr_t)pvParameters;
-  checkForFirmwareUpdate(manual);
+  uint32_t args = (uint32_t)(uintptr_t)pvParameters;
+  checkForFirmwareUpdate((args & 1) != 0, (args & 2) != 0);
   otaPullTaskRunning = false;
   otaPullDownloading = false;   // safety: never leave the web loop paused
   vTaskDelete(NULL);
 }
 
-void startOtaPull(bool manual) {
+void startOtaPull(bool manual, bool skipThrottle) {
   if (otaPullTaskRunning || otaUpdateInProgress) return;
   otaPullManualFlag = manual;
   otaPullTaskRunning = true;
+  uint32_t args = (uint32_t)(manual ? 1 : 0) | (uint32_t)(skipThrottle ? 2 : 0);
   BaseType_t res = xTaskCreatePinnedToCore(otaPullTask, "OtaPullTask", 16384,
-                                           (void *)(uintptr_t)manual, 1, NULL, 0);
+                                           (void *)(uintptr_t)args, 1, NULL, 0);
   if (res != pdPASS) {
     logPrintf("OTA Pull: task creation failed\n");
     otaPullTaskRunning = false;
@@ -306,7 +307,7 @@ static unsigned long lastOtaCheckMs = 0;
 const unsigned long OTA_RECHECK_MIN_MS = 60000;
 }
 
-void checkForFirmwareUpdate(bool manual) {
+void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
   if (!OTA_PULL_ENABLED && !manual) return;
   if (WiFi.status() != WL_CONNECTED) {
     setOtaPullStatus("error: not connected to WiFi");
@@ -316,12 +317,16 @@ void checkForFirmwareUpdate(bool manual) {
     setOtaPullStatus("error: no OTA URL configured");
     return;
   }
-  unsigned long sinceLast = millis() - lastOtaCheckMs;
-  if (sinceLast < OTA_RECHECK_MIN_MS) {
-    unsigned long waitS = (OTA_RECHECK_MIN_MS - sinceLast) / 1000 + 1;
-    logPrintf("OTA Pull: recheck throttled, wait %lus\n", waitS);
-    setOtaPullStatus(("waiting " + String(waitS) + "s before retry").c_str());
-    return;
+  // Throttling guards repeated checks (manual button spam); the once-per-boot
+  // automatic check skips it since it fires within a second of boot.
+  if (!skipThrottle) {
+    unsigned long sinceLast = millis() - lastOtaCheckMs;
+    if (sinceLast < OTA_RECHECK_MIN_MS) {
+      unsigned long waitS = (OTA_RECHECK_MIN_MS - sinceLast) / 1000 + 1;
+      logPrintf("OTA Pull: recheck throttled, wait %lus\n", waitS);
+      setOtaPullStatus(("waiting " + String(waitS) + "s before retry").c_str());
+      return;
+    }
   }
   lastOtaCheckMs = millis();
 
@@ -1158,14 +1163,13 @@ void webServerTask(void *pvParameters) {
     setOtaPullStatus("checking...");
     server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"OTA pull started\"}");
     logPrintf("OTA Pull: triggered from web UI\n");
-    startOtaPull(true);
+    startOtaPull(true, false);
   });
 
   server.on("/api/ota/check", HTTP_GET, []() {
     JsonDocument doc;
     doc["enabled"] = OTA_PULL_ENABLED;
     doc["url"] = OTA_PULL_URL;
-    doc["interval_hours"] = OTA_PULL_INTERVAL_HOURS;
     doc["current_version"] = OTA_CURRENT_VERSION;
     if (otaStatusMutex) xSemaphoreTake(otaStatusMutex, portMAX_DELAY);
     doc["status"] = otaPullStatus;
@@ -1478,16 +1482,12 @@ void webServerTask(void *pvParameters) {
       staHasConnectedBefore = true;
     }
 
-    if (lastOtaPullCheck == 0) {
-      lastOtaPullCheck = millis();
-    }
-    if (OTA_PULL_ENABLED && OTA_PULL_INTERVAL_HOURS > 0 && !otaUpdateInProgress &&
-        !otaPullTaskRunning) {
-      unsigned long intervalMs = (unsigned long)OTA_PULL_INTERVAL_HOURS * 3600000UL;
-      if (millis() - lastOtaPullCheck >= intervalMs) {
-        lastOtaPullCheck = millis();
-        startOtaPull(false);
-      }
+    // Automatic update check: once per boot, fired right after the STA
+    // connection is established (replaces the old recurring interval timer).
+    if (!otaPullBootCheckDone && OTA_PULL_ENABLED && staConnected &&
+        !otaUpdateInProgress && !otaPullTaskRunning) {
+      otaPullBootCheckDone = true;
+      startOtaPull(false, true);
     }
 
     static unsigned long lastWeatherCheck = 0;

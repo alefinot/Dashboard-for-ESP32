@@ -319,7 +319,7 @@ The management portal features a modern grouped card-based layout:
 - **Real-time performance panel** displaying FPS, CPU frequency/temperature, RAM usage, flash storage utilization, and live serial output monitor
 - **Weather Widget group** with city, latitude/longitude, refresh interval, locale, and a day/night icon
 - **Compass calibration** (start / cancel / live status) and **ambient light calibration** (dark / bright reference points)
-- **Cloud OTA pull** controls (enable, URL, interval) with live status polling
+- **Cloud OTA pull** controls (enable, URL) with live status polling
 - **OTA firmware upload** via file picker
 - **NVS backup/restore** (export/import JSON)
 
@@ -401,9 +401,8 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 #### WiFi & Cloud OTA
 - `WIFI_RETRY_MODE` (default=1): Search policy — `0` = one cycle, `1` = fixed-time (`WIFI_RETRY_SECONDS`), `2` = search forever. Same policy governs reconnects after a lost link.
 - `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
-- `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull.
+- `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull (checks once per boot while enabled).
 - `OTA_PULL_URL` (default=""): HTTPS URL of the target firmware binary.
-- `OTA_PULL_INTERVAL_HOURS` (default=24): How often the cloud pull checks for an update.
 - `OTA_CURRENT_VERSION` (default="1.2.6"): Version string compared against the cloud manifest.
 
 #### Ambient Light (Auto-Brightness)

@@ -327,7 +327,6 @@ extern bool TZ_DST_ENABLED;
 
 extern bool OTA_PULL_ENABLED;
 extern char OTA_PULL_URL[192];
-extern int OTA_PULL_INTERVAL_HOURS;
 extern char OTA_CURRENT_VERSION[32];
 
 // ----------------------------------------------------------------------------
@@ -555,9 +554,9 @@ void sensorTask(void *pvParameters);
 // Web API
 // ----------------------------------------------------------------------------
 void webServerTask(void *pvParameters);
-void checkForFirmwareUpdate(bool manual = false);
+void checkForFirmwareUpdate(bool manual = false, bool skipThrottle = false);
 void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion);
-void startOtaPull(bool manual);
+void startOtaPull(bool manual, bool skipThrottle = false);
 void processOtaMemRelease();
 extern volatile bool otaMemReleaseRequested;
 extern volatile bool otaMemReleased;
