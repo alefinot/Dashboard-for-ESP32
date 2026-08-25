@@ -1083,6 +1083,9 @@ const DEFAULTS = {
     GPS_STOP_SETTLE_MS: 1500,
     GPS_MIN_DEV_KMH: 1.0,
     GPS_ONLY_MODE: true,
+    SPEED_SOURCE_HOLD_MS: 500,
+    HALL_MEDIAN_SAMPLES: 9,
+    HALL_PERIOD_GUARD: 32,
     ACCEL_START_SPEED: 1.0,
     ACCEL_TARGET_SPEED: 50.0,
     ACCEL_MAX_TIME: 9.99,
@@ -1509,6 +1512,9 @@ const configMap = [
             { id: "GPS_ONLY_MODE", label: "GPS Only Mode" },
             { id: "GPS_START_KMH", label: "GPS Start Speed", unit: "km/h" },
             { id: "GPS_STOP_SETTLE_MS", label: "GPS Stop Settle Time", unit: "ms" },
+            { id: "SPEED_SOURCE_HOLD_MS", label: "Speed Source Hold Time", unit: "ms" },
+            { id: "HALL_MEDIAN_SAMPLES", label: "Hall Median Samples (1 = off)" },
+            { id: "HALL_PERIOD_GUARD", label: "Hall Period Guard (1 = off)" },
             { id: "GPS_DEBUG_DEFAULT", label: "Show GPS Debug Overlay" },
             { type: "card_header", label: "Compass", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
         <span style="font-size:12px;color:var(--text-muted);">Status: <strong id="compass-cal-status" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span>

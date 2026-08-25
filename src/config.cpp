@@ -55,6 +55,9 @@ float GPS_START_KMH = 3.0f;
 int GPS_STOP_SETTLE_MS = 1500;
 float GPS_MIN_DEV_KMH = 1.0f;
 bool GPS_ONLY_MODE = true;
+int SPEED_SOURCE_HOLD_MS = 500;
+int HALL_MEDIAN_SAMPLES = 9;
+int HALL_PERIOD_GUARD = 32;
 float ACCEL_START_SPEED = 1.0f;
 float ACCEL_TARGET_SPEED = 50.0f;
 float ACCEL_MAX_TIME = 9.99f;
@@ -229,7 +232,7 @@ bool TZ_DST_ENABLED = true;
 bool OTA_PULL_ENABLED = false;
 char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 int OTA_PULL_INTERVAL_HOURS = 24;
-char OTA_CURRENT_VERSION[32] = "1.3.1";
+char OTA_CURRENT_VERSION[32] = "1.3.2";
 
 int FUEL_TOUCH_POINTS = 8;
 int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400,
@@ -369,6 +372,9 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(GPS_STOP_SETTLE_MS, "GPS_STL_MS", 1500);
   CFG_FLT(GPS_MIN_DEV_KMH, "GPS_MIN_DV", 1.0f);
   CFG_BOOL(GPS_ONLY_MODE, "GPS_ONLY", true);
+  CFG_INT(SPEED_SOURCE_HOLD_MS, "SPD_SRC_HOLD", 500);
+  CFG_INT(HALL_MEDIAN_SAMPLES, "HALL_MED_N", 9);
+  CFG_INT(HALL_PERIOD_GUARD, "HALL_PRD_GRD", 32);
   CFG_FLT(ACCEL_START_SPEED, "ACC_STRT", 1.0f);
   CFG_FLT(ACCEL_TARGET_SPEED, "ACC_TGT", 50.0f);
   CFG_FLT(ACCEL_MAX_TIME, "ACC_MAX_T", 9.99f);
@@ -519,7 +525,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
   CFG_INT(OTA_PULL_INTERVAL_HOURS, "OTA_PULL_INT", 24);
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.3.1");
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.3.2");
 
   // WiFi passwords: mode 1 sends empty strings so they never leave the device,
   // mode 2 keeps the stored value when the posted password is empty.
@@ -654,6 +660,9 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "GPS_STOP_SETTLE_MS": 1500,
   "GPS_MIN_DEV_KMH": 1,
   "GPS_ONLY_MODE": true,
+  "SPEED_SOURCE_HOLD_MS": 500,
+  "HALL_MEDIAN_SAMPLES": 9,
+  "HALL_PERIOD_GUARD": 32,
   "ACCEL_START_SPEED": 1,
   "ACCEL_TARGET_SPEED": 50,
   "ACCEL_MAX_TIME": 9.99,
@@ -788,7 +797,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "OTA_PULL_ENABLED": false,
   "OTA_PULL_URL": "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
   "OTA_PULL_INTERVAL_HOURS": 24,
-  "OTA_CURRENT_VERSION": "1.3.1",
+  "OTA_CURRENT_VERSION": "1.3.2",
   "touchTable": [
     950,
     840,

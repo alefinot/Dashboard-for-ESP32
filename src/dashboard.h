@@ -156,6 +156,9 @@ extern float GPS_START_KMH;
 extern int GPS_STOP_SETTLE_MS;
 extern float GPS_MIN_DEV_KMH;
 extern bool GPS_ONLY_MODE;
+extern int SPEED_SOURCE_HOLD_MS;
+extern int HALL_MEDIAN_SAMPLES;
+extern int HALL_PERIOD_GUARD;
 extern float ACCEL_START_SPEED;
 extern float ACCEL_TARGET_SPEED;
 extern float ACCEL_MAX_TIME;
@@ -438,6 +441,7 @@ extern portMUX_TYPE hallMux;
 extern volatile unsigned long lastHallPulseTimeUs;
 extern volatile unsigned long hallPulseIntervalUs;
 extern volatile unsigned long hallPulseCount;
+extern volatile int heldSpeedSourceMode;
 
 extern double tripDistanceKm;
 extern float tripStartFuelLiters;
@@ -526,6 +530,9 @@ inline void drawDebugBox(T &disp, int x, int y, int w, int h,
 void IRAM_ATTR hallSensorISR();
 float getHallSpeed();
 void updateFilteredSpeed();
+int computeSpeedSourceMode(float hallSpeed, float gpsSpeed, int sats,
+                           bool isGpsValid);
+void updateSpeedSourceMode();
 inline float getFilteredSpeed() { return currentCachedSpeed; }
 
 bool initCompass();
@@ -539,6 +546,7 @@ void updateGPSOdometer();
 void processFuelConsumption();
 void updateAverageSpeed();
 void updateAccelTimer();
+void initFuelSensor();
 void processFuelSensor();
 void gpsTask(void *pvParameters);
 void sensorTask(void *pvParameters);

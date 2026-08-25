@@ -1,4 +1,5 @@
 #include "dashboard.h"
+#include <driver/touch_pad.h>
 
 TinyGPSPlus gps;
 HardwareSerial gpsSerial(2);
@@ -79,6 +80,19 @@ static int demoAdcForBatteryVoltage(float v) {
 // display-only and can never reach NVS (see updateGPSOdometer).
 static double demoOdoKm = 0.0;
 
+// History of the last accepted hall pulse intervals (ring, fixed capacity).
+// A single spurious pulse on the hall pin (EMI, bounce, passing magnet)
+// used to land in hallPulseIntervalUs and briefly report several hundred
+// km/h: with the default 1650 mm tire one 30 ms noise blip is 198 km/h.
+// getHallSpeed() takes the median of the last HALL_MEDIAN_SAMPLES entries
+// (WebUI-tunable; 1 = raw single interval, zero lag) so a corrupt blip can
+// no longer move the reading unless a majority is corrupt. The real ISR
+// and the demo simulator below both append through this ring.
+static const unsigned int HALL_MEDIAN_MAX = 31; // ring capacity (compile-time)
+static volatile unsigned long
+    hallIntervalHist[HALL_MEDIAN_MAX] = {0};
+static volatile unsigned int hallHistWriteIdx = 0;
+
 // Injects synthetic hall pulses on the sensor task tick: interval is derived
 // from the simulated speed (so getHallSpeed() reports it) and the pulse count
 // accumulates real distance through updateGPSOdometer's hall path.
@@ -97,6 +111,8 @@ void simulateRawSensors() {
     portENTER_CRITICAL(&hallMux);
     lastHallPulseTimeUs = micros();
     hallPulseIntervalUs = intervalUs;
+    hallIntervalHist[hallHistWriteIdx] = intervalUs;
+    hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
     if (pulses > 0) hallPulseCount += (unsigned long)pulses;
     portEXIT_CRITICAL(&hallMux);
   }
@@ -764,6 +780,11 @@ volatile unsigned long lastHallPulseTimeUs = 0;
 volatile unsigned long hallPulseIntervalUs = 0;
 volatile unsigned long hallPulseCount = 0;
 
+// Hysteresis-held speed source (0=hall, 1=GPS, 2=fused). Written by
+// updateSpeedSourceMode() in sensorTask (core 1), read cross-core by
+// updateFilteredSpeed() in gpsTask (core 0) - atomic 32-bit read/write.
+volatile int heldSpeedSourceMode = 0;
+
 double tripDistanceKm = 0.0;
 float tripStartFuelLiters = -1.0f;
 float tripFuelConsumedLiters = 0.0f;
@@ -796,25 +817,120 @@ volatile unsigned long g_sensorLastTickMs = 0;
 // ----------------------------------------------------------------------------
 void IRAM_ATTR hallSensorISR() {
   constexpr unsigned long DEBOUNCE_US = 10000;
+  // Between two real rotations the wheel period changes by far less than
+  // HALL_PERIOD_GUARD (1 g of acceleration shifts it <2% per rotation).
+  // Guard both directions: fast blips are EMI/bounce on the hall pin;
+  // the slow side rejects the multi-second gap after a stop, which
+  // otherwise entered the interval history as one giant "rotation" and
+  // reported the last driving speed for seconds after the vehicle stopped.
+  // WebUI-tunable; <=1 disables the guard (raw single-interval behavior).
   unsigned long now = micros();
-  if (now - lastHallPulseTimeUs > DEBOUNCE_US) {
+  unsigned long gap = now - lastHallPulseTimeUs;
+  if (gap > DEBOUNCE_US) {
     portENTER_CRITICAL_ISR(&hallMux);
-    hallPulseIntervalUs = now - lastHallPulseTimeUs;
+    unsigned long last = hallPulseIntervalUs;
+    int guard = HALL_PERIOD_GUARD;
+    if (guard > 1 && last != 0 &&
+        ((unsigned long long)gap > (unsigned long long)last * (unsigned)guard ||
+         (unsigned long long)gap * (unsigned)guard < last)) {
+      // Non-physical period: ignore the pulse entirely (keep lastHallPulseTimeUs
+      // and the interval history untouched so the 2 s stale check stays honest)
+      portEXIT_CRITICAL_ISR(&hallMux);
+      return;
+    }
+    hallPulseIntervalUs = gap;
     lastHallPulseTimeUs = now;
     hallPulseCount++;
+    hallIntervalHist[hallHistWriteIdx] = gap;
+    hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
     portEXIT_CRITICAL_ISR(&hallMux);
   }
 }
 
 inline float getHallSpeed() {
-  unsigned long lastTimeUs, intervalUs;
+  unsigned long lastTimeUs;
+  int n = HALL_MEDIAN_SAMPLES; // WebUI-tunable; 1 = raw, zero lag
+  if (n < 1) n = 1;
+  if (n > HALL_MEDIAN_MAX) n = HALL_MEDIAN_MAX;
+  unsigned long hist[HALL_MEDIAN_MAX];
   portENTER_CRITICAL(&hallMux);
   lastTimeUs = lastHallPulseTimeUs;
-  intervalUs = hallPulseIntervalUs;
+  // Newest first: write index points at the next free slot, so the last
+  // accepted interval sits one behind it (wrapping around the ring).
+  int idx = (hallHistWriteIdx == 0 ? HALL_MEDIAN_MAX : hallHistWriteIdx) - 1;
+  for (int i = 0; i < n; i++) {
+    hist[i] = hallIntervalHist[idx];
+    if (--idx < 0)
+      idx = HALL_MEDIAN_MAX - 1;
+  }
   portEXIT_CRITICAL(&hallMux);
-  if (micros() - lastTimeUs > 2000000UL || intervalUs == 0)
+  if (micros() - lastTimeUs > 2000000UL)
+    return 0.0f; // no real motion (pulses stale)
+  // Median of the non-zero samples: with N=9 one or a few noise blips can no
+  // longer move the reading; a corrupt majority needs >=N/2+1 bad samples.
+  unsigned long vals[HALL_MEDIAN_MAX];
+  int m = 0;
+  for (int i = 0; i < n; i++)
+    if (hist[i] != 0)
+      vals[m++] = hist[i];
+  if (m == 0)
     return 0.0f;
-  return WHEEL_SPEED_FACTOR / (float)intervalUs;
+  for (int a = 1; a < m; a++) { // insertion sort (tiny N)
+    unsigned long key = vals[a];
+    int b = a - 1;
+    while (b >= 0 && vals[b] > key) {
+      vals[b + 1] = vals[b];
+      b--;
+    }
+    vals[b + 1] = key;
+  }
+  return WHEEL_SPEED_FACTOR / (float)vals[m / 2];
+}
+
+// Which sensor the displayed speed comes from: 0=hall, 1=GPS, 2=fused (G+H).
+// Pure function of the instantaneous sensor state; updateSpeedSourceMode()
+// adds the hysteresis that decides when a new value actually takes effect.
+int computeSpeedSourceMode(float hallSpeed, float gpsSpeed, int sats,
+                           bool isGpsValid) {
+  if (GPS_ONLY_MODE && isGpsValid)
+    return 1; // user-forced GPS-only (e.g. no hall sensor installed)
+  if (!isGpsValid || hallSpeed <= 0.0f)
+    return 0;
+  float delta = fabsf(gpsSpeed - hallSpeed);
+  if (delta > MAX_SPEED_DELTA_KMH)
+    return 0; // GPS contradicts hall: reject GPS
+  if (delta < GPS_MIN_DEV_KMH)
+    return 1; // agreement zone: trust GPS
+  return 2; // in between: weighted fusion
+}
+
+// The raw candidate flips HAL<->G+H every 20 ms whenever delta hovers around
+// the GPS_MIN_DEV/MAX_SPEED_DELTA boundaries: GPS speed jitters +-1..3 km/h
+// at ~1 Hz while the hall speed is rock-stable, and a single hall noise blip
+// used to push delta past MAX_SPEED_DELTA_KMH for one tick. The badge (and
+// the raw speed selection in updateFilteredSpeed) only follow the candidate
+// once it has held for SPEED_SOURCE_HOLD_MS, so borderline readings settle
+// on one source instead of flickering.
+void updateSpeedSourceMode() {
+  static int pendingMode = -1;
+  static unsigned long pendingSince = 0;
+  float hallSpeed = getHallSpeed();
+  float gpsSpeed = gps.speed.isValid() ? (float)gps.speed.kmph() : 0.0f;
+  int sats = gps.satellites.value();
+  bool isGpsValid = gps.speed.isValid() && (sats >= MIN_SATELLITES);
+  int candidate = computeSpeedSourceMode(hallSpeed, gpsSpeed, sats,
+                                         isGpsValid);
+  if (candidate == heldSpeedSourceMode) {
+    pendingMode = -1;
+    return;
+  }
+  if (candidate != pendingMode) {
+    pendingMode = candidate;
+    pendingSince = millis();
+  } else if (millis() - pendingSince >= (unsigned long)SPEED_SOURCE_HOLD_MS) {
+    heldSpeedSourceMode = candidate;
+    pendingMode = -1;
+  }
 }
 
 void updateFilteredSpeed() {
@@ -822,33 +938,27 @@ void updateFilteredSpeed() {
   int sats = gps.satellites.value();
   bool isGpsValid = gps.speed.isValid() && (sats >= MIN_SATELLITES);
 
-  float raw = 0.0f;
-  int mode = 0; // 0=hall, 1=gps, 2=fused
-
-  if (!isGpsValid) {
-    // Not enough satellites: GPS is untrusted, hall only
+  // Follow the hysteresis-held mode so the displayed number always matches
+  // the source badge. GPS dropping below MIN_SATELLITES mid-hold falls back
+  // to the hall value for the raw number; the badge switches within
+  // SPEED_SOURCE_HOLD_MS.
+  int mode = heldSpeedSourceMode;
+  if (mode != 0 && !isGpsValid)
+    mode = 0;
+  float raw;
+  if (mode == 0) {
     raw = hallSpeed;
-  } else if (GPS_ONLY_MODE) {
-    // User-forced GPS-only (e.g. no hall sensor installed)
+  } else if (mode == 1) {
     raw = (float)gps.speed.kmph();
-    mode = 1;
-  } else if (hallSpeed > 0.0f) {
-    // Always compare both sensors (unless satellites are insufficient)
+  } else {
     float gpsSpeed = (float)gps.speed.kmph();
-    float delta = fabsf(gpsSpeed - hallSpeed);
-    if (delta > MAX_SPEED_DELTA_KMH) {
-      raw = hallSpeed; // GPS contradicts hall: reject GPS
-    } else if (delta < GPS_MIN_DEV_KMH) {
-      raw = gpsSpeed; // agreement zone: trust GPS
-      mode = 1;
-    } else {
-      float gpsWeight = (float)(sats - MIN_SATELLITES + 1) /
-                        (float)(OPTIMAL_SATELLITES - MIN_SATELLITES + 1);
-      raw = gpsSpeed * gpsWeight + hallSpeed * (1.0f - gpsWeight);
-      mode = 2;
-    }
+    // Weight by satellite count; clamped because sats can dip below
+    // MIN_SATELLITES before the hold timer switches us over to hall.
+    float gpsWeight = (float)(sats - MIN_SATELLITES + 1) /
+                      (float)(OPTIMAL_SATELLITES - MIN_SATELLITES + 1);
+    gpsWeight = constrain(gpsWeight, 0.0f, 1.0f);
+    raw = gpsSpeed * gpsWeight + hallSpeed * (1.0f - gpsWeight);
   }
-  // else: no hall sensor and GPS-only disabled -> 0
 
   if (mode == 0) {
     // Hall-only: pulses are real motion, keep the simple threshold
@@ -952,8 +1062,35 @@ void processLightSensor() {
     filteredAmbientValue = ((float)raw * alpha) + (filteredAmbientValue * (1.0f - alpha));
 }
 
+void initFuelSensor() {
+  if (ENABLE_DEMO_MODE) {
+    filteredReading = (float)demoAdcForFuelLiters(5.5f);
+    rawFuelADC = (int)filteredReading;
+    return;
+  }
+
+  // Initialize and configure ESP32 RTC Touch Pad hardware driver for GPIO32 (Touch channel 9).
+  // Increase measurement window (0xFFFF) and charge slope to maximum to handle higher
+  // baseline parasitic capacitance from long wiring runs.
+  touch_pad_init();
+  touch_pad_set_voltage(TOUCH_HVOLT_2V7, TOUCH_LVOLT_0V5, TOUCH_HVOLT_ATTEN_0V);
+  touch_pad_config(TOUCH_PAD_NUM9, 0);
+  touch_pad_set_cnt_mode(TOUCH_PAD_NUM9, TOUCH_PAD_SLOPE_7, TOUCH_PAD_TIE_OPT_LOW);
+  touch_pad_set_meas_time(0x100, 0xFFFF);
+
+  // Take an initial instant reading to prime the EMA filter
+  uint16_t initialVal = 0;
+  if (touch_pad_read(TOUCH_PAD_NUM9, &initialVal) == ESP_OK && initialVal > 0) {
+    rawFuelADC = (int)initialVal;
+    filteredReading = (float)initialVal;
+  } else {
+    rawFuelADC = (int)touchRead(FUEL_TOUCH_PIN);
+    filteredReading = (float)rawFuelADC;
+  }
+}
+
 void processFuelSensor() {
-  int instantReading;
+  int instantReading = 0;
   if (ENABLE_DEMO_MODE) {
     // Simulated fuel: burns in proportion to the distance driven (~6 L per
     // 100 km, so the km/L and average consumption calculations downstream
@@ -975,33 +1112,69 @@ void processFuelSensor() {
     instantReading =
         demoAdcForFuelLiters(demoFuelLevel + 0.03f * sinf((float)t / 5000.0f));
   } else {
-    int sum = 0;
-    for (int i = 0; i < 16; i++) {
-      sum += analogRead(FUEL_TOUCH_PIN);
+    uint16_t val = 0;
+    if (touch_pad_read(TOUCH_PAD_NUM9, &val) == ESP_OK) {
+      instantReading = (int)val;
+    } else {
+      instantReading = (int)touchRead(FUEL_TOUCH_PIN);
     }
-    instantReading = sum / 16;
   }
   rawFuelADC = instantReading;
   filteredReading = ((float)instantReading * FUEL_FILTER_ALPHA) +
                     (filteredReading * (1.0f - FUEL_FILTER_ALPHA));
-  if (filteredReading >= touchTable[0]) {
-    fuelLiters = 0.0f;
-    fuelPercentage = 0;
-    return;
-  }
-  if (filteredReading <= touchTable[FUEL_TOUCH_POINTS - 1]) {
-    fuelLiters = (float)(FUEL_TOUCH_POINTS - 1);
-    fuelPercentage = 100;
-    return;
-  }
-  for (int i = 0; i < FUEL_TOUCH_POINTS - 1; i++) {
-    if (filteredReading <= touchTable[i] &&
-        filteredReading >= touchTable[i + 1]) {
-      fuelLiters = (float)i + ((filteredReading - touchTable[i]) /
-                               (float)(touchTable[i + 1] - touchTable[i]));
-      fuelPercentage = constrain(
-          (int)((fuelLiters / (float)(FUEL_TOUCH_POINTS - 1)) * 100.0f), 0, 100);
+
+  // Determine whether calibration table is descending (capacitive) or ascending (resistive)
+  bool isDescending = (touchTable[0] >= touchTable[FUEL_TOUCH_POINTS - 1]);
+
+  if (isDescending) {
+    if (filteredReading >= touchTable[0]) {
+      fuelLiters = 0.0f;
+      fuelPercentage = 0;
       return;
+    }
+    if (filteredReading <= touchTable[FUEL_TOUCH_POINTS - 1]) {
+      fuelLiters = (float)(FUEL_TOUCH_POINTS - 1);
+      fuelPercentage = 100;
+      return;
+    }
+    for (int i = 0; i < FUEL_TOUCH_POINTS - 1; i++) {
+      if (filteredReading <= touchTable[i] &&
+          filteredReading >= touchTable[i + 1]) {
+        float span = (float)(touchTable[i + 1] - touchTable[i]);
+        if (span != 0.0f) {
+          fuelLiters = (float)i + ((filteredReading - touchTable[i]) / span);
+        } else {
+          fuelLiters = (float)i;
+        }
+        fuelPercentage = constrain(
+            (int)((fuelLiters / (float)(FUEL_TOUCH_POINTS - 1)) * 100.0f), 0, 100);
+        return;
+      }
+    }
+  } else {
+    if (filteredReading <= touchTable[0]) {
+      fuelLiters = 0.0f;
+      fuelPercentage = 0;
+      return;
+    }
+    if (filteredReading >= touchTable[FUEL_TOUCH_POINTS - 1]) {
+      fuelLiters = (float)(FUEL_TOUCH_POINTS - 1);
+      fuelPercentage = 100;
+      return;
+    }
+    for (int i = 0; i < FUEL_TOUCH_POINTS - 1; i++) {
+      if (filteredReading >= touchTable[i] &&
+          filteredReading <= touchTable[i + 1]) {
+        float span = (float)(touchTable[i + 1] - touchTable[i]);
+        if (span != 0.0f) {
+          fuelLiters = (float)i + ((filteredReading - touchTable[i]) / span);
+        } else {
+          fuelLiters = (float)i;
+        }
+        fuelPercentage = constrain(
+            (int)((fuelLiters / (float)(FUEL_TOUCH_POINTS - 1)) * 100.0f), 0, 100);
+        return;
+      }
     }
   }
 }
@@ -1609,21 +1782,8 @@ void sensorTask(void *pvParameters) {
 
       g_sensorData.isGpsSpeedValid =
           gps.speed.isValid() && (g_sensorData.satellites >= MIN_SATELLITES);
-      float hallSpeedNow = getHallSpeed();
-      if (GPS_ONLY_MODE && g_sensorData.isGpsSpeedValid) {
-        g_sensorData.speedSourceMode = 1;
-      } else if (g_sensorData.isGpsSpeedValid && hallSpeedNow > 0.0f) {
-        float gpsSpeedNow = (float)gps.speed.kmph();
-        float deltaNow = fabsf(gpsSpeedNow - hallSpeedNow);
-        if (deltaNow > MAX_SPEED_DELTA_KMH)
-          g_sensorData.speedSourceMode = 0;
-        else if (deltaNow < GPS_MIN_DEV_KMH)
-          g_sensorData.speedSourceMode = 1;
-        else
-          g_sensorData.speedSourceMode = 2;
-      } else {
-        g_sensorData.speedSourceMode = 0;
-      }
+      updateSpeedSourceMode();
+      g_sensorData.speedSourceMode = heldSpeedSourceMode;
       xSemaphoreGive(g_stateMutex);
     } else {
       logPrintf("SENS SKIP: state mutex busy\n");

@@ -154,7 +154,7 @@ void setup() {
   pinMode(HALL_SENSOR_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(HALL_SENSOR_PIN), hallSensorISR,
                   FALLING);
-  pinMode(FUEL_TOUCH_PIN, INPUT);
+  initFuelSensor();
   pinMode(LIGHT_SENSOR_PIN, INPUT);
 
   logPrintf("display.init() start\n");
