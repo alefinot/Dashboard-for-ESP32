@@ -89,7 +89,7 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
 - Release commits include the version bump ("bump to X.Y.Z").
 
 ## 23. Push Policy
-- **Push only on request** — no auto-push after commits. Push to GitHub when the user says so (important releases still push per rule 4).
+- **Always push when committing** — every commit on `main` is pushed to GitHub right after it is made.
 
 ## 24. Android versionCode
 - Bump `versionCode` in `android/app/build.gradle.kts` on every shared/test APK (per the app implementation plan).
