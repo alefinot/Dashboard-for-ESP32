@@ -97,6 +97,9 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
 ## 25. Leave No Broken Build
 - Every task ends green: `pio run` must pass (plus the APK build when `android/` was touched).
 
+## 26. Plan-First for Big Features
+- Non-trivial features: first write an implementation plan into `Implementation plans/` and get the user's sign-off before coding starts.
+
 ## Project Quick Reference
 - **Firmware:** ESP32 WROOM-32, PlatformIO project in repo root (`platformio.ini`, env `esp32dev`), Arduino framework, LovyanGFX 4.0" ILI9488 480×320 display.
 - **Build:** `pio run` (pre-scripts gzip the web UI and compile VLW fonts — run `pio run`, not a plain compile).
