@@ -1184,20 +1184,28 @@ void webServerTask(void *pvParameters) {
     // Copy the echo ring window into a static scratch buffer (LOG_BUF_SIZE
     // max, plus NUL) so this frequently-polled endpoint never allocates heap.
     static char out[LOG_BUF_SIZE + 1];
-    int tail = logTail;
-    int head = logHead;
-    int len = (head >= tail) ? (head - tail) : (LOG_BUF_SIZE - tail + head);
+    int len = 0;
+    // Hold logMux so a writer task can't tear the buffer mid-copy and the
+    // tail advance can't race a concurrent wrap. server.send happens AFTER
+    // the lock (out is static; the response write may block on the client).
+    portENTER_CRITICAL(&logMux);
+    {
+      int tail = logTail;
+      int head = logHead;
+      len = (head >= tail) ? (head - tail) : (LOG_BUF_SIZE - tail + head);
 
-    if (len > 0) {
-      if (head >= tail) {
-        memcpy(out, &logBuf[tail], len);
-      } else {
-        int n1 = LOG_BUF_SIZE - tail;
-        memcpy(out, &logBuf[tail], n1);
-        memcpy(out + n1, logBuf, head);
+      if (len > 0) {
+        if (head >= tail) {
+          memcpy(out, &logBuf[tail], len);
+        } else {
+          int n1 = LOG_BUF_SIZE - tail;
+          memcpy(out, &logBuf[tail], n1);
+          memcpy(out + n1, logBuf, head);
+        }
+        logTail = head;
       }
-      logTail = head;
     }
+    portEXIT_CRITICAL(&logMux);
     out[len] = 0;
     server.send(200, "text/plain", out);
   });

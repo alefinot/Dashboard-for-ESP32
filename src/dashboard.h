@@ -344,6 +344,7 @@ extern char logBuf[LOG_BUF_SIZE];
 extern volatile int logHead;
 extern volatile int logTail;
 extern volatile unsigned long logSequence;
+extern portMUX_TYPE logMux;
 void logPrintf(const char *fmt, ...);
 
 // ----------------------------------------------------------------------------

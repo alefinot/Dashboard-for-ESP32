@@ -5,6 +5,7 @@ char logBuf[LOG_BUF_SIZE];
 volatile int logHead = 0;
 volatile int logTail = 0;
 volatile unsigned long logSequence = 0;
+portMUX_TYPE logMux = portMUX_INITIALIZER_UNLOCKED;
 
 unsigned long g_startupTime = 0;
 bool forceFullRedraw = false;
@@ -49,6 +50,11 @@ void logPrintf(const char *fmt, ...) {
   int len = vsnprintf(tmp, sizeof(tmp), fmt, args);
   va_end(args);
   if (len > 0) {
+    // Shared by every task (main/web/gps/sensor) plus the /api/serial
+    // reader - guard the ring so two writers can't tear a line and the
+    // reader never sees a half-written window. Serial print stays OUTSIDE
+    // the critical section (UART TX is slow; keep the lock window tiny).
+    portENTER_CRITICAL(&logMux);
     for (int i = 0; i < len && i < 256; i++) {
       logBuf[logHead] = tmp[i];
       logHead = (logHead + 1) % LOG_BUF_SIZE;
@@ -56,6 +62,7 @@ void logPrintf(const char *fmt, ...) {
         logTail = (logTail + 1) % LOG_BUF_SIZE;
     }
     logSequence++;
+    portEXIT_CRITICAL(&logMux);
     Serial.print(tmp);
   }
 }
