@@ -349,6 +349,7 @@ The management portal features a modern grouped card-based layout:
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
 | `/api/perf` | `GET` | Live telemetry (CPU, Heap, FPS, WiFi, partitions) | None | `application/json` |
 | `/api/health` | `GET` | Quick heap / mem-saver / uptime health probe | None | `application/json` |
+| `/api/boot` | `GET` | Boot/reboot forensics (reset reason, storm, last-reboot tag, heap watermark) | None | `application/json` |
 
 ---
 
@@ -403,7 +404,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
 - `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull (checks once per boot while enabled).
 - `OTA_PULL_URL` (default=""): HTTPS URL of the target firmware binary.
-- `OTA_CURRENT_VERSION` (default="1.2.6"): Version string compared against the cloud manifest.
+- `OTA_CURRENT_VERSION` (default="1.3.3"): Version string compared against the cloud manifest.
 
 #### Ambient Light (Auto-Brightness)
 - `LIGHT_SENSOR_DARK_VAL`: Dark-reference ambient light value (calibrated via `/api/ambient/cal-dark`).
@@ -524,6 +525,11 @@ In Demo Mode:
 ---
 
 ## Changelog
+
+### V1.3.3 — Crash forensics, safe-mode loop breaker, bad_alloc guards
+- **Boot/reboot forensics** — new `/api/boot` endpoint exposes the reset reason, fast-reboot-storm state, last-reboot tag + heap, and the min-free-heap watermark since boot; every `ESP.restart()` site is now tagged so a crash vs. a clean reboot is diagnosable (a hard crash reads `PANIC`, a clean reboot reads `SW`).
+- **Safe-mode loop breaker** — the heap-critical auto-reboot is gone: when memory-saver can't hold heap above ~16KB the device stays UP in its most-frugal state (mem-saver on, weather/TLS suppressed) instead of rebooting; only the OOM floor (`<8KB`) reboots, and never during a fast-reboot storm.
+- **bad_alloc guards** — the 120px VLW reload and the speed-sprite build now pre-check the largest free heap block before allocating, so a fragmented heap degrades to the existing fallback instead of tripping the uncaught `new → bad_alloc → abort` crash.
 
 ### V1.2.7 — Fuel smoothing alpha + web UI reorganization
 - **Fuel smoothing alpha** — fuel-level EMA smoothing alpha is now configurable live in the Fuel Sensor card (tune it without a reflash).
