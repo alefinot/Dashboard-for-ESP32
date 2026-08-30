@@ -116,6 +116,21 @@ void ensureSpeedSprite() {
     return;
   spBuildAttempted = true;
   ensureSpeedMetrics();
+  // bad_alloc guard: the sprite framebuffer is (w+12) x (h+6) 8-bit pixels.
+  // Require that much contiguous heap (plus margin) BEFORE attempting the
+  // alloc, so a fragmented heap can't trip the uncaught new -> bad_alloc ->
+  // abort inside LovyanGFX. If it doesn't fit, stay in the direct-panel
+  // fallback (the speed still draws via the 120px VLW font); spBuildAttempted
+  // is latched above, so this is only retried after the next mem-saver
+  // release (existing behavior).
+  {
+    uint32_t need = (uint32_t)(w_speed3_max + 12) * (h_speed_max + 6) + 4096;
+    if ((unsigned long)ESP.getMaxAllocHeap() < need) {
+      logPrintf("Speed sprite skipped: maxAlloc=%lu < need=%lu (fallback)\n",
+                (unsigned long)ESP.getMaxAllocHeap(), (unsigned long)need);
+      return;
+    }
+  }
   auto vfd = getVLWData120();
   if (!vfd.data) return;
   sp.setColorDepth(lgfx::color_depth_t::grayscale_8bit);
@@ -738,7 +753,12 @@ if (!vlw120Ready) {
           // In mem-saver mode the 45KB VLW120 buffer must stay freed (that is
           // the whole point of the mode); reloading it here used to re-run the
           // allocation on a fragmented heap and crash (bad_alloc -> abort).
-          if (!memSaverActive) {
+          // A VLW font load also allocates its glyph tables + the cached 120px
+          // buffer, so pre-check the largest free block: if it can't fit, stay
+          // in the (degraded, no-speed) fallback this frame instead of risking
+          // the uncaught new -> bad_alloc -> abort. Rechecked every frame until
+          // the heap recovers, so it self-heals.
+          if (!memSaverActive && (unsigned long)ESP.getMaxAllocHeap() >= 48000UL) {
             display.loadVLWFont("/Fonts/DS-DIGIT_120px.vlw");
             vlw120Ready = isVLW120FontReady();
           }

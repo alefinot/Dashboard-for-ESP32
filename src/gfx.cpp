@@ -1,4 +1,5 @@
 #include "dashboard.h"
+#include "bootinfo.h"
 #include <vector>
 #include <new>
 #include <esp_heap_caps.h>
@@ -689,6 +690,7 @@ void showGoodbyeScreen(bool isSleep) {
     esp_sleep_enable_ext0_wakeup((gpio_num_t)POWER_SENSE_PIN, 1);
     esp_deep_sleep_start();
   } else {
+    bootinfo_tag_reboot("user-reboot");
     ESP.restart();
   }
 }

@@ -1,4 +1,5 @@
 #include "dashboard.h"
+#include "bootinfo.h"
 #include <ArduinoOTA.h>
 #include <Update.h>
 #include <ESPmDNS.h>
@@ -15,6 +16,17 @@ WebServer server(80);
 // Heartbeat counter bumped by the web task loop; the display task watches it
 // and reboots the device if the web server stalls (e.g. a handler hangs).
 volatile unsigned long webLoopCount = 0;
+
+// SAFE MODE (Phase 2 loop-breaker): when memory-saver cannot hold free heap
+// above ~16KB we stay UP in the most-frugal state instead of rebooting. This
+// is what breaks the heap-critical boot loop: the device keeps serving /api
+// (including /api/boot forensics) with mem-saver on and weather/TLS
+// suppressed, and only reboots at the OOM floor — and never reboots during a
+// fast-reboot storm. A hard crash at the floor still reboots, but the reset
+// reason then reads PANIC (crash), not a clean SW loop.
+static volatile bool safeModeActive = false;
+
+bool isSafeModeActive() { return safeModeActive; }
 
 // Wipes the configuration NVS namespaces. Used by /api/reset and by the
 // physical recovery gesture (hold BOOT for 8 seconds after boot).
@@ -691,6 +703,7 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
       unsigned long fillStart = millis();
       while (millis() - fillStart < 6000) vTaskDelay(pdMS_TO_TICKS(100));
       logPrintf("OTA Pull: rebooting\n");
+      bootinfo_tag_reboot("ota-pull");
       ESP.restart();
     } else if (written >= (size_t)totalSize) {
       Update.printError(Serial);
@@ -1106,6 +1119,7 @@ void webServerTask(void *pvParameters) {
     if (otaUpdateSuccess) {
       server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Update OK\"}");
       delay(100);
+      bootinfo_tag_reboot("ota");
       ESP.restart();
     } else {
       server.send(500, "application/json", "{\"status\":\"error\",\"msg\":\"Update failed\"}");
@@ -1178,6 +1192,14 @@ void webServerTask(void *pvParameters) {
     String out;
     serializeJson(doc, out);
     server.send(200, "application/json", out);
+  });
+
+  server.on("/api/boot", HTTP_GET, []() {
+    // Boot/reboot forensics (Phase 0): reset reason, fast-reboot-storm state,
+    // last reboot tag + heap, and the heap watermark since boot. /api/serial
+    // keeps the *live* log; /api/boot keeps the *surviving* facts that outlive
+    // a crash (the reset reason and the tag written before the reboot).
+    server.send(200, "application/json", bootinfo_json());
   });
 
   server.on("/api/serial", HTTP_GET, []() {
@@ -1531,7 +1553,10 @@ void webServerTask(void *pvParameters) {
         lastWeatherCheck = millis();
       }
       unsigned long weatherIntervalMs = (unsigned long)WEATHER_REFRESH_MIN * 60000UL;
-      if (millis() - lastWeatherCheck >= weatherIntervalMs) {
+      // SAFE MODE: don't start new weather fetches (the TLS handshake needs
+      // ~34KB — exactly the heap that's short). In-flight fetches finish
+      // normally (30s hang guard still applies).
+      if (!safeModeActive && millis() - lastWeatherCheck >= weatherIntervalMs) {
         lastWeatherCheck = millis();
         startWeatherFetch();
       }
@@ -1540,8 +1565,10 @@ void webServerTask(void *pvParameters) {
     // Low-heap watchdog: the display keeps speed sprite + tape sprite + the
     // 120px VLW buffer (~60KB total), which can starve /api/config (~30-45KB
     // transient) and the TLS stack. Ask the display task to drop the big
-    // sprites (memory-saver mode); if even that is not enough, reboot to clear
-    // heap fragmentation. Armed 5s after start.
+    // sprites (memory-saver mode); if even that is not enough, enter SAFE
+    // MODE (stay up, no reboot) instead of rebooting to clear heap
+    // fragmentation — this is what breaks a heap-critical boot loop. Armed 5s
+    // after start.
     //
     // Fully-loaded steady state is ~54KB with WiFi up (sprites + VLW120 +
     // STA/TLS stacks), rising to ~118KB after memory-saver drops the buffers.
@@ -1562,10 +1589,24 @@ void webServerTask(void *pvParameters) {
         memSaverRequested = true;
       }
       if (memSaverActive && fh < 16000) {
-        logPrintf("Heap critical (%lu B) even with memory-saver, rebooting\n",
-                  (unsigned long)fh);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        ESP.restart();
+        // SAFE MODE: stay up instead of rebooting. The device keeps serving
+        // /api (forensics included) in the most-frugal state; only the OOM
+        // floor reboots, and never during a fast-reboot storm.
+        if (!safeModeActive) {
+          safeModeActive = true;
+          logPrintf("SAFE MODE entered (heap=%lu B): staying up, no reboot\n",
+                    (unsigned long)fh);
+        }
+        if (fh < 8000 && !bootinfo_storm_active()) {
+          logPrintf("SAFE MODE: OOM floor (heap=%lu B), rebooting\n",
+                    (unsigned long)fh);
+          bootinfo_tag_reboot("heap-oom");
+          vTaskDelay(pdMS_TO_TICKS(500));
+          ESP.restart();
+        }
+      } else if (safeModeActive && fh > 40000) {
+        safeModeActive = false;
+        logPrintf("SAFE MODE lifted (heap=%lu B)\n", (unsigned long)fh);
       }
       if (memSaverActive && fh >= 108000) {
         if (memRelaxSince == 0) memRelaxSince = millis();

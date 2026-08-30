@@ -1,4 +1,5 @@
 #include "dashboard.h"
+#include "bootinfo.h"
 #include <stdarg.h>
 
 char logBuf[LOG_BUF_SIZE];
@@ -96,20 +97,16 @@ void setup() {
   // - Hold BOOT (GPIO0) for 8s within the first 30s after boot: factory reset.
   // - Track fast reboot loops (RTC memory survives ESP.restart) so the
   //   web-task watchdog can never brick the device by rebooting it forever.
-  RTC_NOINIT_ATTR static uint32_t bootCount;
-  RTC_NOINIT_ATTR static uint32_t bootStampSec;
+  // Boot/reboot forensics (Phase 0): reset reason, last-reboot tag, and the
+  // fast-reboot-storm latch now live in bootinfo.cpp (bootinfo.h). A storm
+  // still disables the web watchdog (as before) AND is exposed to the rest of
+  // the firmware so clean auto-reboots can be *broken*, not just delayed.
   pinMode(0, INPUT_PULLUP);
-  {
-    uint32_t nowSec = (uint32_t)(esp_timer_get_time() / 1000000ULL);
-    bootCount++;
-    if (bootStampSec == 0 || bootCount > 10 || nowSec - bootStampSec > 120) {
-      bootCount = 1;
-    } else if (bootCount >= 4) {
-      watchdogDisabled = true;
-      logPrintf("Warning: %u fast reboots in 2 min, web watchdog disabled\n",
-                bootCount);
-    }
-    bootStampSec = nowSec;
+  bootinfo_init();
+  if (bootinfo_storm_active()) {
+    watchdogDisabled = true;
+    logPrintf("Warning: %u fast reboots in 2 min, auto-reboots suppressed for this boot\n",
+              bootinfo_boot_count());
   }
   {
     unsigned long resetDeadline = millis() + 2000;
@@ -125,6 +122,7 @@ void setup() {
           factoryResetConfig();
           logPrintf("Factory reset done, rebooting\n");
           delay(100);
+          bootinfo_tag_reboot("factory-reset");
           ESP.restart();
         }
       }
@@ -509,6 +507,7 @@ void loop() {
       if (otaUpdateSuccess && fillW >= 258 && !otaRebootShown) {
         otaRebootShown = true;
         delay(100);
+        bootinfo_tag_reboot("ota");
         ESP.restart();
       }
     }
@@ -650,6 +649,7 @@ void loop() {
         factoryResetConfig();
         logPrintf("Factory reset done, rebooting\n");
         delay(100);
+        bootinfo_tag_reboot("factory-reset");
         ESP.restart();
       }
     } else {
@@ -682,6 +682,7 @@ void loop() {
     } else if (!watchdogDisabled) {
       logPrintf("Web task stalled (heartbeat stopped), rebooting\n");
       delay(100);
+      bootinfo_tag_reboot("web-watchdog");
       ESP.restart();
     }
   }
