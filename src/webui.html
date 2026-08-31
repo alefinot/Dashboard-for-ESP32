@@ -1936,6 +1936,10 @@ function renderForm(d) {
 function initDetailsAnim() {
     document.querySelectorAll('details:not(#perf-panel)').forEach(el => {
         if (el._animReady) return;
+        // Nested <details> (e.g. the "Advanced" sub-sections) use native
+        // in-place toggling; only top-level accordion groups get the
+        // "one open at a time" behaviour below.
+        if (el.parentElement && el.parentElement.closest('details')) return;
         el._animReady = true;
         const summary = el.querySelector('summary');
         if (!summary) return;
