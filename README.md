@@ -373,6 +373,9 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `CPU_THROTTLE_TEMP_WARN` (default=60): Warning temperature threshold in °C.
 - `CPU_THROTTLE_TEMP_CRIT` (default=70): Critical temperature threshold in °C.
 
+#### Web UI
+- `ADV_MODE` (default=false): Global “Advanced Mode” toggle in the Web UI. When enabled, advanced and technical settings (CPU, GPS, Polling Rates, raw compass values, technical display options, advanced WiFi, and sensor-calibration internals) are shown as normal rows in their groups; when disabled they are hidden.
+
 #### Display & Visual Design
 - `DISPLAY_ROTATION` (default=3): Screen rotation (0, 1, 2, 3).
 - `BACKLIGHT_BRIGHTNESS` (default=100): Backlight duty cycle (0–100%).

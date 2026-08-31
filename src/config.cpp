@@ -149,6 +149,7 @@ WeatherData g_weatherData;
 bool ENABLE_POWER_SENSE = false;
 bool ENABLE_CIRCLE_TEST = false;
 bool ENABLE_DEMO_MODE = false;
+bool ADV_MODE = false;
 bool ENABLE_ANTIALIASING = true;
 float AA_SHARPNESS = 0.2f;
  
@@ -327,6 +328,7 @@ void processConfig(int mode, JsonDocument *doc) {
 
   CFG_INT(DISPLAY_ROTATION, "DISP_ROT", 1);
   CFG_BOOL(UNITS_IMPERIAL, "UNITS_IMP", false);
+  CFG_BOOL(ADV_MODE, "ADV_MODE", false);
   CFG_INT(SPI_BUS_SPEED, "SPI_FREQ", 60000000);
   CFG_INT(DISPLAY_WIDTH, "DISP_W", 480);
   CFG_INT(DISPLAY_HEIGHT, "DISP_H", 320);
@@ -755,6 +757,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "ENABLE_POWER_SENSE": false,
   "ENABLE_CIRCLE_TEST": false,
   "ENABLE_DEMO_MODE": false,
+  "ADV_MODE": false,
   "ENABLE_ANTIALIASING": true,
   "AA_SHARPNESS": 0.2,
   "SHOW_FPS_COUNTER_DEFAULT": false,

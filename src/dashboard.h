@@ -244,6 +244,7 @@ extern bool SHOW_GHOST_DIGITS;
 extern bool ENABLE_POWER_SENSE;
 extern bool ENABLE_CIRCLE_TEST;
 extern bool ENABLE_DEMO_MODE;
+extern bool ADV_MODE;
 extern bool ENABLE_ANTIALIASING;
 extern float AA_SHARPNESS;
  

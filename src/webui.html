@@ -479,30 +479,52 @@ details[open] summary .summary-chevron {
     color: var(--accent-cyan);
 }
 
-/* Nested "Advanced" sub-toggle (lives inside a .card, not a top-level accordion) */
-summary.adv-toggle {
-    background: transparent;
-    padding: 4px 0;
-    font-family: 'Outfit', sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-muted);
+/* Global "Advanced Mode" toggle (top-right of the header) */
+.adv-mode-toggle {
+    position: absolute;
+    top: 6px;
+    right: 4px;
     display: flex;
     align-items: center;
     gap: 6px;
-    justify-content: flex-start;
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    z-index: 10;
 }
-summary.adv-toggle:hover { background: transparent; color: var(--accent-cyan); }
-.adv-chevron {
+.adv-mode-toggle input[type=checkbox] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.adv-switch {
+    width: 34px;
+    height: 18px;
+    background: #2a2a2a;
+    border-radius: 9px;
+    position: relative;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+.adv-switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
     width: 14px;
     height: 14px;
-    flex-shrink: 0;
-    color: var(--text-muted);
-    transition: transform 0.25s ease, color 0.25s ease;
+    background: #666;
+    border-radius: 50%;
+    transition: transform 0.2s, background 0.2s;
 }
-details[open] summary.adv-toggle .adv-chevron {
-    transform: rotate(90deg);
-    color: var(--accent-cyan);
+.adv-mode-toggle input[type=checkbox]:checked + .adv-switch {
+    background: rgba(0, 255, 255, 0.25);
+}
+.adv-mode-toggle input[type=checkbox]:checked + .adv-switch::after {
+    transform: translateX(16px);
+    background: var(--accent-cyan);
 }
 
 .unit {
@@ -947,6 +969,11 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
     <div class="ip-banner">
         <span id="ip-info">LAN: <a href="http://192.168.1.136/" target="_blank">192.168.1.136</a> &nbsp;|&nbsp; AP: <a href="http://192.168.4.1/" target="_blank">192.168.4.1</a></span>
     </div>
+    <label class="adv-mode-toggle" title="Show advanced and technical settings">
+        <span>Advanced Mode</span>
+        <input type="checkbox" id="ADV_MODE" onchange="onAdvToggle(this)">
+        <span class="adv-switch"></span>
+    </label>
 </div>
 
 <div id="msg" class="msg-success">Time synced successfully!</div>
@@ -1347,7 +1374,7 @@ const configMap = [
             { id: "ENABLE_POWER_SENSE", label: "Enable Power Sensing" },
             { id: "SHOW_ELEMENT_BOUNDS", label: "Show UI Element Bounds (Debug)" },
             { id: "UNITS_IMPERIAL", label: "Use Imperial Units" },
-            { type: "card_header", label: "CPU" },
+            { type: "card_header", label: "CPU", advanced: true },
             { 
                 id: "MANUAL_CPU_FREQ", 
                 label: "Manual CPU Frequency", 
@@ -1430,14 +1457,14 @@ const configMap = [
             { id: "REBOOT_SIGNATURE", label: "Reboot Screen Signature" },
             { id: "DASHBOARD_SIGNATURE", label: "Main Dashboard Watermark" },
             { type: "card_header", label: "Wifi" },
-            { id: "WIFI_TX_POWER_DBM", label: "TX Power", type: "range", min: -1, max: 20, step: 1, unit: "dBm" },
+            { id: "WIFI_TX_POWER_DBM", label: "TX Power", type: "range", min: -1, max: 20, step: 1, unit: "dBm", advanced: true },
             { id: "WIFI_RETRY_MODE", label: "WiFi Search Behavior", type: "select",
                 options: [
                     { value: 0, label: "Stop after one cycle" },
                     { value: 1, label: "Search for a fixed time" },
                     { value: 2, label: "Search forever" }
-                ] },
-            { id: "WIFI_RETRY_SECONDS", label: "Search Timeout", unit: "seconds" },
+                ], advanced: true },
+            { id: "WIFI_RETRY_SECONDS", label: "Search Timeout", unit: "seconds", advanced: true },
             { type: "heading", label: "Primary Network" },
             { id: "WIFI_SSID", label: "Network Name (SSID)" },
             { id: "WIFI_PASSWORD", label: "Password" },
@@ -1470,12 +1497,12 @@ const configMap = [
         items: [
             { type: "subtitle", label: "Display" },
             { id: "DISPLAY_ROTATION", label: "Screen Rotation (0-3)" },
-            { id: "DISPLAY_WIDTH", label: "Display Width", unit: "px" },
-            { id: "DISPLAY_HEIGHT", label: "Display Height", unit: "px" },
-            { id: "SPI_BUS_SPEED", label: "SPI Bus Frequency", unit: "MHz" },
-            { id: "DISPLAY_INVERT_COLORS", label: "Invert Display Colors" },
-            { id: "ENABLE_ANTIALIASING", label: "Enable Anti-Aliased Rendering" },
-            { id: "AA_SHARPNESS", label: "AA Sharpness", type: "range", min: 0.2, max: 1.0, step: 0.1 },
+            { id: "DISPLAY_WIDTH", label: "Display Width", unit: "px", advanced: true },
+            { id: "DISPLAY_HEIGHT", label: "Display Height", unit: "px", advanced: true },
+            { id: "SPI_BUS_SPEED", label: "SPI Bus Frequency", unit: "MHz", advanced: true },
+            { id: "DISPLAY_INVERT_COLORS", label: "Invert Display Colors", advanced: true },
+            { id: "ENABLE_ANTIALIASING", label: "Enable Anti-Aliased Rendering", advanced: true },
+            { id: "AA_SHARPNESS", label: "AA Sharpness", type: "range", min: 0.2, max: 1.0, step: 0.1, advanced: true },
             { type: "subtitle", label: "Brightness Control" },
             { id: "BACKLIGHT_BRIGHTNESS", label: "Backlight Brightness", type: "range", min: 0, max: 100, step: 1 },
             { id: "FADE_DURATION_MS", label: "Fade Duration", type: "range", min: 100, max: 5000, step: 100, unit: "ms" },
@@ -1512,17 +1539,11 @@ const configMap = [
             <input type="number" id="temp-ref" step="0.1" placeholder="Reference (°C)" style="flex:1;min-width:0;text-align:center;">
             <button onclick="applyTempCal()" class="btn-secondary" style="font-size:11px;padding:5px 10px;white-space:nowrap;">Apply</button>
         </div>
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Offset corrects the reading. R25, Balance and Beta match the NTC part.</div>
-        <details>
-            <summary class="adv-toggle"><svg class="adv-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>Advanced</summary>
-            <div style="padding-top:6px;">
-                <div class="cfg-row"><label>Offset</label><div class="cfg-controls"><span class="unit">°C</span><input type="number" id="NTC_TEMP_OFFSET" step="0.1" style="width:100px;text-align:center;"></div></div>
-                <div class="cfg-row"><label>R25</label><div class="cfg-controls"><span class="unit">Ω</span><input type="number" id="NTC_R25" step="100" style="width:100px;text-align:center;"></div></div>
-                <div class="cfg-row"><label>Balance</label><div class="cfg-controls"><span class="unit">Ω</span><input type="number" id="NTC_R_BALANCE" step="100" style="width:100px;text-align:center;"></div></div>
-                <div class="cfg-row"><label>Beta</label><div class="cfg-controls"><input type="number" id="NTC_BETA" step="10" style="width:100px;text-align:center;"></div></div>
-                <div style="padding:6px 0 2px 0;"><button onclick="resetTempCal()" class="btn-secondary" style="font-size:11px;padding:4px 10px;">Reset to default</button></div>
-            </div>
-        </details>` },
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Offset corrects the reading. R25, Balance and Beta match the NTC part.</div>` },
+            { id: "NTC_TEMP_OFFSET", label: "Offset", unit: "°C", advanced: true },
+            { id: "NTC_R25", label: "R25", unit: "Ω", advanced: true },
+            { id: "NTC_R_BALANCE", label: "Balance", unit: "Ω", advanced: true },
+            { id: "NTC_BETA", label: "Beta", advanced: true },
             { type: "card_header", label: "Battery Voltage", content: `
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:8px;">
             <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="bat-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> V</span>
@@ -1531,15 +1552,9 @@ const configMap = [
             <input type="number" id="bat-ref" step="0.01" placeholder="Reference (V)" style="flex:1;min-width:0;text-align:center;">
             <button onclick="applyBatCal()" class="btn-secondary" style="font-size:11px;padding:5px 10px;white-space:nowrap;">Apply</button>
         </div>
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Offset corrects the reading. Scale is the divider ratio (4.7 for a 4.7 kΩ / 1 kΩ divider).</div>
-        <details>
-            <summary class="adv-toggle"><svg class="adv-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>Advanced</summary>
-            <div style="padding-top:6px;">
-                <div class="cfg-row"><label>Offset</label><div class="cfg-controls"><span class="unit">V</span><input type="number" id="BATTERY_OFFSET" step="0.1" style="width:100px;text-align:center;"></div></div>
-                <div class="cfg-row"><label>Scale</label><div class="cfg-controls"><span class="unit">×</span><input type="number" id="BATTERY_SCALE" step="0.1" style="width:100px;text-align:center;"></div></div>
-                <div style="padding:6px 0 2px 0;"><button onclick="resetBatCal()" class="btn-secondary" style="font-size:11px;padding:4px 10px;">Reset to default</button></div>
-            </div>
-        </details>` },
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Offset corrects the reading. Scale is the divider ratio (4.7 for a 4.7 kΩ / 1 kΩ divider).</div>` },
+            { id: "BATTERY_OFFSET", label: "Offset", unit: "V", advanced: true },
+            { id: "BATTERY_SCALE", label: "Scale", unit: "×", advanced: true },
             { type: "card_header", label: "Acceleration Timer" },
             { id: "ACCEL_START_SPEED", label: "Timer Start Speed", unit: "km/h" },
             { id: "ACCEL_TARGET_SPEED", label: "Timer Target Speed", unit: "km/h" },
@@ -1555,12 +1570,12 @@ const configMap = [
     </div>` },
             { id: "WHEEL_CIRCUMFERENCE_MM", label: "Wheel Circumference", unit: "mm" },
             { id: "MIN_SPEED_THRESHOLD", label: "Minimum Speed Threshold", unit: "km/h" },
-            { type: "subtitle", label: "Polling Rates" },
+            { type: "subtitle", label: "Polling Rates", advanced: true },
             { id: "REFRESH_SPEED_MS", label: "Speed", type: "number", unit: "ms" },
             { id: "REFRESH_BAT_MS", label: "Battery Voltage", type: "number", unit: "ms" },
             { id: "REFRESH_INST_MS", label: "Instant KML", type: "number", unit: "ms" },
             { id: "REFRESH_FUEL_MS", label: "Fuel LTRS", type: "number", unit: "ms" },
-            { type: "subtitle", label: "GPS" },
+            { type: "subtitle", label: "GPS", advanced: true },
             { id: "GPS_BAUD", label: "GNSS Baud Rate", unit: "baud" },
             { id: "MIN_SATELLITES", label: "Minimum Satellites Required" },
             { id: "OPTIMAL_SATELLITES", label: "Optimal Satellites Count" },
@@ -1590,16 +1605,16 @@ const configMap = [
     </div>
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Mount the module as it will be mounted (any tilt angle) and slowly rotate the WHOLE UNIT a full circle twice, keeping the tilt fixed. The browser captures the raw samples and computes the offsets (outlier-trimmed), the soft-iron scale correction and the tilt axis - review the plot and apply, or let the ESP save its own copy automatically. Keep magnets and metal away.</div>` },
             { id: "COMPASS_DECLINATION_DEG", label: "Declination Offset", unit: "deg" },
-            { id: "COMPASS_CAL_X", label: "Cal X Offset", unit: "raw" },
-            { id: "COMPASS_CAL_Y", label: "Cal Y Offset", unit: "raw" },
-            { id: "COMPASS_CAL_Z", label: "Cal Z Offset", unit: "raw" },
-            { id: "COMPASS_CAL_SCALE_X", label: "Cal Scale X", unit: "x" },
-            { id: "COMPASS_CAL_SCALE_Y", label: "Cal Scale Y", unit: "x" },
-            { id: "COMPASS_CAL_SCALE_Z", label: "Cal Scale Z", unit: "x" },
-            { id: "COMPASS_TILT_COMP", label: "Tilt Compensation (0=robust flat, 1=fixed tilt axis)", type: "number" },
-            { id: "COMPASS_CAL_TX", label: "Tilt Axis X", unit: "raw" },
-            { id: "COMPASS_CAL_TY", label: "Tilt Axis Y", unit: "raw" },
-            { id: "COMPASS_CAL_TZ", label: "Tilt Axis Z", unit: "raw" }
+            { id: "COMPASS_CAL_X", label: "Cal X Offset", unit: "raw", advanced: true },
+            { id: "COMPASS_CAL_Y", label: "Cal Y Offset", unit: "raw", advanced: true },
+            { id: "COMPASS_CAL_Z", label: "Cal Z Offset", unit: "raw", advanced: true },
+            { id: "COMPASS_CAL_SCALE_X", label: "Cal Scale X", unit: "x", advanced: true },
+            { id: "COMPASS_CAL_SCALE_Y", label: "Cal Scale Y", unit: "x", advanced: true },
+            { id: "COMPASS_CAL_SCALE_Z", label: "Cal Scale Z", unit: "x", advanced: true },
+            { id: "COMPASS_TILT_COMP", label: "Tilt Compensation (0=robust flat, 1=fixed tilt axis)", type: "number", advanced: true },
+            { id: "COMPASS_CAL_TX", label: "Tilt Axis X", unit: "raw", advanced: true },
+            { id: "COMPASS_CAL_TY", label: "Tilt Axis Y", unit: "raw", advanced: true },
+            { id: "COMPASS_CAL_TZ", label: "Tilt Axis Z", unit: "raw", advanced: true }
         ]
     },
     {
@@ -1792,11 +1807,12 @@ function renderForm(d) {
 
         group.items.forEach(item => {
             let iType = item.type || 'standard';
+            const advAttr = item.advanced ? ' data-adv-only' : '';
 
             if (iType === 'card_header' || iType === 'subtitle') {
                 hasItems = true;
                 closeSubCard();
-                groupHtml += `<div class="card" style="grid-column:1/-1;"><h4 style="margin:0 0 5px 0;color:var(--accent-cyan);font-size:13px;">${trUnitTokens(item.label)}</h4><div style="display:flex;flex-direction:column;gap:0;">`;
+                groupHtml += `<div class="card"${advAttr} style="grid-column:1/-1;"><h4 style="margin:0 0 5px 0;color:var(--accent-cyan);font-size:13px;">${trUnitTokens(item.label)}</h4><div style="display:flex;flex-direction:column;gap:0;">`;
                 if (item.content) groupHtml += trUnitTokens(item.content);
                 inCardSubCard = true;
             } else if (iType === 'section_header' || iType === 'heading') {
@@ -1808,10 +1824,10 @@ function renderForm(d) {
                     let val = d[item.id];
                     let opts = item.options.map(o => `<option value="${o.value}" ${o.value == val ? 'selected' : ''}>${o.label}</option>`).join('');
                     if (inCardSubCard) {
-                        groupHtml += `<div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls" style="flex-wrap:nowrap;"><select id="${item.id}" style="width:auto;min-width:120px;">${opts}</select>${resetBtn(item.id)}</div></div>`;
+                        groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls" style="flex-wrap:nowrap;"><select id="${item.id}" style="width:auto;min-width:120px;">${opts}</select>${resetBtn(item.id)}</div></div>`;
                     } else {
                         closeSubCard();
-                        groupHtml += `<div class="card"><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls" style="width:auto;flex:1;justify-content:flex-end;"><select id="${item.id}">${opts}</select>${resetBtn(item.id)}</div></div></div>`;
+                        groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls" style="width:auto;flex:1;justify-content:flex-end;"><select id="${item.id}">${opts}</select>${resetBtn(item.id)}</div></div></div>`;
                     }
                 }
             } else if (iType === 'threshold-row') {
@@ -1840,7 +1856,7 @@ function renderForm(d) {
                     let val = displayFromMetric(item.id, d[item.id]);
                     let unitHtml = item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : '';
                     let sliderHtml = `
-                    <div style="padding:4px 0;">
+                    <div${advAttr} style="padding:4px 0;">
                         <label style="font-size:12px;display:block;margin-bottom:4px;">${trUnitTokens(item.label)}</label>
                         <div class="xy-row">
                             <input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value">
@@ -1918,16 +1934,16 @@ function renderForm(d) {
 
                     if (inCardSubCard) {
                         if (isBool) {
-                            groupHtml += `<div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
+                            groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
                         } else {
-                            groupHtml += `<div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any">${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div>`;
+                            groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any">${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div>`;
                         }
                     } else {
                         closeSubCard();
                         if (isBool) {
-                            groupHtml += `<div class="card checkbox-card"><label>${trUnitTokens(item.label)}</label><div style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
+                            groupHtml += `<div class="card checkbox-card"${advAttr}><label>${trUnitTokens(item.label)}</label><div style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
                         } else {
-                            groupHtml += `<div class="card"><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any">${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div></div>`;
+                            groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any">${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div></div>`;
                         }
                     }
                 }
@@ -1961,6 +1977,22 @@ function renderForm(d) {
     protectSliders();
     updateCpuMode();
     bindPowerSense();
+    // Advanced Mode: reflect the ADV_MODE config on the header toggle and
+    // show/hide the advanced rows.
+    advModeOn = !!d.ADV_MODE;
+    const advCb = document.getElementById('ADV_MODE');
+    if (advCb) advCb.checked = advModeOn;
+    applyAdvancedMode();
+}
+
+let advModeOn = false;
+function applyAdvancedMode() {
+    document.querySelectorAll('[data-adv-only]').forEach(el => { el.hidden = !advModeOn; });
+}
+function onAdvToggle(cb) {
+    advModeOn = cb.checked;
+    applyAdvancedMode();
+    save();
 }
 
 function initDetailsAnim() {
@@ -2691,20 +2723,9 @@ function applyBatCal() {
     document.getElementById('BATTERY_OFFSET').value = (ref - cur + curOff).toFixed(2);
 }
 
-function resetTempCal() {
-    document.getElementById('NTC_TEMP_OFFSET').value = 0;
-    document.getElementById('NTC_R25').value = 10000;
-    document.getElementById('NTC_R_BALANCE').value = 10000;
-    document.getElementById('NTC_BETA').value = 3950;
-}
-
-function resetBatCal() {
-    document.getElementById('BATTERY_OFFSET').value = 0.2;
-    document.getElementById('BATTERY_SCALE').value = 5.7;
-}
-
-// Populate the hand-written Advanced inputs (inside card_header content) from
-// the loaded config. Runs after each form render so values track the device.
+// Keep the advanced calibration inputs in sync with the loaded config.
+// (Redundant safety after the standard render; harmless.) Runs after each
+// form render so values track the device.
 function applyCalDefaults(d) {
     const setVal = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined) el.value = v; };
     setVal('NTC_TEMP_OFFSET', d.NTC_TEMP_OFFSET);
