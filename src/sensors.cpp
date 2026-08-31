@@ -62,8 +62,11 @@ static int demoAdcForFuelLiters(float liters) {
 // Sensor() would convert into the given degrees C. Kept clear of the
 // 100/4000 "sensor fault" clamp.
 static int demoAdcForTempC(float c) {
-  float tKelvin = c + 273.15f;
-  float r = NTC_R_ROOM * expf(NTC_BETA * (1.0f / tKelvin - NTC_INV_ROOM_KELVIN));
+  // The model (before the NTC_TEMP_OFFSET bias) must yield c - NTC_TEMP_OFFSET,
+  // so that processTemperatureSensor() shows exactly c.
+  float cModel = c - NTC_TEMP_OFFSET;
+  float tKelvin = cModel + 273.15f;
+  float r = NTC_R25 * expf(NTC_BETA * (1.0f / tKelvin - NTC_INV_ROOM_KELVIN));
   float vOut = 3.3f * r / (r + NTC_R_BALANCE);
   int adc = (int)(vOut / ADC_VOLTS_FACTOR);
   return constrain(adc, 150, 3900);
@@ -71,7 +74,7 @@ static int demoAdcForTempC(float c) {
 
 // Inverse of the battery divider formula (processBatterySensor).
 static int demoAdcForBatteryVoltage(float v) {
-  int adc = (int)(((v - 0.2f) / (ADC_VOLTS_FACTOR * 5.7f)) + 0.5f);
+  int adc = (int)((((v - BATTERY_OFFSET) / (ADC_VOLTS_FACTOR * BATTERY_SCALE)) + 0.5f));
   return constrain(adc, 0, 4095);
 }
 
@@ -1003,7 +1006,7 @@ void processBatterySensor() {
     rawADC = analogRead(BATTERY_SENSE_PIN);
   }
   rawBatteryADC = rawADC;
-  batteryVoltage = ((float)rawADC * ADC_VOLTS_FACTOR * 5.7f) + 0.2f;
+  batteryVoltage = ((float)rawADC * ADC_VOLTS_FACTOR * BATTERY_SCALE) + BATTERY_OFFSET;
   if (batteryVoltage < 2.0f)
     batteryVoltage = 0.0f;
 }
@@ -1028,9 +1031,9 @@ void processTemperatureSensor() {
   }
   float vOut = (float)rawADC * ADC_VOLTS_FACTOR;
   float resistance = NTC_R_BALANCE * (vOut / (3.3f - vOut));
-  float instantTemp = (1.0f / (logf(resistance / NTC_R_ROOM) / NTC_BETA +
+  float instantTemp = (1.0f / (logf(resistance / NTC_R25) / NTC_BETA +
                                NTC_INV_ROOM_KELVIN)) -
-                      273.15f;
+                      273.15f + NTC_TEMP_OFFSET;
   // EMA smoothing (same pattern as the light sensor): the raw NTC ADC jitters
   // by a few °C per 20ms read, which made the sidebar number flicker between
   // adjacent values at full redraw rate.

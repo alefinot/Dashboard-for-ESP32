@@ -1478,9 +1478,38 @@ const configMap = [
                 { id: "REFUEL_RESET_LITERS", label: "Refuel Reset Threshold", unit: "L" },
                 { id: "FUEL_FILTER_ALPHA", label: "Smoothing Factor" }
             ] },
-            { type: "subtitle", label: "Temperature Sensor" },
-            { id: "NTC_R_BALANCE", label: "NTC Balance Resistor", unit: "Ohms" },
-            { id: "NTC_BETA", label: "NTC Beta Value" },
+            { type: "card_header", label: "Engine Temperature", content: `
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="temp-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> °C</span>
+            <input type="number" id="temp-ref" step="0.1" placeholder="Reference (°C)" style="width:130px;">
+            <button onclick="applyTempCal()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Apply</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);padding:4px 0;">Offset corrects the reading. R25, Balance and Beta match the NTC part.</div>
+        <details style="margin:4px 0;">
+            <summary style="cursor:pointer;font-size:11px;color:var(--text-muted);user-select:none;">Advanced</summary>
+            <div style="display:flex;flex-direction:column;gap:8px;padding:8px 0;">
+                <div class="cfg-row"><label>Offset</label><div class="cfg-controls"><span class="unit">°C</span><input type="number" id="NTC_TEMP_OFFSET" step="0.1" style="width:100px;text-align:center;"></div></div>
+                <div class="cfg-row"><label>R25</label><div class="cfg-controls"><span class="unit">Ω</span><input type="number" id="NTC_R25" step="100" style="width:100px;text-align:center;"></div></div>
+                <div class="cfg-row"><label>Balance</label><div class="cfg-controls"><span class="unit">Ω</span><input type="number" id="NTC_R_BALANCE" step="100" style="width:100px;text-align:center;"></div></div>
+                <div class="cfg-row"><label>Beta</label><div class="cfg-controls"><input type="number" id="NTC_BETA" step="10" style="width:100px;text-align:center;"></div></div>
+                <div style="display:flex;gap:8px;padding-top:4px;"><button onclick="resetTempCal()" class="btn-secondary" style="font-size:11px;padding:4px 10px;">Reset to default</button></div>
+            </div>
+        </details>` },
+            { type: "card_header", label: "Battery Voltage", content: `
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="bat-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> V</span>
+            <input type="number" id="bat-ref" step="0.01" placeholder="Reference (V)" style="width:130px;">
+            <button onclick="applyBatCal()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Apply</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);padding:4px 0;">Offset corrects the reading. Scale is the divider ratio (4.7 for a 4.7 kΩ / 1 kΩ divider).</div>
+        <details style="margin:4px 0;">
+            <summary style="cursor:pointer;font-size:11px;color:var(--text-muted);user-select:none;">Advanced</summary>
+            <div style="display:flex;flex-direction:column;gap:8px;padding:8px 0;">
+                <div class="cfg-row"><label>Offset</label><div class="cfg-controls"><span class="unit">V</span><input type="number" id="BATTERY_OFFSET" step="0.1" style="width:100px;text-align:center;"></div></div>
+                <div class="cfg-row"><label>Scale</label><div class="cfg-controls"><span class="unit">×</span><input type="number" id="BATTERY_SCALE" step="0.1" style="width:100px;text-align:center;"></div></div>
+                <div style="display:flex;gap:8px;padding-top:4px;"><button onclick="resetBatCal()" class="btn-secondary" style="font-size:11px;padding:4px 10px;">Reset to default</button></div>
+            </div>
+        </details>` },
             { type: "card_header", label: "Acceleration Timer" },
             { id: "ACCEL_START_SPEED", label: "Timer Start Speed", unit: "km/h" },
             { id: "ACCEL_TARGET_SPEED", label: "Timer Target Speed", unit: "km/h" },
@@ -1695,6 +1724,8 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(pollOdo, 1000);
     pollFuel();
     setInterval(pollFuel, 1000);
+    pollSensors();
+    setInterval(pollSensors, 1000);
     pollCompassCal();
     setInterval(pollCompassCal, 2000);
 
@@ -1891,6 +1922,7 @@ function renderForm(d) {
     });
 
     document.getElementById('form-container').innerHTML = html;
+    applyCalDefaults(d);
     // The units checkbox re-renders the whole form in the new unit system
     // and persists the toggle.
     const unitsCb = document.getElementById('UNITS_IMPERIAL');
@@ -2588,6 +2620,65 @@ function pollFuel() {
         let el = document.getElementById('fuel-reading');
         if (el) el.textContent = d.raw;
     }).catch(() => {});
+}
+
+// Live calibrated readings for the calibration sections (battery + engine
+// temperature). Drives the "Reading:" value the Apply buttons compute from.
+function pollSensors() {
+    if (tabHidden) return;
+    fetch('/api/sensors').then(r => r.json()).then(d => {
+        let el = document.getElementById('temp-reading');
+        if (el) el.textContent = d.t;
+        el = document.getElementById('bat-reading');
+        if (el) el.textContent = d.v;
+    }).catch(() => {});
+}
+
+// "Match to reference": set the offset so the calibrated reading equals the
+// reference the user types. currentOffset is added back so applying twice
+// from different reference points stays consistent.
+function applyTempCal() {
+    const curEl = document.getElementById('temp-reading');
+    const cur = parseFloat(curEl ? curEl.textContent : '');
+    const ref = parseFloat(document.getElementById('temp-ref').value);
+    if (isNaN(cur)) { alert('Waiting for a live temperature reading…'); return; }
+    if (isNaN(ref)) { alert('Enter a reference temperature.'); return; }
+    const curOff = parseFloat(document.getElementById('NTC_TEMP_OFFSET').value) || 0;
+    document.getElementById('NTC_TEMP_OFFSET').value = (ref - cur + curOff).toFixed(1);
+}
+
+function applyBatCal() {
+    const curEl = document.getElementById('bat-reading');
+    const cur = parseFloat(curEl ? curEl.textContent : '');
+    const ref = parseFloat(document.getElementById('bat-ref').value);
+    if (isNaN(cur)) { alert('Waiting for a live battery reading…'); return; }
+    if (isNaN(ref)) { alert('Enter a reference voltage.'); return; }
+    const curOff = parseFloat(document.getElementById('BATTERY_OFFSET').value) || 0;
+    document.getElementById('BATTERY_OFFSET').value = (ref - cur + curOff).toFixed(2);
+}
+
+function resetTempCal() {
+    document.getElementById('NTC_TEMP_OFFSET').value = 0;
+    document.getElementById('NTC_R25').value = 10000;
+    document.getElementById('NTC_R_BALANCE').value = 10000;
+    document.getElementById('NTC_BETA').value = 3950;
+}
+
+function resetBatCal() {
+    document.getElementById('BATTERY_OFFSET').value = 0.2;
+    document.getElementById('BATTERY_SCALE').value = 5.7;
+}
+
+// Populate the hand-written Advanced inputs (inside card_header content) from
+// the loaded config. Runs after each form render so values track the device.
+function applyCalDefaults(d) {
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined) el.value = v; };
+    setVal('NTC_TEMP_OFFSET', d.NTC_TEMP_OFFSET);
+    setVal('NTC_R25', d.NTC_R25);
+    setVal('NTC_R_BALANCE', d.NTC_R_BALANCE);
+    setVal('NTC_BETA', d.NTC_BETA);
+    setVal('BATTERY_OFFSET', d.BATTERY_OFFSET);
+    setVal('BATTERY_SCALE', d.BATTERY_SCALE);
 }
 
 function setOdometer() {

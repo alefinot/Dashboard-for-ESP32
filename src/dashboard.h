@@ -143,9 +143,12 @@ extern float WHEEL_CIRCUMFERENCE_MM;
 extern float FUEL_FILTER_ALPHA;
 extern float REFUEL_RESET_LITERS;
 
+extern float BATTERY_SCALE;
+extern float BATTERY_OFFSET;
 extern float NTC_R_BALANCE;
-extern float NTC_R_ROOM;
+extern float NTC_R25;
 extern float NTC_BETA;
+extern float NTC_TEMP_OFFSET;
 
 extern int GPS_BAUD;
 extern int MIN_SATELLITES;

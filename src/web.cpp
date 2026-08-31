@@ -989,6 +989,21 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", buf);
   });
 
+  // Live processed sensor values, used by the WebUI calibration "Current"
+  // readings (battery voltage + engine temperature). Additive read-only
+  // endpoint; values are the calibrated outputs, not raw ADC.
+  server.on("/api/sensors", HTTP_GET, []() {
+    char buf[96];
+    float v = 0.0f, t = 0.0f;
+    if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+      v = g_sensorData.batteryVoltage;
+      t = g_sensorData.engineTemperature;
+      xSemaphoreGive(g_stateMutex);
+    }
+    snprintf(buf, sizeof(buf), "{\"v\":%.2f,\"t\":%.1f}", v, t);
+    server.send(200, "application/json", buf);
+  });
+
   server.on("/api/ambient/cal-dark", HTTP_POST, []() {
     LIGHT_SENSOR_DARK_VAL = ambientLightValue;
     { Preferences p; p.begin("cfg", false);

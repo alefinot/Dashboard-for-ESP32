@@ -227,7 +227,12 @@ $$R_{\text{ntc}} = R_{\text{balance}} \times \left(\frac{V_{\text{out}}}{3.3 - V
 #### Steinhart-Hart B-Parameter Equation
 $$T_{\text{Kelvin}} = \left( \frac{1}{\beta} \cdot \ln\left(\frac{R_{\text{ntc}}}{R_{\text{room}}}\right) + \frac{1}{T_{\text{room}}} \right)^{-1}$$
 $$T_{\text{Celsius}} = T_{\text{Kelvin}} - 273.15$$
-where $R_{\text{room}} =$ `NTC_R_ROOM` (10,000 $\Omega$), $T_{\text{room}} = 298.15\text{ K}$ ($25^\circ\text{C}$), and $\beta =$ `NTC_BETA` (default=3950).
+where $R_{\text{room}} =$ `NTC_R25` (default=10,000 $\Omega$), $T_{\text{room}} = 298.15\text{ K}$ ($25^\circ\text{C}$), and $\beta =$ `NTC_BETA` (default=3950). A fixed `NTC_TEMP_OFFSET` (°C, default=0.0) is added to the result to correct a systematic reading bias.
+
+#### WebUI Sensor Calibration
+The **Sensors Tuning** WebUI card calibrates the two analog sensors against a reference, using the live `/api/sensors` reading (no raw-ADC conversion needed):
+- **Engine Temperature** — the live reading is shown; type a reference temperature and press **Apply** to set `NTC_TEMP_OFFSET`. `NTC_R25`, `NTC_R_BALANCE` and `NTC_BETA` are under **Advanced**.
+- **Battery Voltage** — the live reading is shown; type a reference voltage (e.g. a multimeter) and press **Apply** to set `BATTERY_OFFSET`. `BATTERY_SCALE` (divider ratio) is under **Advanced**.
 
 ---
 
@@ -381,8 +386,12 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `WHEEL_CIRCUMFERENCE_MM` (default=1650.0): Tire rolling circumference in millimeters.
 - `FUEL_FILTER_ALPHA` (default=0.08): EMA filter coefficient for raw fuel readings.
 - `FUEL_TOUCH_POINTS` (default=8): Number of valid entries in the calibration touch table.
+- `BATTERY_SCALE` (default=5.7): Battery divider ratio `(R1+R2)/R2`. Leave at `5.7` for the stock wiring; set to `4.7` for a 4.7 kΩ / 1 kΩ divider.
+- `BATTERY_OFFSET` (default=0.2): Fixed voltage offset added to the divided battery reading.
 - `NTC_R_BALANCE` (default=10000.0): Balance resistor value in ohms for NTC divider.
+- `NTC_R25` (default=10000.0): Thermistor resistance at 25 °C (R25) in ohms.
 - `NTC_BETA` (default=3950.0): Thermistor Beta coefficient.
+- `NTC_TEMP_OFFSET` (default=0.0): Fixed temperature offset (°C) added to the Steinhart result.
 - `GPS_BAUD` (default=115200): UART baud rate for the GNSS module. On boot the module is forced into NMEA output at this baud with a 10 Hz update rate via u-blox UBX commands (compatible with BZGNSS P25 Pro / M10 receivers).
 - `COMPASS_DECLINATION_DEG` (default=0.0): Magnetic declination offset applied to the compass heading.
 - `REFRESH_COMPASS_MS` (default=200): Throttle for the compass heading widget redraw.
