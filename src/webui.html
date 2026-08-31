@@ -479,6 +479,32 @@ details[open] summary .summary-chevron {
     color: var(--accent-cyan);
 }
 
+/* Nested "Advanced" sub-toggle (lives inside a .card, not a top-level accordion) */
+summary.adv-toggle {
+    background: transparent;
+    padding: 4px 0;
+    font-family: 'Outfit', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-start;
+}
+summary.adv-toggle:hover { background: transparent; color: var(--accent-cyan); }
+.adv-chevron {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: transform 0.25s ease, color 0.25s ease;
+}
+details[open] summary.adv-toggle .adv-chevron {
+    transform: rotate(90deg);
+    color: var(--accent-cyan);
+}
+
 .unit {
     font-size: 11px;
     color: var(--text-muted);
@@ -1479,35 +1505,39 @@ const configMap = [
                 { id: "FUEL_FILTER_ALPHA", label: "Smoothing Factor" }
             ] },
             { type: "card_header", label: "Engine Temperature", content: `
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:8px;">
             <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="temp-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> °C</span>
-            <input type="number" id="temp-ref" step="0.1" placeholder="Reference (°C)" style="width:130px;">
-            <button onclick="applyTempCal()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Apply</button>
         </div>
-        <div style="font-size:11px;color:var(--text-dim);padding:4px 0;">Offset corrects the reading. R25, Balance and Beta match the NTC part.</div>
-        <details style="margin:4px 0;">
-            <summary style="cursor:pointer;font-size:11px;color:var(--text-muted);user-select:none;">Advanced</summary>
-            <div style="display:flex;flex-direction:column;gap:8px;padding:8px 0;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <input type="number" id="temp-ref" step="0.1" placeholder="Reference (°C)" style="flex:1;min-width:0;text-align:center;">
+            <button onclick="applyTempCal()" class="btn-secondary" style="font-size:11px;padding:5px 10px;white-space:nowrap;">Apply</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Offset corrects the reading. R25, Balance and Beta match the NTC part.</div>
+        <details>
+            <summary class="adv-toggle"><svg class="adv-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>Advanced</summary>
+            <div style="padding-top:6px;">
                 <div class="cfg-row"><label>Offset</label><div class="cfg-controls"><span class="unit">°C</span><input type="number" id="NTC_TEMP_OFFSET" step="0.1" style="width:100px;text-align:center;"></div></div>
                 <div class="cfg-row"><label>R25</label><div class="cfg-controls"><span class="unit">Ω</span><input type="number" id="NTC_R25" step="100" style="width:100px;text-align:center;"></div></div>
                 <div class="cfg-row"><label>Balance</label><div class="cfg-controls"><span class="unit">Ω</span><input type="number" id="NTC_R_BALANCE" step="100" style="width:100px;text-align:center;"></div></div>
                 <div class="cfg-row"><label>Beta</label><div class="cfg-controls"><input type="number" id="NTC_BETA" step="10" style="width:100px;text-align:center;"></div></div>
-                <div style="display:flex;gap:8px;padding-top:4px;"><button onclick="resetTempCal()" class="btn-secondary" style="font-size:11px;padding:4px 10px;">Reset to default</button></div>
+                <div style="padding:6px 0 2px 0;"><button onclick="resetTempCal()" class="btn-secondary" style="font-size:11px;padding:4px 10px;">Reset to default</button></div>
             </div>
         </details>` },
             { type: "card_header", label: "Battery Voltage", content: `
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:8px;">
             <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="bat-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> V</span>
-            <input type="number" id="bat-ref" step="0.01" placeholder="Reference (V)" style="width:130px;">
-            <button onclick="applyBatCal()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Apply</button>
         </div>
-        <div style="font-size:11px;color:var(--text-dim);padding:4px 0;">Offset corrects the reading. Scale is the divider ratio (4.7 for a 4.7 kΩ / 1 kΩ divider).</div>
-        <details style="margin:4px 0;">
-            <summary style="cursor:pointer;font-size:11px;color:var(--text-muted);user-select:none;">Advanced</summary>
-            <div style="display:flex;flex-direction:column;gap:8px;padding:8px 0;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <input type="number" id="bat-ref" step="0.01" placeholder="Reference (V)" style="flex:1;min-width:0;text-align:center;">
+            <button onclick="applyBatCal()" class="btn-secondary" style="font-size:11px;padding:5px 10px;white-space:nowrap;">Apply</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Offset corrects the reading. Scale is the divider ratio (4.7 for a 4.7 kΩ / 1 kΩ divider).</div>
+        <details>
+            <summary class="adv-toggle"><svg class="adv-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>Advanced</summary>
+            <div style="padding-top:6px;">
                 <div class="cfg-row"><label>Offset</label><div class="cfg-controls"><span class="unit">V</span><input type="number" id="BATTERY_OFFSET" step="0.1" style="width:100px;text-align:center;"></div></div>
                 <div class="cfg-row"><label>Scale</label><div class="cfg-controls"><span class="unit">×</span><input type="number" id="BATTERY_SCALE" step="0.1" style="width:100px;text-align:center;"></div></div>
-                <div style="display:flex;gap:8px;padding-top:4px;"><button onclick="resetBatCal()" class="btn-secondary" style="font-size:11px;padding:4px 10px;">Reset to default</button></div>
+                <div style="padding:6px 0 2px 0;"><button onclick="resetBatCal()" class="btn-secondary" style="font-size:11px;padding:4px 10px;">Reset to default</button></div>
             </div>
         </details>` },
             { type: "card_header", label: "Acceleration Timer" },
