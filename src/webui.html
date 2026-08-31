@@ -1987,7 +1987,9 @@ function renderForm(d) {
 
 let advModeOn = false;
 function applyAdvancedMode() {
-    document.querySelectorAll('[data-adv-only]').forEach(el => { el.hidden = !advModeOn; });
+    // The advanced rows are .cfg-row/.card (CSS display:flex), so the
+    // hidden attribute would be ignored - drive display directly.
+    document.querySelectorAll('[data-adv-only]').forEach(el => { el.style.display = advModeOn ? '' : 'none'; });
 }
 function onAdvToggle(cb) {
     advModeOn = cb.checked;
