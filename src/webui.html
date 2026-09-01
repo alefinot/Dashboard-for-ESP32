@@ -1856,7 +1856,7 @@ function renderForm(d) {
                     let val = displayFromMetric(item.id, d[item.id]);
                     let unitHtml = item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : '';
                     let sliderHtml = `
-                    <div${advAttr} style="padding:4px 0;">
+                    <div${advAttr} class="cfg-slider" style="padding:4px 0;">
                         <label style="font-size:12px;display:block;margin-bottom:4px;">${trUnitTokens(item.label)}</label>
                         <div class="xy-row">
                             <input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value">
@@ -1875,7 +1875,7 @@ function renderForm(d) {
                     let maxY = item.idY.includes("OFFSET") ? Math.floor(maxH/2) : maxH;
 
                     let xyContent = `
-                    <div style="padding:4px 0;">
+                    <div class="cfg-slider" style="padding:4px 0;">
                         <label style="font-size:12px;display:block;margin-bottom:4px;">${trUnitTokens(item.label)}</label>
                         <div class="xy-row">
                             <label>X</label>
@@ -2234,20 +2234,93 @@ document.getElementById('form-container').addEventListener('input', function(e) 
     autosaveTimer = setTimeout(save, 2000);
 });
 
+// Row-level search filter.
+// Searchable text of a setting row (.cfg-row / .cfg-slider slider block) is
+// label + config id + unit only — select option labels, notes, help text,
+// buttons, placeholders and live readings are deliberately NOT searchable.
+// Scope headers: a matching card <h4> shows every row of the card; a matching
+// section title shows every row of that section. Group titles are not searched.
+// Structural blocks (card content HTML, notes, live readings, touch-table grid)
+// are hidden while a query is active and restored when it is cleared.
 function filterConfig() {
     const q = document.getElementById('searchBar').value.toLowerCase().trim();
+    const qWords = q ? q.split(/\s+/) : [];
+    // Advanced rows/cards are hidden by JS inline style in applyAdvancedMode();
+    // the "shown" value must respect that state.
+    const showDefault = el => (el.hasAttribute('data-adv-only') && !advModeOn) ? 'none' : '';
+    // Word-prefix: every query word must be a prefix of some word of the text.
+    const match = text => {
+        if (!qWords.length) return true;
+        const words = String(text).toLowerCase().split(/\s+/);
+        return qWords.every(qw => words.some(w => w.startsWith(qw)));
+    };
+    const rowText = el => {
+        let t = '';
+        const lab = el.querySelector('label');
+        if (lab) t += lab.textContent + ' ';
+        el.querySelectorAll('input, select').forEach(i => {
+            if (i.id && !i.id.endsWith('_slider')) t += i.id.toUpperCase() + ' ';
+        });
+        const u = el.querySelector('.unit');
+        if (u) t += u.textContent + ' ';
+        return t;
+    };
+    const isRow = el => el.classList.contains('cfg-row') || el.classList.contains('cfg-slider');
     document.querySelectorAll('#form-container details').forEach(d => {
         if (d.id === 'perf-panel') return;
-        const cards = d.querySelectorAll('.details-content > .card, .details-content > .xy-group');
-        let visible = 0;
-        cards.forEach(c => {
-            const match = !q || c.textContent.toLowerCase().includes(q);
-            c.style.display = match ? '' : 'none';
-            if (match) visible++;
+        let visibleCards = 0;
+        d.querySelectorAll('.details-content > .card').forEach(card => {
+            if (!card.querySelector('.cfg-row, .cfg-slider')) {
+                // Standalone card (no row units inside, e.g. .checkbox-card).
+                const ok = match(rowText(card));
+                card.style.display = ok ? showDefault(card) : 'none';
+                if (card.style.display !== 'none') visibleCards++;
+                return;
+            }
+            let h4Match = match('');
+            let sectionMatch = false;
+            let pendingTitle = null;
+            let secAny = false;
+            let anyVisible = false;
+            const closeTitle = () => {
+                if (pendingTitle) {
+                    pendingTitle.el.style.display = (pendingTitle.own || secAny) ? showDefault(pendingTitle.el) : 'none';
+                    pendingTitle = null;
+                }
+            };
+            const evalRow = r => {
+                const show = showDefault(r);
+                const ok = h4Match || sectionMatch || match(rowText(r));
+                r.style.display = ok ? show : 'none';
+                if (ok && show !== 'none') { secAny = true; anyVisible = true; }
+            };
+            const structural = el => { el.style.display = q ? 'none' : showDefault(el); };
+            Array.from(card.children).forEach(child => {
+                if (child.tagName === 'H4') { h4Match = match(child.textContent); return; }
+                if (child.classList.contains('section-title')) {
+                    closeTitle();
+                    sectionMatch = match(child.textContent.trim());
+                    pendingTitle = { el: child, own: sectionMatch };
+                    secAny = false;
+                    return;
+                }
+                if (isRow(child)) { evalRow(child); return; }
+                if (child.querySelector('.cfg-row, .cfg-slider')) {
+                    // Row container (the card's flex divs): rows inside, structural around.
+                    Array.from(child.children).forEach(c => {
+                        if (isRow(c)) evalRow(c);
+                        else structural(c);
+                    });
+                } else {
+                    structural(child);
+                }
+            });
+            closeTitle();
+            card.style.display = anyVisible ? showDefault(card) : 'none';
+            if (card.style.display !== 'none') visibleCards++;
         });
-        d.style.display = (!q || visible > 0 || d.querySelector('summary').textContent.toLowerCase().includes(q)) ? '' : 'none';
-        if (q) d.open = true;
-        else d.open = false;
+        d.style.display = q ? (visibleCards > 0 ? '' : 'none') : '';
+        d.open = q ? (visibleCards > 0) : false;
     });
 }
 
