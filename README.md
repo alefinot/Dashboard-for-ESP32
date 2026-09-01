@@ -110,7 +110,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **Fuel Level Sensor** | Capacitive / Resistive Sender | GPIO32 (ADC1_CH4) | Analog 0–3.3V, 20-point touch table, EMA smoothing filter |
 | **Engine Temp Sensor** | NTC Thermistor (10k/100k) | GPIO36 (ADC1_CH0) | Analog 0–3.3V, Steinhart-Hart equation, voltage divider balance |
 | **Battery Voltage** | Voltage Divider (5.7:1) | GPIO35 (ADC1_CH7) | Analog 0–3.3V, range 0–18.8V DC, sampled every 500 ms |
-| **Power / Ignition** | Ignition Key Sense Line | GPIO34 (RTC_GPIO4) | High=Ignition ON, Low=Power Lost → Animated Deep Sleep |
+| **Power / Ignition** | Ignition Key Sense Line | GPIO4 | High=Ignition ON, Low=Power Lost → Animated Deep Sleep |
 
 ---
 
@@ -297,10 +297,10 @@ The governor uses a 3-state machine with hysteresis deadbands to prevent frequen
 ```
 
 #### Ignition Loss & Deep Sleep Transition
-When `ENABLE_POWER_SENSE` is enabled and `POWER_SENSE_PIN` (GPIO34) drops LOW:
+When `ENABLE_POWER_SENSE` is enabled and `POWER_SENSE_PIN` (GPIO4) drops LOW:
 1. Plays goodbye screen animation (`showGoodbyeScreen(true)`).
 2. Fades display backlight down to 0% via LEDC PWM.
-3. Configures RTC EXT0 wake-up trigger on GPIO34 (High level).
+3. Configures RTC EXT0 wake-up trigger on GPIO4 (High level).
 4. Invokes `esp_deep_sleep_start()`.
 
 ---
