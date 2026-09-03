@@ -794,6 +794,11 @@ float tripFuelConsumedLiters = 0.0f;
 float instantKml = 0.0f;
 float averageKml = 0.0f;
 float averageSpeed = 0.0f;
+// Session peak of the fused/filtered speed (km/h). RAM-only: resets to 0 on
+// every reboot (the "max speed till reboot" behavior - no NVS, no manual
+// reset). Written in updateFilteredSpeed() (core 0), read under g_stateMutex
+// in the sensor snapshot (core 1); the 32-bit float write is atomic.
+float maxSpeed = 0.0f;
 unsigned long movingTimeMs = 0;
 
 void setOdometerKm(double km) {
@@ -989,6 +994,11 @@ void updateFilteredSpeed() {
     belowStopSince = 0; // between thresholds: hold current state
   }
   currentCachedSpeed = isMoving ? raw : 0.0f;
+  // Track the session's maximum achieved speed (RAM-only, resets on reboot).
+  // Sampled here every tick (~20 ms) so a peak is not missed between slower
+  // consumer updates. Cross-core: core 0 writes, core 1 reads under mutex.
+  if (currentCachedSpeed > maxSpeed)
+    maxSpeed = currentCachedSpeed;
 }
 
 // ----------------------------------------------------------------------------
@@ -1771,6 +1781,7 @@ void sensorTask(void *pvParameters) {
       g_sensorData.instantKml = instantKml;
       g_sensorData.averageKml = averageKml;
       g_sensorData.averageSpeed = averageSpeed;
+      g_sensorData.maxSpeed = maxSpeed;
       g_sensorData.heading = currentHeading;
 
       if (systemTimeToLocal(g_sensorData.localHour, g_sensorData.minute,

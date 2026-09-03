@@ -46,6 +46,7 @@ struct SensorSnapshot {
   float instantKml = 0.0f;
   float averageKml = 0.0f;
   float averageSpeed = 0.0f;
+  float maxSpeed = 0.0f;
   float heading = 0.0f;
   int localHour = 0;
   int minute = 0;
@@ -206,6 +207,8 @@ extern int OFFSET_FUEL_LTRS_X;
 extern int OFFSET_FUEL_LTRS_Y;
 extern int OFFSET_AVG_SPEED_X;
 extern int OFFSET_AVG_SPEED_Y;
+extern int OFFSET_MAX_SPEED_X;
+extern int OFFSET_MAX_SPEED_Y;
 extern int OFFSET_COMPASS_X;
 extern int OFFSET_COMPASS_Y;
 
@@ -217,6 +220,7 @@ extern int ALIGN_INST_KML;
 extern int ALIGN_AVG_KML;
 extern int ALIGN_FUEL_LTRS;
 extern int ALIGN_AVG_SPEED;
+extern int ALIGN_MAX_SPEED;
 
 extern bool SHOW_ELEMENT_BOUNDS;
 // Display-only element visibility toggles. Sensors, calculations and trip
@@ -238,6 +242,7 @@ extern bool SHOW_ELEMENT_BAT;
 extern bool SHOW_ELEMENT_INST_KML;
 extern bool SHOW_ELEMENT_AVG_KML;
 extern bool SHOW_ELEMENT_AVG_SPEED;
+extern bool SHOW_ELEMENT_MAX_SPEED;
 extern bool SHOW_ELEMENT_FUEL_LTRS;
 extern bool SHOW_ELEMENT_COMPASS;
 extern bool SHOW_GHOST_DIGITS;
@@ -274,6 +279,7 @@ extern int currentBrightnessTarget;
 extern int REFRESH_SPEED_MS;
 extern int REFRESH_BAT_MS;
 extern int REFRESH_INST_MS;
+extern int REFRESH_MAX_SPEED_MS;
 extern int REFRESH_FUEL_MS;
 extern float COMPASS_DECLINATION_DEG;
 
@@ -291,6 +297,8 @@ extern int FUEL_INT_DIGITS;
 extern int FUEL_DEC_DIGITS;
 extern int AVG_SPEED_INT_DIGITS;
 extern int AVG_SPEED_DEC_DIGITS;
+extern int MAX_SPEED_INT_DIGITS;
+extern int MAX_SPEED_DEC_DIGITS;
 extern int HEADING_DIGITS;
 extern int ODO_INT_DIGITS;
 extern int ODO_DEC_DIGITS;
@@ -454,6 +462,7 @@ extern unsigned long movingTimeMs;
 extern float instantKml;
 extern float averageKml;
 extern float averageSpeed;
+extern float maxSpeed;
 
 extern TimerState accelState;
 extern unsigned long accelStartTime;

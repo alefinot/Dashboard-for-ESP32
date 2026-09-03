@@ -1755,6 +1755,150 @@ if (!vlw120Ready) {
     }
   }
 
+  // --- Max Speed (session peak, RAM-only; resets on reboot) ---
+  float displayMaxSpd = displaySnap.maxSpeed;
+  if (UNITS_IMPERIAL) displayMaxSpd = kmhToMph(displaySnap.maxSpeed);
+  // Clamp so a converted value can never overflow the fixed cell count.
+  float maxSpdMax = powf(10.0f, (float)MAX_SPEED_INT_DIGITS) -
+                     (MAX_SPEED_DEC_DIGITS > 0 ? 0.5f : 1.0f);
+  if (displayMaxSpd > maxSpdMax) displayMaxSpd = maxSpdMax;
+  static float lastDispMaxSpd = -1.0f;
+  bool maxSpdChanged = fabsf(displayMaxSpd - lastDispMaxSpd) >= 1.0f;
+  // ds15_fontH is normally set by the Instant KM/L block below; if that element
+  // is hidden (and we are the first visible 28px consumer), self-measure so the
+  // clear height / debug box stay correct.
+  if (ds15_fontH == 0) {
+    int16_t msfx, msfy;
+    uint16_t msfw, msfh;
+    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
+    display.getTextBounds("88", 0, 0, &msfx, &msfy, &msfw, &msfh);
+    ds15_fontH = msfh;
+  }
+  if (SHOW_ELEMENT_MAX_SPEED && (forceDraw || (IN_BAND_BUDGET &&
+      (maxSpdChanged || forceDraw)))) {
+    lastDispMaxSpd = displayMaxSpd;
+    componentUpdated = true;
+
+    int maxSpdCenterX = BIG_CENTER_X + OFFSET_MAX_SPEED_X;
+    int maxSpdY = BIG_CENTER_Y + OFFSET_MAX_SPEED_Y;
+
+    static uint16_t w_kmh_unit_maxSpd = 0;
+    static uint16_t badgeW_maxSpd = 0, badgeH_maxSpd = 0;
+    static int16_t badgeBx_maxSpd = 0, badgeBy_maxSpd = 0;
+    static int maxSpdLayoutMode = -1;
+    int maxSpdMode = UNITS_IMPERIAL ? 1 : 0;
+    if (maxSpdLayoutMode != maxSpdMode) {
+      maxSpdLayoutMode = maxSpdMode;
+      uint16_t bw, bh;
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.getTextBounds("MAX", 0, 0, &badgeBx_maxSpd, &badgeBy_maxSpd, &bw, &bh);
+      badgeW_maxSpd = bw + 6;
+      badgeH_maxSpd = bh + 4;
+      display.getTextBounds(speedUnitLabel(UNITS_IMPERIAL), 0, 0, &badgeBx_maxSpd, &badgeBy_maxSpd, &w_kmh_unit_maxSpd, &bh);
+    }
+    static int maxSpdCells[MAX_CELLS] = {0};
+    static int maxSpdCellW = 0, maxSpdCellsCount = 0;
+    if (maxSpdCellsCount == 0) {
+      maxSpdCellsCount = MAX_SPEED_INT_DIGITS + (MAX_SPEED_DEC_DIGITS > 0 ? 1 + MAX_SPEED_DEC_DIGITS : 0);
+      measureDs15Cells(maxSpdCells, maxSpdCellW, maxSpdCellsCount, MAX_SPEED_DEC_DIGITS > 0 ? MAX_SPEED_INT_DIGITS : -1);
+    }
+
+    char maxSpdStr[12];
+    if (displayMaxSpd > 0.0f) {
+      if (MAX_SPEED_DEC_DIGITS > 0)
+        snprintf(maxSpdStr, sizeof(maxSpdStr), "%.*f", MAX_SPEED_DEC_DIGITS, displayMaxSpd);
+      else
+        snprintf(maxSpdStr, sizeof(maxSpdStr), "%d", (int)displayMaxSpd);
+    } else {
+      snprintf(maxSpdStr, sizeof(maxSpdStr), "0");
+    }
+
+    uint16_t w_right_maxSpd = (badgeW_maxSpd > w_kmh_unit_maxSpd) ? badgeW_maxSpd : w_kmh_unit_maxSpd;
+    int currentMaxSpdWidth = maxSpdCellW + 4 + w_right_maxSpd;
+    int maxSpdNumAreaX = applyAlign(maxSpdCenterX, currentMaxSpdWidth, ALIGN_MAX_SPEED);
+
+    int clearMaxSpdH = ds15_fontH + 8;
+
+    display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
+    int maxSpdLen = strlen(maxSpdStr);
+    if (SHOW_GHOST_DIGITS) {
+      // Single merged pass per cell: ghost '8' (solid black) then value on top.
+      int leadingGap = maxSpdCellsCount - maxSpdLen;
+      for (int ci = 0; ci < maxSpdCellsCount; ci++) {
+        char gc = (MAX_SPEED_DEC_DIGITS > 0 && ci == MAX_SPEED_INT_DIGITS) ? '.' : '8';
+        int cellRight = maxSpdNumAreaX + maxSpdCells[ci];
+        int cx;
+        if (gc == '.') {
+          cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+        } else {
+          cx = cellRight - 2 - ds15_digitXOff[8] - ds15_digitWidth[8];
+        }
+        display.setTextColor(ghost_color, TFT_BLACK);
+        display.setCursor(cx, maxSpdY);
+        display.print(gc);
+        if (ci >= leadingGap) {
+          char c = maxSpdStr[ci - leadingGap];
+          int cx2;
+          if (c == '.') {
+            cx2 = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+          } else {
+            int d = c - '0';
+            cx2 = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
+          }
+          display.setTextColor(TFT_MAGENTA);
+          display.setCursor(cx2, maxSpdY);
+          display.print(c);
+        }
+      }
+    } else {
+      // Erase only the digit cells; the static badge/unit column to the right
+      // must never be covered (drawn once on forceDraw, not per update).
+      display.fillRect(maxSpdNumAreaX - 2, maxSpdY - clearMaxSpdH + 4,
+                       maxSpdCellW + 4, clearMaxSpdH, TFT_BLACK);
+      display.setTextColor(TFT_MAGENTA, TFT_BLACK);
+      for (int i = 0; i < maxSpdLen; i++) {
+        char c = maxSpdStr[i];
+        int cellIdx = (maxSpdCellsCount - maxSpdLen) + i;
+        int cellRight = maxSpdNumAreaX + maxSpdCells[cellIdx];
+        int cx;
+        if (c == '.') {
+          cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
+        } else {
+          int d = c - '0';
+          cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
+        }
+        display.setCursor(cx, maxSpdY);
+        display.print(c);
+      }
+    }
+
+    // Static badge + unit: drawn once (boot / layout change), never on value
+    // updates.
+    if (forceDraw) {
+      int rightColMaxSpdX = maxSpdNumAreaX + maxSpdCellW + 4;
+      int maxSpdBadgeX = rightColMaxSpdX + (w_right_maxSpd - badgeW_maxSpd) / 2;
+      int maxSpdBadgeY = maxSpdY - 18;
+      drawAARoundRect(display, maxSpdBadgeX, maxSpdBadgeY, badgeW_maxSpd, badgeH_maxSpd, 2, TFT_MAGENTA);
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.setTextColor(TFT_MAGENTA);
+      display.setCursor(maxSpdBadgeX + 3 - badgeBx_maxSpd, maxSpdBadgeY - badgeBy_maxSpd + 2);
+      display.print("MAX");
+
+      int kmhMaxX = rightColMaxSpdX + (w_right_maxSpd - w_kmh_unit_maxSpd) / 2;
+      display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+      display.setTextColor(TFT_MAGENTA);
+      display.setCursor(kmhMaxX, maxSpdY - 1);
+      display.print(speedUnitLabel(UNITS_IMPERIAL));
+    }
+
+    if (SHOW_ELEMENT_BOUNDS) {
+      int maxSpdTop = maxSpdY + std::min((int)ds15_refY1, -18);
+      int maxSpdBottom = maxSpdY + (int)ds15_refY1 + (int)ds15_fontH;
+      drawDebugBox(display, maxSpdNumAreaX - 2, maxSpdTop - 2,
+                   currentMaxSpdWidth + 4, maxSpdBottom - maxSpdTop + 4);
+    }
+  }
+
   // --- Fuel Liters (4 fixed cells: tens, ones, dot, tenths) ---
   float displayFuelLtrs = displaySnap.fuelLiters;
   if (UNITS_IMPERIAL) displayFuelLtrs = litersToGal(displaySnap.fuelLiters);

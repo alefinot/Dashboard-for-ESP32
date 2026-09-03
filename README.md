@@ -42,7 +42,7 @@ Dashboard++ replaces legacy analog or basic digital gauges with an automotive-gr
 - **PROGMEM VLW Font System:** All fonts (Conthrax SemiBold and DS-DIGIT variants) are compiled into flash as PROGMEM byte arrays (generated from the `.vlw` sources in `data/Fonts/` by `scripts/vlw_to_header.py`), loaded at build time via `loadVLWFont()` — zero DRAM per glyph, no runtime filesystem lookups.
 - **Dirty-Rendering Frame Pipeline:** Element state tracking ensures only mutated visual regions are drawn to the SPI bus, with dedicated per-element refresh rate throttles for speed, satellite count, timer, battery, fuel economy, and average speed.
 - **Configurable 7-Segment Digital Fonts:** 120px (sprite) and 28px (direct) seven-segment fonts with background "ghost digit" rendering (888 backdrop effect) and fully user-configurable integer and decimal digit boundaries for all telemetry counters.
-- **Full Sensor Suite Integration:** Precise fuel level monitoring (20-point piecewise linear calibration table + EMA filtering), engine coolant thermistor telemetry (Steinhart-Hart equation), battery voltage divider monitoring, 3-axis I2C digital compass heading, trip fuel economy tracking, and **trip average speed** display.
+- **Full Sensor Suite Integration:** Precise fuel level monitoring (20-point piecewise linear calibration table + EMA filtering), engine coolant thermistor telemetry (Steinhart-Hart equation), battery voltage divider monitoring, 3-axis I2C digital compass heading, trip fuel economy tracking, **trip average speed**, and a **session max speed (Vmax)** readout display.
 - **FreeRTOS Dual-Core Multitasking:** Strict core isolation — the continuous ~1.1KB/s GNSS UART stream is quarantined in its own Core 0 task (bulk ring-buffer read, bounded per tick, sitting below the WiFi stack), while the vehicle sensor suite and UI rendering run on Core 1, so a GPS stream backlog can never stall the dashboard or freeze any real-time value.
 - **Embedded Web Management Portal:** Embedded single-page Web application accessible over SoftAP or local WiFi network featuring grouped card-based configuration UI with live search, real-time performance telemetry panel (FPS, CPU frequency/temp, RAM, flash storage), interactive sliders, color pickers, NVS backup/restore, web serial terminal stream, cloud OTA pull, and HTTP file upload OTA firmware updating.
 - **Hysteresis-Based Dynamic CPU Scaling:** Three-state frequency governor (240/160/80 MHz) with hysteresis deadbands prevents oscillation, and thermal throttling automatically caps frequency at configurable warning/critical temperature thresholds.
@@ -243,6 +243,7 @@ The **Sensors Tuning** WebUI card calibrates the two analog sensors against a re
 - **Instantaneous (KM/L):** Calculated across a 3-second sliding window:
   $$KM/L_{\text{inst}} = 0.4 \cdot \left(\frac{\Delta D_{3\text{s}}}{\Delta C_{3\text{s}}}\right) + 0.6 \cdot KM/L_{\text{inst, prev}}$$
 - **Trip Average Speed (KM/H):** $V_{\text{avg}} = \frac{D_{\text{trip}}}{t_{\text{elapsed}}}$, displayed in the bottom row alongside fuel economy readouts.
+- **Session Max Speed (Vmax):** The highest fused/filtered speed reached this power-on session; held on screen until the next reboot (RAM-only, no NVS persistence, no manual reset). Rendered as the **MAX** icon in the bottom row — same 28px 7-segment structure as the Instant KM/L readout — in MPH under imperial. Controlled by `SHOW_ELEMENT_MAX_SPEED`, `OFFSET_MAX_SPEED_X/Y`, `ALIGN_MAX_SPEED`, `MAX_SPEED_INT_DIGITS`, `MAX_SPEED_DEC_DIGITS`, and the `REFRESH_MAX_SPEED_MS` redraw throttle.
 
 #### Acceleration Performance Timer
 Measures time taken to accelerate between configured speed thresholds (`ACCEL_START_SPEED` to `ACCEL_TARGET_SPEED`, e.g., 0–50 km/h or 0–100 km/h) using a 3-state state machine with configurable timeout (`ACCEL_MAX_TIME`, default=30s):
@@ -423,11 +424,11 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `LIGHT_SENSOR_BRIGHT_VAL`: Bright-reference ambient light value (calibrated via `/api/ambient/cal-bright`).
 
 #### Digit Boundaries (Configurable 7-Segment Formatting)
-- `SPEED_DIGITS`, `SAT_DIGITS`, `TMR_INT_DIGITS`, `TMR_DEC_DIGITS`, `BAT_INT_DIGITS`, `BAT_DEC_DIGITS`, `INST_INT_DIGITS`, `INST_DEC_DIGITS`, `AVG_INT_DIGITS`, `AVG_DEC_DIGITS`, `AVG_SPEED_INT_DIGITS`, `AVG_SPEED_DEC_DIGITS`, `FUEL_INT_DIGITS`, `FUEL_DEC_DIGITS`, `ODO_INT_DIGITS`, `ODO_DEC_DIGITS`: Configurable integer and decimal digit limits for all UI numerical readouts.
+- `SPEED_DIGITS`, `SAT_DIGITS`, `TMR_INT_DIGITS`, `TMR_DEC_DIGITS`, `BAT_INT_DIGITS`, `BAT_DEC_DIGITS`, `INST_INT_DIGITS`, `INST_DEC_DIGITS`, `AVG_INT_DIGITS`, `AVG_DEC_DIGITS`, `AVG_SPEED_INT_DIGITS`, `AVG_SPEED_DEC_DIGITS`, `MAX_SPEED_INT_DIGITS`, `MAX_SPEED_DEC_DIGITS`, `FUEL_INT_DIGITS`, `FUEL_DEC_DIGITS`, `ODO_INT_DIGITS`, `ODO_DEC_DIGITS`: Configurable integer and decimal digit limits for all UI numerical readouts.
 
 #### UI Layout Offset Coordinates
 - `BIG_CENTER_X`, `BIG_CENTER_Y`: Screen anchor origin point.
-- `OFFSET_BIG_TIME_X/Y`, `OFFSET_BIG_DATE_X/Y`, `OFFSET_BIG_SPEED_NUM_X/Y`, `OFFSET_BIG_SPEED_UNIT_X/Y`, `OFFSET_BIG_ODO_X/Y`, `OFFSET_BIG_SAT_X/Y`, `OFFSET_BIG_TMR_X/Y`, `OFFSET_BIG_BAT_X/Y`, `OFFSET_INST_KML_X/Y`, `OFFSET_AVG_KML_X/Y`, `OFFSET_AVG_SPEED_X/Y`, `OFFSET_FUEL_LTRS_X/Y`, `OFFSET_COMPASS_X/Y`, `SIDEBAR_LEFT_X/Y`, `SIDEBAR_RIGHT_X/Y`: Fine-grained pixel coordinate offsets for every UI component.
+- `OFFSET_BIG_TIME_X/Y`, `OFFSET_BIG_DATE_X/Y`, `OFFSET_BIG_SPEED_NUM_X/Y`, `OFFSET_BIG_SPEED_UNIT_X/Y`, `OFFSET_BIG_ODO_X/Y`, `OFFSET_BIG_SAT_X/Y`, `OFFSET_BIG_TMR_X/Y`, `OFFSET_BIG_BAT_X/Y`, `OFFSET_INST_KML_X/Y`, `OFFSET_AVG_KML_X/Y`, `OFFSET_AVG_SPEED_X/Y`, `OFFSET_MAX_SPEED_X/Y`, `OFFSET_FUEL_LTRS_X/Y`, `OFFSET_COMPASS_X/Y`, `SIDEBAR_LEFT_X/Y`, `SIDEBAR_RIGHT_X/Y`: Fine-grained pixel coordinate offsets for every UI component.
 
 ---
 
