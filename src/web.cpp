@@ -742,7 +742,7 @@ void webServerTask(void *pvParameters) {
   if (txPower < -1) txPower = -1;
   if (txPower > 20) txPower = 20;
   WiFi.setTxPower((wifi_power_t)txPower);
-  WiFi.softAP("Dashboard_Config", "12345678");
+  WiFi.softAP("Dashboard_Config", AP_PASSWORD);
   logPrintf("AP: Dashboard_Config\n");
   logPrintf("AP IP: %s\n", WiFi.softAPIP().toString().c_str());
 

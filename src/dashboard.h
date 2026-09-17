@@ -328,6 +328,7 @@ extern char WIFI_SSID_3[64];
 extern char WIFI_PASSWORD_3[64];
 extern char WIFI_SSID_4[64];
 extern char WIFI_PASSWORD_4[64];
+extern char AP_PASSWORD[64];
 extern int WIFI_TX_POWER_DBM;
 extern int WIFI_RETRY_MODE;
 extern int WIFI_RETRY_SECONDS;

@@ -413,6 +413,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `WEATHER_LOCALE` (default="en"): ISO locale code for weather-condition naming.
 
 #### WiFi & Cloud OTA
+- `AP_PASSWORD` (default="12345678"): Password of the `Dashboard_Config` SoftAP (the configuration portal). Set in the WebUI (System & General → Wifi → Device Config AP).
 - `WIFI_RETRY_MODE` (default=1): Search policy — `0` = one cycle, `1` = fixed-time (`WIFI_RETRY_SECONDS`), `2` = search forever. Same policy governs reconnects after a lost link.
 - `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
 - `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull (checks once per boot while enabled).
