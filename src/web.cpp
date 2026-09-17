@@ -1408,6 +1408,11 @@ void webServerTask(void *pvParameters) {
       staNetIdx = 0;
       staSearchStart = 0;
       staRetryAt = millis() + 500;
+      // Clear the finalize latch so the post-join block re-runs on the
+      // reconnect: re-arms the weather fetch and re-binds mDNS for the
+      // freshly-assigned IP (otherwise dashboard-pp.local keeps advertising
+      // the stale address). NTP stays one-shot via staHasConnectedBefore.
+      staFinalized = false;
     }
 
     // Non-blocking STA connect: try each configured network for up to 5s,
