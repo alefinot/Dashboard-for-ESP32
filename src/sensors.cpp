@@ -1268,10 +1268,13 @@ void processFuelConsumption() {
       tripFuelConsumedLiters = consumed;
     // A fuel-level rise beyond the user-set threshold (REFUEL_RESET_LITERS,
     // webui "Refuel Reset Threshold") counts as a refuel: reset the trip
-    // consumption instead of subtracting the rising level.
+    // consumption instead of subtracting the rising level. The trip distance
+    // resets with it, so the post-refuel average km/L is not diluted against
+    // the pre-refuel trip distance.
     else if (consumed < -REFUEL_RESET_LITERS) {
       tripStartFuelLiters = fuelLiters;
       tripFuelConsumedLiters = 0.0f;
+      tripDistanceKm = 0.0;
     }
   }
   // Consumption is computed internally as L/100km (the physically natural
