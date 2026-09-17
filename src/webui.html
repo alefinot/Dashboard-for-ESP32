@@ -2940,6 +2940,11 @@ function doOtaPull() {
             const poll = setInterval(() => {
                 if (tabHidden) return;
                 fetch('/api/ota/check').then(r => r.json()).then(c => {
+                    if (c.status && c.status.startsWith('waiting')) {
+                        msgBox.className = '';
+                        msgBox.innerText = c.status;
+                        return;
+                    }
                     if (c.status && c.status !== 'checking...') {
                         clearInterval(poll);
                         btn.disabled = false; btn.textContent = 'Check Updates';

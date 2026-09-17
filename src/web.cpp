@@ -330,14 +330,21 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
     return;
   }
   // Throttling guards repeated checks (manual button spam); the once-per-boot
-  // automatic check skips it since it fires within a second of boot.
-  if (!skipThrottle) {
-    unsigned long sinceLast = millis() - lastOtaCheckMs;
-    if (sinceLast < OTA_RECHECK_MIN_MS) {
-      unsigned long waitS = (OTA_RECHECK_MIN_MS - sinceLast) / 1000 + 1;
-      logPrintf("OTA Pull: recheck throttled, wait %lus\n", waitS);
-      setOtaPullStatus(("waiting " + String(waitS) + "s before retry").c_str());
-      return;
+  // automatic check skips it since it fires within a second of boot. A
+  // throttled check waits here and retries by itself, publishing a live
+  // countdown in the status string, instead of making the user re-click.
+  // lastOtaCheckMs == 0 means "never checked": the first check always runs.
+  if (!skipThrottle && lastOtaCheckMs != 0 &&
+      millis() - lastOtaCheckMs < OTA_RECHECK_MIN_MS) {
+    logPrintf("OTA Pull: throttled, auto-retry in %lus\n",
+              (unsigned long)((OTA_RECHECK_MIN_MS -
+                              (millis() - lastOtaCheckMs)) /
+                             1000UL));
+    while (millis() - lastOtaCheckMs < OTA_RECHECK_MIN_MS) {
+      unsigned long remainMs = OTA_RECHECK_MIN_MS - (millis() - lastOtaCheckMs);
+      setOtaPullStatus(("waiting " + String(remainMs / 1000 + 1) +
+                        "s before retry (auto)").c_str());
+      vTaskDelay(pdMS_TO_TICKS(500));
     }
   }
   lastOtaCheckMs = millis();
