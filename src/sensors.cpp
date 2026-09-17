@@ -1522,21 +1522,24 @@ bool systemTimeToLocal(int &hour, int &minute, int &day, int &month,
   struct timeval tv;
   gettimeofday(&tv, NULL);
   if (tv.tv_sec <= 1000000000) return false;
-  time_t local = tv.tv_sec;
-  struct tm *loc_tm = gmtime(&local);
+  // gmtime_r, not gmtime: this runs on two cores (sensor task + display
+  // loop), and gmtime() writes a shared static tm buffer.
+  struct tm tmUtc = {0};
+  if (!gmtime_r(&tv.tv_sec, &tmUtc)) return false;
   int dst = 0;
   if (TZ_DST_ENABLED) {
-    int euroOff = getEuropeanOffset(loc_tm->tm_year + 1900, loc_tm->tm_mon + 1,
-                                    loc_tm->tm_mday, loc_tm->tm_hour);
+    int euroOff = getEuropeanOffset(tmUtc.tm_year + 1900, tmUtc.tm_mon + 1,
+                                    tmUtc.tm_mday, tmUtc.tm_hour);
     dst = euroOff - 1;
   }
-  local += ((TZ_OFFSET_HOURS + dst) * 3600);
-  loc_tm = gmtime(&local);
-  hour = loc_tm->tm_hour;
-  minute = loc_tm->tm_min;
-  day = loc_tm->tm_mday;
-  month = loc_tm->tm_mon + 1;
-  year = loc_tm->tm_year % 100;
+  time_t local = tv.tv_sec + ((TZ_OFFSET_HOURS + dst) * 3600);
+  struct tm tmLocal = {0};
+  if (!gmtime_r(&local, &tmLocal)) return false;
+  hour = tmLocal.tm_hour;
+  minute = tmLocal.tm_min;
+  day = tmLocal.tm_mday;
+  month = tmLocal.tm_mon + 1;
+  year = tmLocal.tm_year % 100;
   return true;
 }
 
