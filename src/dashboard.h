@@ -574,7 +574,6 @@ void startOtaPull(bool manual, bool skipThrottle = false);
 void processOtaMemRelease();
 extern volatile bool otaMemReleaseRequested;
 extern volatile bool otaMemReleased;
-extern volatile bool otaMemReleased;
 void processMemSaverRelease();
 extern volatile bool memSaverRequested;
 extern volatile bool memSaverActive;
