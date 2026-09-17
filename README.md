@@ -418,7 +418,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
 - `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull (checks once per boot while enabled).
 - `OTA_PULL_URL` (default=""): HTTPS URL of the target firmware binary.
-- `OTA_CURRENT_VERSION` (default="1.3.3"): Version string compared against the cloud manifest.
+- `OTA_CURRENT_VERSION` (default="1.3.4"): Version string compared against the cloud manifest.
 
 #### Ambient Light (Auto-Brightness)
 - `LIGHT_SENSOR_DARK_VAL`: Dark-reference ambient light value (calibrated via `/api/ambient/cal-dark`).
@@ -539,6 +539,14 @@ In Demo Mode:
 ---
 
 ## Changelog
+
+### V1.3.4 — Refuel fix, mDNS rebind on reconnect, OTA check auto-retry
+- **Refuel trip reset** — the automatic refuel reset (fuel rise ≥ threshold) now also clears `tripDistanceKm`, so the post-refuel average KM/L is no longer diluted against the pre-refuel trip distance.
+- **mDNS rebind on reconnect** — the STA finalize latch is cleared on link loss, so a reconnect re-binds mDNS to the new DHCP IP (`dashboard-pp.local` no longer advertises a stale address) and re-arms the weather fetch; NTP stays one-shot.
+- **OTA check auto-retry** — a throttled cloud update check now waits out its 1-minute limit and retries by itself, showing a live countdown in the WebUI instead of a frozen "waiting" message; the first check after boot always runs.
+- **Configurable AP password** — new `AP_PASSWORD` param (default `12345678`) makes the `Dashboard_Config` SoftAP password user-settable in the WebUI (System & General → Wifi).
+- **Thread-safe clock** — the shared local-time computation switched to `gmtime_r` (it is called from two cores).
+- **Cleanup** — removed the dead 10px Conthrax VLW font (~10 KB flash; its path shimmed to the 4pt7b font) and a duplicate `otaMemReleased` extern.
 
 ### V1.3.3 — Crash forensics, safe-mode loop breaker, bad_alloc guards
 - **Boot/reboot forensics** — new `/api/boot` endpoint exposes the reset reason, fast-reboot-storm state, last-reboot tag + heap, and the min-free-heap watermark since boot; every `ESP.restart()` site is now tagged so a crash vs. a clean reboot is diagnosable (a hard crash reads `PANIC`, a clean reboot reads `SW`).
