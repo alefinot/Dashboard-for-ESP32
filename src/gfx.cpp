@@ -50,7 +50,6 @@ void LGFX_ST7789_4::applyBusConfig() {
 #include "Conthrax_SemiBold4pt7b.h"
 #include "DS_DIGIT_120px_vlw.h"
 #include "DS_DIGIT_28px_vlw.h"
-#include "Conthrax_SemiBold_10px_vlw.h"
 #include "Conthrax_SemiBold_16px_vlw.h"
 #include "Conthrax_SemiBold_28px_vlw.h"
 

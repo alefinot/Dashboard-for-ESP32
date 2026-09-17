@@ -1,7 +1,6 @@
 #include "dashboard.h"
 #include "Conthrax_SemiBold7pt7b.h"
 #include "Conthrax_SemiBold4pt7b.h"
-#include "Conthrax_SemiBold_10px_vlw.h"
 #include "Conthrax_SemiBold_16px_vlw.h"
 
 #define MAX_CELLS 16
