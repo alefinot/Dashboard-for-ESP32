@@ -1955,6 +1955,191 @@ const configMap = [
     }
 ];
 
+/* =====================================================================
+ * Presentation shims — custom dropdown widgets + slider track fill.
+ *
+ * Native <select> elements (class .dd-native) remain the source of truth:
+ * collectConfig(), applyDefault() and updateCpuMode() all keep reading
+ * and writing them by id. The shims only add a visible glass widget in
+ * front of each select, keyboard navigation, and the filled-track paint
+ * for range inputs. No functional behavior is altered.
+ * =================================================================== */
+(function () {
+    'use strict';
+
+    function fillSlider(el) {
+        if (!el || el.type !== 'range') return;
+        let min = parseFloat(el.min || '0');
+        let max = parseFloat(el.max || '1');
+        let v = parseFloat(el.value || '0');
+        let p = (max > min) ? ((v - min) / (max - min)) * 100 : 0;
+        p = Math.max(0, Math.min(100, p));
+        el.style.setProperty('--fill', String(p));
+    }
+
+    function syncWrap(wrap, sel) {
+        let i = sel.selectedIndex;
+        let valueEl = wrap.querySelector('.dd-value');
+        if (valueEl) valueEl.textContent = (i >= 0 && sel.options[i]) ? sel.options[i].textContent : '';
+        let opts = wrap.querySelectorAll('.dd-opt');
+        for (let j = 0; j < opts.length; j++) opts[j].setAttribute('aria-selected', String(j === i));
+        wrap.classList.toggle('dd-disabled', !!sel.disabled);
+    }
+
+    function buildWidget(sel) {
+        let wrap = document.createElement('div');
+        wrap.className = sel.disabled ? 'dd dd-disabled' : 'dd';
+        wrap.innerHTML =
+            '<button type="button" class="dd-trigger" aria-haspopup="listbox" aria-expanded="false">' +
+            '  <span class="dd-value"></span>' +
+            '  <svg class="dd-caret" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>' +
+            '</button>' +
+            '<div class="dd-list" role="listbox" tabindex="-1"></div>';
+        sel.insertAdjacentElement('beforebegin', wrap);
+
+        let trigger = wrap.querySelector('.dd-trigger');
+        let list = wrap.querySelector('.dd-list');
+        let buttons = [];
+        Array.prototype.forEach.call(sel.options, function (opt) {
+            let b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'dd-opt';
+            b.textContent = opt.textContent;
+            b.setAttribute('role', 'option');
+            b.setAttribute('aria-selected', String(opt.value === sel.value));
+            b._value = opt.value;
+            b.addEventListener('click', function () { commit(b._value); });
+            b.addEventListener('mousemove', function () { setActive(b); });
+            list.appendChild(b);
+            buttons.push(b);
+        });
+
+        let active = -1;
+        function isOpen() { return wrap.classList.contains('open'); }
+        function open() { wrap.classList.add('open'); trigger.setAttribute('aria-expanded', 'true'); }
+        function close() {
+            wrap.classList.remove('open');
+            trigger.setAttribute('aria-expanded', 'false');
+            for (let j = 0; j < buttons.length; j++) buttons[j].classList.remove('active');
+            active = -1;
+        }
+        function setActive(btn) {
+            if (active >= 0 && buttons[active]) buttons[active].classList.remove('active');
+            active = buttons.indexOf(btn);
+            if (btn) {
+                btn.classList.add('active');
+                btn.scrollIntoView({ block: 'nearest' });
+            }
+        }
+        function commit(value) {
+            sel.value = value;
+            syncWrap(wrap, sel);
+            close();
+            sel.dispatchEvent(new Event('input', { bubbles: true }));
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            trigger.focus();
+        }
+        trigger.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (sel.disabled) return;
+            if (isOpen()) { close(); } else { open(); }
+        });
+        trigger.addEventListener('keydown', function (e) {
+            let k = e.key;
+            if (k === 'Enter') {
+                e.preventDefault();
+                if (isOpen() && active >= 0) commit(buttons[active]._value);
+                else open();
+            } else if (k === ' ' || k === 'Spacebar') {
+                e.preventDefault();
+                if (isOpen() && active >= 0) commit(buttons[active]._value);
+                else open();
+            } else if (k === 'Escape') {
+                close();
+            } else if (k === 'ArrowDown' || k === 'ArrowUp') {
+                e.preventDefault();
+                let n = buttons.length;
+                if (!n) return;
+                if (!isOpen()) open();
+                let next = (k === 'ArrowDown') ? (active + 1 + n) % n : (active - 1 + n) % n;
+                setActive(buttons[next]);
+            } else if (k === 'Home' && isOpen()) {
+                e.preventDefault();
+                setActive(buttons[0]);
+            } else if (k === 'End' && isOpen()) {
+                e.preventDefault();
+                setActive(buttons[buttons.length - 1]);
+            } else if (k === 'Tab') {
+                close();
+            }
+        });
+        list.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') { close(); trigger.focus(); }
+        });
+
+        wrap._ddSync = function () { syncWrap(wrap, sel); };
+        wrap._ddClose = close;
+
+        syncWrap(wrap, sel);
+    }
+
+    function closeAll() {
+        document.querySelectorAll('.dd.open').forEach(function (w) { if (w._ddClose) w._ddClose(); });
+    }
+
+    function initAll() {
+        let fc = document.getElementById('form-container');
+        if (!fc) return;
+        fc.querySelectorAll('select.dd-native').forEach(function (sel) {
+            let prev = sel.previousElementSibling;
+            if (prev && prev.classList.contains('dd')) return;
+            buildWidget(sel);
+        });
+        fc.querySelectorAll('input[type="range"]').forEach(fillSlider);
+    }
+
+    // The hidden selects are the source of truth — keep the widgets in sync
+    // no matter who writes to them (applyDefault, unit toggle, dynamic-CPU
+    // disable, the widgets themselves).
+    document.addEventListener('input', function (e) {
+        let t = e.target;
+        if (!t) return;
+        if (t.tagName === 'SELECT' && t.classList.contains('dd-native')) {
+            let w = t.previousElementSibling;
+            if (w && w.classList.contains('dd') && w._ddSync) w._ddSync();
+        }
+        if (t.type === 'range') fillSlider(t);
+        if (t.id && t.type !== 'range') {
+            let pair = document.getElementById(t.id + '_slider');
+            if (pair) fillSlider(pair);
+        }
+    });
+    document.addEventListener('change', function (e) {
+        let t = e.target;
+        if (t && t.id === 'ENABLE_DYNAMIC_CPU') {
+            let sel = document.getElementById('MANUAL_CPU_FREQ');
+            if (sel) {
+                let w = sel.previousElementSibling;
+                if (w && w.classList.contains('dd') && w._ddSync) w._ddSync();
+            }
+        }
+    });
+    // Clicking outside every open widget closes them; clicks inside one
+    // (its padding, an option) keep it open.
+    document.addEventListener('click', function (e) {
+        let open = document.querySelectorAll('.dd.open');
+        for (let i = 0; i < open.length; i++) {
+            if (open[i].contains(e.target)) return;
+        }
+        closeAll();
+    });
+
+    // Rebuild widgets after every form re-render (initial load, unit toggle,
+    // reset-to-default). The observer fires after innerHTML replaced.
+    let fc0 = document.getElementById('form-container');
+    if (fc0) new MutationObserver(function () { initAll(); }).observe(fc0, { childList: true });
+    initAll();
+})();
 document.addEventListener('DOMContentLoaded', function() {
     fetch('/api/config').then(r => {
         if (!r.ok) throw { status: r.status };
