@@ -855,6 +855,7 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 5px; }
 }
 .tt-card h4::before { background: var(--accent-cyan); }
 .tt-label { font-size: 11px; color: var(--text-muted); }
+.tt-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px 0; }
 .tt-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -2052,10 +2053,10 @@ function renderForm(d) {
                     let val = d[item.id];
                     let opts = item.options.map(o => `<option value="${o.value}" ${o.value == val ? 'selected' : ''}>${o.label}</option>`).join('');
                     if (inCardSubCard) {
-                        groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls" style="flex-wrap:nowrap;"><select id="${item.id}" style="width:auto;min-width:120px;">${opts}</select>${resetBtn(item.id)}</div></div>`;
+                        groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls" style="flex-wrap:nowrap;"><select id="${item.id}" class="dd-native" hidden>${opts}</select>${resetBtn(item.id)}</div></div>`;
                     } else {
                         closeSubCard();
-                        groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls" style="width:auto;flex:1;justify-content:flex-end;"><select id="${item.id}">${opts}</select>${resetBtn(item.id)}</div></div></div>`;
+                        groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls" style="flex:1;"><select id="${item.id}" class="dd-native" hidden>${opts}</select>${resetBtn(item.id)}</div></div></div>`;
                     }
                 }
             } else if (iType === 'threshold-row') {
@@ -2125,19 +2126,19 @@ function renderForm(d) {
                 closeSubCard();
                 hasItems = true;
                 let tableArr = d[item.arrayId] || [950, 840, 750, 670, 600, 530, 460, 400];
-                let liveLine = item.liveId ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px 0;"><span style="font-size:12px;color:var(--text-muted);">Current sensor value (raw ADC): <strong id="${item.liveId}" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span></div>` : '';
+                let liveLine = item.liveId ? `<div class="tt-live"><span>Current sensor value (raw ADC): <strong id="${item.liveId}">--</strong></span></div>` : '';
                 let tableHtml = `
-                <div class="card" style="grid-column:1/-1;">
+                <div class="card tt-card" style="grid-column:1/-1;">
                     <h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">${item.label}</h4>${liveLine}
-                    <label style="font-size:11px;">Number of points (tank capacity + 1):</label>
-                    <div style="display:flex; align-items:center; gap:8px; margin:6px 0 10px 0;">
+                    <label class="tt-label">Number of points (tank capacity + 1):</label>
+                    <div class="tt-row">
                         <input type="number" id="${item.pointCount}" value="${tableArr.length}" min="2" max="20" style="width:70px;">${resetBtn(item.pointCount)}
                         <button onclick="save();setTimeout(() => location.reload(), 500)" class="btn-secondary" style="padding:5px 10px; font-size:11px;">↻ Refresh Table</button>
                     </div>
-                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:6px 12px; align-items:center;">`;
+                    <div class="tt-grid">`;
                 
                 tableArr.forEach((val, idx) => {
-                    tableHtml += `<div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:'JetBrains Mono',monospace;">#${idx}</span><input type="number" id="TT_${idx}" value="${val}" style="width:100%;">${resetBtn('TT_' + idx)}</div>`;
+                    tableHtml += `<div class="tt-cell"><span class="tt-idx">#${idx}</span><input type="number" id="TT_${idx}" value="${val}" style="width:100%;">${resetBtn('TT_' + idx)}</div>`;
                 });
                 tableHtml += `</div>`;
                 if (item.rows) {
