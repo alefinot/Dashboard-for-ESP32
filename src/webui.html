@@ -1178,15 +1178,16 @@ button svg { fill: none; stroke: currentColor; }
 
 <div class="sticky-top">
 <div class="header">
-    <h2>Dashboard++ Setup</h2>
+    <div class="header-row">
+        <div class="brand"><span class="brand-dot" aria-hidden="true"></span><h2>Dashboard++ Setup</h2></div>
+        <label class="adv-mode-toggle" for="ADV_MODE" title="Show advanced and technical settings">
+            <span class="adv-text">Advanced Mode</span>
+            <input type="checkbox" id="ADV_MODE" onchange="onAdvToggle(this)">
+        </label>
+    </div>
     <div class="ip-banner">
         <span id="ip-info">LAN: <a href="http://192.168.1.136/" target="_blank">192.168.1.136</a> &nbsp;|&nbsp; AP: <a href="http://192.168.4.1/" target="_blank">192.168.4.1</a></span>
     </div>
-    <label class="adv-mode-toggle" title="Show advanced and technical settings">
-        <span>Advanced Mode</span>
-        <input type="checkbox" id="ADV_MODE" onchange="onAdvToggle(this)">
-        <span class="adv-switch"></span>
-    </label>
 </div>
 
 <div id="msg" class="msg-success">Time synced successfully!</div>
