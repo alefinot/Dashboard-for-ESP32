@@ -1029,114 +1029,6 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", buf);
   });
 
-  server.on("/api/compass/cal-start", HTTP_POST, []() {
-    if (!compassReady) {
-      server.send(200, "application/json",
-                  "{\"status\":\"error\",\"error\":\"Compass not detected\"}");
-      return;
-    }
-    compassCalStart(30);
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
-  });
-
-  server.on("/api/compass/cal-cancel", HTTP_POST, []() {
-    compassCalCancel();
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
-  });
-
-  server.on("/api/compass/cal-status", HTTP_GET, []() {
-    long remain = compassCalActive ? (long)((compassCalEndTime - millis()) / 1000) : 0;
-    char buf[384];
-    snprintf(buf, sizeof(buf),
-             "{\"state\":\"%s\",\"remaining\":%ld,\"minX\":%d,\"maxX\":%d,"
-             "\"minY\":%d,\"maxY\":%d,\"minZ\":%d,\"maxZ\":%d,"
-             "\"offX\":%d,\"offY\":%d,\"offZ\":%d,"
-             "\"scaleX\":%.3f,\"scaleY\":%.3f,\"scaleZ\":%.3f,"
-             "\"tX\":%d,\"tY\":%d,\"tZ\":%d,\"result\":\"%s\"}",
-             compassCalActive ? "capturing" : "idle", remain,
-             compassCalMinX, compassCalMaxX, compassCalMinY, compassCalMaxY,
-             compassCalMinZ, compassCalMaxZ, COMPASS_CAL_X, COMPASS_CAL_Y,
-             COMPASS_CAL_Z,
-             (double)COMPASS_CAL_SCALE_X, (double)COMPASS_CAL_SCALE_Y,
-             (double)COMPASS_CAL_SCALE_Z,
-             COMPASS_CAL_TX, COMPASS_CAL_TY, COMPASS_CAL_TZ,
-             compassCalResult);
-    server.send(200, "application/json", buf);
-  });
-
-  // Current raw magnetometer sample. The webui polls this during a capture
-  // to build its own sample cloud in the browser (no ESP32 RAM cost).
-  server.on("/api/compass/raw", HTTP_GET, []() {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "{\"x\":%d,\"y\":%d,\"z\":%d}",
-             compassRawX, compassRawY, compassRawZ);
-    server.send(200, "application/json", buf);
-  });
-
-  // Apply browser-computed calibration values (outlier-trimmed offsets +
-  // soft-iron scale + tilt axis). Range-checked before touching NVS.
-  server.on("/api/compass/cal-apply", HTTP_POST, []() {
-    if (!server.hasArg("plain")) {
-      server.send(400, "application/json", "{\"status\":\"error\",\"error\":\"no body\"}");
-      return;
-    }
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, server.arg("plain"));
-    if (err) {
-      logPrintf("Compass: cal-apply parse error\n");
-      server.send(400, "application/json",
-                  "{\"status\":\"error\",\"error\":\"parse\"}");
-      return;
-    }
-    int offX = doc["offX"] | 0;
-    int offY = doc["offY"] | 0;
-    int offZ = doc["offZ"] | 0;
-    float sX = doc["sX"] | 1.0f;
-    float sY = doc["sY"] | 1.0f;
-    float sZ = doc["sZ"] | 1.0f;
-    if (offX < -30000 || offX > 30000 || offY < -30000 || offY > 30000 ||
-        offZ < -30000 || offZ > 30000 || sX < 0.2f || sX > 5.0f ||
-        sY < 0.2f || sY > 5.0f || sZ < 0.2f || sZ > 5.0f) {
-      server.send(400, "application/json",
-                  "{\"status\":\"error\",\"error\":\"out of range\"}");
-      return;
-    }
-    COMPASS_CAL_X = (int16_t)offX;
-    COMPASS_CAL_Y = (int16_t)offY;
-    COMPASS_CAL_Z = (int16_t)offZ;
-    COMPASS_CAL_SCALE_X = sX;
-    COMPASS_CAL_SCALE_Y = sY;
-    COMPASS_CAL_SCALE_Z = sZ;
-    bool tiltOk = false;
-    int tX = 0, tY = 0, tZ = 0;
-    if (!doc["tX"].isNull()) {
-      tX = doc["tX"] | 0;
-      tY = doc["tY"] | 0;
-      tZ = doc["tZ"] | 0;
-      float tl = (float)sqrt((double)tX * tX + (double)tY * tY + (double)tZ * tZ);
-      tiltOk = (tl > 26200.0f && tl < 39300.0f);
-    }
-    { Preferences p; p.begin("cfg", false);
-      p.putInt("CMP_CAL_X", COMPASS_CAL_X);
-      p.putInt("CMP_CAL_Y", COMPASS_CAL_Y);
-      p.putInt("CMP_CAL_Z", COMPASS_CAL_Z);
-      p.putFloat("CMP_SCALE_X", COMPASS_CAL_SCALE_X);
-      p.putFloat("CMP_SCALE_Y", COMPASS_CAL_SCALE_Y);
-      p.putFloat("CMP_SCALE_Z", COMPASS_CAL_SCALE_Z);
-      if (tiltOk) {
-        COMPASS_CAL_TX = (int16_t)tX;
-        COMPASS_CAL_TY = (int16_t)tY;
-        COMPASS_CAL_TZ = (int16_t)tZ;
-        p.putInt("CMP_TILT_X", COMPASS_CAL_TX);
-        p.putInt("CMP_TILT_Y", COMPASS_CAL_TY);
-        p.putInt("CMP_TILT_Z", COMPASS_CAL_TZ);
-      }
-      p.end(); }
-    logPrintf("Compass: applied from webui: X=%d Y=%d Z=%d S=%.3f/%.3f/%.3f %s\n",
-              offX, offY, offZ, sX, sY, sZ, tiltOk ? "tilt set" : "tilt kept");
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
-  });
-
   server.on("/api/ota", HTTP_POST, []() {
     if (otaUpdateSuccess) {
       server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Update OK\"}");
@@ -1589,8 +1481,8 @@ void webServerTask(void *pvParameters) {
       }
     }
 
-    // Low-heap watchdog: the display keeps speed sprite + tape sprite + the
-    // 120px VLW buffer (~60KB total), which can starve /api/config (~30-45KB
+    // Low-heap watchdog: the display keeps speed sprite + the 120px VLW
+    // buffer (~60KB total), which can starve /api/config (~30-45KB
     // transient) and the TLS stack. Ask the display task to drop the big
     // sprites (memory-saver mode); if even that is not enough, enter SAFE
     // MODE (stay up, no reboot) instead of rebooting to clear heap
@@ -1605,7 +1497,7 @@ void webServerTask(void *pvParameters) {
     // the OTA pull does its own pre-TLS release, and the weather fetch
     // releases before an https connect. Memory-saver is REVERSIBLE: once free
     // heap stays >= 108KB for a minute the flags are cleared and
-    // ensureSpeedSprite()/the tape path rebuild the buffers again. The
+    // ensureSpeedSprite() rebuilds the buffers again. The
     // 30KB / 108KB thresholds bracket real states (54 vs 118) so the UI cannot
     // flap between armed and recovered.
     if (millis() - webStartMs > 5000) {

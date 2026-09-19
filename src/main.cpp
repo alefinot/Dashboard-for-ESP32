@@ -209,9 +209,6 @@ void setup() {
   delay(100);
   configureGNSS();
 
-  Wire.begin(COMPASS_SDA, COMPASS_SCL);
-  initCompass();
-
   updateSplashProgress(40);
 
   preferences.begin("dashboard", false);
@@ -325,12 +322,12 @@ void loop() {
   static unsigned long lastDiagHeartbeat = 0;
   if (now - lastDiagHeartbeat >= 10000) {
     lastDiagHeartbeat = now;
-    logPrintf("HB: up=%lus fps=%.1f freq=%uMHz tgtFps=%d heap=%lu min=%lu maxAlloc=%lu sp=%d tape=%d fallback=%d otaReq=%d memAct=%d wifi=%d rssi=%d apClients=%u temp=%.1f maxFrame=%lums over24=%lu sMaxGap=%lums\n",
+    logPrintf("HB: up=%lus fps=%.1f freq=%uMHz tgtFps=%d heap=%lu min=%lu maxAlloc=%lu sp=%d fallback=%d otaReq=%d memAct=%d wifi=%d rssi=%d apClients=%u temp=%.1f maxFrame=%lums over24=%lu sMaxGap=%lums\n",
               millis() / 1000UL, (double)currentMeasuredFps,
               (unsigned)getCpuFrequencyMhz(), TARGET_FPS,
               (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
               (unsigned long)ESP.getMaxAllocHeap(), (int)speedSpriteValid(),
-              (int)tapeSpriteValid(), (int)isSpeedFallback(),
+              (int)isSpeedFallback(),
               (int)otaMemReleaseRequested, (int)memSaverActive,
               (int)WiFi.status(), (int)WiFi.RSSI(),
               (unsigned)WiFi.softAPgetStationNum(), (double)temperatureRead(),
@@ -539,22 +536,20 @@ void loop() {
     float altitude = gps.altitude.isValid() ? gps.altitude.meters() : 0.0f;
 
     logPrintf("[RAW] hallInt=%.1fms hallCnt=%lu fuelADC=%d fuelFlt=%.1f "
-              "lightADC=%d batADC=%d tempADC=%d "
-              "magX=%d magY=%d magZ=%d\n",
+              "lightADC=%d batADC=%d tempADC=%d\n",
               hallIntUs / 1000.0f, hallCnt,
               rawFuelADC, filteredReading, rawLightADC,
-              rawBatteryADC, rawTempADC,
-              compassRawX, compassRawY, compassRawZ);
+              rawBatteryADC, rawTempADC);
 
     logPrintf("[VAL] spd=%.1fkmh src=%s bat=%.1fV engT=%.1fC fuel=%.1fL(%d%%) "
               "sat=%d hdop=%.1f alt=%.0fm lat=%.6f lon=%.6f gpsSpd=%.1f "
-              "head=%.0f odo=%.1fkm trip=%.2fkm avg=%.1fkmh avgKml=%.1f "
+              "odo=%.1fkm trip=%.2fkm avg=%.1fkmh avgKml=%.1f "
               "instKml=%.1f accel=%.2fs\n",
               snap.currentSpeed, speedSrc, snap.batteryVoltage,
               snap.engineTemperature, snap.fuelLiters, snap.fuelPercentage,
               snap.satellites, hdop, altitude,
               gps.location.lat(), gps.location.lng(), gpsSpeed,
-              snap.heading, snap.totalDistanceKm, tripDistanceKm,
+              snap.totalDistanceKm, tripDistanceKm,
               snap.averageSpeed, snap.averageKml, snap.instantKml,
               snap.accelResultTime);
 

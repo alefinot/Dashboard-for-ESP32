@@ -9,7 +9,7 @@ static void feedGpsLine(char *line); // defined in the UBX parser section below
 // ----------------------------------------------------------------------------
 // Demo mode: simulate the RAW sensors instead of faking final values.
 // The hardware reads below are swapped for synthetic raw values (ADC counts,
-// hall pulses, magnetometer axes and a synthetic GPS NMEA stream), so the
+// hall pulses and a synthetic GPS NMEA stream), so the
 // ENTIRE real processing pipeline runs unchanged on simulated data: EMA
 // filters, fuel touch-table interpolation, NTC->temperature math, hall
 // speed, GPS parse/fusion (HAL/GPS/G+H), odometer, fuel consumption and the
@@ -17,9 +17,8 @@ static void feedGpsLine(char *line); // defined in the UBX parser section below
 // themselves.
 // ----------------------------------------------------------------------------
 
-// Steady 20°/s heading rotation, shared by the compass and the GPS course so
-// the two always agree.
-static float demoSimHeadingDeg(unsigned long t) {
+// Steady 20°/s course rotation for the synthetic GPS stream.
+static float demoSimCourseDeg(unsigned long t) {
   return fmodf((float)t * 0.02f, 360.0f);
 }
 
@@ -135,7 +134,7 @@ static void demoGpsSentence() {
   // lands in the G+H band (GPS_MIN_DEV_KMH < delta < MAX_SPEED_DELTA_KMH).
   float gpsV = v + 2.0f * sinf((float)t / 20000.0f);
   if (gpsV < 0.0f) gpsV = 0.0f;
-  float course = demoSimHeadingDeg(t);
+  float course = demoSimCourseDeg(t);
   int sats = 6 + (int)(4.0f * (0.5f + 0.5f * sinf((float)t / 12000.0f)));
   bool hasFix = v > 0.5f;
 
@@ -184,437 +183,6 @@ static void demoGpsSentence() {
           hr, mi, sc, alat, demoLat < 0 ? 'S' : 'N', alon, demoLon < 0 ? 'W' : 'E',
           hasFix ? 1 : 0, sats, 1.2f, 150.0f);
   feedGpsLine(line);
-}
-
-// ----------------------------------------------------------------------------
-// Compass driver (I2C) - auto-detects the chip actually fitted:
-//   QMC5883P @ 0x2C  (newest revision, used by BZGNSS P25 Pro: CHIPID 0x80,
-//                     data at 0x01-0x06 LSB-first, mode 0x0A, config 0x0B)
-//   QMC5883L @ 0x0D  (standard)
-//   VCM5883L @ 0x0C  (older BZGNSS units)
-//   HMC5883L @ 0x1E  (oldest modules, MSB-first data at 0x03)
-// ----------------------------------------------------------------------------
-#define QMC5883P_ADDR   0x2C
-#define QMC5883P_CHIPID 0x00
-#define QMC5883P_DATA   0x01
-#define QMC5883P_STATUS 0x09
-#define QMC5883P_MODE   0x0A
-#define QMC5883P_CONFIG 0x0B
-
-#define QMC5883L_ADDR   0x0D
-#define VCM5883L_ADDR   0x0C
-#define HMC5883L_ADDR   0x1E
-
-#define QMC5883L_X_LSB  0x00
-#define QMC5883L_CTRL1  0x0B
-#define HMC5883L_CFGA   0x00
-#define HMC5883L_CFGB   0x01
-#define HMC5883L_MODE   0x02
-#define HMC5883L_X_MSB  0x03
-
-enum CompassChip { COMPASS_NONE = 0, COMPASS_QMC = 1, COMPASS_HMC = 2,
-                   COMPASS_P = 3 };
-
-static CompassChip compassChip = COMPASS_NONE;
-static uint8_t compassAddr = 0;
-bool compassReady = false;
-
-static bool compassWriteReg(uint8_t addr, uint8_t reg, uint8_t val) {
-  Wire.beginTransmission(addr);
-  Wire.write(reg);
-  Wire.write(val);
-  return Wire.endTransmission() == 0;
-}
-
-static bool compassRead6(uint8_t addr, uint8_t startReg, bool msbFirst,
-                         int16_t &x, int16_t &y, int16_t &z) {
-  Wire.beginTransmission(addr);
-  Wire.write(startReg);
-  if (Wire.endTransmission() != 0) return false;
-  if (Wire.requestFrom((int)addr, 6) < 6) return false;
-  uint8_t b[6];
-  for (int i = 0; i < 6; i++) b[i] = Wire.read();
-  if (msbFirst) {
-    x = (int16_t)(b[0] << 8 | b[1]);
-    y = (int16_t)(b[2] << 8 | b[3]);
-    z = (int16_t)(b[4] << 8 | b[5]);
-  } else {
-    x = (int16_t)(b[1] << 8 | b[0]);
-    y = (int16_t)(b[3] << 8 | b[2]);
-    z = (int16_t)(b[5] << 8 | b[4]);
-  }
-  return true;
-}
-
-static void compassDumpRegs(uint8_t addr) {
-  for (int off = 0; off < 0x40; off += 16) {
-    Wire.beginTransmission(addr);
-    Wire.write(off);
-    if (Wire.endTransmission() != 0) break;
-    Wire.requestFrom((int)addr, 16);
-    uint8_t buf[16];
-    uint8_t n = 0;
-    while (Wire.available() && n < 16) buf[n++] = Wire.read();
-    if (n == 0) break;
-    char line[128];
-    int p = snprintf(line, sizeof(line), "Compass: regs[0x%02X]=", off);
-    for (uint8_t i = 0; i < n && p < (int)sizeof(line) - 4; i++)
-      p += snprintf(line + p, sizeof(line) - p, "%02X ", buf[i]);
-    logPrintf("%s\n", line);
-  }
-}
-
-// Full-bus scan + compass candidate check on a given SDA/SCL pin assignment.
-// Returns true and initializes the chip if a compass is found.
-static bool compassScanBus(uint8_t sdaPin, uint8_t sclPin) {
-  gpio_pullup_en((gpio_num_t)sdaPin);
-  gpio_pullup_en((gpio_num_t)sclPin);
-  Wire.begin(sdaPin, sclPin);
-  delay(10);
-
-  uint8_t foundDevices[8];
-  uint8_t devCount = 0;
-  for (uint8_t addr = 1; addr <= 126; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0 && devCount < 8)
-      foundDevices[devCount++] = addr;
-  }
-  for (uint8_t i = 0; i < devCount; i++)
-    logPrintf("Compass: I2C device found @0x%02X\n", foundDevices[i]);
-
-  static const uint8_t candidates[] = {QMC5883P_ADDR, QMC5883L_ADDR,
-                                       VCM5883L_ADDR, HMC5883L_ADDR};
-  for (uint8_t addr : candidates) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() != 0) continue;
-    if (addr == HMC5883L_ADDR) {
-      if (!compassWriteReg(addr, HMC5883L_CFGA, 0x70) || // 8 samples, 15 Hz
-          !compassWriteReg(addr, HMC5883L_CFGB, 0x20) || // 1.3 Ga gain
-          !compassWriteReg(addr, HMC5883L_MODE, 0x00))   // continuous
-        return false;
-      compassChip = COMPASS_HMC;
-    } else if (addr == QMC5883P_ADDR) {
-      // Verify the chip ID (0x80) before configuring a QMC5883P
-      Wire.beginTransmission(addr);
-      Wire.write(QMC5883P_CHIPID);
-      if (Wire.endTransmission() != 0) return false;
-      Wire.requestFrom((int)addr, 1);
-      if (!Wire.available() || Wire.read() != 0x80) continue;
-      if (!compassWriteReg(addr, QMC5883P_MODE, 0xCF) ||   // continuous 200 Hz
-          !compassWriteReg(addr, QMC5883P_CONFIG, 0x08))   // +/-8G, set/reset
-        return false;
-      compassChip = COMPASS_P;
-    } else {
-      if (!compassWriteReg(addr, QMC5883L_CTRL1, 0x1D)) // cont 200Hz 8G 512osr
-        return false;
-      compassChip = COMPASS_QMC;
-    }
-    compassAddr = addr;
-    compassReady = true;
-    const char *name = (compassChip == COMPASS_HMC) ? "HMC5883L"
-                      : (compassChip == COMPASS_P)  ? "QMC5883P"
-                                                    : "QMC/VCM5883L";
-    logPrintf("Compass: %s detected @0x%02X (SDA=%u, SCL=%u)\n",
-              name, compassAddr, sdaPin, sclPin);
-    return true;
-  }
-
-  logPrintf("Compass: orientation SDA=%u SCL=%u - %u device(s), no known "
-            "compass address\n", sdaPin, sclPin, devCount);
-  for (uint8_t i = 0; i < devCount; i++)
-    compassDumpRegs(foundDevices[i]);
-  return false;
-}
-
-bool initCompass() {
-  // Try the normal assignment, then the mirrored one (module pin order 5=SCL,
-  // 6=SDA vs. many boards labeling the other way) - no wire swapping needed.
-  if (compassScanBus(COMPASS_SDA, COMPASS_SCL)) return true;
-  if (compassScanBus(COMPASS_SCL, COMPASS_SDA)) return true;
-  logPrintf("Compass: no compass chip found in either SDA/SCL orientation - "
-            "check wire continuity from module pins 5/6\n");
-  return false;
-}
-
-int16_t compassRawX = 0, compassRawY = 0, compassRawZ = 0;
-
-// Hard-iron calibration: X/Y/Z offsets removed from the raw readings before
-// the heading is computed. Captured live while the user rotates the device
-// (min/max tracking) and persisted to NVS ("cfg" namespace, CMP_CAL_*).
-int16_t COMPASS_CAL_X = 0, COMPASS_CAL_Y = 0, COMPASS_CAL_Z = 0;
-// Tilt compensation: unit "up" axis (rotation-axis normal fitted during
-// calibration) in sensor coordinates, scaled by 32767. Default (0,0,1) = flat
-// mount, which degrades to plain atan2(y,x). Persisted as CMP_TILT_*.
-int16_t COMPASS_CAL_TX = 0, COMPASS_CAL_TY = 0, COMPASS_CAL_TZ = 32767;
-// Soft-iron scale correction: per-axis multipliers applied after the offset
-// subtraction so the (soft-iron-distorted) reading sphere becomes round
-// again. Captured from the calibration spans and persisted as CMP_SCALE_*.
-// Default 1.0 = no correction.
-float COMPASS_CAL_SCALE_X = 1.0f, COMPASS_CAL_SCALE_Y = 1.0f,
-      COMPASS_CAL_SCALE_Z = 1.0f;
-// COMPASS_TILT_COMP: 0 = flat assumption (robust to a changing tilt, default
-// for a handlebar-mounted dashboard); 1 = use the calibrated tilt axis (only
-// correct while the mounting tilt is constant).
-int COMPASS_TILT_COMP = 0;
-volatile bool compassCalActive = false;
-unsigned long compassCalEndTime = 0;
-int16_t compassCalMinX = 0, compassCalMaxX = 0;
-int16_t compassCalMinY = 0, compassCalMaxY = 0;
-int16_t compassCalMinZ = 0, compassCalMaxZ = 0;
-char compassCalResult[128] = "";
-
-// Raw (X,Y,Z) ring buffer captured during calibration, used to fit the plane
-// of the rotation circle (its normal = sensor "up" axis = tilt).
-#define COMPASS_CAL_MAX_SAMPLES 600
-static int16_t calSamples[COMPASS_CAL_MAX_SAMPLES][3];
-static uint16_t calSampleCount = 0;
-static unsigned long lastCalSampleMs = 0;
-
-// qsort comparator for int16_t.
-static int cmpInt16(const void *a, const void *b) {
-  return (int)*(const int16_t *)a - (int)*(const int16_t *)b;
-}
-
-// Per-axis outlier trim: sort the captured samples and discard the top and
-// bottom COMPASS_CAL_TRIM_PCT percent before taking min/max, so a single
-// spike (motor interference, ...) can't corrupt the offset.
-#define COMPASS_CAL_TRIM_PCT 5
-static int16_t calSortBuf[COMPASS_CAL_MAX_SAMPLES];
-static void trimmedMinMax(uint8_t axis, uint16_t n, int16_t &lo, int16_t &hi) {
-  for (uint16_t i = 0; i < n; i++) calSortBuf[i] = calSamples[i][axis];
-  qsort(calSortBuf, n, sizeof(int16_t), cmpInt16);
-  uint16_t cut = n * COMPASS_CAL_TRIM_PCT / 100;
-  lo = calSortBuf[cut];
-  hi = calSortBuf[n - 1 - cut];
-}
-
-void compassCalStart(unsigned int seconds) {
-  if (!compassReady || seconds == 0) return;
-  compassCalActive = true;
-  compassCalEndTime = millis() + (unsigned long)seconds * 1000UL;
-  compassCalMinX = compassCalMaxX = compassRawX;
-  compassCalMinY = compassCalMaxY = compassRawY;
-  compassCalMinZ = compassCalMaxZ = compassRawZ;
-  calSampleCount = 0;
-  lastCalSampleMs = 0;
-  compassCalResult[0] = 0;
-  logPrintf("Compass: calibration started - rotate the device slowly for "
-            "%us around a VERTICAL axis, keeping the module at its mounting "
-            "angle (keep metal/magnets away)\n", seconds);
-}
-
-void compassCalCancel() {
-  compassCalActive = false;
-  logPrintf("Compass: calibration cancelled\n");
-}
-
-static void compassCalFinish() {
-  compassCalActive = false;
-  if (calSampleCount < 32) {
-    snprintf(compassCalResult, sizeof(compassCalResult),
-             "Calibration aborted: too few samples (%d)", (int)calSampleCount);
-    logPrintf("Compass: %s\n", compassCalResult);
-    return;
-  }
-  // Outlier-trimmed min/max per axis (spike rejection).
-  int16_t loX, hiX, loY, hiY, loZ, hiZ;
-  trimmedMinMax(0, calSampleCount, loX, hiX);
-  trimmedMinMax(1, calSampleCount, loY, hiY);
-  trimmedMinMax(2, calSampleCount, loZ, hiZ);
-  int32_t offX = ((int32_t)loX + (int32_t)hiX) / 2;
-  int32_t offY = ((int32_t)loY + (int32_t)hiY) / 2;
-  int32_t offZ = ((int32_t)loZ + (int32_t)hiZ) / 2;
-  int32_t spanX = (int32_t)hiX - loX;
-  int32_t spanY = (int32_t)hiY - loY;
-  bool lowSpan = (spanX < 200 || spanY < 200);
-  if (lowSpan) {
-    snprintf(compassCalResult, sizeof(compassCalResult),
-             "Calibration FAILED (span %ld/%ld) - rotate the unit in full "
-             "circles, 30s", (long)spanX, (long)spanY);
-    logPrintf("Compass: %s\n", compassCalResult);
-    return;  // don't save garbage
-  }
-
-  // Soft-iron scale correction: equalize the X/Y spans (the rotation circle).
-  // The Z span is set by the mounting tilt, not by soft iron, so it isn't
-  // updated here (kept as is; default 1.0).
-  int32_t avgXY = (spanX + spanY) / 2;
-  COMPASS_CAL_SCALE_X = (float)avgXY / (float)spanX;
-  COMPASS_CAL_SCALE_Y = (float)avgXY / (float)spanY;
-  // Safety clamp: scales outside this range are not plausible.
-  if (COMPASS_CAL_SCALE_X < 0.2f || COMPASS_CAL_SCALE_X > 5.0f) COMPASS_CAL_SCALE_X = 1.0f;
-  if (COMPASS_CAL_SCALE_Y < 0.2f || COMPASS_CAL_SCALE_Y > 5.0f) COMPASS_CAL_SCALE_Y = 1.0f;
-
-  COMPASS_CAL_X = (int16_t)offX;
-  COMPASS_CAL_Y = (int16_t)offY;
-  COMPASS_CAL_Z = (int16_t)offZ;
-  { Preferences p; p.begin("cfg", false);
-    p.putInt("CMP_CAL_X", COMPASS_CAL_X);
-    p.putInt("CMP_CAL_Y", COMPASS_CAL_Y);
-    p.putInt("CMP_CAL_Z", COMPASS_CAL_Z);
-    p.putFloat("CMP_SCALE_X", COMPASS_CAL_SCALE_X);
-    p.putFloat("CMP_SCALE_Y", COMPASS_CAL_SCALE_Y);
-    p.putFloat("CMP_SCALE_Z", COMPASS_CAL_SCALE_Z);
-    p.end(); }
-
-  // Tilt fit: the samples trace a circle in 3D whose plane is perpendicular to
-  // the rotation (vertical) axis. Consecutive edge vectors d_i, d_{i+1}
-  // both lie in that plane, so d_i x d_{i+1} points along its normal; the
-  // sum over the whole rotation cancels wobble and yields the "up" axis in
-  // sensor coordinates. A flat calibration naturally fits (0,0,1). The fit
-  // runs on the offset- and scale-corrected samples, matching the heading
-  // math.
-  char tiltTxt[64] = "";
-  float scx = COMPASS_CAL_SCALE_X, scy = COMPASS_CAL_SCALE_Y, scz = COMPASS_CAL_SCALE_Z;
-  {
-    int64_t nx = 0, ny = 0, nz = 0;
-    for (uint16_t i = 1; i + 1 < calSampleCount; i++) {
-      float x0 = (float)(calSamples[i - 1][0] - COMPASS_CAL_X) * scx;
-      float y0 = (float)(calSamples[i - 1][1] - COMPASS_CAL_Y) * scy;
-      float z0 = (float)(calSamples[i - 1][2] - COMPASS_CAL_Z) * scz;
-      float x1 = (float)(calSamples[i][0] - COMPASS_CAL_X) * scx;
-      float y1 = (float)(calSamples[i][1] - COMPASS_CAL_Y) * scy;
-      float z1 = (float)(calSamples[i][2] - COMPASS_CAL_Z) * scz;
-      float x2 = (float)(calSamples[i + 1][0] - COMPASS_CAL_X) * scx;
-      float y2 = (float)(calSamples[i + 1][1] - COMPASS_CAL_Y) * scy;
-      float z2 = (float)(calSamples[i + 1][2] - COMPASS_CAL_Z) * scz;
-      float dx1 = x1 - x0, dy1 = y1 - y0, dz1 = z1 - z0;
-      float dx2 = x2 - x1, dy2 = y2 - y1, dz2 = z2 - z1;
-      nx += (int64_t)dy1 * dz2 - (int64_t)dz1 * dy2;
-      ny += (int64_t)dz1 * dx2 - (int64_t)dx1 * dz2;
-      nz += (int64_t)dx1 * dy2 - (int64_t)dy1 * dx2;
-    }
-    float nf[3] = {(float)nx, (float)ny, (float)nz};
-    float mag = sqrtf(nf[0] * nf[0] + nf[1] * nf[1] + nf[2] * nf[2]);
-    if (mag > 1.0f) {
-      nf[0] /= mag;
-      nf[1] /= mag;
-      nf[2] /= mag;
-      // Planarity check: mean |p . n| vs mean |p| over the centered samples.
-      // Near 0 = clean circle; >= ~0.6 = the module was wobbled, fit is junk.
-      float sumDot = 0.0f, sumR = 0.0f;
-      for (uint16_t i = 0; i < calSampleCount; i++) {
-        float px = (float)(calSamples[i][0] - COMPASS_CAL_X) * scx;
-        float py = (float)(calSamples[i][1] - COMPASS_CAL_Y) * scy;
-        float pz = (float)(calSamples[i][2] - COMPASS_CAL_Z) * scz;
-        sumDot += fabsf(px * nf[0] + py * nf[1] + pz * nf[2]);
-        sumR += sqrtf(px * px + py * py + pz * pz);
-      }
-      float ratio = (sumR > 0.01f) ? sumDot / sumR : 1.0f;
-      if (ratio < 0.6f) {
-        COMPASS_CAL_TX = (int16_t)(nf[0] * 32767.0f);
-        COMPASS_CAL_TY = (int16_t)(nf[1] * 32767.0f);
-        COMPASS_CAL_TZ = (int16_t)(nf[2] * 32767.0f);
-        { Preferences p; p.begin("cfg", false);
-          p.putInt("CMP_TILT_X", COMPASS_CAL_TX);
-          p.putInt("CMP_TILT_Y", COMPASS_CAL_TY);
-          p.putInt("CMP_TILT_Z", COMPASS_CAL_TZ);
-          p.end(); }
-        snprintf(tiltTxt, sizeof(tiltTxt), " tilt=%.2f/%.2f/%.2f",
-                 nf[0], nf[1], nf[2]);
-      } else {
-        snprintf(tiltTxt, sizeof(tiltTxt),
-                 " TILT FIT FAILED (wobble=%.2f, keep tilt fixed)", ratio);
-      }
-    } else {
-      snprintf(tiltTxt, sizeof(tiltTxt), " TILT FIT FAILED (low motion)");
-    }
-  }
-
-  snprintf(compassCalResult, sizeof(compassCalResult),
-           "Calibration saved: X=%d Y=%d Z=%d S=%.3f/%.3f/%.3f%s (span %ld/%ld)",
-           COMPASS_CAL_X, COMPASS_CAL_Y, COMPASS_CAL_Z,
-           COMPASS_CAL_SCALE_X, COMPASS_CAL_SCALE_Y, COMPASS_CAL_SCALE_Z,
-           tiltTxt, (long)spanX, (long)spanY);
-  logPrintf("Compass: %s\n", compassCalResult);
-}
-void processCompassSensor() {
-  int16_t x, y, z;
-  bool ok = false;
-  if (ENABLE_DEMO_MODE) {
-    // Simulated rotating field. The calibration offsets are added back to the
-    // raw axes so the offset-subtraction and tilt-compensation math in the
-    // heading calculation below still operates on centered values.
-    unsigned long t = millis();
-    float rad = demoSimHeadingDeg(t) * (M_PI / 180.0f);
-    x = COMPASS_CAL_X + (int16_t)(400.0f * cosf(rad));
-    y = COMPASS_CAL_Y + (int16_t)(400.0f * sinf(rad));
-    z = COMPASS_CAL_Z + (int16_t)(60.0f * sinf((float)t / 7000.0f));
-    ok = true;
-  } else {
-    if (!compassReady) return;
-    if (compassChip == COMPASS_HMC)
-      ok = compassRead6(compassAddr, HMC5883L_X_MSB, true, x, y, z);
-    else if (compassChip == COMPASS_P)
-      ok = compassRead6(compassAddr, QMC5883P_DATA, false, x, y, z);
-    else
-      ok = compassRead6(compassAddr, QMC5883L_X_LSB, false, x, y, z);
-    if (!ok) return;
-  }
-  compassRawX = x;
-  compassRawY = y;
-  compassRawZ = z;
-
-  // Calibration capture: track min/max over the window; offsets and the tilt
-  // axis are derived and saved when it elapses.
-  if (compassCalActive) {
-    if (x < compassCalMinX) compassCalMinX = x;
-    if (x > compassCalMaxX) compassCalMaxX = x;
-    if (y < compassCalMinY) compassCalMinY = y;
-    if (y > compassCalMaxY) compassCalMaxY = y;
-    if (z < compassCalMinZ) compassCalMinZ = z;
-    if (z > compassCalMaxZ) compassCalMaxZ = z;
-    unsigned long nowMs = millis();
-    if (calSampleCount < COMPASS_CAL_MAX_SAMPLES &&
-        nowMs - lastCalSampleMs >= 40) {
-      lastCalSampleMs = nowMs;
-      calSamples[calSampleCount][0] = x;
-      calSamples[calSampleCount][1] = y;
-      calSamples[calSampleCount][2] = z;
-      calSampleCount++;
-    }
-    if (nowMs >= compassCalEndTime) compassCalFinish();
-  }
-
-  // Heading: offset- and scale-correct the field, then take the angle of the
-  // horizontal component.
-  //
-  // COMPASS_TILT_COMP selects the plane the corrected field is projected
-  // onto:
-  //   1 = plane perpendicular to the calibrated "up" axis (COMPASS_CAL_TX/Y/Z).
-  //     Only correct while the mounting tilt is constant - a 3-axis
-  //     magnetometer cannot sense the current tilt, so if the mounting tilt
-  //     changes (handlebars tilting while riding) the projection swings
-  //     wildly.
-  //   0 = default: plane perpendicular to the sensor Z axis (flat-mount
-  //     assumption), h = atan2(py, px). The error is bounded by the tilt
-  //     angle, so it degrades gracefully instead of going crazy.
-  float px = ((float)x - (float)COMPASS_CAL_X) * COMPASS_CAL_SCALE_X;
-  float py = ((float)y - (float)COMPASS_CAL_Y) * COMPASS_CAL_SCALE_Y;
-  float pz = ((float)z - (float)COMPASS_CAL_Z) * COMPASS_CAL_SCALE_Z;
-  float h;
-  if (COMPASS_TILT_COMP) {
-    float ux = (float)COMPASS_CAL_TX / 32767.0f;
-    float uy = (float)COMPASS_CAL_TY / 32767.0f;
-    float uz = (float)COMPASS_CAL_TZ / 32767.0f;
-    float ulen = sqrtf(ux * ux + uy * uy + uz * uz);
-    if (ulen > 0.001f) { ux /= ulen; uy /= ulen; uz /= ulen; }
-    float dot = px * ux + py * uy + pz * uz;
-    h = atan2f(py - dot * uy, px - dot * ux) * (180.0f / M_PI);
-  } else {
-    h = atan2f(py, px) * (180.0f / M_PI);
-  }
-  if (h < 0) h += 360.0f;
-  h += COMPASS_DECLINATION_DEG;
-  if (h < 0.0f) h += 360.0f;
-  else if (h >= 360.0f) h -= 360.0f;
-  // EMA smoothing with wraparound handling (jump 359 -> 0)
-  float diff = h - currentHeading;
-  if (diff > 180.0f) diff -= 360.0f;
-  else if (diff < -180.0f) diff += 360.0f;
-  currentHeading += diff * 0.15f;
-  if (currentHeading < 0.0f) currentHeading += 360.0f;
-  else if (currentHeading >= 360.0f) currentHeading -= 360.0f;
 }
 
 // ----------------------------------------------------------------------------
@@ -776,7 +344,6 @@ double lastLon = 0.0;
 bool hasLastPos = false;
 int splashCurrentProgress = 0;
 float currentCachedSpeed = 0.0f;
-float currentHeading = 0.0f;
 
 portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;
 volatile unsigned long lastHallPulseTimeUs = 0;
@@ -1734,13 +1301,8 @@ void gpsTask(void *pvParameters) {
 void sensorTask(void *pvParameters) {
   for (;;) {
     if (ENABLE_DEMO_MODE)
-      simulateRawSensors(); // synthetic hall pulses; the analog/compass
-                            // read sites inject their own simulated raw values
-    {
-      unsigned long tStage = millis();
-      processCompassSensor();
-      sensorStageDiag("compass", tStage);
-    }
+      simulateRawSensors(); // synthetic hall pulses; the analog
+                           // read sites inject their own simulated raw values
     {
       unsigned long tStage = millis();
       processLightSensor();
@@ -1788,7 +1350,6 @@ void sensorTask(void *pvParameters) {
       g_sensorData.averageKml = averageKml;
       g_sensorData.averageSpeed = averageSpeed;
       g_sensorData.maxSpeed = maxSpeed;
-      g_sensorData.heading = currentHeading;
 
       if (systemTimeToLocal(g_sensorData.localHour, g_sensorData.minute,
                             g_sensorData.day, g_sensorData.month,

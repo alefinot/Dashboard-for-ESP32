@@ -14,7 +14,6 @@
 #include <LovyanGFX.hpp>
 
 #include <HardwareSerial.h>
-#include <Wire.h>
 #include <Preferences.h>
 #include <TinyGPS++.h>
 #include <cmath>
@@ -47,7 +46,6 @@ struct SensorSnapshot {
   float averageKml = 0.0f;
   float averageSpeed = 0.0f;
   float maxSpeed = 0.0f;
-  float heading = 0.0f;
   int localHour = 0;
   int minute = 0;
   int day = 0;
@@ -90,8 +88,6 @@ constexpr int HALL_SENSOR_PIN = 33;
 #define FUEL_TOUCH_PIN 32
 #define RXD2 16 // TEST: moved from 25 for pin-swap isolation test
 #define TXD2 17 // TEST: moved from 26 for pin-swap isolation test
-#define COMPASS_SDA 13 // TEST: moved from 21 (board silkscreen labels unreliable)
-#define COMPASS_SCL 15 // TEST: moved from 22
 #define POWER_SENSE_PIN 4
 #define BATTERY_SENSE_PIN 35
 #define TEMP_SENSE_PIN 36
@@ -209,8 +205,6 @@ extern int OFFSET_AVG_SPEED_X;
 extern int OFFSET_AVG_SPEED_Y;
 extern int OFFSET_MAX_SPEED_X;
 extern int OFFSET_MAX_SPEED_Y;
-extern int OFFSET_COMPASS_X;
-extern int OFFSET_COMPASS_Y;
 
 extern int ALIGN_BIG_SPEED_NUM;
 extern int ALIGN_BIG_SAT;
@@ -244,7 +238,6 @@ extern bool SHOW_ELEMENT_AVG_KML;
 extern bool SHOW_ELEMENT_AVG_SPEED;
 extern bool SHOW_ELEMENT_MAX_SPEED;
 extern bool SHOW_ELEMENT_FUEL_LTRS;
-extern bool SHOW_ELEMENT_COMPASS;
 extern bool SHOW_GHOST_DIGITS;
 extern bool ENABLE_POWER_SENSE;
 extern bool ENABLE_CIRCLE_TEST;
@@ -281,7 +274,6 @@ extern int REFRESH_BAT_MS;
 extern int REFRESH_INST_MS;
 extern int REFRESH_MAX_SPEED_MS;
 extern int REFRESH_FUEL_MS;
-extern float COMPASS_DECLINATION_DEG;
 
 extern int SPEED_DIGITS;
 extern int SAT_DIGITS;
@@ -299,7 +291,6 @@ extern int AVG_SPEED_INT_DIGITS;
 extern int AVG_SPEED_DEC_DIGITS;
 extern int MAX_SPEED_INT_DIGITS;
 extern int MAX_SPEED_DEC_DIGITS;
-extern int HEADING_DIGITS;
 extern int ODO_INT_DIGITS;
 extern int ODO_DEC_DIGITS;
 
@@ -408,33 +399,6 @@ extern int rawFuelADC;
 extern int rawBatteryADC;
 extern int rawTempADC;
 extern int rawLightADC;
-extern int16_t compassRawX;
-extern int16_t compassRawY;
-extern int16_t compassRawZ;
-extern int16_t COMPASS_CAL_X;
-extern int16_t COMPASS_CAL_Y;
-extern int16_t COMPASS_CAL_Z;
-extern int16_t COMPASS_CAL_TX;
-extern int16_t COMPASS_CAL_TY;
-extern int16_t COMPASS_CAL_TZ;
-extern float COMPASS_CAL_SCALE_X;
-extern float COMPASS_CAL_SCALE_Y;
-extern float COMPASS_CAL_SCALE_Z;
-// COMPASS_TILT_COMP: 0 = flat assumption (robust to a changing tilt, default
-// for a handlebar-mounted dashboard); 1 = use the calibrated tilt axis (only
-// correct while the mounting tilt is constant).
-extern int COMPASS_TILT_COMP;
-extern volatile bool compassCalActive;
-extern unsigned long compassCalEndTime;
-extern int16_t compassCalMinX;
-extern int16_t compassCalMaxX;
-extern int16_t compassCalMinY;
-extern int16_t compassCalMaxY;
-extern int16_t compassCalMinZ;
-extern int16_t compassCalMaxZ;
-extern char compassCalResult[128];
-void compassCalStart(unsigned int seconds);
-void compassCalCancel();
 extern float fuelLiters;
 extern int fuelPercentage;
 extern float batteryVoltage;
@@ -448,7 +412,6 @@ extern bool hasLastPos;
 extern int splashCurrentProgress;
 extern float currentCachedSpeed;
 extern unsigned long g_startupTime;
-extern float currentHeading;
 
 extern portMUX_TYPE hallMux;
 extern volatile unsigned long lastHallPulseTimeUs;
@@ -549,10 +512,7 @@ int computeSpeedSourceMode(float hallSpeed, float gpsSpeed, int sats,
 void updateSpeedSourceMode();
 inline float getFilteredSpeed() { return currentCachedSpeed; }
 
-bool initCompass();
-void processCompassSensor();
 void configureGNSS();
-extern bool compassReady;
 void processBatterySensor();
 void processTemperatureSensor();
 void processLightSensor();
@@ -580,7 +540,6 @@ extern volatile bool memSaverRequested;
 extern volatile bool memSaverActive;
 void ensureSpeedSprite();
 bool speedSpriteValid();
-bool tapeSpriteValid();
 bool isSpeedFallback();
 extern volatile unsigned long webLoopCount;
 void factoryResetConfig();

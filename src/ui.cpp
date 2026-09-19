@@ -14,12 +14,12 @@ static constexpr unsigned long STARTUP_RAMP_DURATION_MS = 3000;
 // Once a frame has already spent FRAME_DEFER_MS on the top phases, the
 // throttle-gated lower-priority components are deferred wholesale to the next
 // frame (their REFRESH_* throttles make a one-frame delay invisible). The
-// same budget is also checked per group inside the odo/middle/compass band.
+// same budget is also checked per group inside the odo/middle band.
 static constexpr unsigned long FRAME_DEFER_MS = 10;
 
 // In-band budget check: true while the frame has not yet consumed the whole
 // video-frame budget. Used to gate the low-priority redraw groups so that
-// odo + sidebars + middle row + compass no longer stack into one 35ms frame.
+// odo + sidebars + middle row no longer stack into one 35ms frame.
 #define IN_BAND_BUDGET ((millis() - tFrame0) < (unsigned long)FRAME_DEFER_MS)
 
 // Pre-rendered 4-bit speed-digit sprite (~10KB framebuffer) plus its loaded
@@ -145,16 +145,7 @@ void ensureSpeedSprite() {
   }
 }
 
-// Offscreen backbuffer for the compass tape's scrolling strip (ticks + bg).
-// The strip is painted here and pushed to the panel in one burst so the
-// display never shows a partially repainted tape. Freed together with the
-// other big buffers during an OTA check (see processOtaMemRelease).
-static LGFX_Sprite tapeSprite(&display);
-static bool tapeSpriteReady = false;
-static int tapeSpriteW = 0, tapeSpriteH = 0;
-
 bool speedSpriteValid() { return spValid; }
-bool tapeSpriteValid() { return tapeSpriteReady; }
 bool isSpeedFallback() { return SHOW_ELEMENT_SPEED && !spValid && !otaMemReleaseRequested; }
 
 // Called from loop() every frame, before any sprite use: frees the big UI
@@ -165,10 +156,6 @@ void processOtaMemRelease() {
   sp.deleteSprite();
   spValid = false;
   spBuildAttempted = false;
-  if (tapeSpriteReady) {
-    tapeSprite.deleteSprite();
-    tapeSpriteReady = false;
-  }
   vlw120Ready = false;
   resetVLWFontCache();
   freeVLWData120();
@@ -177,7 +164,7 @@ void processOtaMemRelease() {
 
 // Same release, triggered by the web task when free heap gets dangerously low
 // (the big buffers starve /api/config and the TLS stack). Once active, the
-// speed sprite and tape sprite stay freed until the next reboot; the 120px
+// speed sprite stays freed until the next reboot; the 120px
 // font buffer is only re-read lazily if a speed digit actually redraws.
 volatile bool memSaverRequested = false;
 volatile bool memSaverActive = false;
@@ -187,15 +174,11 @@ void processMemSaverRelease() {
   sp.deleteSprite();
   spValid = false;
   spBuildAttempted = false;
-  if (tapeSpriteReady) {
-    tapeSprite.deleteSprite();
-    tapeSpriteReady = false;
-  }
   vlw120Ready = false;
   resetVLWFontCache();
   freeVLWData120();
   memSaverActive = true;
-  logPrintf("MEM SAVER: dropped speed sprite, tape sprite and VLW120 (heap=%lu B)\n",
+  logPrintf("MEM SAVER: dropped speed sprite and VLW120 (heap=%lu B)\n",
             (unsigned long)ESP.getFreeHeap());
 }
 
@@ -261,113 +244,6 @@ static void drawDsDigitPair(LGFX_ST7789_4 &g, const char *str, int baseX, int y)
 }
 
 // ----------------------------------------------------------------------------
-// Compass tape dynamic layer (scrolling ticks)
-// ----------------------------------------------------------------------------
-// Fades tape content toward black at the screen edges (HUD look).
-static uint16_t tapeFadeColor(uint16_t color, int x, int tapeW, int fadeW) {
-  float f = 1.0f;
-  if (x < fadeW) {
-    f = (float)(x + 1) / (float)fadeW;
-  } else if (x >= tapeW - fadeW) {
-    f = (float)(tapeW - x) / (float)fadeW;
-  }
-  return blendColorWithBlack(color, f);
-}
-
-// Erases the strip (black fill) and paints the whole scrolling layer - ticks
-// AND labels - into `d`. yBase is the strip top in `d`'s coordinate space and
-// bandTopL the strip height (sprite: yBase=0, bandTopL=stripH; panel:
-// yBase=labelTop, bandTopL=bandTop-labelTop). Labels use the same compiled-in
-// Conthrax fonts as the panel, so sprite and direct rendering match exactly.
-// Fonts must be switched through the panel's loadVLWFont shim when drawing on
-// the display: the shim caches the last font (g_lastVLWFont) and skips setFont
-// on a hit, so a direct setFont() desyncs the cache and later components (e.g.
-// the FPS counter) keep drawing with a stale, larger font. Sprites have no
-// such cache, so they can use setFont directly.
-static inline void tapeSetFont(LGFX_ST7789_4 &d, const lgfx::IFont *f) {
-  d.loadVLWFont(f == &Conthrax_SemiBold7pt7b ? "/Fonts/Conthrax_SemiBold_16px.vlw"
-                                             : "/Fonts/Conthrax_SemiBold_10px.vlw");
-}
-template <typename T>
-static inline void tapeSetFont(T &d, const lgfx::IFont *f) {
-  if (f == &Conthrax_SemiBold7pt7b) {
-    d.loadFont(Conthrax_SemiBold_16px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
-  } else {
-    d.setFont(f);
-  }
-}
-
-template <typename T>
-static void renderTapeStrip(T &d, int tapeW, int compassX, int yBase, int bandTopL,
-                            float refDeg, float displayHeading, float pxPerDeg,
-                            uint16_t c_tickMin, uint16_t c_tickMaj, int fadeW,
-                            bool headValid) {
-  int labelBaselineL = bandTopL - 10;
-  d.fillRect(0, yBase, tapeW, bandTopL, TFT_BLACK);
-  for (int t = -40; t <= 40; t += 5) {
-    if (t % 10 == 0) continue;
-    int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
-    if (x < -6 || x >= tapeW + 6) continue;
-    drawAALine(d, (float)x, (float)(yBase + bandTopL - 6), (float)x, (float)(yBase + bandTopL - 1),
-               tapeFadeColor(c_tickMin, x, tapeW, fadeW));
-  }
-  for (int t = -40; t <= 40; t += 10) {
-    int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
-    if (x < -16 || x >= tapeW + 16) continue;
-    drawAALine(d, (float)x, (float)(yBase + bandTopL - 9), (float)x, (float)(yBase + bandTopL - 1),
-               tapeFadeColor(c_tickMaj, x, tapeW, fadeW));
-  }
-
-  // Degree labels / cardinal letters (10° steps), centered on the major ticks
-  if (headValid) {
-    // Numbers first (small font)
-    tapeSetFont(d, &Conthrax_SemiBold4pt7b);
-    for (int t = -40; t <= 40; t += 10) {
-      int deg = ((int)roundf(refDeg + (float)t) % 360 + 360) % 360;
-      if (deg == 0 || deg == 90 || deg == 180 || deg == 270) continue;
-      int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
-      if (x < -16 || x >= tapeW + 16) continue;
-      char lb[4];
-      snprintf(lb, sizeof(lb), "%d", deg);
-      d.setTextColor(tapeFadeColor(TFT_WHITE, x, tapeW, fadeW));
-      d.setCursor(x - (d.textWidth(lb) / 2), yBase + labelBaselineL);
-      d.print(lb);
-    }
-    // Cardinal letters on top (bigger font)
-    tapeSetFont(d, &Conthrax_SemiBold7pt7b);
-    for (int t = -40; t <= 40; t += 10) {
-      int deg = ((int)roundf(refDeg + (float)t) % 360 + 360) % 360;
-      if (deg != 0 && deg != 90 && deg != 180 && deg != 270) continue;
-      const char *label;
-      uint16_t col;
-      if (deg == 0) {
-        label = "N";
-        col = TFT_RED;
-      } else if (deg == 90) {
-        label = "E";
-        col = TFT_WHITE;
-      } else if (deg == 180) {
-        label = "S";
-        col = TFT_WHITE;
-      } else {
-        label = "W";
-        col = TFT_WHITE;
-      }
-      int x = compassX + (int)roundf((refDeg + (float)t - displayHeading) * pxPerDeg);
-      if (x < -16 || x >= tapeW + 16) continue;
-      d.setTextColor(tapeFadeColor(col, x, tapeW, fadeW));
-      d.setCursor(x - (d.textWidth(label) / 2), yBase + labelBaselineL);
-      d.print(label);
-    }
-  } else {
-    tapeSetFont(d, &Conthrax_SemiBold7pt7b);
-    d.setTextColor(d.color565(70, 70, 70));
-    d.setCursor(compassX - (d.textWidth("---") / 2), yBase + labelBaselineL);
-    d.print("---");
-  }
-}
-
-// ----------------------------------------------------------------------------
 // Weather day/night state. Uses the fetched sunrise/sunset times when
 // available, otherwise falls back to the fixed NIGHT_MODE window.
 // ----------------------------------------------------------------------------
@@ -424,8 +300,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   // Diagnostics: per-phase frame timing, logged only when the frame exceeds
   // the 60 FPS budget (33ms). Breakdown points at the guilty component.
   unsigned long tFrame0 = millis();
-  unsigned long tAfterSpeed = tFrame0, tAfterOdo = tFrame0,
-                tAfterCompass = tFrame0, tAfterWeather = tFrame0;
+  unsigned long tAfterSpeed = tFrame0, tAfterOdo = tFrame0, tAfterWeather = tFrame0;
   unsigned long tClockMs = 0, tSprMs = 0;
   unsigned long tAfterSb = tFrame0, tAfterMid = tFrame0;
 
@@ -814,13 +689,12 @@ if (!vlw120Ready) {
     display.endWrite();
     unsigned long tFrameEnd = millis();
     if (tFrameEnd - tFrame0 > 33) {
-      logPrintf("SLOW FRAME %lums: time+spd=%lu sb=%lu mid=%lu cmp=%lu wx=%lu odo=%lu tail=%lu clk=%lu spr=%lu heap=%lu maxAlloc=%lu sp=%d fallback=%d\n",
+      logPrintf("SLOW FRAME %lums: time+spd=%lu sb=%lu mid=%lu wx=%lu odo=%lu tail=%lu clk=%lu spr=%lu heap=%lu maxAlloc=%lu sp=%d fallback=%d\n",
                 (unsigned long)(tFrameEnd - tFrame0),
                 (unsigned long)(tAfterSpeed - tFrame0),
                 (unsigned long)(tAfterSb - tAfterSpeed),
                 (unsigned long)(tAfterMid - tAfterSb),
-                (unsigned long)(tAfterCompass - tAfterMid),
-                (unsigned long)(tAfterWeather - tAfterCompass),
+                (unsigned long)(tAfterWeather - tAfterMid),
                 (unsigned long)(tAfterOdo - tAfterWeather),
                 (unsigned long)(tFrameEnd - tAfterOdo),
                 (unsigned long)tClockMs, (unsigned long)tSprMs,
@@ -831,7 +705,7 @@ if (!vlw120Ready) {
   };
 
   // Defer the throttle-gated lower-priority components (odo, sidebars, middle
-  // row, compass, weather) when this frame's top phases (clock + speed sprite)
+  // row, weather) when this frame's top phases (clock + speed sprite)
   // already ate the 16.6ms 60FPS budget. A deferral is never repeated two
   // frames in a row, so those components always make progress at their own
   // REFRESH_* cadence.
@@ -841,7 +715,7 @@ if (!vlw120Ready) {
       (millis() - tFrame0) > FRAME_DEFER_MS;
   frameDeferredLast = frameDeferRest;
   if (frameDeferRest) {
-    tAfterOdo = tAfterSb = tAfterMid = tAfterCompass = tAfterWeather = millis();
+    tAfterOdo = tAfterSb = tAfterMid = tAfterWeather = millis();
     finishFrame();
     return;
   }
@@ -1989,181 +1863,6 @@ if (!vlw120Ready) {
 
   tAfterMid = millis();
 
-  // --- Compass (full-width HUD heading tape) ---
-  float displayHeading = displaySnap.heading;
-  static int lastTapePix = -1;
-  static bool compassStaticDrawn = false;
-  static bool lastHeadValid = false;
-  int currentHeadingInt = ((int)displayHeading + 360) % 360;
-
-  int compassX = display.width() / 2;
-  int compassY = BIG_CENTER_Y + OFFSET_COMPASS_Y;
-  int tapeW = display.width();
-
-  const float pxPerDeg = 6.0f;
-  int tapePix = (int)roundf(displayHeading * pxPerDeg);
-
-  // The tape is redrawn every frame the heading moves: the strip is painted in
-  // RAM and pushed in one DMA burst, so the tape rolls smoothly (1-2 px/frame).
-  // On frames that are already over the band budget it drops to every-other-frame
-  // (alternation) so it can't stack on top of odo/sidebars/middle-row draws.
-  bool tapeMoved = tapePix != lastTapePix;
-  static bool tapeDeferredLast = false;
-  bool tapeWants = SHOW_ELEMENT_COMPASS && (tapeMoved || forceDraw);
-  bool tapeBudgetOk = (millis() - tFrame0) < FRAME_DEFER_MS || !tapeDeferredLast;
-  tapeDeferredLast = tapeWants && !tapeBudgetOk;
-
-  // Glyph-top metrics for the tape label band, hoisted out of the draw block
-  // so the "compass disabled" erase path below can reuse them.
-  static int16_t labelY1 = 0;
-  static int16_t cardY1 = 0;
-  static bool labelMeasured = false;
-  if (!labelMeasured) {
-    labelMeasured = true;
-    int16_t tlx, tly;
-    uint16_t tlw, tlh;
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
-    display.getTextBounds("0", 0, 0, &tlx, &labelY1, &tlw, &tlh);
-    display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
-    display.getTextBounds("N", 0, 0, &tlx, &cardY1, &tlw, &tlh);
-  }
-
-  if (tapeWants && tapeBudgetOk) {
-    lastTapePix = tapePix;
-    componentUpdated = true;
-
-    const int bandTop = compassY - 7;
-    const int bandH = 10;
-
-    // Numbers sit just above the band (cursor y = baseline)
-    int labelBaseline = bandTop - 10;
-    const int markerH = 8; // bottom marker triangle height
-    int labelTop = std::min(labelBaseline + (int)labelY1,
-                            std::min(labelBaseline + (int)cardY1, bandTop - 10)) - 2;
-    int stripBottom = bandTop + bandH + markerH;
-
-    bool headValid = compassReady || ENABLE_DEMO_MODE;
-    uint16_t c_border = display.color565(90, 90, 90);
-    uint16_t c_tickMin = display.color565(110, 110, 110);
-    uint16_t c_tickMaj = display.color565(170, 170, 170);
-    uint16_t c_marker = headValid ? TFT_RED : display.color565(70, 70, 70);
-
-    // Edge fade: tape content blends toward black at the screen edges (HUD look)
-    const int fadeW = 72;
-    static uint16_t fadeBandColors[72];
-    static uint16_t fadeBorderColors[72];
-    static bool fadeInit = false;
-    if (!fadeInit) {
-      fadeInit = true;
-      for (int i = 0; i < fadeW; i++) {
-        float f = (float)(i + 1) / (float)fadeW;
-        fadeBandColors[i] = blendColorWithBlack(display.color565(20, 20, 20), f);
-        fadeBorderColors[i] = blendColorWithBlack(display.color565(90, 90, 90), f);
-      }
-    }
-
-    // Static layer: the band, its edge fades and the center marker never
-    // scroll, so draw them once instead of every update. Erasing the full
-    // strip (erase-to-black + repaint) on every heading change was what made
-    // the tape flash. Redrawn only on a full redraw or when the marker's
-    // validity state flips (gray -> red).
-    if (!compassStaticDrawn || forceDraw || headValid != lastHeadValid) {
-      lastHeadValid = headValid;
-      compassStaticDrawn = true;
-      display.fillRect(0, labelTop, tapeW, stripBottom - labelTop + 2, TFT_BLACK);
-
-      // Tape band (edge to edge, fixed reference frame), fading at the edges
-      int midX0 = fadeW, midX1 = tapeW - fadeW;
-      display.fillRect(midX0, bandTop, midX1 - midX0, bandH, display.color565(20, 20, 20));
-      display.fillRect(midX0, bandTop, midX1 - midX0, 1, c_border);
-      display.fillRect(midX0, bandTop + bandH - 1, midX1 - midX0, 1, c_border);
-      for (int i = 0; i < fadeW; i += 6) {
-        int w = std::min(6, fadeW - i);
-        int fi = i + w / 2;
-        display.fillRect(i, bandTop, w, bandH, fadeBandColors[fi]);
-        display.fillRect(tapeW - i - w, bandTop, w, bandH, fadeBandColors[fi]);
-        display.fillRect(i, bandTop, w, 1, fadeBorderColors[fi]);
-        display.fillRect(i, bandTop + bandH - 1, w, 1, fadeBorderColors[fi]);
-        display.fillRect(tapeW - i - w, bandTop, w, 1, fadeBorderColors[fi]);
-        display.fillRect(tapeW - i - w, bandTop + bandH - 1, w, 1, fadeBorderColors[fi]);
-      }
-
-      // Fixed center marker: inverted triangle below the band, apex on the band
-      // (kept clear of the numbers so it never covers the center heading)
-      display.fillTriangle(compassX - 5, bandTop + bandH + markerH - 1,
-                           compassX + 5, bandTop + bandH + markerH - 1,
-                           compassX, bandTop + bandH, c_marker);
-    }
-
-    // Dynamic layer: only the label/tick region above the band scrolls. It is
-    // painted into an offscreen sprite and pushed to the panel in one burst,
-    // so the display never shows a partially repainted tape. Falls back to
-    // drawing directly if the sprite buffer can't be allocated.
-    int stripH = bandTop - labelTop;
-    if (tapeSpriteReady && (tapeSpriteW != tapeW || tapeSpriteH != stripH)) {
-      tapeSprite.deleteSprite();
-      tapeSpriteReady = false;
-    }
-    if (!tapeSpriteReady && !memSaverActive && !otaMemReleaseRequested) {
-      // NOTE: LGFX_Sprite::setColorDepth returns the sprite's buffer pointer
-      // (nullptr until createSprite allocates one), NOT a bool. It must be
-      // called as a statement - inside a bool expression the null return
-      // short-circuits && and createSprite would never run.
-      // 16-bit RGB565 primary (full antialiased line & vector font blending),
-      // 8-bit RGB332 secondary, 4-bit as a last resort.
-      tapeSprite.setColorDepth(16);
-      tapeSpriteReady = tapeSprite.createSprite(tapeW, stripH);
-      if (!tapeSpriteReady) {
-        tapeSprite.setColorDepth(8);
-        tapeSpriteReady = tapeSprite.createSprite(tapeW, stripH);
-      }
-      if (!tapeSpriteReady) {
-        tapeSprite.setColorDepth(4);
-        tapeSpriteReady = tapeSprite.createSprite(tapeW, stripH);
-      }
-      if (tapeSpriteReady)
-        tapeSprite.setTextDatum(lgfx::textdatum_t::baseline_left);
-      tapeSpriteW = tapeW;
-      tapeSpriteH = stripH;
-      logPrintf("Compass tape sprite %s (%dx%d, depth=%d, heap=%lu)\n",
-                tapeSpriteReady ? "OK" : "FAILED (fallback: direct panel)",
-                tapeW, stripH,
-                tapeSpriteReady ? (int)tapeSprite.getColorDepth() : 0,
-                (unsigned long)ESP.getFreeHeap());
-    }
-
-    // Tape scrolls with the fractional heading so ticks/numbers glide smoothly
-    int nearest10 = (currentHeadingInt + 5) / 10 * 10;
-    float refDeg = (float)nearest10;
-
-    if (tapeSpriteReady) {
-      renderTapeStrip(tapeSprite, tapeW, compassX, 0, stripH, refDeg,
-                      displayHeading, pxPerDeg, c_tickMin, c_tickMaj, fadeW,
-                      headValid);
-      tapeSprite.pushSprite(0, labelTop);
-    } else {
-      renderTapeStrip(display, tapeW, compassX, labelTop, stripH, refDeg,
-                      displayHeading, pxPerDeg, c_tickMin, c_tickMaj, fadeW,
-                      headValid);
-    }
-
-    drawDebugBox(display, 0, labelTop, tapeW, stripBottom - labelTop + 2);
-  }
-
-  // When the compass element is toggled off live, erase the tape band it left
-  // on screen (the draw block above never runs in that state).
-  if (!SHOW_ELEMENT_COMPASS && compassStaticDrawn) {
-    compassStaticDrawn = false;
-    lastTapePix = -1;
-    int eCompassY = BIG_CENTER_Y + OFFSET_COMPASS_Y;
-    int eBandTop = eCompassY - 7;
-    int eLabelTop = std::min(eBandTop - 10 + (int)labelY1,
-                             std::min(eBandTop - 10 + (int)cardY1, eBandTop - 10)) - 2;
-    int eStripBottom = eBandTop + 10 + 8;
-    display.fillRect(0, eLabelTop, display.width(), eStripBottom - eLabelTop + 2,
-                     TFT_BLACK);
-  }
-  tAfterCompass = millis();
 
   // ----------------------------------------------------------------------------
   // Weather Widget Rendering
