@@ -535,6 +535,7 @@ In Demo Mode:
 - **Compass feature removed** — the dashboard is now screwed to the vehicle and cannot be rotated for auto-calibration, so the magnetometer compass is gone for good: QMC5883L driver, tilt-compensated heading math, heading-tape HUD readout, WebUI calibration workbench, the five `/api/compass/*` endpoints, and all related NVS parameters (`OFFSET_COMPASS_X/Y`, `SHOW_ELEMENT_COMPASS`, `COMPASS_DECLINATION_DEG`, `HEADING_DIGITS`, `COMPASS_CAL_*`, `COMPASS_TILT_COMP`).
 - **Freed pins** — GPIO21/22 (former compass I²C bus) are now free.
 - **Mobile WebUI fixes** — the Time Zone select no longer overflows the System & General card on narrow screens (it was sized to its longest option and the details box clipped its right edge), and the Advanced Mode toggle no longer overlaps the page title on phones (it now flows below the IP banner, centered).
+- **WebUI source cleanup** — removed the browser "saved page" artifact (the `saved from` URL header) and the hardcoded `192.168.1.136` initial state from `webui.html`; the IP banner now starts from the always-true AP address and the live `/api/perf` value remains the source of truth.
 
 ### V1.3.4 — Refuel fix, mDNS rebind on reconnect, OTA check auto-retry
 - **Refuel trip reset** — the automatic refuel reset (fuel rise ≥ threshold) now also clears `tripDistanceKm`, so the post-refuel average KM/L is no longer diluted against the pre-refuel trip distance.
