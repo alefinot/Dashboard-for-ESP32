@@ -958,6 +958,13 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
     .details-content { grid-template-columns: 1fr; }
     .cfg-row > label { min-width: 110px; }
     .cfg-controls { width: auto; min-width: 0; }
+    /* In-card selects (time zone, etc.) render width:auto to fit their
+       longest option, which is wider than a phone screen and clipped the
+       details box - force them to the available width on mobile */
+    .cfg-controls select { width: 100% !important; }
+    /* The absolutely-positioned advanced-mode toggle overlaps the 26px
+       page title on narrow screens - flow it in below the IP banner */
+    .adv-mode-toggle { position: static; width: fit-content; margin: 6px auto 0 auto; }
 }
 </style>
 </head>
