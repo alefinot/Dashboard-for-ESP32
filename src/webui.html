@@ -1180,21 +1180,8 @@ const DEFAULTS = {
     OFFSET_AVG_SPEED_Y: -25,
     OFFSET_MAX_SPEED_X: -60,
     OFFSET_MAX_SPEED_Y: -25,
-    OFFSET_COMPASS_X: 0,
-    OFFSET_COMPASS_Y: -130,
     OFFSET_FUEL_LTRS_X: 132,
     OFFSET_FUEL_LTRS_Y: 123,
-    COMPASS_DECLINATION_DEG: 0.0,
-    COMPASS_CAL_X: -79,
-    COMPASS_CAL_Y: -2040,
-    COMPASS_CAL_Z: -515,
-    COMPASS_CAL_TX: -15193,
-    COMPASS_CAL_TY: -26464,
-    COMPASS_CAL_TZ: 11935,
-    COMPASS_CAL_SCALE_X: 1.0,
-    COMPASS_CAL_SCALE_Y: 1.0,
-    COMPASS_CAL_SCALE_Z: 1.0,
-    COMPASS_TILT_COMP: 0,
     SIDEBAR_BAR_WIDTH: 8,
     SIDEBAR_BAR_HEIGHT: 190,
     SHOW_ELEMENT_BOUNDS: false,
@@ -1216,7 +1203,6 @@ const DEFAULTS = {
     SHOW_ELEMENT_AVG_SPEED: true,
     SHOW_ELEMENT_MAX_SPEED: true,
     SHOW_ELEMENT_FUEL_LTRS: true,
-    SHOW_ELEMENT_COMPASS: true,
     SHOW_ELEMENT_WEATHER: true,
     OFFSET_WEATHER_X: 0,
     OFFSET_WEATHER_Y: 146,
@@ -1262,7 +1248,6 @@ const DEFAULTS = {
     AVG_SPEED_DEC_DIGITS: 0,
     MAX_SPEED_INT_DIGITS: 3,
     MAX_SPEED_DEC_DIGITS: 0,
-    HEADING_DIGITS: 3,
     FUEL_INT_DIGITS: 1,
     FUEL_DEC_DIGITS: 1,
     ODO_INT_DIGITS: 5,
@@ -1597,33 +1582,6 @@ const configMap = [
             { id: "HALL_MEDIAN_SAMPLES", label: "Hall Median Samples (1 = off)" },
             { id: "HALL_PERIOD_GUARD", label: "Hall Period Guard (1 = off)" },
             { id: "GPS_DEBUG_DEFAULT", label: "Show GPS Debug Overlay" },
-            { type: "card_header", label: "Compass", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-        <span style="font-size:12px;color:var(--text-muted);">Status: <strong id="compass-cal-status" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span>
-        <div style="display:flex;gap:6px;">
-            <button onclick="compassCalStart()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Start Calibration (30s)</button>
-            <button onclick="compassCalCancel()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Cancel</button>
-        </div>
-    </div>
-    <div id="compass-cal-workbench" style="display:none;">
-        <canvas id="compass-cal-plot" width="540" height="150" style="width:100%;height:120px;"></canvas>
-        <div id="compass-cal-quality" style="font-size:11px;color:var(--text-muted);margin:6px 0;"></div>
-        <div style="display:flex;gap:6px;align-items:center;">
-            <button onclick="compassCalApply()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Apply computed values</button>
-            <span id="compass-cal-apply-status" style="font-size:11px;color:#77d99a;"></span>
-        </div>
-    </div>
-    <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Mount the module as it will be mounted (any tilt angle) and slowly rotate the WHOLE UNIT a full circle twice, keeping the tilt fixed. The browser captures the raw samples and computes the offsets (outlier-trimmed), the soft-iron scale correction and the tilt axis - review the plot and apply, or let the ESP save its own copy automatically. Keep magnets and metal away.</div>` },
-            { id: "COMPASS_DECLINATION_DEG", label: "Declination Offset", unit: "deg" },
-            { id: "COMPASS_CAL_X", label: "Cal X Offset", unit: "raw", advanced: true },
-            { id: "COMPASS_CAL_Y", label: "Cal Y Offset", unit: "raw", advanced: true },
-            { id: "COMPASS_CAL_Z", label: "Cal Z Offset", unit: "raw", advanced: true },
-            { id: "COMPASS_CAL_SCALE_X", label: "Cal Scale X", unit: "x", advanced: true },
-            { id: "COMPASS_CAL_SCALE_Y", label: "Cal Scale Y", unit: "x", advanced: true },
-            { id: "COMPASS_CAL_SCALE_Z", label: "Cal Scale Z", unit: "x", advanced: true },
-            { id: "COMPASS_TILT_COMP", label: "Tilt Compensation (0=robust flat, 1=fixed tilt axis)", type: "number", advanced: true },
-            { id: "COMPASS_CAL_TX", label: "Tilt Axis X", unit: "raw", advanced: true },
-            { id: "COMPASS_CAL_TY", label: "Tilt Axis Y", unit: "raw", advanced: true },
-            { id: "COMPASS_CAL_TZ", label: "Tilt Axis Z", unit: "raw", advanced: true }
         ]
     },
     {
@@ -1709,11 +1667,6 @@ const configMap = [
             { type: "section_header", label: "WiFi Icon" },
             { id: "SHOW_ELEMENT_WIFI", label: "Visible" },
             { type: 'xy', idX: "OFFSET_WIFI_ICON_X", idY: "OFFSET_WIFI_ICON_Y", label: "Position" },
-            { type: "card_header", label: "Compass" },
-            { type: "section_header", label: "Heading Indicator" },
-            { id: "SHOW_ELEMENT_COMPASS", label: "Visible" },
-            { id: "HEADING_DIGITS", label: "Digits" },
-            { type: 'xy', idX: "OFFSET_COMPASS_X", idY: "OFFSET_COMPASS_Y", label: "Position" },
             { type: "card_header", label: "Weather Widget" },
             { id: "SHOW_ELEMENT_WEATHER", label: "Show Weather Widget on Dashboard" },
             { type: 'xy', idX: "OFFSET_WEATHER_X", idY: "OFFSET_WEATHER_Y", label: "Position" },
@@ -1785,8 +1738,6 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(pollFuel, 1000);
     pollSensors();
     setInterval(pollSensors, 1000);
-    pollCompassCal();
-    setInterval(pollCompassCal, 2000);
 
     fetch('/api/perf').then(r => r.json()).then(perf => {
         let ipEl = document.getElementById('ip-info');
@@ -2563,196 +2514,6 @@ function calibrateBright() {
     }).catch(() => {});
 }
 
-let _compassWasCapturing = false;
-let _compassSamples = [];
-let _compassCapDeadline = 0;
-let _compassComputed = null;
-let _compassRawTimer = null;
-
-function compassStopRawPoll() {
-    if (_compassRawTimer) { clearTimeout(_compassRawTimer); _compassRawTimer = null; }
-}
-
-function compassCalStart() {
-    _compassSamples = [];
-    _compassComputed = null;
-    compassStopRawPoll();
-    fetch('/api/compass/cal-start', {method:'POST'}).then(r => r.json()).then(d => {
-        if (d.status === 'ok') {
-            _compassWasCapturing = true;
-            _compassCapDeadline = Date.now() + 30000;
-            compassPollRaw();
-        } else { let el = document.getElementById('compass-cal-status'); if (el) el.innerText = 'Error: ' + (d.error || 'unknown'); }
-    }).catch(() => {});
-}
-function compassCalCancel() {
-    compassStopRawPoll();
-    _compassWasCapturing = false;
-    _compassSamples = [];
-    _compassComputed = null;
-    let wb = document.getElementById('compass-cal-workbench');
-    if (wb) wb.style.display = 'none';
-    fetch('/api/compass/cal-cancel').then(r => r.json()).then(() => pollCompassCal()).catch(() => {});
-}
-function compassPollRaw() {
-    if (tabHidden) { _compassRawTimer = setTimeout(compassPollRaw, 500); return; }
-    fetch('/api/compass/raw').then(r => r.json()).then(d => {
-        _compassSamples.push([d.x, d.y, d.z]);
-        if (Date.now() >= _compassCapDeadline) { compassCalFinishBrowser(); return; }
-        let el = document.getElementById('compass-cal-status');
-        if (el) {
-            el.style.color = '#ffcc00';
-            el.innerText = 'CAPTURE... rotate the unit - ' + Math.max(0, Math.ceil((_compassCapDeadline - Date.now()) / 1000)) + 's';
-        }
-        _compassRawTimer = setTimeout(compassPollRaw, 100);
-    }).catch(() => { _compassRawTimer = setTimeout(compassPollRaw, 500); });
-}
-function compassTrimmedMinMax(a) {
-    const s = a.slice().sort((p, q) => p - q);
-    const cut = Math.floor(s.length * 0.05);
-    return [s[cut], s[s.length - 1 - cut]];
-}
-function compassCalCompute(sZ) {
-    const n = _compassSamples.length;
-    if (n < 32) return null;
-    const xs = _compassSamples.map(v => v[0]);
-    const ys = _compassSamples.map(v => v[1]);
-    const zs = _compassSamples.map(v => v[2]);
-    const [loX, hiX] = compassTrimmedMinMax(xs);
-    const [loY, hiY] = compassTrimmedMinMax(ys);
-    const [loZ, hiZ] = compassTrimmedMinMax(zs);
-    const offX = (loX + hiX) / 2, offY = (loY + hiY) / 2, offZ = (loZ + hiZ) / 2;
-    const spanX = hiX - loX, spanY = hiY - loY;
-    const lowSpan = spanX < 200 || spanY < 200;
-    const avgXY = (spanX + spanY) / 2;
-    const sX = Math.min(5.0, Math.max(0.2, avgXY / spanX));
-    const sY = Math.min(5.0, Math.max(0.2, avgXY / spanY));
-    const Cx = xs.map(v => (v - offX) * sX);
-    const Cy = ys.map(v => (v - offY) * sY);
-    const Cz = zs.map(v => (v - offZ) * sZ);
-    let nx = 0, ny = 0, nz = 0;
-    for (let i = 1; i + 1 < n; i++) {
-        const dx1 = Cx[i] - Cx[i - 1], dy1 = Cy[i] - Cy[i - 1], dz1 = Cz[i] - Cz[i - 1];
-        const dx2 = Cx[i + 1] - Cx[i], dy2 = Cy[i + 1] - Cy[i], dz2 = Cz[i + 1] - Cz[i];
-        nx += dy1 * dz2 - dz1 * dy2;
-        ny += dz1 * dx2 - dx1 * dz2;
-        nz += dx1 * dy2 - dy1 * dx2;
-    }
-    const mag = Math.sqrt(nx * nx + ny * ny + nz * nz);
-    let tX = 0, tY = 0, tZ = 0, tiltOk = false, ratio = 1.0;
-    if (mag > 1.0) {
-        const ux = nx / mag, uy = ny / mag, uz = nz / mag;
-        let sumDot = 0, sumR = 0;
-        for (let i = 0; i < n; i++) {
-            sumDot += Math.abs(Cx[i] * ux + Cy[i] * uy + Cz[i] * uz);
-            sumR += Math.sqrt(Cx[i] * Cx[i] + Cy[i] * Cy[i] + Cz[i] * Cz[i]);
-        }
-        ratio = sumR > 0.01 ? sumDot / sumR : 1.0;
-        if (ratio < 0.6) { tX = ux * 32767; tY = uy * 32767; tZ = uz * 32767; tiltOk = true; }
-    }
-    const rs = [];
-    for (let i = 0; i < n; i++) rs.push(Math.sqrt(Cx[i] * Cx[i] + Cy[i] * Cy[i] + Cz[i] * Cz[i]));
-    let rmin = Infinity, rmax = 0, rsum = 0;
-    for (const r of rs) { rmin = Math.min(rmin, r); rmax = Math.max(rmax, r); rsum += r; }
-    const rmean = rsum / n;
-    const uniformity = rmean > 1 ? (rmax - rmin) / rmean : 1;
-    return { offX: Math.round(offX), offY: Math.round(offY), offZ: Math.round(offZ),
-             sX, sY, sZ, tX: Math.round(tX), tY: Math.round(tY), tZ: Math.round(tZ),
-             tiltOk, ratio, spanX, spanY, uniformity, n, lowSpan };
-}
-function compassCalFinishBrowser() {
-    _compassWasCapturing = false;
-    fetch('/api/compass/cal-status').then(r => r.json()).then(st => {
-        const c = compassCalCompute(st.scaleZ || 1.0);
-        _compassComputed = c;
-        let el = document.getElementById('compass-cal-status');
-        if (el) {
-            el.style.color = '';
-            if (!c) el.innerText = 'Not enough samples captured - try again';
-            else if (c.lowSpan) el.innerText = 'Calibration FAILED - span too small, rotate the unit in full circles';
-            else el.innerText = 'Calibration ready - review the plot and apply';
-        }
-        const wb = document.getElementById('compass-cal-workbench');
-        if (wb && c) {
-            wb.style.display = '';
-            const q = document.getElementById('compass-cal-quality');
-            q.innerText = 'Quality: span X/Y ' + c.spanX + '/' + c.spanY +
-                           ' · uniformity ' + c.uniformity.toFixed(3) +
-                           (c.tiltOk ? '' : ' · tilt fit rejected (wobble ' + c.ratio.toFixed(2) + ')');
-            compassDrawPlot(c);
-        }
-    }).catch(() => {});
-}
-function compassDrawPlot(c) {
-    const cv = document.getElementById('compass-cal-plot');
-    if (!cv) return;
-    const ctx = cv.getContext('2d');
-    const W = cv.width, H = cv.height;
-    ctx.fillStyle = '#0b1016';
-    ctx.fillRect(0, 0, W, H);
-    const sc = [c.sX, c.sY, c.sZ], off = [c.offX, c.offY, c.offZ];
-    const panels = [[0, 1, 'X-Y'], [0, 2, 'X-Z'], [1, 2, 'Y-Z']];
-    const pw = W / 3;
-    for (let p = 0; p < 3; p++) {
-        const a = panels[p][0], b = panels[p][1];
-        const corr = _compassSamples.map(v => [(v[a] - off[a]) * sc[a], (v[b] - off[b]) * sc[b]]);
-        const raw = _compassSamples.map(v => [v[a], v[b]]);
-        let mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity;
-        for (const q of corr) { mnx = Math.min(mnx, q[0]); mxx = Math.max(mxx, q[0]); mny = Math.min(mny, q[1]); mxy = Math.max(mxy, q[1]); }
-        const spanx = (mxx - mnx) || 1, spany = (mxy - mny) || 1;
-        const px0 = p * pw + 8, py0 = 18, pwidth = pw - 16, pheight = H - 36;
-        const mx = mnx - spanx * 0.05, my = mny - spany * 0.05;
-        const X = (v) => px0 + (v - mx) * (pwidth / (spanx * 1.1));
-        const Y = (v) => py0 + pheight - (v - my) * (pheight / (spany * 1.1));
-        ctx.fillStyle = 'rgba(255,255,255,0.25)';
-        for (const q of raw) ctx.fillRect(X(q[0]) - 1, Y(q[1]) - 1, 2, 2);
-        ctx.fillStyle = 'rgba(0,255,170,0.7)';
-        for (const q of corr) ctx.fillRect(X(q[0]) - 1, Y(q[1]) - 1, 2, 2);
-        ctx.fillStyle = '#888';
-        ctx.font = '10px monospace';
-        ctx.fillText(panels[p][2], px0 + 4, 10);
-    }
-}
-function compassCalApply() {
-    const c = _compassComputed;
-    if (!c || c.lowSpan) return;
-    const body = { offX: c.offX, offY: c.offY, offZ: c.offZ, sX: c.sX, sY: c.sY, sZ: c.sZ };
-    if (c.tiltOk) { body.tX = c.tX; body.tY = c.tY; body.tZ = c.tZ; }
-    fetch('/api/compass/cal-apply', { method: 'POST', body: JSON.stringify(body) })
-        .then(r => r.json()).then(d => {
-            const st = document.getElementById('compass-cal-apply-status');
-            if (st) st.innerText = d.status === 'ok' ? 'Applied' : ('Apply failed: ' + (d.error || 'error'));
-        }).catch(() => {});
-}
-function pollCompassCal() {
-    if (tabHidden) return;
-    fetch('/api/compass/cal-status').then(r => r.json()).then(d => {
-        let el = document.getElementById('compass-cal-status');
-        if (!el) return;
-        if (d.state === 'capturing') {
-            _compassWasCapturing = true;
-            if (_compassSamples.length) return;  // browser capture drives the status line
-            el.style.color = '#ffcc00';
-            el.innerText = 'CALIBRATING... rotate slowly - ' + d.remaining + 's left (X ' + d.minX + '..' + d.maxX + ' / Y ' + d.minY + '..' + d.maxY + ')';
-        } else {
-            el.style.color = '';
-            if (_compassWasCapturing && d.result && d.result.length) {
-                let m = { COMPASS_CAL_X: d.offX, COMPASS_CAL_Y: d.offY, COMPASS_CAL_Z: d.offZ,
-                          COMPASS_CAL_SCALE_X: d.scaleX, COMPASS_CAL_SCALE_Y: d.scaleY, COMPASS_CAL_SCALE_Z: d.scaleZ,
-                          COMPASS_CAL_TX: d.tX, COMPASS_CAL_TY: d.tY, COMPASS_CAL_TZ: d.tZ };
-                for (let id in m) { let e = document.getElementById(id); if (e) e.value = m[id]; }
-                let msg = document.getElementById('msg');
-                msg.className = 'msg-success'; msg.innerText = d.result;
-            }
-            _compassWasCapturing = false;
-            if (!_compassSamples.length) {
-                el.innerText = 'Idle - offsets X ' + d.offX + ' / Y ' + d.offY + ' / Z ' + d.offZ +
-                                ' | scales ' + d.scaleX + ' / ' + d.scaleY + ' / ' + d.scaleZ +
-                                ' | tilt X ' + d.tX + ' / Y ' + d.tY + ' / Z ' + d.tZ;
-            }
-        }
-    }).catch(() => {});
-}
 function pollAmbient() {
     if (tabHidden) return;
     fetch('/api/ambient').then(r => r.json()).then(d => {
