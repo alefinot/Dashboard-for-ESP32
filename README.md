@@ -42,7 +42,7 @@ Dashboard++ replaces legacy analog or basic digital gauges with an automotive-gr
 - **PROGMEM VLW Font System:** All fonts (Conthrax SemiBold and DS-DIGIT variants) are compiled into flash as PROGMEM byte arrays (generated from the `.vlw` sources in `data/Fonts/` by `scripts/vlw_to_header.py`), loaded at build time via `loadVLWFont()` — zero DRAM per glyph, no runtime filesystem lookups.
 - **Dirty-Rendering Frame Pipeline:** Element state tracking ensures only mutated visual regions are drawn to the SPI bus, with dedicated per-element refresh rate throttles for speed, satellite count, timer, battery, fuel economy, and average speed.
 - **Configurable 7-Segment Digital Fonts:** 120px (sprite) and 28px (direct) seven-segment fonts with background "ghost digit" rendering (888 backdrop effect) and fully user-configurable integer and decimal digit boundaries for all telemetry counters.
-- **Full Sensor Suite Integration:** Precise fuel level monitoring (20-point piecewise linear calibration table + EMA filtering), engine coolant thermistor telemetry (Steinhart-Hart equation), battery voltage divider monitoring, 3-axis I2C digital compass heading, trip fuel economy tracking, **trip average speed**, and a **session max speed (Vmax)** readout display.
+- **Full Sensor Suite Integration:** Precise fuel level monitoring (20-point piecewise linear calibration table + EMA filtering), engine coolant thermistor telemetry (Steinhart-Hart equation), battery voltage divider monitoring, trip fuel economy tracking, **trip average speed**, and a **session max speed (Vmax)** readout display.
 - **FreeRTOS Dual-Core Multitasking:** Strict core isolation — the continuous ~1.1KB/s GNSS UART stream is quarantined in its own Core 0 task (bulk ring-buffer read, bounded per tick, sitting below the WiFi stack), while the vehicle sensor suite and UI rendering run on Core 1, so a GPS stream backlog can never stall the dashboard or freeze any real-time value.
 - **Embedded Web Management Portal:** Embedded single-page Web application accessible over SoftAP or local WiFi network featuring grouped card-based configuration UI with live search, real-time performance telemetry panel (FPS, CPU frequency/temp, RAM, flash storage), interactive sliders, color pickers, NVS backup/restore, web serial terminal stream, cloud OTA pull, and HTTP file upload OTA firmware updating.
 - **Hysteresis-Based Dynamic CPU Scaling:** Three-state frequency governor (240/160/80 MHz) with hysteresis deadbands prevents oscillation, and thermal throttling automatically caps frequency at configurable warning/critical temperature thresholds.
@@ -63,11 +63,11 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 ││ Task: GpsTaskCore0 (Prio 2, 10KB)    │││ Task: SensorTaskCore1 (Prio 2, 10KB) ││
 ││                                      │││                                      ││
 ││• UART2 @ 115200 bulk ring drain      │││• Hall Sensor GPIO33 ISR              ││
-││  (readBytes() batch, 1024 B/tick cap)│││• QMC5883L Magnetometer               ││
-││• TinyGPS++ NMEA + UBX NAV-PVT parse  │││  (I2C @ 200 Hz)                      ││
-││• Speed Fusion & Odometer calc        │││• ADC: Fuel (32), Temp (36), Bat (35) ││
-││• GNSS Epoch Time Sync -> settimeofday│││• Fuel Economy & Accel Timer          ││
-││• Safe Thread Sync via g_stateMutex   │││• Trip Average Speed                  ││
+││  (readBytes() batch, 1024 B/tick cap)│││• ADC: Fuel (32), Temp (36), Bat (35) ││
+││• TinyGPS++ NMEA + UBX NAV-PVT parse  │││• Fuel Economy & Accel Timer          ││
+││• Speed Fusion & Odometer calc        │││• Trip Average Speed                  ││
+││• GNSS Epoch Time Sync -> settimeofday│││• Safe Thread Sync via g_stateMutex   ││
+││• Safe Thread Sync via g_stateMutex   │││                                      ││
 ││                                      │││• Safe Thread Sync via g_stateMutex   ││
 ││──────────────────────────────────────│││──────────────────────────────────────││
 ││ Task: WebTaskCore0 (Prio 1, 12KB)    │││ Main Loop (Priority 1)               ││
@@ -105,7 +105,6 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **Display Panel** | ILI9488 TFT LCD (4.0") | SPI (16-bit RGB565) | 480×320 pixels, 60 MHz SPI bus speed, hardware CS/DC/RST |
 | **Display Backlight** | LED Backlight Channel | LEDC PWM (Channel 0) | 1 kHz hardware PWM, 256 brightness levels, logarithmic fading |
 | **GNSS Module** | BZGNSS P25 Pro (u-blox M10) | UART2 (RX=25, TX=26) | 115200 baud (configurable), NMEA 0183 (forced at boot via UBX), 10 Hz update rate, multi-constellation (GPS/GLONASS/BDS/Galileo), UTC epoch time synchronization |
-| **Digital Compass** | QMC5883L (built into BZGNSS P25 Pro) | I2C (SDA=21, SCL=22) | 3-axis magnetometer, 0x0D address, 200 Hz continuous mode, configurable declination offset |
 | **Wheel Speed Sensor** | Hall Effect Interrupt | GPIO33 (Input Pullup) | Hardware Falling-Edge ISR, microsecond interval timing |
 | **Fuel Level Sensor** | Capacitive / Resistive Sender | GPIO32 (ADC1_CH4) | Analog 0–3.3V, 20-point touch table, EMA smoothing filter |
 | **Engine Temp Sensor** | NTC Thermistor (10k/100k) | GPIO36 (ADC1_CH0) | Analog 0–3.3V, Steinhart-Hart equation, voltage divider balance |
@@ -123,8 +122,6 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **GPIO12** | `BL_DISPLAY` | Backlight PWM | Output | Attached to ESP32 LEDC Channel 0 (1 kHz PWM) |
 | **GPIO14** | `SPI_RST` | Display Reset | Output | Active-Low hardware reset line for ILI9488 |
 | **GPIO18** | `SPI_CLK` | SPI Clock | Output | Hardware SPI SCK pin (60 MHz) |
-| **GPIO21** | `COMPASS_SDA` | I2C Data | Bi-directional | QMC5883L I2C SDA — wired to the GNSS module's SDA pin (built-in compass) (Requires external/internal 4.7k pullups) |
-| **GPIO22** | `COMPASS_SCL` | I2C Clock | Output | QMC5883L I2C SCL — wired to the GNSS module's SCL pin (built-in compass) |
 | **GPIO23** | `SPI_MOSI` | SPI Master Out | Output | Hardware SPI MOSI pin for LCD data command stream |
 | **GPIO25** | `RXD2` | GPS Serial RX | Input | Connected to GNSS Module TX pin (UART2) |
 | **GPIO26** | `TXD2` | GPS Serial TX | Output | Connected to GNSS Module RX pin (UART2) |
@@ -139,7 +136,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 > GPIO32 is dedicated to the fuel ADC input to avoid pin-sharing conflicts with the GPIO33 Hall interrupt hardware line.
 
 > [!NOTE]
-> The current code carries temporary isolation-test pins for `RXD2` (GPIO16), `TXD2` (GPIO17), `COMPASS_SDA` (GPIO13), and `COMPASS_SCL` (GPIO15), as flagged in `dashboard.h`. The matrix above reflects the board's intended wiring (GPIO21/22 for compass I²C, GPIO25/26 for GNSS serial).
+> The current code carries temporary isolation-test pins for `RXD2` (GPIO16) and `TXD2` (GPIO17), as flagged in `dashboard.h`. The matrix above reflects the board's intended wiring (GPIO25/26 for GNSS serial).
 
 ---
 
@@ -324,7 +321,7 @@ The management portal features a modern grouped card-based layout:
 - **XY offset controls** with linked sliders for UI element positioning
 - **Real-time performance panel** displaying FPS, CPU frequency/temperature, RAM usage, flash storage utilization, and live serial output monitor
 - **Weather Widget group** with city, latitude/longitude, refresh interval, locale, and a day/night icon
-- **Compass calibration** (start / cancel / live status) and **ambient light calibration** (dark / bright reference points)
+- **Ambient light calibration** (dark / bright reference points)
 - **Cloud OTA pull** controls (enable, URL) with live status polling
 - **OTA firmware upload** via file picker
 - **NVS backup/restore** (export/import JSON)
@@ -346,9 +343,6 @@ The management portal features a modern grouped card-based layout:
 | `/api/ambient` | `GET` | Reads raw ambient light sensor value | None | `application/json` |
 | `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `text/plain` |
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `text/plain` |
-| `/api/compass/cal-start` | `POST` | Starts a ~30 s two-sided compass calibration | None | `text/plain` |
-| `/api/compass/cal-cancel` | `POST` | Cancels an in-progress compass calibration | None | `text/plain` |
-| `/api/compass/cal-status` | `GET` | Live calibration state (min/max per axis, offsets, result) | None | `application/json` |
 | `/api/ota` | `POST` | Over-The-Air firmware binary upload | Binary `.bin` payload | `multipart/form-data` |
 | `/api/ota/pull` | `POST` | Triggers cloud OTA pull (checks `OTA_PULL_URL`) | None | `text/plain` |
 | `/api/ota/check` | `GET` | Reports cloud OTA pull state (enabled, URL, version, status) | None | `application/json` |
@@ -375,7 +369,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `CPU_THROTTLE_TEMP_CRIT` (default=70): Critical temperature threshold in °C.
 
 #### Web UI
-- `ADV_MODE` (default=false): Global “Advanced Mode” toggle in the Web UI. When enabled, advanced and technical settings (CPU, GPS, Polling Rates, raw compass values, technical display options, advanced WiFi, and sensor-calibration internals) are shown as normal rows in their groups; when disabled they are hidden.
+- `ADV_MODE` (default=false): Global “Advanced Mode” toggle in the Web UI. When enabled, advanced and technical settings (CPU, GPS, Polling Rates, technical display options, advanced WiFi, and sensor-calibration internals) are shown as normal rows in their groups; when disabled they are hidden.
 
 #### Display & Visual Design
 - `DISPLAY_ROTATION` (default=3): Screen rotation (0, 1, 2, 3).
@@ -397,9 +391,6 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `NTC_BETA` (default=3950.0): Thermistor Beta coefficient.
 - `NTC_TEMP_OFFSET` (default=0.0): Fixed temperature offset (°C) added to the Steinhart result.
 - `GPS_BAUD` (default=115200): UART baud rate for the GNSS module. On boot the module is forced into NMEA output at this baud with a 10 Hz update rate via u-blox UBX commands (compatible with BZGNSS P25 Pro / M10 receivers).
-- `COMPASS_DECLINATION_DEG` (default=0.0): Magnetic declination offset applied to the compass heading.
-- `REFRESH_COMPASS_MS` (default=200): Throttle for the compass heading widget redraw.
-- `HEADING_DIGITS` (default=3): Integer digit count for the compass heading readout.
 - `MIN_SATELLITES` (default=5): Minimum GPS satellite lock requirement.
 - `OPTIMAL_SATELLITES` (default=8): Satellite count threshold for full GPS speed reliance.
 - `MAX_SPEED_DELTA_KMH` (default=5.0): Maximum allowable difference between GPS and Hall speed before falling back.
@@ -418,7 +409,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
 - `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull (checks once per boot while enabled).
 - `OTA_PULL_URL` (default=""): HTTPS URL of the target firmware binary.
-- `OTA_CURRENT_VERSION` (default="1.3.4"): Version string compared against the cloud manifest.
+- `OTA_CURRENT_VERSION` (default="1.3.5"): Version string compared against the cloud manifest.
 
 #### Ambient Light (Auto-Brightness)
 - `LIGHT_SENSOR_DARK_VAL`: Dark-reference ambient light value (calibrated via `/api/ambient/cal-dark`).
@@ -429,7 +420,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 
 #### UI Layout Offset Coordinates
 - `BIG_CENTER_X`, `BIG_CENTER_Y`: Screen anchor origin point.
-- `OFFSET_BIG_TIME_X/Y`, `OFFSET_BIG_DATE_X/Y`, `OFFSET_BIG_SPEED_NUM_X/Y`, `OFFSET_BIG_SPEED_UNIT_X/Y`, `OFFSET_BIG_ODO_X/Y`, `OFFSET_BIG_SAT_X/Y`, `OFFSET_BIG_TMR_X/Y`, `OFFSET_BIG_BAT_X/Y`, `OFFSET_INST_KML_X/Y`, `OFFSET_AVG_KML_X/Y`, `OFFSET_AVG_SPEED_X/Y`, `OFFSET_MAX_SPEED_X/Y`, `OFFSET_FUEL_LTRS_X/Y`, `OFFSET_COMPASS_X/Y`, `SIDEBAR_LEFT_X/Y`, `SIDEBAR_RIGHT_X/Y`: Fine-grained pixel coordinate offsets for every UI component.
+- `OFFSET_BIG_TIME_X/Y`, `OFFSET_BIG_DATE_X/Y`, `OFFSET_BIG_SPEED_NUM_X/Y`, `OFFSET_BIG_SPEED_UNIT_X/Y`, `OFFSET_BIG_ODO_X/Y`, `OFFSET_BIG_SAT_X/Y`, `OFFSET_BIG_TMR_X/Y`, `OFFSET_BIG_BAT_X/Y`, `OFFSET_INST_KML_X/Y`, `OFFSET_AVG_KML_X/Y`, `OFFSET_AVG_SPEED_X/Y`, `OFFSET_MAX_SPEED_X/Y`, `OFFSET_FUEL_LTRS_X/Y`, `SIDEBAR_LEFT_X/Y`, `SIDEBAR_RIGHT_X/Y`: Fine-grained pixel coordinate offsets for every UI component.
 
 ---
 
@@ -466,7 +457,7 @@ Dashboard++ for ESP32/
     ├── main.cpp           # System setup(), dual FreeRTOS task spawns, main display loop
     ├── config.cpp         # NVS parameter storage, JSON serialization/deserialization engine
     ├── gfx.cpp            # LovyanGFX display device class, PROGMEM VLW font loader, AA primitives, icons
-    ├── sensors.cpp        # Core 0 GPS task (bulk UART drain, TinyGPS++/UBX parser, speed fusion, odo, time-sync) + Core 1 sensor task (Hall ISR, QMC5883L compass, ADC sensors, snapshot)
+    ├── sensors.cpp        # Core 0 GPS task (bulk UART drain, TinyGPS++/UBX parser, speed fusion, odo, time-sync) + Core 1 sensor task (Hall ISR, ADC sensors, snapshot)
     ├── ui.cpp             # Dirty-rendering dashboard visual layout engine
     ├── web.cpp            # SoftAP/STA WiFi manager, REST API handlers, cloud OTA pull, embedded Web UI
     └── webui.html         # Single-page Web UI source (gzipped at build time by scripts/gzip_webui.py)
@@ -533,12 +524,16 @@ To enable Demo Mode:
 
 In Demo Mode:
 - Speed oscillates synthetically between 10 km/h and 110 km/h using sinusoidal formulas.
-- Engine temperature, fuel level, battery voltage, compass heading, satellite count, instant/avg KM/L, and average speed simulate active riding telemetry.
+- Engine temperature, fuel level, battery voltage, satellite count, instant/avg KM/L, and average speed simulate active riding telemetry.
 - Speed source indicator badge automatically cycles between `HAL`, `GPS`, and `G+H` every 2 seconds.
 
 ---
 
 ## Changelog
+
+### V1.3.5 — Compass/heading feature removed
+- **Compass feature removed** — the dashboard is now screwed to the vehicle and cannot be rotated for auto-calibration, so the magnetometer compass is gone for good: QMC5883L driver, tilt-compensated heading math, heading-tape HUD readout, WebUI calibration workbench, the five `/api/compass/*` endpoints, and all related NVS parameters (`OFFSET_COMPASS_X/Y`, `SHOW_ELEMENT_COMPASS`, `COMPASS_DECLINATION_DEG`, `HEADING_DIGITS`, `COMPASS_CAL_*`, `COMPASS_TILT_COMP`).
+- **Freed pins** — GPIO21/22 (former compass I²C bus) are now free.
 
 ### V1.3.4 — Refuel fix, mDNS rebind on reconnect, OTA check auto-retry
 - **Refuel trip reset** — the automatic refuel reset (fuel rise ≥ threshold) now also clears `tripDistanceKm`, so the post-refuel average KM/L is no longer diluted against the pre-refuel trip distance.

@@ -238,7 +238,7 @@ bool TZ_DST_ENABLED = true;
 
 bool OTA_PULL_ENABLED = false;
 char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
-char OTA_CURRENT_VERSION[32] = "1.3.4";
+char OTA_CURRENT_VERSION[32] = "1.3.5";
 
 int FUEL_TOUCH_POINTS = 8;
 int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400,
@@ -525,7 +525,7 @@ void processConfig(int mode, JsonDocument *doc) {
 
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.3.4");
+  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.3.5");
 
   // WiFi passwords: mode 1 sends empty strings so they never leave the device,
   // mode 2 keeps the stored value when the posted password is empty.
@@ -796,7 +796,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "TZ_DST_ENABLED": true,
   "OTA_PULL_ENABLED": false,
   "OTA_PULL_URL": "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
-  "OTA_CURRENT_VERSION": "1.3.4",
+  "OTA_CURRENT_VERSION": "1.3.5",
   "touchTable": [
     950,
     840,
