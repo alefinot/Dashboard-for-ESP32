@@ -106,7 +106,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **Display Backlight** | LED Backlight Channel | LEDC PWM (Channel 0) | 1 kHz hardware PWM, 256 brightness levels, logarithmic fading |
 | **GNSS Module** | BZGNSS P25 Pro (u-blox M10) | UART2 (RX=25, TX=26) | 115200 baud (configurable), NMEA 0183 (forced at boot via UBX), 10 Hz update rate, multi-constellation (GPS/GLONASS/BDS/Galileo), UTC epoch time synchronization |
 | **Wheel Speed Sensor** | Hall Effect Interrupt | GPIO33 (Input Pullup) | Hardware Falling-Edge ISR, microsecond interval timing |
-| **Fuel Level Sensor** | Capacitive / Resistive Sender | GPIO32 (ADC1_CH4) | Analog 0–3.3V, 20-point touch table, EMA smoothing filter |
+| **Fuel Level Sensor** | Resistive Sender (capacitive touch removed in v1.3.6) | GPIO32 (ADC1_CH4) | Analog 0–3.3V, 20-point calibration table, EMA smoothing filter |
 | **Engine Temp Sensor** | NTC Thermistor (10k/100k) | GPIO36 (ADC1_CH0) | Analog 0–3.3V, Steinhart-Hart equation, voltage divider balance |
 | **Battery Voltage** | Voltage Divider (5.7:1) | GPIO35 (ADC1_CH7) | Analog 0–3.3V, range 0–18.8V DC, sampled every 500 ms |
 | **Power / Ignition** | Ignition Key Sense Line | GPIO4 | High=Ignition ON, Low=Power Lost → Animated Deep Sleep |
@@ -126,7 +126,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **GPIO25** | `RXD2` | GPS Serial RX | Input | Connected to GNSS Module TX pin (UART2) |
 | **GPIO26** | `TXD2` | GPS Serial TX | Output | Connected to GNSS Module RX pin (UART2) |
 | **GPIO27** | `SPI_DC` | Data / Command | Output | High = Data, Low = Command for ILI9488 controller |
-| **GPIO32** | `FUEL_TOUCH_PIN` | Fuel ADC | Input | Dedicated ADC1 Channel 4 pin for fuel level reading |
+| **GPIO32** | `FUEL_TOUCH_PIN` | Fuel ADC | Input | Dedicated ADC1 Channel 4 pin for fuel level reading (resistive sender; capacitive touch removed in v1.3.6) |
 | **GPIO33** | `HALL_SENSOR_PIN` | Hall Interrupt | Input (Pullup) | Falling-edge hardware interrupt for wheel magnet pulses |
 | **GPIO34** | `LIGHT_SENSOR_PIN` | Ambient Light | Input (No Pull) | LDR ambient light sensor for auto-brightness (calibrated via `/api/ambient/cal-dark` / `cal-bright`) |
 | **GPIO35** | `BATTERY_SENSE_PIN`| Battery ADC | Input (No Pull) | Connected to 5.7:1 precision resistor divider node |
@@ -534,6 +534,7 @@ In Demo Mode:
 ### V1.3.6 — arduino-esp32 3.3.12 (ESP-IDF 5.5.5) core migration
 - **Core migration** — firmware now builds on arduino-esp32 3.3.12 (ESP-IDF v5.5.5) via the pioarduino community PlatformIO platform, pinned to exact release tag `55.03.312` in `platformio.ini`; the official SCons platform tops out at 2.0.17 (espressif/arduino-esp32#8606, platformio/platform-espressif32#1225).
 - **3.x API changes** — LEDC backlight switched to the pin-based `ledcAttach`/`ledcWrite` API (same GPIO12, same 1 kHz 8-bit PWM), and the console is explicitly pinned to UART1 on GPIO1/GPIO3 (`Serial.setPins`) because 3.x moved the default console to GPIO26/27.
+- **Capacitive fuel touch sensor removed** — the legacy RTC touch-pad driver cannot coexist with the new-generation touch driver of arduino-esp32 3.x (IDF 5.5 aborts on mixing), so the capacitive fuel sensor is gone. The fuel gauge pipeline (EMA filter, 20-point calibration table, ascending/resistive branch) is unchanged and now reads a neutral 0 — the gauge shows empty until a resistive fuel sender is wired to the reserved GPIO32 and the table re-fitted.
 - **Build environment** — first build downloads the pinned platform release (full rebuild + xtensa 13.2 toolchain); pins, `partitions.csv`, NVS layout and library pins are unchanged.
 
 ### V1.3.5 — Compass/heading feature removed
