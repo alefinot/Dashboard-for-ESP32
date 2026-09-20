@@ -409,7 +409,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
 - `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull (checks once per boot while enabled).
 - `OTA_PULL_URL` (default=""): HTTPS URL of the target firmware binary.
-- `OTA_CURRENT_VERSION` (default="1.3.5"): Version string compared against the cloud manifest.
+- `OTA_CURRENT_VERSION` (default="1.3.6"): Version string compared against the cloud manifest.
 
 #### Ambient Light (Auto-Brightness)
 - `LIGHT_SENSOR_DARK_VAL`: Dark-reference ambient light value (calibrated via `/api/ambient/cal-dark`).
@@ -530,6 +530,11 @@ In Demo Mode:
 ---
 
 ## Changelog
+
+### V1.3.6 — arduino-esp32 3.3.12 (ESP-IDF 5.5.5) core migration
+- **Core migration** — firmware now builds on arduino-esp32 3.3.12 (ESP-IDF v5.5.5) via the pioarduino community PlatformIO platform, pinned to exact release tag `55.03.312` in `platformio.ini`; the official SCons platform tops out at 2.0.17 (espressif/arduino-esp32#8606, platformio/platform-espressif32#1225).
+- **3.x API changes** — LEDC backlight switched to the pin-based `ledcAttach`/`ledcWrite` API (same GPIO12, same 1 kHz 8-bit PWM), and the console is explicitly pinned to UART1 on GPIO1/GPIO3 (`Serial.setPins`) because 3.x moved the default console to GPIO26/27.
+- **Build environment** — first build downloads the pinned platform release (full rebuild + xtensa 13.2 toolchain); pins, `partitions.csv`, NVS layout and library pins are unchanged.
 
 ### V1.3.5 — Compass/heading feature removed
 - **Compass feature removed** — the dashboard is now screwed to the vehicle and cannot be rotated for auto-calibration, so the magnetometer compass is gone for good: QMC5883L driver, tilt-compensated heading math, heading-tape HUD readout, WebUI calibration workbench, the five `/api/compass/*` endpoints, and all related NVS parameters (`OFFSET_COMPASS_X/Y`, `SHOW_ELEMENT_COMPASS`, `COMPASS_DECLINATION_DEG`, `HEADING_DIGITS`, `COMPASS_CAL_*`, `COMPASS_TILT_COMP`).
