@@ -100,6 +100,13 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
 ## 26. Plan-First for Big Features
 - Non-trivial features: first write an implementation plan into `Implementation plans/` and get the user's sign-off before coding starts.
 
+## 27. Release Assets — Always Ship firmware.bin and the APK
+- Every GitHub release must attach **both** artifacts: the ESP firmware binary (`.pio/build/esp32dev/firmware.bin`) and the Android app debug APK (`android/app/build/outputs/apk/debug/app-debug.apk`).
+- A release with only one of the two artifacts is incomplete.
+
+## 28. GitHub Release Title Format
+- Release titles are **just `Vx.x.x`** (e.g. `V1.3.3`) — no extra text, matching how they were titled before.
+
 ## Project Quick Reference
 - **Firmware:** ESP32 WROOM-32, PlatformIO project in repo root (`platformio.ini`, env `esp32dev`), Arduino framework, LovyanGFX 4.0" ILI9488 480×320 display.
 - **Build:** `pio run` (pre-scripts gzip the web UI and compile VLW fonts — run `pio run`, not a plain compile).
