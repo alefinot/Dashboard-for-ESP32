@@ -852,6 +852,9 @@ void webServerTask(void *pvParameters) {
     JsonDocument doc;
     processConfig(1, &doc);
     doc["ambientLightValue"] = ambientLightValue;
+    // Runtime-only field (read by the WebUI, ignored by processConfig on POST):
+    // the arduino-esp32 core version this firmware was built with.
+    doc["core_version"] = ESP.getCoreVersion();
     String out;
     serializeJson(doc, out);
     logPrintf("GW: entry=%lu heap=%lu wait=%lums mem_active=%d keys=%lu over=%d out=%u\n",

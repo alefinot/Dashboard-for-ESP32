@@ -1488,7 +1488,8 @@ const configMap = [
     </div>` },
             { id: "OTA_PULL_ENABLED", label: "Enable Automatic OTA Pull" },
             { id: "OTA_PULL_URL", label: "Firmware Manifest URL" },
-            { id: "OTA_CURRENT_VERSION", label: "Current Firmware Version" }
+            { id: "OTA_CURRENT_VERSION", label: "Current Firmware Version" },
+            { type: "status", id: "core_version", label: "ESP Core FW" }
         ]
     },
     {
@@ -1893,6 +1894,18 @@ function renderForm(d) {
                 }
                 tableHtml += `</div>`;
                 groupHtml += tableHtml;
+            } else if (iType === 'status') {
+                if (d.hasOwnProperty(item.id)) {
+                    hasItems = true;
+                    let val = String(d[item.id]);
+                    let rowHtml = `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls"><span style="font-family:'JetBrains Mono',monospace;">${val}</span></div></div>`;
+                    if (inCardSubCard) {
+                        groupHtml += rowHtml;
+                    } else {
+                        closeSubCard();
+                        groupHtml += `<div class="card"${advAttr}>${rowHtml}</div>`;
+                    }
+                }
             } else {
                 if (d.hasOwnProperty(item.id)) {
                     hasItems = true;
