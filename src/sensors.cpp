@@ -1,5 +1,4 @@
 #include "dashboard.h"
-#include <driver/touch_pad.h>
 
 TinyGPSPlus gps;
 HardwareSerial gpsSerial(2);
@@ -649,24 +648,13 @@ void initFuelSensor() {
     return;
   }
 
-  // Initialize and configure ESP32 RTC Touch Pad hardware driver for GPIO32 (Touch channel 9).
-  // Increase measurement window (0xFFFF) and charge slope to maximum to handle higher
-  // baseline parasitic capacitance from long wiring runs.
-  touch_pad_init();
-  touch_pad_set_voltage(TOUCH_HVOLT_2V7, TOUCH_LVOLT_0V5, TOUCH_HVOLT_ATTEN_0V);
-  touch_pad_config(TOUCH_PAD_NUM9, 0);
-  touch_pad_set_cnt_mode(TOUCH_PAD_NUM9, TOUCH_PAD_SLOPE_7, TOUCH_PAD_TIE_OPT_LOW);
-  touch_pad_set_meas_time(0x100, 0xFFFF);
-
-  // Take an initial instant reading to prime the EMA filter
-  uint16_t initialVal = 0;
-  if (touch_pad_read(TOUCH_PAD_NUM9, &initialVal) == ESP_OK && initialVal > 0) {
-    rawFuelADC = (int)initialVal;
-    filteredReading = (float)initialVal;
-  } else {
-    rawFuelADC = (int)touchRead(FUEL_TOUCH_PIN);
-    filteredReading = (float)rawFuelADC;
-  }
+  // Capacitive fuel touch sensor removed: the legacy touch_pad driver cannot
+  // coexist with the new-generation driver the arduino-esp32 3.x core uses
+  // (IDF 5.x aborts when both are active). The fuel gauge is being replaced by
+  // a resistive sensor; until it is wired, prime the filter at a neutral 0 so
+  // the table interpolation and gauge pipeline keep running.
+  rawFuelADC = 0;
+  filteredReading = 0.0f;
 }
 
 void processFuelSensor() {
@@ -692,12 +680,9 @@ void processFuelSensor() {
     instantReading =
         demoAdcForFuelLiters(demoFuelLevel + 0.03f * sinf((float)t / 5000.0f));
   } else {
-    uint16_t val = 0;
-    if (touch_pad_read(TOUCH_PAD_NUM9, &val) == ESP_OK) {
-      instantReading = (int)val;
-    } else {
-      instantReading = (int)touchRead(FUEL_TOUCH_PIN);
-    }
+    // Capacitive touch sensor removed (see initFuelSensor). The resistive fuel
+    // sensor will feed this value once wired; until then, 0 → gauge empty.
+    instantReading = 0;
   }
   rawFuelADC = instantReading;
   filteredReading = ((float)instantReading * FUEL_FILTER_ALPHA) +

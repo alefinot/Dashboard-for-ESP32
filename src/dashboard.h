@@ -84,7 +84,8 @@ constexpr int HALL_SENSOR_PIN = 33;
 // NOTE: Fuel sensor must NOT share the Hall sensor pin. The original code used
 // pin 33 for both, which made analog fuel readings unreliable because the Hall
 // interrupt also fires on that line. It is now assigned to a dedicated ADC pin.
-#define FUEL_TOUCH_PIN 32
+#define FUEL_TOUCH_PIN 32 // reserved: fuel sensor (capacitive touch removed;
+                         // resistive sensor to be wired here)
 #define RXD2 16 // TEST: moved from 25 for pin-swap isolation test
 #define TXD2 17 // TEST: moved from 26 for pin-swap isolation test
 #define POWER_SENSE_PIN 4
