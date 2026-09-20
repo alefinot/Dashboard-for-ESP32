@@ -600,10 +600,10 @@ void showGoodbyeScreen(bool isSleep) {
   logPrintf("goodbye fade-out: fadeTarget=%d\n", fadeTarget);
   int fadeStepCount = (fadeTarget / 8) + 1;
   for (int level = fadeTarget; level >= 0; level -= 8) {
-    ledcWrite(BACKLIGHT_CHANNEL, level);
+    ledcWrite(BL_DISPLAY, level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
-  ledcWrite(BACKLIGHT_CHANNEL, 0);
+  ledcWrite(BL_DISPLAY, 0);
 
   display.startWrite();
   display.fillScreen(TFT_BLACK);
@@ -631,10 +631,10 @@ void showGoodbyeScreen(bool isSleep) {
   fadeTarget = currentBrightnessTarget;
   fadeStepCount = (fadeTarget / 8) + 1;
   for (int level = 0; level <= fadeTarget; level += 8) {
-    ledcWrite(BACKLIGHT_CHANNEL, level);
+    ledcWrite(BL_DISPLAY, level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
-  ledcWrite(BACKLIGHT_CHANNEL, fadeTarget);
+  ledcWrite(BL_DISPLAY, fadeTarget);
 
   int currentProgress = 0;
   unsigned long remainingDuration = SHUTDOWN_TIME_MS;
@@ -655,10 +655,10 @@ void showGoodbyeScreen(bool isSleep) {
   fadeTarget = currentBrightnessTarget;
   fadeStepCount = (fadeTarget / 8) + 1;
   for (int level = fadeTarget; level >= 0; level -= 8) {
-    ledcWrite(BACKLIGHT_CHANNEL, level);
+    ledcWrite(BL_DISPLAY, level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
-  ledcWrite(BACKLIGHT_CHANNEL, 0);
+  ledcWrite(BL_DISPLAY, 0);
 
   if (isSleep) {
     pinMode(SPI_RST, OUTPUT);
@@ -709,10 +709,10 @@ void showUpdatingScreen() {
   int fadeTarget = currentBrightnessTarget;
   int fadeStepCount = (fadeTarget / 8) + 1;
   for (int level = fadeTarget; level >= 0; level -= 8) {
-    ledcWrite(BACKLIGHT_CHANNEL, level);
+    ledcWrite(BL_DISPLAY, level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
-  ledcWrite(BACKLIGHT_CHANNEL, 0);
+  ledcWrite(BL_DISPLAY, 0);
 
   int16_t x1, y1;
   uint16_t w, h;
@@ -740,10 +740,10 @@ void showUpdatingScreen() {
   fadeTarget = currentBrightnessTarget;
   fadeStepCount = (fadeTarget / 8) + 1;
   for (int level = 0; level <= fadeTarget; level += 8) {
-    ledcWrite(BACKLIGHT_CHANNEL, level);
+    ledcWrite(BL_DISPLAY, level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
-  ledcWrite(BACKLIGHT_CHANNEL, fadeTarget);
+  ledcWrite(BL_DISPLAY, fadeTarget);
 }
 
 void updateOTAProgress(int progress, int total) {

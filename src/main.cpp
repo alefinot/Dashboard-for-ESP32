@@ -71,6 +71,9 @@ void logPrintf(const char *fmt, ...) {
 void setup() {
   setCpuFrequencyMhz(240);
   Serial.setTxBufferSize(256);
+  // arduino-esp32 3.x moved the UART1 console default to GPIO26/27 - pin it
+  // explicitly to GPIO1/3 (the device's console wiring) to keep 2.x behavior.
+  Serial.setPins(1, 3);
   Serial.begin(115200);
   delay(50);
 
@@ -141,11 +144,13 @@ void setup() {
   g_stateMutex = xSemaphoreCreateMutex();
   pinMode(CS_DISPLAY, OUTPUT);
   digitalWrite(CS_DISPLAY, HIGH);
-  uint32_t _lc = ledcSetup(BACKLIGHT_CHANNEL, 1000, 8);
-  logPrintf("ledcSetup ch=%d freq=%u\n", BACKLIGHT_CHANNEL, _lc);
-  if (_lc == 0) logPrintf("*** LEDC SETUP FAILED ***\n");
-  ledcAttachPin(BL_DISPLAY, BACKLIGHT_CHANNEL);
-  ledcWrite(BACKLIGHT_CHANNEL, 0);
+  // arduino-esp32 3.x: ledcSetup/ledcAttachPin are gone - ledcAttach merges them
+  // (first arg is the pin, returns bool; the channel is allocated internally).
+  // Pin BL_DISPLAY = GPIO12.
+  bool _ledcOk = ledcAttach(BL_DISPLAY, 1000, 8);
+  logPrintf("ledcAttach pin=%d ok=%d\n", BL_DISPLAY, (int)_ledcOk);
+  if (!_ledcOk) logPrintf("*** LEDC SETUP FAILED ***\n");
+  ledcWrite(BL_DISPLAY, 0);
   pinMode(SPI_RST, OUTPUT);
   digitalWrite(SPI_RST, LOW);
   delay(10);
@@ -196,11 +201,11 @@ void setup() {
   logPrintf("splash fade: currentBrightnessTarget=%d\n", currentBrightnessTarget);
   int fadeStepCount = (currentBrightnessTarget / 8) + 1;
   for (int level = 0; level <= currentBrightnessTarget; level += 8) {
-    ledcWrite(BACKLIGHT_CHANNEL, level);
+    ledcWrite(BL_DISPLAY, level);
     logPrintf("  fade step: level=%d\n", level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
-  ledcWrite(BACKLIGHT_CHANNEL, currentBrightnessTarget);
+  ledcWrite(BL_DISPLAY, currentBrightnessTarget);
   logPrintf("  fade final: value=%d\n", currentBrightnessTarget);
   updateSplashProgress(20);
 
@@ -228,21 +233,21 @@ void setup() {
 
   fadeStepCount = (currentBrightnessTarget / 8) + 1;
   for (int level = currentBrightnessTarget; level >= 0; level -= 8) {
-    ledcWrite(BACKLIGHT_CHANNEL, level);
+    ledcWrite(BL_DISPLAY, level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
-  ledcWrite(BACKLIGHT_CHANNEL, 0);
+  ledcWrite(BL_DISPLAY, 0);
   display.fillScreen(TFT_BLACK);
 
   SensorSnapshot emptySnap;
   updateBigDisplay(emptySnap);
   fadeStepCount = (currentBrightnessTarget / 8) + 1;
   for (int level = 0; level <= currentBrightnessTarget; level += 8) {
-    ledcWrite(BACKLIGHT_CHANNEL, level);
+    ledcWrite(BL_DISPLAY, level);
     delay(FADE_DURATION_MS / fadeStepCount);
   }
-  ledcWrite(BACKLIGHT_CHANNEL, currentBrightnessTarget);
-  logPrintf("post-fade confirm: ledcWrite(%d, %d)\n", BACKLIGHT_CHANNEL, currentBrightnessTarget);
+  ledcWrite(BL_DISPLAY, currentBrightnessTarget);
+  logPrintf("post-fade confirm: ledcWrite(%d, %d)\n", BL_DISPLAY, currentBrightnessTarget);
   g_startupTime = millis();
 
 // GPS is quarantined from the sensors: the UBX module streams ~1.1KB/s, so the
@@ -277,7 +282,7 @@ void loop() {
   }
   if (pendingBacklightValue >= 0) {
     currentBrightnessTarget = (pendingBacklightValue * 255) / 100;
-    ledcWrite(BACKLIGHT_CHANNEL, currentBrightnessTarget);
+    ledcWrite(BL_DISPLAY, currentBrightnessTarget);
     pendingBacklightValue = -1;
   }
 
@@ -305,7 +310,7 @@ void loop() {
       autoBrightPwmF += ((float)autoBrightTarget - autoBrightPwmF) * alpha;
       if (abs(autoBrightTarget - (int)autoBrightPwmF) <= 1)
         autoBrightPwmF = (float)autoBrightTarget;
-      ledcWrite(BACKLIGHT_CHANNEL, (int)autoBrightPwmF);
+      ledcWrite(BL_DISPLAY, (int)autoBrightPwmF);
     }
   }
 

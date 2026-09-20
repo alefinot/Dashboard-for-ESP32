@@ -2020,7 +2020,7 @@ void checkNightMode(const SensorSnapshot &snap) {
       int level = isNightModeActive
                       ? 75
                       : (BACKLIGHT_BRIGHTNESS * 255) / 100;
-      ledcWrite(BACKLIGHT_CHANNEL, level);
+      ledcWrite(BL_DISPLAY, level);
     }
   }
 }

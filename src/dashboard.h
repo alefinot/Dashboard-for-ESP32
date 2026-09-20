@@ -80,8 +80,7 @@ constexpr int HALL_SENSOR_PIN = 33;
 #define SPI_DC 27
 #define SPI_RST 14
 #define CS_DISPLAY 5
-#define BL_DISPLAY 12
-#define BACKLIGHT_CHANNEL 0
+#define BL_DISPLAY 12 // backlight LEDC pin (3.x ledc* APIs are pin-based)
 // NOTE: Fuel sensor must NOT share the Hall sensor pin. The original code used
 // pin 33 for both, which made analog fuel readings unreliable because the Hall
 // interrupt also fires on that line. It is now assigned to a dedicated ADC pin.
