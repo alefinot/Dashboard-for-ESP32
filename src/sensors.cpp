@@ -255,7 +255,7 @@ static bool gpsWaitForSync(unsigned long ms, bool &isUbx) {
 static uint32_t gpsSweepBaud(bool &ubxSeen) {
   static const uint32_t candidates[] = {115200, 9600, 38400, 57600, 230400, 4800, 460800};
   for (uint32_t baud : candidates) {
-    gpsSerial.begin(baud, SERIAL_8N1, RXD2, TXD2);
+    gpsSerial.begin(baud, SERIAL_8N1, GNSS_UART2_RX_PIN, GNSS_UART2_TX_PIN);
     delay(30);
     while (gpsSerial.available()) gpsSerial.read();
     bool isUbx = false;
@@ -281,7 +281,7 @@ void configureGNSS() {
     //     then sweep again.
     logPrintf("GNSS: no traffic - sending factory reset (CFG-CFG clear + "
               "soft reset) at 115200...\n");
-    gpsSerial.begin(115200, SERIAL_8N1, RXD2, TXD2);
+    gpsSerial.begin(115200, SERIAL_8N1, GNSS_UART2_RX_PIN, GNSS_UART2_TX_PIN);
     uint8_t clr[13] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
                        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02};
     ubxSend(clr, 0x06, 0x09, sizeof(clr)); // CFG-CFG: clear all stored config
@@ -291,7 +291,7 @@ void configureGNSS() {
     while (gpsSerial.available()) gpsSerial.read();
     detectedBaud = gpsSweepBaud(ubxSeen);
     if (detectedBaud == 0) {
-      gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
+      gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GNSS_UART2_RX_PIN, GNSS_UART2_TX_PIN);
       logPrintf("GNSS: still no traffic after factory reset - using saved "
                 "GPS_BAUD=%d. Verify the module itself with u-center2 and "
                 "check wiring: module TX->ESP GPIO16, module RX->ESP GPIO17, "

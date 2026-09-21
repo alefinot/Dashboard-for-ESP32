@@ -86,8 +86,8 @@ constexpr int HALL_SENSOR_PIN = 33;
 // interrupt also fires on that line. It is now assigned to a dedicated ADC pin.
 #define FUEL_TOUCH_PIN 32 // reserved: fuel sensor (capacitive touch removed;
                          // resistive sensor to be wired here)
-#define RXD2 16 // TEST: moved from 25 for pin-swap isolation test
-#define TXD2 17 // TEST: moved from 26 for pin-swap isolation test
+#define GNSS_UART2_RX_PIN 16 // GNSS UART2 RX (was 25 before pin-swap test)
+#define GNSS_UART2_TX_PIN 17 // GNSS UART2 TX (was 26 before pin-swap test)
 #define POWER_SENSE_PIN 4
 #define BATTERY_SENSE_PIN 35
 #define TEMP_SENSE_PIN 36
@@ -254,6 +254,7 @@ extern int OFFSET_BIG_FPS_Y;
 extern bool ENABLE_NIGHT_MODE;
 extern int NIGHT_MODE_START_HOUR;
 extern int NIGHT_MODE_END_HOUR;
+extern int NIGHT_BACKLIGHT;
 extern bool DISPLAY_INVERT_COLORS;
 
 extern int TARGET_FPS;

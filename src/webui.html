@@ -1232,6 +1232,7 @@ const DEFAULTS = {
     ENABLE_NIGHT_MODE: false,
     NIGHT_MODE_START_HOUR: 23,
     NIGHT_MODE_END_HOUR: 0,
+    NIGHT_BACKLIGHT: 29,
     DISPLAY_INVERT_COLORS: false,
     OFFSET_BIG_FPS_X: -9,
     OFFSET_BIG_FPS_Y: -7,
@@ -1521,7 +1522,8 @@ const configMap = [
             { id: "AUTO_BRIGHT_FADE_MS", label: "Transition Speed", type: "range", min: 100, max: 5000, step: 100, unit: "ms" },
             { id: "ENABLE_NIGHT_MODE", label: "Enable Night Mode" },
             { id: "NIGHT_MODE_START_HOUR", label: "Start Time", unit: "Hour" },
-            { id: "NIGHT_MODE_END_HOUR", label: "End Time", unit: "Hour" }
+            { id: "NIGHT_MODE_END_HOUR", label: "End Time", unit: "Hour" },
+            { id: "NIGHT_BACKLIGHT", label: "Night Backlight", type: "range", min: 0, max: 100, step: 1 }
         ]
     },
     {
@@ -2321,7 +2323,7 @@ function collectConfig() {
     document.querySelectorAll('input, select').forEach(el => {
         if (el.id.endsWith('_slider') || el.type === 'file') return;
         if (el.id.startsWith('TT_')) {
-            let idx = parseInt(el.id.substring(3));
+            let idx = parseInt(el.id.substring(3), 10);
             if (!out['touchTable']) out['touchTable'] = [];
             out['touchTable'][idx] = parseFloat(el.value) || 0;
         } else if (el.type === 'checkbox') out[el.id] = el.checked;

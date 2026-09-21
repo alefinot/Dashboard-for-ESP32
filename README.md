@@ -379,6 +379,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 #### Display & Visual Design
 - `DISPLAY_ROTATION` (default=3): Screen rotation (0, 1, 2, 3).
 - `BACKLIGHT_BRIGHTNESS` (default=100): Backlight duty cycle (0–100%).
+- `NIGHT_BACKLIGHT` (default=29): Night-mode backlight duty cycle (0–100%), applied while night mode is active.
 - `ENABLE_ANTIALIASING` (default=true): Anti-aliased line rendering toggle.
 - `AA_SHARPNESS` (default=1.0): Anti-aliasing gamma correction factor.
 - `GHOST_COLOR_STR` (default="#212021"): Hex color code for inactive 7-segment digit background.

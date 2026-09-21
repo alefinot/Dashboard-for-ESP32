@@ -2018,7 +2018,7 @@ void checkNightMode(const SensorSnapshot &snap) {
       isNightModeActive = shouldBeNightMode;
       firstCheck = false;
       int level = isNightModeActive
-                      ? 75
+                      ? (NIGHT_BACKLIGHT * 255) / 100
                       : (BACKLIGHT_BRIGHTNESS * 255) / 100;
       ledcWrite(BL_DISPLAY, level);
     }

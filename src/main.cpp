@@ -142,6 +142,10 @@ void setup() {
   logPrintf("Starting Dashboard++\n");
 
   g_stateMutex = xSemaphoreCreateMutex();
+  if (g_stateMutex == NULL) {
+    logPrintf("*** FATAL: g_stateMutex allocation failed ***\n");
+    ESP.restart();
+  }
   pinMode(CS_DISPLAY, OUTPUT);
   digitalWrite(CS_DISPLAY, HIGH);
   // arduino-esp32 3.x: ledcSetup/ledcAttachPin are gone - ledcAttach merges them
@@ -209,7 +213,7 @@ void setup() {
   logPrintf("  fade final: value=%d\n", currentBrightnessTarget);
   updateSplashProgress(20);
 
-  gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
+  gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GNSS_UART2_RX_PIN, GNSS_UART2_TX_PIN);
   gpsSerial.setTimeout(20);
   delay(100);
   configureGNSS();
@@ -672,7 +676,9 @@ void loop() {
     watchdogDisabled = false;
     logPrintf("Web watchdog re-armed\n");
   }
-  static unsigned long lastWebLoop = 0;
+  // Seed from the live counter (not 0) so the first check is a real
+  // "did it advance since arming?" test, not a 0==0 comparison.
+  static unsigned long lastWebLoop = (unsigned long)webLoopCount;
   static unsigned long webWatchdogDue = 0;
   if (webWatchdogDue == 0) webWatchdogDue = millis() + 60000;
   if (now >= webWatchdogDue) {

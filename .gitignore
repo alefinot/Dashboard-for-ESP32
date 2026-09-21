@@ -2,6 +2,7 @@
 .vscode/
 test/
 nul
+scan_lan.ps1
 chips/
 compile_commands.json
 
