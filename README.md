@@ -539,6 +539,12 @@ In Demo Mode:
 
 ## Changelog
 
+### V1.3.7 — Hall speed window, fusion 0-lock fix, Speed Source selector
+- **Speed Source selector** — the "GPS Only Mode" toggle is replaced by a **Speed Source** dropdown: **Hall only** (0), **GPS only** (1), **Sensor Fusion** (2, default). Each mode uses only its source; an unavailable source reads 0 (no cross-fallback). Existing devices default to Fusion (same behavior as before).
+- **Fusion 0-lock fixed** — when the hall sensor is dead but GPS is valid, fusion now trusts GPS instead of showing 0 km/h (the old logic conflated "no GPS" with "dead hall").
+- **Multi-pulse hall window** — hall speed is now the mean of the last W accepted intervals (`speed = K_wheel × m / Σ`) instead of a median, so a single EMI blip caps at 1/W of the window (1/9 at default) rather than flashing ~192 km/h; the WebUI knob is relabeled **"Hall Speed Window (samples, 1 = raw)"**.
+- **Period guard tightened 32×→8×** — a single EMI blip (e.g. a 30 ms spike, ~10× the 297 ms period at 20 km/h) is now rejected in the ISR and never enters the window; real driving only shifts the period <2%/rotation, so a genuine pulse is never rejected.
+
 ### V1.3.6 — arduino-esp32 3.3.12 (ESP-IDF 5.5.5) core migration
 - **Core migration** — firmware now builds on arduino-esp32 3.3.12 (ESP-IDF v5.5.5) via the pioarduino community PlatformIO platform, pinned to exact release tag `55.03.312` in `platformio.ini`; the official SCons platform tops out at 2.0.17 (espressif/arduino-esp32#8606, platformio/platform-espressif32#1225).
 - **3.x API changes** — LEDC backlight switched to the pin-based `ledcAttach`/`ledcWrite` API (same GPIO12, same 1 kHz 8-bit PWM), and the console is explicitly pinned to UART1 on GPIO1/GPIO3 (`Serial.setPins`) because 3.x moved the default console to GPIO26/27.
