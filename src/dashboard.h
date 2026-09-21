@@ -417,6 +417,7 @@ extern portMUX_TYPE hallMux;
 extern volatile unsigned long lastHallPulseTimeUs;
 extern volatile unsigned long hallPulseIntervalUs;
 extern volatile unsigned long hallPulseCount;
+extern volatile bool hallRolling;
 extern volatile int heldSpeedSourceMode;
 
 extern double tripDistanceKm;
@@ -504,7 +505,7 @@ inline void drawDebugBox(T &disp, int x, int y, int w, int h,
 // ----------------------------------------------------------------------------
 // Sensors API
 // ----------------------------------------------------------------------------
-void IRAM_ATTR hallSensorISR();
+void hallSensorISR();
 float getHallSpeed();
 void updateFilteredSpeed();
 int computeSpeedSourceMode(float hallSpeed, float gpsSpeed, int sats,

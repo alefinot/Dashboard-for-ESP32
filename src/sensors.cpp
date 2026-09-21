@@ -112,6 +112,7 @@ void simulateRawSensors() {
     portENTER_CRITICAL(&hallMux);
     lastHallPulseTimeUs = micros();
     hallPulseIntervalUs = intervalUs;
+    hallRolling = true;
     hallIntervalHist[hallHistWriteIdx] = intervalUs;
     hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
     if (pulses > 0) hallPulseCount += (unsigned long)pulses;
@@ -348,6 +349,13 @@ portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;
 volatile unsigned long lastHallPulseTimeUs = 0;
 volatile unsigned long hallPulseIntervalUs = 0;
 volatile unsigned long hallPulseCount = 0;
+volatile bool hallRolling = false;
+
+// Standstill timeout (1.5 s, ~4 km/h with 1650 mm tire): no pulse in this
+// duration means the wheel is stopped.
+static constexpr unsigned long STANDSTILL_TIMEOUT_US = 1500000UL;
+// Debounce window (12 ms = 495 km/h on 1650 mm wheel): reject switch bounce and EMI.
+static constexpr unsigned long DEBOUNCE_US = 12000UL;
 
 // Hysteresis-held speed source (0=hall, 1=GPS, 2=fused). Written by
 // updateSpeedSourceMode() in sensorTask (core 1), read cross-core by
@@ -390,65 +398,136 @@ volatile unsigned long g_sensorLastTickMs = 0;
 // Hall sensor (ISR + speed)
 // ----------------------------------------------------------------------------
 void IRAM_ATTR hallSensorISR() {
-  constexpr unsigned long DEBOUNCE_US = 10000;
-  // Between two real rotations the wheel period changes by far less than
-  // HALL_PERIOD_GUARD (1 g of acceleration shifts it <2% per rotation).
-  // Guard both directions: fast blips are EMI/bounce on the hall pin;
-  // the slow side rejects the multi-second gap after a stop, which
-  // otherwise entered the interval history as one giant "rotation" and
-  // reported the last driving speed for seconds after the vehicle stopped.
-  // WebUI-tunable; <=1 disables the guard (raw single-interval behavior).
   unsigned long now = micros();
   unsigned long gap = now - lastHallPulseTimeUs;
-  if (gap > DEBOUNCE_US) {
+
+  // Standstill check: if more than 1.5s has elapsed since the last pulse,
+  // the wheel was stationary. This pulse is the first physical edge of a new
+  // roll: record its timestamp to anchor the next interval, count the distance,
+  // but do not compute a speed from the multi-second stopped gap.
+  if (gap > STANDSTILL_TIMEOUT_US) {
     portENTER_CRITICAL_ISR(&hallMux);
-    unsigned long last = hallPulseIntervalUs;
-    int guard = HALL_PERIOD_GUARD;
-    if (guard > 1 && last != 0 &&
-        ((unsigned long long)gap > (unsigned long long)last * (unsigned)guard ||
-         (unsigned long long)gap * (unsigned)guard < last)) {
-      // Non-physical period: ignore the pulse entirely (keep lastHallPulseTimeUs
-      // and the interval history untouched so the 2 s stale check stays honest)
-      portEXIT_CRITICAL_ISR(&hallMux);
-      return;
-    }
-    hallPulseIntervalUs = gap;
     lastHallPulseTimeUs = now;
+    hallPulseIntervalUs = 0;
     hallPulseCount++;
-    hallIntervalHist[hallHistWriteIdx] = gap;
-    hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
+    hallRolling = false;
     portEXIT_CRITICAL_ISR(&hallMux);
+    return;
   }
+
+  // Fast-edge hardware debounce: reject sub-12ms contact bounce or HF noise
+  // (12 ms = 495 km/h on 1650 mm wheel).
+  if (gap < DEBOUNCE_US) {
+    return;
+  }
+
+  portENTER_CRITICAL_ISR(&hallMux);
+  unsigned long last = hallPulseIntervalUs;
+  int guard = HALL_PERIOD_GUARD;
+
+  // In-motion acceleration guard:
+  // If we are actively rolling, reject sudden implausibly short intervals
+  // caused by spark plug EMI or switch bounce (e.g. an interval >guard times
+  // shorter than the previous rotation). Real physical vehicle acceleration
+  // cannot change period by >guard times in a single revolution.
+  if (hallRolling && guard > 1 && last != 0 &&
+      (unsigned long long)gap * (unsigned)guard < last) {
+    // Non-physical acceleration: ignore the EMI blip. Keep lastHallPulseTimeUs
+    // untouched so the real magnet pass measures from the true previous pulse.
+    portEXIT_CRITICAL_ISR(&hallMux);
+    return;
+  }
+
+  hallPulseIntervalUs = gap;
+  lastHallPulseTimeUs = now;
+  hallPulseCount++;
+  hallRolling = true;
+  hallIntervalHist[hallHistWriteIdx] = gap;
+  hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
+  portEXIT_CRITICAL_ISR(&hallMux);
 }
 
 inline float getHallSpeed() {
   unsigned long lastTimeUs;
+  bool rolling;
   int n = HALL_MEDIAN_SAMPLES; // window size W (WebUI-tunable); 1 = raw single interval, zero lag
   if (n < 1) n = 1;
   if (n > HALL_MEDIAN_MAX) n = HALL_MEDIAN_MAX;
+
+  unsigned long localHist[HALL_MEDIAN_MAX];
+  int m = 0;
+
   portENTER_CRITICAL(&hallMux);
   lastTimeUs = lastHallPulseTimeUs;
-  // Newest first: write index points at the next free slot, so the last
-  // accepted interval sits one behind it (wrapping around the ring).
+  rolling = hallRolling;
+
+  // Read the newest intervals from the ring buffer
   int idx = (hallHistWriteIdx == 0 ? HALL_MEDIAN_MAX : hallHistWriteIdx) - 1;
-  unsigned long long sum = 0;
-  int m = 0;
   for (int i = 0; i < n; i++) {
     unsigned long v = hallIntervalHist[idx];
-    if (v != 0) { sum += v; m++; }
+    if (v != 0) {
+      localHist[m++] = v;
+    }
     if (--idx < 0)
       idx = HALL_MEDIAN_MAX - 1;
   }
   portEXIT_CRITICAL(&hallMux);
-  if (micros() - lastTimeUs > 2000000UL)
-    return 0.0f; // no real motion (pulses stale)
-  if (m == 0)
+
+  unsigned long now = micros();
+  unsigned long dt = now - lastTimeUs;
+
+  // Standstill check: if pulses are stale or wheel has not completed a timed rotation
+  if (dt > STANDSTILL_TIMEOUT_US || !rolling || m == 0) {
     return 0.0f;
-  // Multi-pulse "double-buffered" method (Option C): the m accepted intervals
-  // span m revolutions in `sum` microseconds, so speed = WHEEL_SPEED_FACTOR * m / sum.
-  // Exact at every speed (period property); a single EMI blip is only 1/m of
-  // the window (counting property), so it caps instead of spiking.
-  return WHEEL_SPEED_FACTOR * (float)m / (float)sum;
+  }
+
+  // Calculate the average interval over the window.
+  // When m >= 4, use an outlier-trimmed mean: sort the samples and exclude the
+  // minimum interval (which eliminates any borderline high-speed noise blip).
+  unsigned long long sum = 0;
+  int validCount = 0;
+
+  if (m >= 4) {
+    // Insertion sort localHist
+    for (int i = 1; i < m; i++) {
+      unsigned long key = localHist[i];
+      int j = i - 1;
+      while (j >= 0 && localHist[j] > key) {
+        localHist[j + 1] = localHist[j];
+        j--;
+      }
+      localHist[j + 1] = key;
+    }
+    // Discard the smallest sample (index 0) to eliminate fast EMI spikes
+    for (int i = 1; i < m; i++) {
+      sum += localHist[i];
+      validCount++;
+    }
+  } else {
+    for (int i = 0; i < m; i++) {
+      sum += localHist[i];
+      validCount++;
+    }
+  }
+
+  if (validCount == 0 || sum == 0)
+    return 0.0f;
+
+  float measuredSpeed = WHEEL_SPEED_FACTOR * (float)validCount / (float)sum;
+
+  // Dynamic physical braking decay:
+  // If the time since the last pulse (dt) exceeds the average rotation period,
+  // the vehicle is decelerating. The instantaneous speed cannot physically
+  // exceed WHEEL_SPEED_FACTOR / dt. This ensures the speedometer glides
+  // smoothly to 0 as the wheel stops, rather than hanging at cruising speed.
+  unsigned long avgPeriod = (unsigned long)(sum / validCount);
+  if (dt > avgPeriod) {
+    float maxPossibleSpeed = WHEEL_SPEED_FACTOR / (float)dt;
+    if (measuredSpeed > maxPossibleSpeed)
+      measuredSpeed = maxPossibleSpeed;
+  }
+
+  return measuredSpeed;
 }
 
 // Which sensor the displayed speed comes from: 0=hall, 1=GPS, 2=fused (G+H).
@@ -457,22 +536,31 @@ inline float getHallSpeed() {
 int computeSpeedSourceMode(float hallSpeed, float gpsSpeed, int sats,
                            bool isGpsValid) {
   // SPEED_SOURCE_MODE: 0=Hall only, 1=GPS only, 2=Sensor fusion (default).
-  // Each mode uses only its source; an unavailable source shows 0 (no fallback).
   if (SPEED_SOURCE_MODE == 0)
     return 0; // Hall only
   if (SPEED_SOURCE_MODE == 1)
-    return 1; // GPS only (invalid GPS -> gpsSpeed==0 -> shows 0)
-  // Sensor fusion:
+    return 1; // GPS only
+
+  // Sensor fusion mode (2):
+  // If Hall is inactive/dead (hallSpeed <= 0.0f):
+  if (hallSpeed <= 0.0f) {
+    // If vehicle is moving according to GPS with valid fix, fall back to GPS
+    if (isGpsValid && gpsSpeed >= GPS_START_KMH)
+      return 1;
+    // Otherwise vehicle is stopped (or both sensors inactive): default to Hall badge
+    return 0;
+  }
+
+  // Hall is active and measuring speed:
   if (!isGpsValid)
-    return 0; // no GPS: hall is the only source
-  if (hallSpeed <= 0.0f)
-    return 1; // hall dead but GPS valid: trust GPS
+    return 0; // GPS not valid (tunnel, bad sats): Hall only
+
   float delta = fabsf(gpsSpeed - hallSpeed);
   if (delta > MAX_SPEED_DELTA_KMH)
-    return 0; // GPS contradicts hall: reject GPS
-  if (delta < GPS_MIN_DEV_KMH)
-    return 1; // agreement zone: trust GPS
-  return 2; // in between: weighted fusion
+    return 0; // GPS contradicts Hall (multipath/glitch): trust Hall
+
+  // Both sensors active, valid GPS, reasonable agreement: fused mode
+  return 2;
 }
 
 // The raw candidate flips HAL<->G+H every 20 ms whenever delta hovers around
@@ -506,60 +594,98 @@ void updateSpeedSourceMode() {
 
 void updateFilteredSpeed() {
   float hallSpeed = getHallSpeed();
+  float gpsSpeed = gps.speed.isValid() ? (float)gps.speed.kmph() : 0.0f;
   int sats = gps.satellites.value();
   bool isGpsValid = gps.speed.isValid() && (sats >= MIN_SATELLITES);
 
-  // Follow the hysteresis-held mode so the displayed number always matches
-  // the source badge. GPS dropping below MIN_SATELLITES mid-hold falls back
-  // to the hall value for the raw number; the badge switches within
-  // SPEED_SOURCE_HOLD_MS.
-  int mode = heldSpeedSourceMode;
-  if (mode != 0 && !isGpsValid)
-    mode = 0;
-  float raw;
+  int mode = SPEED_SOURCE_MODE;
+  float raw = 0.0f;
+
   if (mode == 0) {
+    // ------------------------------------------------------------------------
+    // MODE 0: HALL SENSOR ONLY
+    // ------------------------------------------------------------------------
     raw = hallSpeed;
-  } else if (mode == 1) {
-    raw = (float)gps.speed.kmph();
-  } else {
-    float gpsSpeed = (float)gps.speed.kmph();
-    // Weight by satellite count; clamped because sats can dip below
-    // MIN_SATELLITES before the hold timer switches us over to hall.
-    float gpsWeight = (float)(sats - MIN_SATELLITES + 1) /
-                      (float)(OPTIMAL_SATELLITES - MIN_SATELLITES + 1);
-    gpsWeight = constrain(gpsWeight, 0.0f, 1.0f);
-    raw = gpsSpeed * gpsWeight + hallSpeed * (1.0f - gpsWeight);
-  }
-
-  if (mode == 0) {
-    // Hall-only: pulses are real motion, keep the simple threshold
     currentCachedSpeed = (raw < MIN_SPEED_THRESHOLD) ? 0.0f : raw;
-    return;
-  }
-
-  // GPS-derived speed: apply hysteresis so stationary GPS noise (typically
-  // 0-2 km/h jitter) can't make the display flicker. Start showing speed
-  // only above GPS_START_KMH, and return to 0 only after the speed has
-  // stayed below MIN_SPEED_THRESHOLD for GPS_STOP_SETTLE_MS.
-  static bool isMoving = false;
-  static unsigned long belowStopSince = 0;
-  if (raw >= GPS_START_KMH) {
-    isMoving = true;
-    belowStopSince = 0;
-  } else if (raw <= MIN_SPEED_THRESHOLD) {
-    if (belowStopSince == 0)
-      belowStopSince = millis();
-    if (isMoving && millis() - belowStopSince >= (unsigned long)GPS_STOP_SETTLE_MS) {
-      isMoving = false;
-      belowStopSince = 0;
+  } else if (mode == 1) {
+    // ------------------------------------------------------------------------
+    // MODE 1: GPS SENSOR ONLY
+    // ------------------------------------------------------------------------
+    if (!isGpsValid) {
+      currentCachedSpeed = 0.0f;
+    } else {
+      raw = gpsSpeed;
+      // GPS stationary jitter filter
+      static bool gpsMoving = false;
+      static unsigned long gpsBelowStopSince = 0;
+      if (raw >= GPS_START_KMH) {
+        gpsMoving = true;
+        gpsBelowStopSince = 0;
+      } else if (raw <= MIN_SPEED_THRESHOLD) {
+        if (gpsBelowStopSince == 0)
+          gpsBelowStopSince = millis();
+        if (gpsMoving && millis() - gpsBelowStopSince >= (unsigned long)GPS_STOP_SETTLE_MS) {
+          gpsMoving = false;
+          gpsBelowStopSince = 0;
+        }
+      } else {
+        gpsBelowStopSince = 0;
+      }
+      currentCachedSpeed = gpsMoving ? raw : 0.0f;
     }
   } else {
-    belowStopSince = 0; // between thresholds: hold current state
+    // ------------------------------------------------------------------------
+    // MODE 2: DUAL SENSOR FUSION (G+H)
+    // ------------------------------------------------------------------------
+    if (hallSpeed <= 0.0f) {
+      // Wheel is physically stationary OR Hall sensor has failed/disconnected
+      if (isGpsValid && gpsSpeed >= GPS_START_KMH) {
+        // Hall is inactive, but GPS has a solid fix and vehicle is moving:
+        // FAILSAFE FALLBACK TO GPS (Never show 0 when moving!)
+        raw = gpsSpeed;
+        currentCachedSpeed = raw;
+      } else {
+        // Wheel is physically stopped, and GPS is within stationary jitter band:
+        // ROCK-SOLID ZERO AT STANDSTILL
+        raw = 0.0f;
+        currentCachedSpeed = 0.0f;
+      }
+    } else {
+      // Wheel is actively turning (hallSpeed > 0.0f):
+      // The vehicle is definitely moving! (Never show 0 when moving!)
+      if (!isGpsValid) {
+        // No valid GPS (tunnel, underpass, poor sats): trust Hall 100%
+        raw = hallSpeed;
+      } else {
+        float delta = fabsf(gpsSpeed - hallSpeed);
+        if (delta > MAX_SPEED_DELTA_KMH) {
+          // GPS contradicts Hall (e.g. GPS multipath jump, speed spike): trust Hall
+          raw = hallSpeed;
+        } else {
+          // Both sensors active and consistent: dynamic confidence blending
+          float satFactor = (float)(sats - MIN_SATELLITES + 1) /
+                            (float)(OPTIMAL_SATELLITES - MIN_SATELLITES + 1);
+          satFactor = constrain(satFactor, 0.0f, 1.0f);
+
+          float deltaFactor = 1.0f;
+          if (delta > GPS_MIN_DEV_KMH) {
+            deltaFactor = 1.0f - (delta - GPS_MIN_DEV_KMH) /
+                                 (MAX_SPEED_DELTA_KMH - GPS_MIN_DEV_KMH);
+            deltaFactor = constrain(deltaFactor, 0.0f, 1.0f);
+          }
+
+          // Cap GPS weight at 0.5 to retain Hall's zero-latency dynamic responsiveness,
+          // while GPS eliminates long-term tire pressure/wear calibration error.
+          float gpsWeight = satFactor * deltaFactor * 0.5f;
+          raw = gpsSpeed * gpsWeight + hallSpeed * (1.0f - gpsWeight);
+        }
+      }
+      currentCachedSpeed = (raw < MIN_SPEED_THRESHOLD) ? 0.0f : raw;
+    }
   }
-  currentCachedSpeed = isMoving ? raw : 0.0f;
+
   // Track the session's maximum achieved speed (RAM-only, resets on reboot).
-  // Sampled here every tick (~20 ms) so a peak is not missed between slower
-  // consumer updates. Cross-core: core 0 writes, core 1 reads under mutex.
+  // Handled for ALL modes (fixes early return bug for Mode 0).
   if (currentCachedSpeed > maxSpeed)
     maxSpeed = currentCachedSpeed;
 }
@@ -764,7 +890,18 @@ void updateGPSOdometer() {
   // touched - demo mileage can never corrupt the stored real odometer.
   bool isDemo = ENABLE_DEMO_MODE;
 
-  if (!isGpsValid && pulses > 0) {
+  // Determine whether to accumulate distance from Hall pulses or GPS position
+  bool useHallDistance = false;
+  if (SPEED_SOURCE_MODE == 0) {
+    useHallDistance = true; // Hall only: always use wheel pulses
+  } else if (SPEED_SOURCE_MODE == 2) {
+    // In fusion mode, Hall pulses are preferred for millimeter accuracy.
+    // If Hall sensor produces pulses, use them. If Hall sensor is inactive (0 pulses)
+    // while moving by GPS, fall back to GPS distance.
+    useHallDistance = (pulses > 0);
+  }
+
+  if (useHallDistance && pulses > 0) {
     double dKm = (double)pulses * WHEEL_DIST_PER_PULSE_KM;
     tripDistanceKm += dKm;
     if (isDemo) {
@@ -778,8 +915,7 @@ void updateGPSOdometer() {
         lastSavedOdo = totalDistanceKm;
       }
     }
-  }
-  if (isGpsValid && gps.location.isUpdated()) {
+  } else if (isGpsValid && gps.location.isUpdated()) {
     if (getFilteredSpeed() > 0.0f && hasLastPos) {
       double distanceMeters = TinyGPSPlus::distanceBetween(
           gps.location.lat(), gps.location.lng(), lastLat, lastLon);
@@ -799,6 +935,9 @@ void updateGPSOdometer() {
         }
       }
     }
+  }
+
+  if (isGpsValid && gps.location.isUpdated()) {
     lastLat = gps.location.lat();
     lastLon = gps.location.lng();
     hasLastPos = true;

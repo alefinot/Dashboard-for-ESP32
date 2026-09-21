@@ -107,6 +107,12 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
 ## 28. GitHub Release Title Format
 - Release titles are **just `Vx.x.x`** (e.g. `V1.3.3`) — no extra text, matching how they were titled before.
 
+## 29. Graphify Output — Keep in Sync
+- Every time there's a change on the **code** of the project, **keep the Graphify Output updated**: run the incremental update flow (`graphify . --update`) so `graphify-out/` (`graph.json`, `graph.html`, `GRAPH_REPORT.md`) reflects the current state of the repo.
+- Doc / non-code file changes (`AGENTS.md`, `README.md`, etc.) do **not** trigger an update — run `graphify . --update` manually when a doc change matters.
+- Code-only changes go through the AST fast path (no LLM tokens).
+- `graphify-out/` and `graphify-watch.bat` are gitignored local-only — never commit them. For live updates while coding, run `graphify-watch.bat` (auto-rebuilds on file changes via `graphify watch`).
+
 ## Project Quick Reference
 - **Firmware:** ESP32 WROOM-32, PlatformIO project in repo root (`platformio.ini`, env `esp32dev`), Arduino framework, LovyanGFX 4.0" ILI9488 480×320 display.
 - **Build:** `pio run` (pre-scripts gzip the web UI and compile VLW fonts — run `pio run`, not a plain compile).
@@ -116,3 +122,4 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
 - **Android app:** `android/` — companion app (Kotlin/Compose, Gradle). Always finish with a debug APK build (rule 8).
 - **Config backups:** NVS backup/restore handled via Web UI; reference template in code.
 - **Demo mode:** Web UI → System & Modes → enable; synth telemetry for bench testing.
+- **Graphify:** `graphify-out/` knowledge graph — local-only, kept in sync on code changes (rule 29); `graphify-watch.bat` runs the live watcher.

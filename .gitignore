@@ -10,3 +10,7 @@ Implementation plans/
 
 # Agent session/tooling dirs (local only)
 .pi/
+
+# graphify knowledge-graph tooling and outputs (local only)
+graphify-out/
+graphify-watch.bat
