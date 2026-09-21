@@ -147,28 +147,28 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 Dashboard++ features a dual-source speed calculation engine that combines low-latency wheel rotation timing with absolute satellite GPS telemetry.
 
 #### Hall Sensor Calculation
-Speed is derived from microsecond timing between consecutive interrupt pulses, averaged over a window of the last $W$ accepted intervals ($W$ = `HALL_MEDIAN_SAMPLES`, default 9; 1 = raw single interval). Over the window, $m$ accepted intervals span $m$ wheel revolutions in $S$ microseconds, so:
-$$V_{\text{hall}} = K_{\text{wheel}} \cdot \frac{m}{S} \quad [\text{km/h}]$$
-where $K_{\text{wheel}}$ is the wheel speed scaling factor computed from the wheel circumference $C_{\text{mm}}$:
-$$K_{\text{wheel}} = 3600 \times C_{\text{mm}}$$
-A single EMI blip affects only $1/W$ of the window (so it caps instead of spiking), and intervals rejected by the period guard (`HALL_PERIOD_GUARD`, default 8×) never enter the window.
+Speed is derived from microsecond timing between consecutive interrupt pulses, filtered through a two-stage state machine and averaged over a window of the last $W$ accepted intervals ($W$ = `HALL_MEDIAN_SAMPLES`, default 9; 1 = raw single interval):
+
+1. **Standstill Detection & Re-sync:** If time since the last pulse exceeds `STANDSTILL_TIMEOUT_US` (1.5 s), the wheel was stopped. The first pulse synchronizes the timing baseline and increments odometer distance without deadlocking. The second pulse computes the first true rotation interval.
+2. **Noise & EMI Rejection:** Hardware debounce (`DEBOUNCE_US = 12000UL`, 12 ms / ~495 km/h) rejects contact bounce. In-motion acceleration guard (`gap * guard < last`) drops non-physical ignition EMI spikes without advancing the pulse timestamp.
+3. **Outlier-Trimmed Window:** For $W \ge 4$, intervals are sorted and the smallest sample (highest speed) is excluded to eliminate borderline noise.
+4. **Dynamic Physical Deceleration Decay:** If elapsed time $dt$ since the last pulse exceeds the measured average period, the vehicle is slowing down. Speed is dynamically constrained to:
+$$V_{\text{hall}} = \min\left(K_{\text{wheel}} \cdot \frac{m}{S}, \; \frac{K_{\text{wheel}}}{dt}\right) \quad [\text{km/h}]$$
+where $K_{\text{wheel}} = 3600 \times C_{\text{mm}}$. Speed smoothly glides to 0 as the vehicle halts, eliminating the prior 2-second speed freeze.
 
 #### Speed Source & Fusion Logic
-The displayed speed source is selected by `SPEED_SOURCE_MODE`: `0`=Hall only, `1`=GPS only, `2`=Sensor Fusion (default). Each mode uses only its source; an unavailable source reads 0 (no cross-fallback).
+The displayed speed source is selected by `SPEED_SOURCE_MODE`: `0`=Hall only, `1`=GPS only, `2`=Sensor Fusion (default).
 
-In **Sensor Fusion** mode the source is chosen from the GPS/hall delta $\Delta V = |V_{\text{gps}} - V_{\text{hall}}|$, where $\Delta V_{\text{max}}$ = `MAX_SPEED_DELTA_KMH` (default 5.0) and $\Delta V_{\text{min}}$ = `GPS_MIN_DEV_KMH` (default 1.0):
-
-$$\text{SpeedSourceMode} = \begin{cases} 
-\text{Hall (0)}, & \text{if GPS is invalid} \\
-\text{GPS (1)}, & \text{if } V_{\text{hall}} = 0 \text{ (hall dead) and GPS valid} \\
-\text{Hall (0)}, & \text{if } \Delta V > \Delta V_{\text{max}} \\
-\text{GPS (1)}, & \text{if } \Delta V < \Delta V_{\text{min}} \\
-\text{G+H Fusion (2)}, & \text{otherwise}
-\end{cases}$$
-
-When in **G+H Fusion mode**, the output speed $V_{\text{fused}}$ uses linear confidence interpolation weighted by satellite quality $N_{\text{sat}}$:
-$$W_{\text{gps}} = \frac{N_{\text{sat}} - N_{\text{min}} + 1}{N_{\text{opt}} - N_{\text{min}} + 1}$$
+In **Sensor Fusion mode (2)**, the engine dynamically balances both sensors:
+- **Rock-Solid Standstill:** When $V_{\text{hall}} = 0$ and $V_{\text{gps}} < \text{GPS\_START\_KMH}$ (3.0 km/h), speed is forced to solid `0.0 km/h`, eliminating GPS drift at traffic lights.
+- **Immediate Response:** As soon as wheel pulses arrive ($V_{\text{hall}} > 0$), speed is displayed immediately without clamping.
+- **Dual Failsafe Redundancy:** If the Hall sensor fails or disconnects at speed, the system automatically falls back to valid GPS ($V_{\text{gps}} \ge 3.0\text{ km/h}$). If GPS signal is lost in a tunnel or suffers a multipath spike ($\Delta V > \text{MAX\_SPEED\_DELTA\_KMH}$), Hall sensor carries 100% of the speed. Speed never drops to 0 while moving.
+- **Dynamic Confidence Blending:** When both sensors are healthy and consistent ($\Delta V \le \text{MAX\_SPEED\_DELTA\_KMH}$):
+$$C_{\text{sat}} = \text{constrain}\left(\frac{N_{\text{sat}} - N_{\text{min}} + 1}{N_{\text{opt}} - N_{\text{min}} + 1}, 0.0, 1.0\right)$$
+$$C_{\delta} = \text{constrain}\left(1.0 - \frac{\Delta V - \Delta V_{\text{min}}}{\Delta V_{\text{max}} - \Delta V_{\text{min}}}, 0.0, 1.0\right)$$
+$$W_{\text{gps}} = C_{\text{sat}} \cdot C_{\delta} \cdot 0.5$$
 $$V_{\text{fused}} = (W_{\text{gps}} \cdot V_{\text{gps}}) + ((1 - W_{\text{gps}}) \cdot V_{\text{hall}})$$
+Capping $W_{\text{gps}}$ at 0.5 ensures Hall sensor's zero-latency dynamic throttle/brake response is always preserved, while GPS anchors long-term tire wear accuracy.
 
 #### Odometer Persistence Strategy
 To protect the ESP32 NVS Flash memory from wear, distance accumulation runs continuously in RAM. The odometer writes to non-volatile storage **only after accumulating a full 1.0 km increment**:
@@ -539,11 +539,12 @@ In Demo Mode:
 
 ## Changelog
 
-### V1.3.7 — Hall speed window, fusion 0-lock fix, Speed Source selector
-- **Speed Source selector** — the "GPS Only Mode" toggle is replaced by a **Speed Source** dropdown: **Hall only** (0), **GPS only** (1), **Sensor Fusion** (2, default). Each mode uses only its source; an unavailable source reads 0 (no cross-fallback). Existing devices default to Fusion (same behavior as before).
-- **Fusion 0-lock fixed** — when the hall sensor is dead but GPS is valid, fusion now trusts GPS instead of showing 0 km/h (the old logic conflated "no GPS" with "dead hall").
-- **Multi-pulse hall window** — hall speed is now the mean of the last W accepted intervals (`speed = K_wheel × m / Σ`) instead of a median, so a single EMI blip caps at 1/W of the window (1/9 at default) rather than flashing ~192 km/h; the WebUI knob is relabeled **"Hall Speed Window (samples, 1 = raw)"**.
-- **Period guard tightened 32×→8×** — a single EMI blip (e.g. a 30 ms spike, ~10× the 297 ms period at 20 km/h) is now rejected in the ISR and never enters the window; real driving only shifts the period <2%/rotation, so a genuine pulse is never rejected.
+### V1.3.7 — Hall standstill deadlock fix, sensor fusion overhaul, Speed Source selector
+- **Hall standstill deadlock fixed** — resolved the critical bug where starting from a stop rejected pulses and permanently deadlocked the Hall sensor at 0 km/h; implemented a two-stage state machine (`STANDSTILL_TIMEOUT_US = 1.5s`) that cleanly re-syncs timing on the first rotation after stopping.
+- **Dynamic physical deceleration decay** — speed smoothly glides to 0 km/h as the vehicle halts ($\min(V_{\text{measured}}, K_{\text{wheel}}/dt)$) instead of hanging frozen at cruising speed for 2 seconds.
+- **Hardware debounce & spike rejection** — 12 ms ISR debounce (`DEBOUNCE_US = 12000UL`, ~495 km/h) rejects contact bounce and ignition EMI bursts, and an outlier-trimmed multi-pulse window excludes borderline noise.
+- **Dual sensor fusion overhaul** — holds a rock-solid 0.0 km/h at traffic lights (killing stationary GPS drift), displays immediately upon rolling, dynamically blends Hall and GPS confidence (capped at 50% GPS to retain zero-latency throttle/brake response), and seamlessly falls back to GPS if the Hall sensor is disconnected while driving.
+- **Speed Source selector & independent modes** — **Hall only** (0), **GPS only** (1), **Sensor Fusion** (2, default). Hall-only mode now correctly records session `maxSpeed` and odometer distance.
 
 ### V1.3.6 — arduino-esp32 3.3.12 (ESP-IDF 5.5.5) core migration
 - **Core migration** — firmware now builds on arduino-esp32 3.3.12 (ESP-IDF v5.5.5) via the pioarduino community PlatformIO platform, pinned to exact release tag `55.03.312` in `platformio.ini`; the official SCons platform tops out at 2.0.17 (espressif/arduino-esp32#8606, platformio/platform-espressif32#1225).
