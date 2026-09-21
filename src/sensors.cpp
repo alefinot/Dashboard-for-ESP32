@@ -423,42 +423,32 @@ void IRAM_ATTR hallSensorISR() {
 
 inline float getHallSpeed() {
   unsigned long lastTimeUs;
-  int n = HALL_MEDIAN_SAMPLES; // WebUI-tunable; 1 = raw, zero lag
+  int n = HALL_MEDIAN_SAMPLES; // window size W (WebUI-tunable); 1 = raw single interval, zero lag
   if (n < 1) n = 1;
   if (n > HALL_MEDIAN_MAX) n = HALL_MEDIAN_MAX;
-  unsigned long hist[HALL_MEDIAN_MAX];
   portENTER_CRITICAL(&hallMux);
   lastTimeUs = lastHallPulseTimeUs;
   // Newest first: write index points at the next free slot, so the last
   // accepted interval sits one behind it (wrapping around the ring).
   int idx = (hallHistWriteIdx == 0 ? HALL_MEDIAN_MAX : hallHistWriteIdx) - 1;
+  unsigned long long sum = 0;
+  int m = 0;
   for (int i = 0; i < n; i++) {
-    hist[i] = hallIntervalHist[idx];
+    unsigned long v = hallIntervalHist[idx];
+    if (v != 0) { sum += v; m++; }
     if (--idx < 0)
       idx = HALL_MEDIAN_MAX - 1;
   }
   portEXIT_CRITICAL(&hallMux);
   if (micros() - lastTimeUs > 2000000UL)
     return 0.0f; // no real motion (pulses stale)
-  // Median of the non-zero samples: with N=9 one or a few noise blips can no
-  // longer move the reading; a corrupt majority needs >=N/2+1 bad samples.
-  unsigned long vals[HALL_MEDIAN_MAX];
-  int m = 0;
-  for (int i = 0; i < n; i++)
-    if (hist[i] != 0)
-      vals[m++] = hist[i];
   if (m == 0)
     return 0.0f;
-  for (int a = 1; a < m; a++) { // insertion sort (tiny N)
-    unsigned long key = vals[a];
-    int b = a - 1;
-    while (b >= 0 && vals[b] > key) {
-      vals[b + 1] = vals[b];
-      b--;
-    }
-    vals[b + 1] = key;
-  }
-  return WHEEL_SPEED_FACTOR / (float)vals[m / 2];
+  // Multi-pulse "double-buffered" method (Option C): the m accepted intervals
+  // span m revolutions in `sum` microseconds, so speed = WHEEL_SPEED_FACTOR * m / sum.
+  // Exact at every speed (period property); a single EMI blip is only 1/m of
+  // the window (counting property), so it caps instead of spiking.
+  return WHEEL_SPEED_FACTOR * (float)m / (float)sum;
 }
 
 // Which sensor the displayed speed comes from: 0=hall, 1=GPS, 2=fused (G+H).
