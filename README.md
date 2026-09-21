@@ -147,21 +147,26 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 Dashboard++ features a dual-source speed calculation engine that combines low-latency wheel rotation timing with absolute satellite GPS telemetry.
 
 #### Hall Sensor Calculation
-The speed calculated from Hall pulses is derived from microsecond timing between consecutive interrupts:
-$$V_{\text{hall}} = \frac{K_{\text{wheel}}}{\Delta t_{\text{pulse}}} \quad [\text{km/h}]$$
+Speed is derived from microsecond timing between consecutive interrupt pulses, averaged over a window of the last $W$ accepted intervals ($W$ = `HALL_MEDIAN_SAMPLES`, default 9; 1 = raw single interval). Over the window, $m$ accepted intervals span $m$ wheel revolutions in $S$ microseconds, so:
+$$V_{\text{hall}} = K_{\text{wheel}} \cdot \frac{m}{S} \quad [\text{km/h}]$$
 where $K_{\text{wheel}}$ is the wheel speed scaling factor computed from the wheel circumference $C_{\text{mm}}$:
-$$K_{\text{wheel}} = \left(\frac{C_{\text{mm}}}{10^6\text{ km}}\right) \times \left(3.6 \times 10^9\text{ }\mu\text{s/h}\right) = 3600 \times C_{\text{mm}}$$
+$$K_{\text{wheel}} = 3600 \times C_{\text{mm}}$$
+A single EMI blip affects only $1/W$ of the window (so it caps instead of spiking), and intervals rejected by the period guard (`HALL_PERIOD_GUARD`, default 8×) never enter the window.
 
-#### Dual-Source Fusion Logic
-Speed fusion evaluates satellite quality $N_{\text{sat}}$ against configured bounds $N_{\text{min}}$ (`MIN_SATELLITES`, default=5) and $N_{\text{opt}}$ (`OPTIMAL_SATELLITES`, default=8):
+#### Speed Source & Fusion Logic
+The displayed speed source is selected by `SPEED_SOURCE_MODE`: `0`=Hall only, `1`=GPS only, `2`=Sensor Fusion (default). Each mode uses only its source; an unavailable source reads 0 (no cross-fallback).
+
+In **Sensor Fusion** mode the source is chosen from the GPS/hall delta $\Delta V = |V_{\text{gps}} - V_{\text{hall}}|$, where $\Delta V_{\text{max}}$ = `MAX_SPEED_DELTA_KMH` (default 5.0) and $\Delta V_{\text{min}}$ = `GPS_MIN_DEV_KMH` (default 1.0):
 
 $$\text{SpeedSourceMode} = \begin{cases} 
-\text{GPS (1)}, & \text{if } N_{\text{sat}} \ge N_{\text{opt}} \text{ and } V_{\text{gps}} \text{ is valid} \\
-\text{G+H Fusion (2)}, & \text{if } N_{\text{min}} \le N_{\text{sat}} < N_{\text{opt}} \text{ and } |V_{\text{gps}} - V_{\text{hall}}| \le \Delta V_{\text{max}} \\
-\text{Hall-Only (0)}, & \text{if } N_{\text{sat}} < N_{\text{min}} \text{ or } |V_{\text{gps}} - V_{\text{hall}}| > \Delta V_{\text{max}}
+\text{Hall (0)}, & \text{if GPS is invalid} \\
+\text{GPS (1)}, & \text{if } V_{\text{hall}} = 0 \text{ (hall dead) and GPS valid} \\
+\text{Hall (0)}, & \text{if } \Delta V > \Delta V_{\text{max}} \\
+\text{GPS (1)}, & \text{if } \Delta V < \Delta V_{\text{min}} \\
+\text{G+H Fusion (2)}, & \text{otherwise}
 \end{cases}$$
 
-When in **G+H Fusion mode**, the output speed $V_{\text{fused}}$ uses linear confidence interpolation:
+When in **G+H Fusion mode**, the output speed $V_{\text{fused}}$ uses linear confidence interpolation weighted by satellite quality $N_{\text{sat}}$:
 $$W_{\text{gps}} = \frac{N_{\text{sat}} - N_{\text{min}} + 1}{N_{\text{opt}} - N_{\text{min}} + 1}$$
 $$V_{\text{fused}} = (W_{\text{gps}} \cdot V_{\text{gps}}) + ((1 - W_{\text{gps}}) \cdot V_{\text{hall}})$$
 
@@ -394,6 +399,9 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `MIN_SATELLITES` (default=5): Minimum GPS satellite lock requirement.
 - `OPTIMAL_SATELLITES` (default=8): Satellite count threshold for full GPS speed reliance.
 - `MAX_SPEED_DELTA_KMH` (default=5.0): Maximum allowable difference between GPS and Hall speed before falling back.
+- `SPEED_SOURCE_MODE` (default=2): Speed source — `0`=Hall only, `1`=GPS only, `2`=Sensor Fusion.
+- `HALL_MEDIAN_SAMPLES` (default=9): Speed window size W (accepted pulses averaged); 1 = raw single interval.
+- `HALL_PERIOD_GUARD` (default=8): Reject an interval >N or <1/N of the last accepted one.
 - `ACCEL_MAX_TIME` (default=30.0): Acceleration timer maximum duration in seconds before auto-finish.
 
 #### Weather Widget (Open-Meteo)

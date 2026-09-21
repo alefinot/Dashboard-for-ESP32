@@ -57,7 +57,8 @@ float MIN_SPEED_THRESHOLD = 1.0f;
 float GPS_START_KMH = 3.0f;
 int GPS_STOP_SETTLE_MS = 1500;
 float GPS_MIN_DEV_KMH = 1.0f;
-bool GPS_ONLY_MODE = true;
+// 0 = Hall only, 1 = GPS only, 2 = Sensor fusion (default). Replaces GPS_ONLY_MODE.
+int SPEED_SOURCE_MODE = 2;
 int SPEED_SOURCE_HOLD_MS = 500;
 int HALL_MEDIAN_SAMPLES = 9;
 // 8x keeps single EMI blips out (a 30 ms blip is ~10x the 297 ms period at 20 km/h);
@@ -384,7 +385,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_FLT(GPS_START_KMH, "GPS_START", 3.0f);
   CFG_INT(GPS_STOP_SETTLE_MS, "GPS_STL_MS", 1500);
   CFG_FLT(GPS_MIN_DEV_KMH, "GPS_MIN_DV", 1.0f);
-  CFG_BOOL(GPS_ONLY_MODE, "GPS_ONLY", true);
+  CFG_INT(SPEED_SOURCE_MODE, "SPD_SRC_MODE", 2);
   CFG_INT(SPEED_SOURCE_HOLD_MS, "SPD_SRC_HOLD", 500);
   CFG_INT(HALL_MEDIAN_SAMPLES, "HALL_MED_N", 9);
   CFG_INT(HALL_PERIOD_GUARD, "HALL_PRD_GRD", 8);
@@ -665,7 +666,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "GPS_START_KMH": 3,
   "GPS_STOP_SETTLE_MS": 1500,
   "GPS_MIN_DEV_KMH": 1,
-  "GPS_ONLY_MODE": true,
+  "SPEED_SOURCE_MODE": 2,
   "SPEED_SOURCE_HOLD_MS": 500,
   "HALL_MEDIAN_SAMPLES": 9,
   "HALL_PERIOD_GUARD": 8,

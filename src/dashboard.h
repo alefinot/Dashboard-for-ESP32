@@ -155,7 +155,7 @@ extern float MIN_SPEED_THRESHOLD;
 extern float GPS_START_KMH;
 extern int GPS_STOP_SETTLE_MS;
 extern float GPS_MIN_DEV_KMH;
-extern bool GPS_ONLY_MODE;
+extern int SPEED_SOURCE_MODE;
 extern int SPEED_SOURCE_HOLD_MS;
 extern int HALL_MEDIAN_SAMPLES;
 extern int HALL_PERIOD_GUARD;

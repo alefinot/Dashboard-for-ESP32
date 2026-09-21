@@ -456,10 +456,17 @@ inline float getHallSpeed() {
 // adds the hysteresis that decides when a new value actually takes effect.
 int computeSpeedSourceMode(float hallSpeed, float gpsSpeed, int sats,
                            bool isGpsValid) {
-  if (GPS_ONLY_MODE && isGpsValid)
-    return 1; // user-forced GPS-only (e.g. no hall sensor installed)
-  if (!isGpsValid || hallSpeed <= 0.0f)
-    return 0;
+  // SPEED_SOURCE_MODE: 0=Hall only, 1=GPS only, 2=Sensor fusion (default).
+  // Each mode uses only its source; an unavailable source shows 0 (no fallback).
+  if (SPEED_SOURCE_MODE == 0)
+    return 0; // Hall only
+  if (SPEED_SOURCE_MODE == 1)
+    return 1; // GPS only (invalid GPS -> gpsSpeed==0 -> shows 0)
+  // Sensor fusion:
+  if (!isGpsValid)
+    return 0; // no GPS: hall is the only source
+  if (hallSpeed <= 0.0f)
+    return 1; // hall dead but GPS valid: trust GPS
   float delta = fabsf(gpsSpeed - hallSpeed);
   if (delta > MAX_SPEED_DELTA_KMH)
     return 0; // GPS contradicts hall: reject GPS
