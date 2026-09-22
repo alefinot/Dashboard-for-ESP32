@@ -425,17 +425,22 @@ void IRAM_ATTR hallSensorISR() {
   unsigned long last = hallPulseIntervalUs;
   int guard = HALL_PERIOD_GUARD;
 
-  // In-motion acceleration guard:
-  // If we are actively rolling, reject sudden implausibly short intervals
-  // caused by spark plug EMI or switch bounce (e.g. an interval >guard times
-  // shorter than the previous rotation). Real physical vehicle acceleration
-  // cannot change period by >guard times in a single revolution.
-  if (hallRolling && guard > 1 && last != 0 &&
-      (unsigned long long)gap * (unsigned)guard < last) {
-    // Non-physical acceleration: ignore the EMI blip. Keep lastHallPulseTimeUs
-    // untouched so the real magnet pass measures from the true previous pulse.
-    portEXIT_CRITICAL_ISR(&hallMux);
-    return;
+  // In-motion physical acceleration guard:
+  // Reject sudden impossible acceleration spikes caused by spark plug EMI
+  // or contact bounce. Real terrestrial vehicles cannot accelerate faster than
+  // ~2.0g (72 km/h per second) on rubber tires.
+  // When guard <= 1, guard is disabled.
+  // When guard > 1, max acceleration is guard * 10 km/h per second (default guard=8 -> 80 km/h/s, ~2.3g).
+  if (hallRolling && guard > 1 && last != 0 && gap < last) {
+    float dtS = (float)gap * 1e-6f;
+    float dSpeed = (WHEEL_SPEED_FACTOR / (float)gap) - (WHEEL_SPEED_FACTOR / (float)last);
+    float maxAccelKmhS = (float)guard * 10.0f;
+    if (dSpeed / dtS > maxAccelKmhS) {
+      // Non-physical acceleration: ignore the EMI blip. Keep lastHallPulseTimeUs
+      // untouched so the real magnet pass measures from the true previous pulse.
+      portEXIT_CRITICAL_ISR(&hallMux);
+      return;
+    }
   }
 
   hallPulseIntervalUs = gap;
@@ -481,47 +486,37 @@ inline float getHallSpeed() {
     return 0.0f;
   }
 
-  // Calculate the average interval over the window.
-  // When m >= 4, use an outlier-trimmed mean: sort the samples and exclude the
-  // minimum interval (which eliminates any borderline high-speed noise blip).
-  unsigned long long sum = 0;
-  int validCount = 0;
-
-  if (m >= 4) {
-    // Insertion sort localHist
-    for (int i = 1; i < m; i++) {
-      unsigned long key = localHist[i];
-      int j = i - 1;
-      while (j >= 0 && localHist[j] > key) {
-        localHist[j + 1] = localHist[j];
-        j--;
-      }
-      localHist[j + 1] = key;
+  // True median filter:
+  // Sort the samples in ascending order. The median is the center value, which
+  // mathematically rejects up to (m-1)/2 noise spikes without any distortion.
+  for (int i = 1; i < m; i++) {
+    unsigned long key = localHist[i];
+    int j = i - 1;
+    while (j >= 0 && localHist[j] > key) {
+      localHist[j + 1] = localHist[j];
+      j--;
     }
-    // Discard the smallest sample (index 0) to eliminate fast EMI spikes
-    for (int i = 1; i < m; i++) {
-      sum += localHist[i];
-      validCount++;
-    }
-  } else {
-    for (int i = 0; i < m; i++) {
-      sum += localHist[i];
-      validCount++;
-    }
+    localHist[j + 1] = key;
   }
 
-  if (validCount == 0 || sum == 0)
+  unsigned long medianInterval;
+  if (m % 2 == 1) {
+    medianInterval = localHist[m / 2];
+  } else {
+    medianInterval = (localHist[m / 2 - 1] + localHist[m / 2]) / 2;
+  }
+
+  if (medianInterval == 0)
     return 0.0f;
 
-  float measuredSpeed = WHEEL_SPEED_FACTOR * (float)validCount / (float)sum;
+  float measuredSpeed = WHEEL_SPEED_FACTOR / (float)medianInterval;
 
   // Dynamic physical braking decay:
-  // If the time since the last pulse (dt) exceeds the average rotation period,
+  // If the time since the last pulse (dt) exceeds the median rotation period,
   // the vehicle is decelerating. The instantaneous speed cannot physically
   // exceed WHEEL_SPEED_FACTOR / dt. This ensures the speedometer glides
   // smoothly to 0 as the wheel stops, rather than hanging at cruising speed.
-  unsigned long avgPeriod = (unsigned long)(sum / validCount);
-  if (dt > avgPeriod) {
+  if (dt > medianInterval) {
     float maxPossibleSpeed = WHEEL_SPEED_FACTOR / (float)dt;
     if (measuredSpeed > maxPossibleSpeed)
       measuredSpeed = maxPossibleSpeed;
@@ -556,8 +551,15 @@ int computeSpeedSourceMode(float hallSpeed, float gpsSpeed, int sats,
     return 0; // GPS not valid (tunnel, bad sats): Hall only
 
   float delta = fabsf(gpsSpeed - hallSpeed);
-  if (delta > MAX_SPEED_DELTA_KMH)
-    return 0; // GPS contradicts Hall (multipath/glitch): trust Hall
+  if (delta > MAX_SPEED_DELTA_KMH) {
+    // Disagreement zone: determine which sensor is steady
+    float dHall = fabsf(hallSpeed - currentCachedSpeed);
+    float dGps = fabsf(gpsSpeed - currentCachedSpeed);
+    if (dHall > 10.0f && dGps < 5.0f && sats >= MIN_SATELLITES) {
+      return 1; // Hall spiked, GPS steady -> show GPS
+    }
+    return 0; // GPS contradicted Hall (multipath/glitch): trust Hall
+  }
 
   // Both sensors active, valid GPS, reasonable agreement: fused mode
   return 2;
@@ -659,8 +661,22 @@ void updateFilteredSpeed() {
       } else {
         float delta = fabsf(gpsSpeed - hallSpeed);
         if (delta > MAX_SPEED_DELTA_KMH) {
-          // GPS contradicts Hall (e.g. GPS multipath jump, speed spike): trust Hall
-          raw = hallSpeed;
+          // Disagreement zone: check if one sensor had an impossible sudden jump
+          // relative to the speed displayed on the previous tick (~20 ms ago).
+          float dHall = fabsf(hallSpeed - currentCachedSpeed);
+          float dGps = fabsf(gpsSpeed - currentCachedSpeed);
+          if (dHall > 10.0f && dGps < 5.0f && sats >= MIN_SATELLITES) {
+            // Hall had a sudden impossible jump while GPS remained steady with good satellites:
+            // REJECT THE HALL SPIKE, TRUST GPS!
+            raw = gpsSpeed;
+          } else if (dGps > 10.0f && dHall < 5.0f) {
+            // GPS had a sudden jump (multipath spike) while Hall remained steady:
+            // REJECT THE GPS SPIKE, TRUST HALL!
+            raw = hallSpeed;
+          } else {
+            // Smooth transition / tunnel: trust Hall
+            raw = hallSpeed;
+          }
         } else {
           // Both sensors active and consistent: dynamic confidence blending
           float satFactor = (float)(sats - MIN_SATELLITES + 1) /
