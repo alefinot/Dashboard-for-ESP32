@@ -60,7 +60,7 @@ float GPS_MIN_DEV_KMH = 1.0f;
 // 0 = Hall only, 1 = GPS only, 2 = Sensor fusion (default). Replaces GPS_ONLY_MODE.
 int SPEED_SOURCE_MODE = 2;
 int SPEED_SOURCE_HOLD_MS = 500;
-int HALL_MEDIAN_SAMPLES = 9;
+int HALL_MEDIAN_SAMPLES = 3;
 // 8x keeps single EMI blips out (a 30 ms blip is ~10x the 297 ms period at 20 km/h);
 // real driving shifts the period <2%/rotation, so 8x never rejects a real pulse.
 int HALL_PERIOD_GUARD = 8;
@@ -388,7 +388,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_FLT(GPS_MIN_DEV_KMH, "GPS_MIN_DV", 1.0f);
   CFG_INT(SPEED_SOURCE_MODE, "SPD_SRC_MODE", 2);
   CFG_INT(SPEED_SOURCE_HOLD_MS, "SPD_SRC_HOLD", 500);
-  CFG_INT(HALL_MEDIAN_SAMPLES, "HALL_MED_N", 9);
+  CFG_INT(HALL_MEDIAN_SAMPLES, "HALL_MED_N", 3);
   CFG_INT(HALL_PERIOD_GUARD, "HALL_PRD_GRD", 8);
   CFG_FLT(ACCEL_START_SPEED, "ACC_STRT", 1.0f);
   CFG_FLT(ACCEL_TARGET_SPEED, "ACC_TGT", 50.0f);
@@ -670,7 +670,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "GPS_MIN_DEV_KMH": 1,
   "SPEED_SOURCE_MODE": 2,
   "SPEED_SOURCE_HOLD_MS": 500,
-  "HALL_MEDIAN_SAMPLES": 9,
+  "HALL_MEDIAN_SAMPLES": 3,
   "HALL_PERIOD_GUARD": 8,
   "ACCEL_START_SPEED": 1,
   "ACCEL_TARGET_SPEED": 50,

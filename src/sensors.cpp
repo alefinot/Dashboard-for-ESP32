@@ -404,13 +404,18 @@ void IRAM_ATTR hallSensorISR() {
   // Standstill check: if more than 1.5s has elapsed since the last pulse,
   // the wheel was stationary. This pulse is the first physical edge of a new
   // roll: record its timestamp to anchor the next interval, count the distance,
-  // but do not compute a speed from the multi-second stopped gap.
+  // and completely purge the history ring buffer so no stale cruising speeds
+  // poison the speed calculation when moving off from a stop.
   if (gap > STANDSTILL_TIMEOUT_US) {
     portENTER_CRITICAL_ISR(&hallMux);
     lastHallPulseTimeUs = now;
     hallPulseIntervalUs = 0;
     hallPulseCount++;
     hallRolling = false;
+    for (int i = 0; i < HALL_MEDIAN_MAX; i++) {
+      hallIntervalHist[i] = 0;
+    }
+    hallHistWriteIdx = 0;
     portEXIT_CRITICAL_ISR(&hallMux);
     return;
   }
@@ -425,22 +430,16 @@ void IRAM_ATTR hallSensorISR() {
   unsigned long last = hallPulseIntervalUs;
   int guard = HALL_PERIOD_GUARD;
 
-  // In-motion physical acceleration guard:
-  // Reject sudden impossible acceleration spikes caused by spark plug EMI
-  // or contact bounce. Real terrestrial vehicles cannot accelerate faster than
-  // ~2.0g (72 km/h per second) on rubber tires.
-  // When guard <= 1, guard is disabled.
-  // When guard > 1, max acceleration is guard * 10 km/h per second (default guard=8 -> 80 km/h/s, ~2.3g).
-  if (hallRolling && guard > 1 && last != 0 && gap < last) {
-    float dtS = (float)gap * 1e-6f;
-    float dSpeed = (WHEEL_SPEED_FACTOR / (float)gap) - (WHEEL_SPEED_FACTOR / (float)last);
-    float maxAccelKmhS = (float)guard * 10.0f;
-    if (dSpeed / dtS > maxAccelKmhS) {
-      // Non-physical acceleration: ignore the EMI blip. Keep lastHallPulseTimeUs
-      // untouched so the real magnet pass measures from the true previous pulse.
-      portEXIT_CRITICAL_ISR(&hallMux);
-      return;
-    }
+  // In-motion acceleration guard (100% integer math, zero float operations in ISR):
+  // Reject sudden implausibly short intervals caused by spark plug EMI or bounce
+  // (e.g. interval >guard times shorter than the previous rotation). Real physical
+  // vehicle acceleration cannot change period by >guard times in a single revolution.
+  if (hallRolling && guard > 1 && last != 0 &&
+      (unsigned long long)gap * (unsigned)guard < last) {
+    // Non-physical acceleration: ignore the EMI blip. Keep lastHallPulseTimeUs
+    // untouched so the real magnet pass measures from the true previous pulse.
+    portEXIT_CRITICAL_ISR(&hallMux);
+    return;
   }
 
   hallPulseIntervalUs = gap;
@@ -466,7 +465,7 @@ inline float getHallSpeed() {
   lastTimeUs = lastHallPulseTimeUs;
   rolling = hallRolling;
 
-  // Read the newest intervals from the ring buffer
+  // Read the newest non-zero intervals from the current roll
   int idx = (hallHistWriteIdx == 0 ? HALL_MEDIAN_MAX : hallHistWriteIdx) - 1;
   for (int i = 0; i < n; i++) {
     unsigned long v = hallIntervalHist[idx];
@@ -486,24 +485,27 @@ inline float getHallSpeed() {
     return 0.0f;
   }
 
-  // True median filter:
-  // Sort the samples in ascending order. The median is the center value, which
-  // mathematically rejects up to (m-1)/2 noise spikes without any distortion.
-  for (int i = 1; i < m; i++) {
-    unsigned long key = localHist[i];
-    int j = i - 1;
-    while (j >= 0 && localHist[j] > key) {
-      localHist[j + 1] = localHist[j];
-      j--;
-    }
-    localHist[j + 1] = key;
-  }
-
   unsigned long medianInterval;
-  if (m % 2 == 1) {
-    medianInterval = localHist[m / 2];
+  if (m == 1) {
+    medianInterval = localHist[0];
+  } else if (m == 2) {
+    medianInterval = (localHist[0] + localHist[1]) / 2;
   } else {
-    medianInterval = (localHist[m / 2 - 1] + localHist[m / 2]) / 2;
+    // Insertion sort localHist
+    for (int i = 1; i < m; i++) {
+      unsigned long key = localHist[i];
+      int j = i - 1;
+      while (j >= 0 && localHist[j] > key) {
+        localHist[j + 1] = localHist[j];
+        j--;
+      }
+      localHist[j + 1] = key;
+    }
+    if (m % 2 == 1) {
+      medianInterval = localHist[m / 2];
+    } else {
+      medianInterval = (localHist[m / 2 - 1] + localHist[m / 2]) / 2;
+    }
   }
 
   if (medianInterval == 0)
@@ -512,11 +514,11 @@ inline float getHallSpeed() {
   float measuredSpeed = WHEEL_SPEED_FACTOR / (float)medianInterval;
 
   // Dynamic physical braking decay:
-  // If the time since the last pulse (dt) exceeds the median rotation period,
-  // the vehicle is decelerating. The instantaneous speed cannot physically
-  // exceed WHEEL_SPEED_FACTOR / dt. This ensures the speedometer glides
-  // smoothly to 0 as the wheel stops, rather than hanging at cruising speed.
-  if (dt > medianInterval) {
+  // Only engage when a pulse is actually overdue (dt > medianInterval * 1.5).
+  // During normal riding and accelerating, dt never reaches 1.5x the period,
+  // preventing speed oscillation. When stopping, it smoothly glides to 0.
+  unsigned long decayThresholdUs = medianInterval + (medianInterval >> 1);
+  if (dt > decayThresholdUs) {
     float maxPossibleSpeed = WHEEL_SPEED_FACTOR / (float)dt;
     if (measuredSpeed > maxPossibleSpeed)
       measuredSpeed = maxPossibleSpeed;
@@ -552,13 +554,9 @@ int computeSpeedSourceMode(float hallSpeed, float gpsSpeed, int sats,
 
   float delta = fabsf(gpsSpeed - hallSpeed);
   if (delta > MAX_SPEED_DELTA_KMH) {
-    // Disagreement zone: determine which sensor is steady
-    float dHall = fabsf(hallSpeed - currentCachedSpeed);
-    float dGps = fabsf(gpsSpeed - currentCachedSpeed);
-    if (dHall > 10.0f && dGps < 5.0f && sats >= MIN_SATELLITES) {
-      return 1; // Hall spiked, GPS steady -> show GPS
-    }
-    return 0; // GPS contradicted Hall (multipath/glitch): trust Hall
+    // Disagreement zone: GPS lags during rapid acceleration/braking or suffers multipath.
+    // Hall has zero latency, so trust Hall.
+    return 0;
   }
 
   // Both sensors active, valid GPS, reasonable agreement: fused mode
@@ -661,22 +659,9 @@ void updateFilteredSpeed() {
       } else {
         float delta = fabsf(gpsSpeed - hallSpeed);
         if (delta > MAX_SPEED_DELTA_KMH) {
-          // Disagreement zone: check if one sensor had an impossible sudden jump
-          // relative to the speed displayed on the previous tick (~20 ms ago).
-          float dHall = fabsf(hallSpeed - currentCachedSpeed);
-          float dGps = fabsf(gpsSpeed - currentCachedSpeed);
-          if (dHall > 10.0f && dGps < 5.0f && sats >= MIN_SATELLITES) {
-            // Hall had a sudden impossible jump while GPS remained steady with good satellites:
-            // REJECT THE HALL SPIKE, TRUST GPS!
-            raw = gpsSpeed;
-          } else if (dGps > 10.0f && dHall < 5.0f) {
-            // GPS had a sudden jump (multipath spike) while Hall remained steady:
-            // REJECT THE GPS SPIKE, TRUST HALL!
-            raw = hallSpeed;
-          } else {
-            // Smooth transition / tunnel: trust Hall
-            raw = hallSpeed;
-          }
+          // GPS contradicts Hall (e.g. GPS multipath jump, or normal GPS latency during throttle):
+          // Trust Hall for dynamic vehicle responsiveness.
+          raw = hallSpeed;
         } else {
           // Both sensors active and consistent: dynamic confidence blending
           float satFactor = (float)(sats - MIN_SATELLITES + 1) /
