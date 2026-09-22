@@ -147,13 +147,13 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 Dashboard++ features a dual-source speed calculation engine that combines low-latency wheel rotation timing with absolute satellite GPS telemetry.
 
 #### Hall Sensor Calculation
-Speed is derived from microsecond timing between consecutive interrupt pulses, filtered through a two-stage state machine and averaged over a window of the last $W$ accepted intervals ($W$ = `HALL_MEDIAN_SAMPLES`, default 9; 1 = raw single interval):
+Speed is derived from microsecond timing between consecutive interrupt pulses, filtered through a two-stage state machine and a true median filter over a window of the last $W$ accepted intervals ($W$ = `HALL_MEDIAN_SAMPLES`, default 9; 1 = raw single interval):
 
 1. **Standstill Detection & Re-sync:** If time since the last pulse exceeds `STANDSTILL_TIMEOUT_US` (1.5 s), the wheel was stopped. The first pulse synchronizes the timing baseline and increments odometer distance without deadlocking. The second pulse computes the first true rotation interval.
-2. **Noise & EMI Rejection:** Hardware debounce (`DEBOUNCE_US = 12000UL`, 12 ms / ~495 km/h) rejects contact bounce. In-motion acceleration guard (`gap * guard < last`) drops non-physical ignition EMI spikes without advancing the pulse timestamp.
-3. **Outlier-Trimmed Window:** For $W \ge 4$, intervals are sorted and the smallest sample (highest speed) is excluded to eliminate borderline noise.
-4. **Dynamic Physical Deceleration Decay:** If elapsed time $dt$ since the last pulse exceeds the measured average period, the vehicle is slowing down. Speed is dynamically constrained to:
-$$V_{\text{hall}} = \min\left(K_{\text{wheel}} \cdot \frac{m}{S}, \; \frac{K_{\text{wheel}}}{dt}\right) \quad [\text{km/h}]$$
+2. **Physical Acceleration Guard & Debounce:** Hardware debounce (`DEBOUNCE_US = 12000UL`, 12 ms / ~495 km/h) rejects contact bounce. In-motion physical acceleration guard calculates instantaneous vehicle acceleration $\frac{dSpeed}{dt} = \frac{\Delta V}{\Delta t}$; if it exceeds `HALL_PERIOD_GUARD * 10 km/h/s` (default 8 $\implies$ 80 km/h/s, ~2.3g, well above physical tire traction), the spark/EMI pulse is dropped without advancing timestamps.
+3. **True Median Filter:** For window $W$, intervals are insertion-sorted in ascending order and the true median interval ($W/2$) is taken. This mathematically eliminates up to $(W-1)/2$ impulse noise spikes completely without phase distortion or speed lag.
+4. **Dynamic Physical Deceleration Decay:** If elapsed time $dt$ since the last pulse exceeds the measured median period, the vehicle is slowing down. Speed is dynamically constrained to:
+$$V_{\text{hall}} = \min\left(\frac{K_{\text{wheel}}}{\text{interval}_{\text{median}}}, \; \frac{K_{\text{wheel}}}{dt}\right) \quad [\text{km/h}]$$
 where $K_{\text{wheel}} = 3600 \times C_{\text{mm}}$. Speed smoothly glides to 0 as the vehicle halts, eliminating the prior 2-second speed freeze.
 
 #### Speed Source & Fusion Logic
@@ -162,7 +162,8 @@ The displayed speed source is selected by `SPEED_SOURCE_MODE`: `0`=Hall only, `1
 In **Sensor Fusion mode (2)**, the engine dynamically balances both sensors:
 - **Rock-Solid Standstill:** When $V_{\text{hall}} = 0$ and $V_{\text{gps}} < \text{GPS\_START\_KMH}$ (3.0 km/h), speed is forced to solid `0.0 km/h`, eliminating GPS drift at traffic lights.
 - **Immediate Response:** As soon as wheel pulses arrive ($V_{\text{hall}} > 0$), speed is displayed immediately without clamping.
-- **Dual Failsafe Redundancy:** If the Hall sensor fails or disconnects at speed, the system automatically falls back to valid GPS ($V_{\text{gps}} \ge 3.0\text{ km/h}$). If GPS signal is lost in a tunnel or suffers a multipath spike ($\Delta V > \text{MAX\_SPEED\_DELTA\_KMH}$), Hall sensor carries 100% of the speed. Speed never drops to 0 while moving.
+- **Sensor Cross-Validation & Spike Rejection:** When $|V_{\text{gps}} - V_{\text{hall}}| > \text{MAX\_SPEED\_DELTA\_KMH}$, the engine cross-checks each sensor against the previous tick's displayed speed. If Hall experienced an impossible sudden spike ($|\Delta V_{\text{hall}}| > 10\text{ km/h}$) while GPS remained steady ($|\Delta V_{\text{gps}}| < 5\text{ km/h}$), the Hall spike is rejected and GPS is trusted. Conversely, GPS multipath spikes are rejected in favor of steady Hall speed.
+- **Dual Failsafe Redundancy:** If the Hall sensor fails or disconnects at speed, the system automatically falls back to valid GPS ($V_{\text{gps}} \ge 3.0\text{ km/h}$). If GPS signal is lost in a tunnel, Hall sensor carries 100% of the speed. Speed never drops to 0 while moving.
 - **Dynamic Confidence Blending:** When both sensors are healthy and consistent ($\Delta V \le \text{MAX\_SPEED\_DELTA\_KMH}$):
 $$C_{\text{sat}} = \text{constrain}\left(\frac{N_{\text{sat}} - N_{\text{min}} + 1}{N_{\text{opt}} - N_{\text{min}} + 1}, 0.0, 1.0\right)$$
 $$C_{\delta} = \text{constrain}\left(1.0 - \frac{\Delta V - \Delta V_{\text{min}}}{\Delta V_{\text{max}} - \Delta V_{\text{min}}}, 0.0, 1.0\right)$$
@@ -540,11 +541,12 @@ In Demo Mode:
 
 ## Changelog
 
-### V1.3.7 — Hall standstill deadlock fix, sensor fusion overhaul, Speed Source selector
+### V1.3.7 — Hall standstill deadlock fix, physical acceleration guard, sensor fusion overhaul, Speed Source selector
 - **Hall standstill deadlock fixed** — resolved the critical bug where starting from a stop rejected pulses and permanently deadlocked the Hall sensor at 0 km/h; implemented a two-stage state machine (`STANDSTILL_TIMEOUT_US = 1.5s`) that cleanly re-syncs timing on the first rotation after stopping.
+- **Physical acceleration guard & true median filter** — replaced crude period ratios with an in-motion physical vehicle acceleration guard ($a_{\text{max}} = \text{guard} \times 10\text{ km/h/s} \approx 2.3g$) and an insertion-sorted true median filter, completely eliminating residual ignition EMI speed spikes (e.g. 35 $\to$ 70 km/h) without speed lag.
 - **Dynamic physical deceleration decay** — speed smoothly glides to 0 km/h as the vehicle halts ($\min(V_{\text{measured}}, K_{\text{wheel}}/dt)$) instead of hanging frozen at cruising speed for 2 seconds.
-- **Hardware debounce & spike rejection** — 12 ms ISR debounce (`DEBOUNCE_US = 12000UL`, ~495 km/h) rejects contact bounce and ignition EMI bursts, and an outlier-trimmed multi-pulse window excludes borderline noise.
-- **Dual sensor fusion overhaul** — holds a rock-solid 0.0 km/h at traffic lights (killing stationary GPS drift), displays immediately upon rolling, dynamically blends Hall and GPS confidence (capped at 50% GPS to retain zero-latency throttle/brake response), and seamlessly falls back to GPS if the Hall sensor is disconnected while driving.
+- **Hardware debounce & spike rejection** — 12 ms ISR debounce (`DEBOUNCE_US = 12000UL`, ~495 km/h) rejects contact bounce and ignition EMI bursts.
+- **Dual sensor fusion overhaul & cross-validation** — holds a rock-solid 0.0 km/h at traffic lights (killing stationary GPS drift), displays immediately upon rolling, dynamically blends Hall and GPS confidence (capped at 50% GPS to retain zero-latency throttle/brake response), cross-validates sensor deltas ($>15\text{ km/h}$) against previous tick speed to reject outliers, and seamlessly falls back to GPS if the Hall sensor is disconnected while driving.
 - **Speed Source selector & independent modes** — **Hall only** (0), **GPS only** (1), **Sensor Fusion** (2, default). Hall-only mode now correctly records session `maxSpeed` and odometer distance.
 
 ### V1.3.6 — arduino-esp32 3.3.12 (ESP-IDF 5.5.5) core migration
