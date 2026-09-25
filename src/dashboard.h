@@ -417,6 +417,7 @@ extern unsigned long g_startupTime;
 extern portMUX_TYPE hallMux;
 extern volatile unsigned long lastHallPulseTimeUs;
 extern volatile unsigned long hallPulseIntervalUs;
+extern volatile unsigned long hallStableIntervalUs;
 extern volatile unsigned long hallPulseCount;
 extern volatile bool hallRolling;
 extern volatile int heldSpeedSourceMode;

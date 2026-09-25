@@ -1,4 +1,7 @@
 #include "dashboard.h"
+#include "esp_rom_sys.h"
+#include "driver/gpio.h"
+#include "soc/gpio_reg.h"
 
 TinyGPSPlus gps;
 HardwareSerial gpsSerial(2);
@@ -112,6 +115,7 @@ void simulateRawSensors() {
     portENTER_CRITICAL(&hallMux);
     lastHallPulseTimeUs = micros();
     hallPulseIntervalUs = intervalUs;
+    hallStableIntervalUs = intervalUs;
     hallRolling = true;
     hallIntervalHist[hallHistWriteIdx] = intervalUs;
     hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
@@ -348,6 +352,7 @@ float currentCachedSpeed = 0.0f;
 portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;
 volatile unsigned long lastHallPulseTimeUs = 0;
 volatile unsigned long hallPulseIntervalUs = 0;
+volatile unsigned long hallStableIntervalUs = 0;
 volatile unsigned long hallPulseCount = 0;
 volatile bool hallRolling = false;
 
@@ -398,6 +403,15 @@ volatile unsigned long g_sensorLastTickMs = 0;
 // Hall sensor (ISR + speed)
 // ----------------------------------------------------------------------------
 void IRAM_ATTR hallSensorISR() {
+  // Layer 1: Pulse-Width Qualification (Glitch Filter)
+  // Real magnet passes hold GPIO33 LOW for >140 µs (even at 200 km/h).
+  // Spark plug EMI transients ring and collapse back to HIGH within <10 µs.
+  // Wait 25 µs: if the pin has already bounced back to HIGH, reject the glitch!
+  esp_rom_delay_us(25);
+  if ((REG_READ(GPIO_IN1_REG) & (1UL << (HALL_SENSOR_PIN - 32))) != 0) {
+    return;
+  }
+
   unsigned long now = micros();
   unsigned long gap = now - lastHallPulseTimeUs;
 
@@ -410,7 +424,8 @@ void IRAM_ATTR hallSensorISR() {
     portENTER_CRITICAL_ISR(&hallMux);
     lastHallPulseTimeUs = now;
     hallPulseIntervalUs = 0;
-    hallPulseCount++;
+    hallStableIntervalUs = 0;
+    hallPulseCount = hallPulseCount + 1;
     hallRolling = false;
     for (int i = 0; i < HALL_MEDIAN_MAX; i++) {
       hallIntervalHist[i] = 0;
@@ -427,24 +442,23 @@ void IRAM_ATTR hallSensorISR() {
   }
 
   portENTER_CRITICAL_ISR(&hallMux);
-  unsigned long last = hallPulseIntervalUs;
-  int guard = HALL_PERIOD_GUARD;
+  unsigned long last = hallStableIntervalUs;
+  if (last == 0) last = hallPulseIntervalUs;
 
-  // In-motion acceleration guard (100% integer math, zero float operations in ISR):
-  // Reject sudden implausibly short intervals caused by spark plug EMI or bounce
-  // (e.g. interval >guard times shorter than the previous rotation). Real physical
-  // vehicle acceleration cannot change period by >guard times in a single revolution.
-  if (hallRolling && guard > 1 && last != 0 &&
-      (unsigned long long)gap * (unsigned)guard < last) {
-    // Non-physical acceleration: ignore the EMI blip. Keep lastHallPulseTimeUs
-    // untouched so the real magnet pass measures from the true previous pulse.
+  // Layer 2: Anti-Collapse Timing Baseline (100% integer math, zero float operations in ISR):
+  // When actively rolling at speed, reject any impossible sudden jump (>2x speed increase in 1 turn).
+  // Real terrestrial vehicles cannot double speed in a single wheel revolution (<300 ms).
+  // By keeping lastHallPulseTimeUs and hallStableIntervalUs locked to the verified magnet timing,
+  // ignition sparks cannot collapse the guard during deceleration or cruising.
+  if (hallRolling && last != 0 && (unsigned long long)gap * 2ULL < (unsigned long long)last) {
     portEXIT_CRITICAL_ISR(&hallMux);
     return;
   }
 
   hallPulseIntervalUs = gap;
+  hallStableIntervalUs = gap;
   lastHallPulseTimeUs = now;
-  hallPulseCount++;
+  hallPulseCount = hallPulseCount + 1;
   hallRolling = true;
   hallIntervalHist[hallHistWriteIdx] = gap;
   hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
@@ -606,13 +620,12 @@ void updateFilteredSpeed() {
     // MODE 0: HALL SENSOR ONLY
     // ------------------------------------------------------------------------
     raw = hallSpeed;
-    currentCachedSpeed = (raw < MIN_SPEED_THRESHOLD) ? 0.0f : raw;
   } else if (mode == 1) {
     // ------------------------------------------------------------------------
     // MODE 1: GPS SENSOR ONLY
     // ------------------------------------------------------------------------
     if (!isGpsValid) {
-      currentCachedSpeed = 0.0f;
+      raw = 0.0f;
     } else {
       raw = gpsSpeed;
       // GPS stationary jitter filter
@@ -631,7 +644,7 @@ void updateFilteredSpeed() {
       } else {
         gpsBelowStopSince = 0;
       }
-      currentCachedSpeed = gpsMoving ? raw : 0.0f;
+      raw = gpsMoving ? raw : 0.0f;
     }
   } else {
     // ------------------------------------------------------------------------
@@ -643,12 +656,10 @@ void updateFilteredSpeed() {
         // Hall is inactive, but GPS has a solid fix and vehicle is moving:
         // FAILSAFE FALLBACK TO GPS (Never show 0 when moving!)
         raw = gpsSpeed;
-        currentCachedSpeed = raw;
       } else {
         // Wheel is physically stopped, and GPS is within stationary jitter band:
         // ROCK-SOLID ZERO AT STANDSTILL
         raw = 0.0f;
-        currentCachedSpeed = 0.0f;
       }
     } else {
       // Wheel is actively turning (hallSpeed > 0.0f):
@@ -659,9 +670,15 @@ void updateFilteredSpeed() {
       } else {
         float delta = fabsf(gpsSpeed - hallSpeed);
         if (delta > MAX_SPEED_DELTA_KMH) {
-          // GPS contradicts Hall (e.g. GPS multipath jump, or normal GPS latency during throttle):
-          // Trust Hall for dynamic vehicle responsiveness.
-          raw = hallSpeed;
+          // Layer 5: GPS Cross-Validation in Sensor Fusion Mode
+          // If Hall speed reads > gpsSpeed + 30 km/h with a valid GPS lock,
+          // it is an anomalous Hall EMI spike that passed lower layers: trust GPS.
+          // Otherwise GPS is lagging during normal throttle or multipath: trust Hall for dynamic responsiveness.
+          if (hallSpeed > gpsSpeed + 30.0f) {
+            raw = gpsSpeed;
+          } else {
+            raw = hallSpeed;
+          }
         } else {
           // Both sensors active and consistent: dynamic confidence blending
           float satFactor = (float)(sats - MIN_SATELLITES + 1) /
@@ -681,9 +698,44 @@ void updateFilteredSpeed() {
           raw = gpsSpeed * gpsWeight + hallSpeed * (1.0f - gpsWeight);
         }
       }
-      currentCachedSpeed = (raw < MIN_SPEED_THRESHOLD) ? 0.0f : raw;
     }
   }
+
+  float targetSpeed = (raw < MIN_SPEED_THRESHOLD) ? 0.0f : raw;
+
+  // Layer 4: Physical Slew-Rate Limiter (Max Accel / Decel)
+  // Terrestrial motorcycles cannot exceed ~1.7g acceleration (60 km/h/s)
+  // or ~2.3g emergency braking (80 km/h/s).
+  // Clamping rate-of-change mathematically prevents instantaneous spikes
+  // (e.g. jumping from 30 km/h to 200+ km/h in a fraction of a second).
+  static float slewedSpeed = 0.0f;
+  static unsigned long lastSlewTimeMs = 0;
+  unsigned long nowMs = millis();
+
+  if (lastSlewTimeMs == 0) {
+    lastSlewTimeMs = nowMs;
+    slewedSpeed = targetSpeed;
+  } else {
+    float dtS = (float)(nowMs - lastSlewTimeMs) / 1000.0f;
+    lastSlewTimeMs = nowMs;
+    if (dtS > 0.5f) dtS = 0.5f; // Guard against clock jumps or task suspension
+
+    if (targetSpeed > slewedSpeed) {
+      const float MAX_ACCEL_KMH_S = 60.0f;
+      float maxStep = MAX_ACCEL_KMH_S * dtS;
+      slewedSpeed += fminf(targetSpeed - slewedSpeed, maxStep);
+    } else if (targetSpeed < slewedSpeed) {
+      const float MAX_DECEL_KMH_S = 80.0f;
+      float maxStep = MAX_DECEL_KMH_S * dtS;
+      slewedSpeed -= fminf(slewedSpeed - targetSpeed, maxStep);
+    }
+  }
+
+  if (slewedSpeed < MIN_SPEED_THRESHOLD) {
+    slewedSpeed = 0.0f;
+  }
+
+  currentCachedSpeed = slewedSpeed;
 
   // Track the session's maximum achieved speed (RAM-only, resets on reboot).
   // Handled for ALL modes (fixes early return bug for Mode 0).

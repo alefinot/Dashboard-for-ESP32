@@ -146,15 +146,14 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 
 Dashboard++ features a dual-source speed calculation engine that combines low-latency wheel rotation timing with absolute satellite GPS telemetry.
 
-#### Hall Sensor Calculation
-Speed is derived from microsecond timing between consecutive interrupt pulses, filtered through a two-stage state machine and a lightweight median filter over a window of the last $W$ accepted intervals ($W$ = `HALL_MEDIAN_SAMPLES`, default 3; 1 = raw single interval):
+#### Hall Sensor Calculation & 5-Layer Defense Pipeline
+Speed is derived from microsecond timing between consecutive interrupt pulses on GPIO33, protected by an end-to-end 5-layer defense pipeline that eliminates spark ignition EMI glitches, prevents baseline collapse during deceleration, and bounds rate-of-change to physical limits:
 
-1. **Standstill Detection & History Purge:** If time since the last pulse exceeds `STANDSTILL_TIMEOUT_US` (1.5 s), the wheel was stopped. The first pulse synchronizes the timing baseline, increments odometer distance, and completely purges the history buffer so no stale cruising speeds linger. The second pulse computes the first true rotation interval from 0 km/h.
-2. **Integer Debounce & Period Guard:** Hardware debounce (`DEBOUNCE_US = 12000UL`, 12 ms / ~495 km/h) rejects contact bounce. Integer period guard (`gap * guard < last`) drops non-physical ignition EMI spikes without any floating-point ISR execution, keeping hardware FPU registers uncorrupted.
-3. **Responsive Median Filter ($W=3$):** For window $W$, intervals are sorted and the median interval is taken. At default $W=3$, isolated spark EMI spikes are completely eliminated with only a single wheel revolution of lag.
-4. **Overdue Deceleration Decay:** If elapsed time $dt$ since the last pulse exceeds $1.5\times$ the rotation period, the vehicle is decelerating to a stop. Speed is dynamically constrained to:
-$$V_{\text{hall}} = \min\left(\frac{K_{\text{wheel}}}{\text{interval}_{\text{median}}}, \; \frac{K_{\text{wheel}}}{dt}\right) \quad [\text{km/h}]$$
-where $K_{\text{wheel}} = 3600 \times C_{\text{mm}}$. Speed smoothly glides to 0 as the vehicle halts without oscillating during live driving.
+1. **Layer 1: ISR Pulse-Width Qualification (Glitch Filter):** Real wheel magnets hold GPIO33 LOW for hundreds of microseconds (>140 µs even at 200 km/h). High-frequency ignition coil ringing collapses back to HIGH within <10 µs. On a `FALLING` interrupt, the ISR delays 25 µs (`esp_rom_delay_us(25)`) and samples the hardware register directly (`REG_READ(GPIO_IN1_REG)`). If the line bounced back to HIGH, the glitch is dropped before any timestamping or interval logic runs.
+2. **Layer 2: Anti-Collapse Timing Baseline (Integer Guard):** 100% integer timestamping and period guard in the ISR with zero floating-point math, protecting hardware FPU registers from interrupt corruption. When actively rolling, candidate intervals faster than $2\times$ previous speed ($gap \times 2 < last$) are dropped without updating `lastHallPulseTimeUs` or the stable baseline `hallStableIntervalUs`. This prevents spark bursts during braking from collapsing the guard baseline and producing >200 km/h spikes.
+3. **Layer 3: Standstill Detection, Buffer Purge & Deceleration Decay:** If time since the last pulse exceeds `STANDSTILL_TIMEOUT_US` (1.5 s), the wheel was stopped. The first pulse synchronizes the timing baseline, increments odometer distance, and completely purges the history ring buffer. The second pulse computes the first true rotation interval from 0 km/h. During deceleration, if elapsed time $dt$ since the last pulse exceeds $1.5\times$ the rotation period, dynamic decay constrains speed smoothly to 0 km/h without mid-revolution diving.
+4. **Layer 4: Physical Slew-Rate Limiter (Max Accel / Decel):** Terrestrial motorcycles cannot exceed physical acceleration limits (~1.7g / 60 km/h/s) or emergency braking (~2.3g / 80 km/h/s). Clamping $\Delta V$ between update ticks (~20 ms) mathematically prevents instantaneous multi-hundred km/h jumps on the speedometer.
+5. **Layer 5: Sensor Fusion Outlier Rejection:** In Sensor Fusion mode (2), if Hall speed reads $> V_{\text{gps}} + 30\text{ km/h}$ while GPS has a solid satellite lock, the Hall reading is rejected as an anomalous spike and the dashboard displays GPS speed.
 
 #### Speed Source & Fusion Logic
 The displayed speed source is selected by `SPEED_SOURCE_MODE`: `0`=Hall only, `1`=GPS only, `2`=Sensor Fusion (default).
@@ -541,8 +540,12 @@ In Demo Mode:
 
 ## Changelog
 
-### V1.3.7 — Hall standstill deadlock fix, pure integer ISR, sensor fusion overhaul, Speed Source selector
-- **Hall standstill deadlock & history purge** — resolved the critical bug where starting from a stop rejected pulses and permanently deadlocked the Hall sensor at 0 km/h; implemented a two-stage state machine (`STANDSTILL_TIMEOUT_US = 1.5s`) that cleanly re-syncs timing and purges the history ring buffer upon stopping so no stale cruising speeds linger.
+### V1.3.7 — Hall 5-layer defense pipeline, anti-collapse baseline, slew-rate limiter, pure integer ISR, sensor fusion overhaul
+- **Layer 1: ISR pulse-width qualification** — on `FALLING` interrupt, delays 25 µs and directly samples the GPIO33 input register; spark ignition EMI ringing (<10 µs) is dropped immediately before any timestamping or interval logic runs, while genuine wheel magnet pulses (>140 µs) pass through cleanly.
+- **Layer 2: Anti-collapse timing baseline** — locks reference interval `hallStableIntervalUs` to verified wheel rotation; unverified spark bursts during deceleration cannot collapse the guard baseline or trigger false >200 km/h readings.
+- **Layer 3: Hall standstill deadlock fix & history purge** — resolved the critical bug where starting from a stop rejected pulses and permanently deadlocked the Hall sensor at 0 km/h; implemented a two-stage state machine (`STANDSTILL_TIMEOUT_US = 1.5s`) that cleanly re-syncs timing and purges the history ring buffer upon stopping so no stale cruising speeds linger.
+- **Layer 4: Physical slew-rate limiter** — caps speed rate-of-change to physical vehicle dynamics (max 60 km/h/s acceleration, 80 km/h/s braking); mathematically prevents multi-hundred km/h instantaneous speedometer jumps.
+- **Layer 5: Sensor fusion outlier rejection** — in Dual Sensor Fusion mode, cross-checks Hall speed against GPS: if Hall exceeds GPS by >30 km/h with a solid fix, Hall reading is rejected as an EMI spike and GPS speed is displayed.
 - **Pure integer ISR & hardware debounce** — 100% integer timestamping and period guard in the ISR with zero floating-point math, protecting hardware FPU registers from interrupt corruption; 12 ms ISR debounce (`DEBOUNCE_US = 12000UL`, ~495 km/h) rejects contact bounce.
 - **Overdue deceleration decay** — dynamic braking decay engages only when a pulse is truly overdue ($dt > 1.5 \times \text{period}$), ensuring the speedometer glides smoothly to 0 km/h when stopping without oscillating or diving mid-rotation during active driving.
 - **Responsive median filter ($W=3$)** — lightweight 3-sample median filter mathematically rejects isolated ignition EMI blips with only a single wheel revolution of lag, tracking brisk throttle roll-on in real time.
