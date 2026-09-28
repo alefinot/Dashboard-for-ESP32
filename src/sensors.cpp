@@ -144,6 +144,9 @@ void simulateRawSensors() {
     hallPulseIntervalUs = intervalUs;
     hallStableIntervalUs = intervalUs;
     hallRolling = true;
+    // Synthetic pulses are trustworthy by construction - the confirmation gate
+    // guards against pin noise, so demo mode unlocks the speed path directly.
+    hallSpeedConfirmed = true;
     hallIntervalHist[hallHistWriteIdx] = intervalUs;
     hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
     if (pulses > 0) hallPulseCount += (unsigned long)pulses;
@@ -390,6 +393,28 @@ volatile bool hallRolling = false;
 // is confirmed one revolution later and credits the anchor edge then.
 volatile bool hallPendingAnchor = false;
 
+// Confirmed-roll gate for the SPEED path (Layer 3b).
+// The standstill purge deliberately wipes every trace of a stopped wheel, and
+// that leaves two defences disarmed exactly when the wheel is stationary:
+// Layer 2 is preconditions on hallRolling (just cleared), and the median window
+// holds a single sample - so one accepted inter-edge gap IS the displayed
+// speed. Two ignition-EMI edges 12 ms..1.5 s apart therefore reported a real
+// reading (100 ms -> 59 km/h on a 1650 mm wheel) on a parked machine.
+// The speed path now stays locked until HALL_CONFIRM_REVS consecutive accepted
+// intervals agree pairwise within 2x - the same physical bound Layer 2 already
+// applies while rolling, so it costs nothing at speed and only delays a genuine
+// roll start by two extra revolutions. Distance credits are untouched: the
+// odometer is guarded by hallPendingAnchor.
+volatile unsigned long hallCandIntervalUs = 0;
+volatile unsigned int hallCandRun = 0;
+volatile bool hallSpeedConfirmed = false;
+
+// Accepted intervals that must agree before the speed path unlocks.
+// Note the effective low-speed floor does not change: with a 1650 mm wheel a
+// 1.5 s standstill timeout already means "no pulses below ~4 km/h", so the
+// three intervals needed here arrive inside ~1 s at 12 km/h and above.
+static constexpr unsigned int HALL_CONFIRM_REVS = 3;
+
 // Standstill timeout (1.5 s, ~4 km/h with 1650 mm tire): no pulse in this
 // duration means the wheel is stopped.
 static constexpr unsigned long STANDSTILL_TIMEOUT_US = 1500000UL;
@@ -486,6 +511,11 @@ void IRAM_ATTR hallSensorISR() {
     // Anchor only - credited when the next edge confirms an actual revolution.
     hallPendingAnchor = true;
     hallRolling = false;
+    // Re-arm the speed lock with the wheel: until a fresh roll is confirmed,
+    // nothing on the pin may move the speedometer.
+    hallCandIntervalUs = 0;
+    hallCandRun = 0;
+    hallSpeedConfirmed = false;
     for (int i = 0; i < HALL_MEDIAN_MAX; i++) {
       hallIntervalHist[i] = 0;
     }
@@ -516,6 +546,39 @@ void IRAM_ATTR hallSensorISR() {
     return;
   }
 
+  // Layer 2b: HALL_PERIOD_GUARD upper bound. The parameter and the WebUI
+  // control have existed since 1.3.2 but nothing read them - this is the half
+  // of the documented "reject an interval >N or <1/N of the last accepted one"
+  // that Layer 2 does not cover (Layer 2 is the 1/2 lower bound). An interval
+  // N times longer than the last one means the wheel slowed N-fold in a single
+  // revolution, which is not a vehicle manoeuvre; a genuine stop lands in the
+  // standstill branch instead. N = 1 disables the check (WebUI label).
+  if (HALL_PERIOD_GUARD > 1 && last != 0 &&
+      (unsigned long long)gap >
+          (unsigned long long)last * (unsigned long long)(unsigned int)HALL_PERIOD_GUARD) {
+    hallDbgGuardReject++;
+    portEXIT_CRITICAL_ISR(&hallMux);
+    return;
+  }
+
+  // Layer 3b: speed-path confirmation run (see hallSpeedConfirmed above).
+  // Pairwise 2x agreement, HALL_CONFIRM_REVS in a row, unlocks the speed.
+  if (!hallSpeedConfirmed) {
+    bool agrees = hallCandIntervalUs != 0 &&
+                  (unsigned long long)gap * 2ULL >= (unsigned long long)hallCandIntervalUs &&
+                  (unsigned long long)hallCandIntervalUs * 2ULL >= (unsigned long long)gap;
+    if (agrees) {
+      hallCandRun++;
+      if (hallCandRun >= HALL_CONFIRM_REVS)
+        hallSpeedConfirmed = true;
+    } else {
+      hallCandRun = 1;
+    }
+    hallCandIntervalUs = gap;
+    if (!hallSpeedConfirmed)
+      hallDbgUnconfirmed++;
+  }
+
   hallPulseIntervalUs = gap;
   hallStableIntervalUs = gap;
   lastHallPulseTimeUs = now;
@@ -537,6 +600,7 @@ void IRAM_ATTR hallSensorISR() {
 inline float getHallSpeed() {
   unsigned long lastTimeUs;
   bool rolling;
+  bool confirmed;
   int n = HALL_MEDIAN_SAMPLES; // window size W (WebUI-tunable); 1 = raw single interval, zero lag
   if (n < 1) n = 1;
   if (n > HALL_MEDIAN_MAX) n = HALL_MEDIAN_MAX;
@@ -547,6 +611,7 @@ inline float getHallSpeed() {
   portENTER_CRITICAL(&hallMux);
   lastTimeUs = lastHallPulseTimeUs;
   rolling = hallRolling;
+  confirmed = hallSpeedConfirmed;
 
   // Read the newest non-zero intervals from the current roll
   int idx = (hallHistWriteIdx == 0 ? HALL_MEDIAN_MAX : hallHistWriteIdx) - 1;
@@ -564,7 +629,7 @@ inline float getHallSpeed() {
   unsigned long dt = now - lastTimeUs;
 
   // Standstill check: if pulses are stale or wheel has not completed a timed rotation
-  if (dt > STANDSTILL_TIMEOUT_US || !rolling || m == 0) {
+  if (dt > STANDSTILL_TIMEOUT_US || !rolling || !confirmed || m == 0) {
     return 0.0f;
   }
 
@@ -1617,10 +1682,12 @@ void gpsTask(void *pvParameters) {
         hs[i] = d;
       }
       logPrintf("HALL: edges=%lu l1=%lu db=%lu l2=%lu guard=%lu purge=%lu "
-                "held=%lu acc=%lu med=%luus hall=%.1f disp=%.1f src=%d\n",
+                "held=%lu acc=%lu lastint=%luus hall=%.1f disp=%.1f src=%d "
+                "conf=%d\n",
                 hs[0], hs[1], hs[2], hs[3], hs[4], hs[5], hs[6], hs[7],
                 (unsigned long)hallStableIntervalUs, getHallSpeed(),
-                currentCachedSpeed, (int)heldSpeedSourceMode);
+                currentCachedSpeed, (int)heldSpeedSourceMode,
+                (int)hallSpeedConfirmed);
     }
 
     // GNSS date/time is only applied while a real position fix is valid AND

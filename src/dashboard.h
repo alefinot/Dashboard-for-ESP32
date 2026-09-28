@@ -444,6 +444,7 @@ extern volatile unsigned long hallPulseIntervalUs;
 extern volatile unsigned long hallStableIntervalUs;
 extern volatile unsigned long hallPulseCount;
 extern volatile bool hallRolling;
+extern volatile bool hallSpeedConfirmed;
 extern volatile int heldSpeedSourceMode;
 
 extern double tripDistanceKm;
