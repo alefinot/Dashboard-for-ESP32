@@ -97,6 +97,33 @@ static volatile unsigned long
     hallIntervalHist[HALL_MEDIAN_MAX] = {0};
 static volatile unsigned int hallHistWriteIdx = 0;
 
+// Hall filter-chain counters (P1 instrumentation). Plain 32-bit volatile
+// increments inside the ISR - no heap, no floats, no locks (the ISR owns the
+// edges). They answer one question with data: at what layer does the parked
+// ignition EMI die, and does anything reach the accepted stage while the wheel
+// is stationary? Read from gpsTask as per-interval deltas.
+volatile unsigned long hallDbgEdges = 0;      // every ISR entry
+volatile unsigned long hallDbgL1Reject = 0;   // pin back HIGH after pulse-width check
+volatile unsigned long hallDbgDebounce = 0;   // gap < DEBOUNCE_US
+volatile unsigned long hallDbgL2Reject = 0;   // anti-collapse baseline reject
+volatile unsigned long hallDbgGuardReject = 0; // HALL_PERIOD_GUARD reject
+volatile unsigned long hallDbgL3Purge = 0;    // standstill branch taken
+volatile unsigned long hallDbgUnconfirmed = 0; // accepted edge held as candidate
+volatile unsigned long hallDbgAccepted = 0;   // edge published to the speed path
+
+static const int HALL_DBG_N = 8;
+
+void hallDbgSnapshot(unsigned long *out) {
+  out[0] = hallDbgEdges;
+  out[1] = hallDbgL1Reject;
+  out[2] = hallDbgDebounce;
+  out[3] = hallDbgL2Reject;
+  out[4] = hallDbgGuardReject;
+  out[5] = hallDbgL3Purge;
+  out[6] = hallDbgUnconfirmed;
+  out[7] = hallDbgAccepted;
+}
+
 // Injects synthetic hall pulses on the sensor task tick: interval is derived
 // from the simulated speed (so getHallSpeed() reports it) and the pulse count
 // accumulates real distance through updateGPSOdometer's hall path.
@@ -120,6 +147,7 @@ void simulateRawSensors() {
     hallIntervalHist[hallHistWriteIdx] = intervalUs;
     hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
     if (pulses > 0) hallPulseCount += (unsigned long)pulses;
+    hallDbgAccepted++;
     portEXIT_CRITICAL(&hallMux);
   }
   lastSimTickMs = now;
@@ -430,12 +458,14 @@ volatile unsigned long g_sensorLastTickMs = 0;
 // Hall sensor (ISR + speed)
 // ----------------------------------------------------------------------------
 void IRAM_ATTR hallSensorISR() {
+  hallDbgEdges++;
   // Layer 1: Pulse-Width Qualification (Glitch Filter)
   // Real magnet passes hold GPIO33 LOW for >140 µs (even at 200 km/h).
   // Spark plug EMI transients ring and collapse back to HIGH within <10 µs.
   // Wait 25 µs: if the pin has already bounced back to HIGH, reject the glitch!
   esp_rom_delay_us(25);
   if ((REG_READ(GPIO_IN1_REG) & (1UL << (HALL_SENSOR_PIN - 32))) != 0) {
+    hallDbgL1Reject++;
     return;
   }
 
@@ -448,6 +478,7 @@ void IRAM_ATTR hallSensorISR() {
   // and completely purge the history ring buffer so no stale cruising speeds
   // poison the speed calculation when moving off from a stop.
   if (gap > STANDSTILL_TIMEOUT_US) {
+    hallDbgL3Purge++;
     portENTER_CRITICAL_ISR(&hallMux);
     lastHallPulseTimeUs = now;
     hallPulseIntervalUs = 0;
@@ -466,6 +497,7 @@ void IRAM_ATTR hallSensorISR() {
   // Fast-edge hardware debounce: reject sub-12ms contact bounce or HF noise
   // (12 ms = 495 km/h on 1650 mm wheel).
   if (gap < DEBOUNCE_US) {
+    hallDbgDebounce++;
     return;
   }
 
@@ -479,6 +511,7 @@ void IRAM_ATTR hallSensorISR() {
   // By keeping lastHallPulseTimeUs and hallStableIntervalUs locked to the verified magnet timing,
   // ignition sparks cannot collapse the guard during deceleration or cruising.
   if (hallRolling && last != 0 && (unsigned long long)gap * 2ULL < (unsigned long long)last) {
+    hallDbgL2Reject++;
     portEXIT_CRITICAL_ISR(&hallMux);
     return;
   }
@@ -495,6 +528,7 @@ void IRAM_ATTR hallSensorISR() {
     hallPulseCount = hallPulseCount + 1;
   }
   hallRolling = true;
+  hallDbgAccepted++;
   hallIntervalHist[hallHistWriteIdx] = gap;
   hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
   portEXIT_CRITICAL_ISR(&hallMux);
@@ -1563,6 +1597,31 @@ void gpsTask(void *pvParameters) {
     }
     updateFilteredSpeed();
     updateGPSOdometer();
+
+    // Hall filter-chain telemetry (P1). 1 Hz for the first 5 minutes after
+    // boot (bench warm-up / parked-EMI test), then one line a minute so the
+    // chain stays observable on a long ride without drowning the other logs.
+    // Deltas per interval + the live speed at each stage show where ignition
+    // noise enters and what the display finally gets.
+    static unsigned long hallDbgLastMs = 0;
+    static unsigned long hallDbgPrev[HALL_DBG_N] = {0};
+    unsigned long hallDbgNowMs = millis();
+    unsigned long hallDbgPeriod = hallDbgNowMs < 300000UL ? 1000UL : 60000UL;
+    if (hallDbgNowMs - hallDbgLastMs >= hallDbgPeriod) {
+      hallDbgLastMs = hallDbgNowMs;
+      unsigned long hs[HALL_DBG_N];
+      hallDbgSnapshot(hs);
+      for (int i = 0; i < HALL_DBG_N; i++) {
+        unsigned long d = hs[i] - hallDbgPrev[i];
+        hallDbgPrev[i] = hs[i];
+        hs[i] = d;
+      }
+      logPrintf("HALL: edges=%lu l1=%lu db=%lu l2=%lu guard=%lu purge=%lu "
+                "held=%lu acc=%lu med=%luus hall=%.1f disp=%.1f src=%d\n",
+                hs[0], hs[1], hs[2], hs[3], hs[4], hs[5], hs[6], hs[7],
+                (unsigned long)hallStableIntervalUs, getHallSpeed(),
+                currentCachedSpeed, (int)heldSpeedSourceMode);
+    }
 
     // GNSS date/time is only applied while a real position fix is valid AND
     // the module clock has been observed ticking in step with real time
