@@ -355,6 +355,12 @@ volatile unsigned long hallPulseIntervalUs = 0;
 volatile unsigned long hallStableIntervalUs = 0;
 volatile unsigned long hallPulseCount = 0;
 volatile bool hallRolling = false;
+// Delayed credit for the standstill anchor edge: the first pulse after a
+// stop is NOT counted until a confirming pulse follows within the standstill
+// window. A parked bike hit by ignition EMI blips never gets a confirm, so
+// phantom revolutions no longer creep onto the odometer; a real roll start
+// is confirmed one revolution later and credits the anchor edge then.
+volatile bool hallPendingAnchor = false;
 
 // Standstill timeout (1.5 s, ~4 km/h with 1650 mm tire): no pulse in this
 // duration means the wheel is stopped.
@@ -446,7 +452,8 @@ void IRAM_ATTR hallSensorISR() {
     lastHallPulseTimeUs = now;
     hallPulseIntervalUs = 0;
     hallStableIntervalUs = 0;
-    hallPulseCount = hallPulseCount + 1;
+    // Anchor only - credited when the next edge confirms an actual revolution.
+    hallPendingAnchor = true;
     hallRolling = false;
     for (int i = 0; i < HALL_MEDIAN_MAX; i++) {
       hallIntervalHist[i] = 0;
@@ -479,7 +486,14 @@ void IRAM_ATTR hallSensorISR() {
   hallPulseIntervalUs = gap;
   hallStableIntervalUs = gap;
   lastHallPulseTimeUs = now;
-  hallPulseCount = hallPulseCount + 1;
+  if (hallPendingAnchor) {
+    // This edge confirms the anchor edge was a real roll (one full
+    // revolution apart): credit both edges now.
+    hallPulseCount = hallPulseCount + 2;
+    hallPendingAnchor = false;
+  } else {
+    hallPulseCount = hallPulseCount + 1;
+  }
   hallRolling = true;
   hallIntervalHist[hallHistWriteIdx] = gap;
   hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
@@ -981,6 +995,15 @@ void updateGPSOdometer() {
   // touched - demo mileage can never corrupt the stored real odometer.
   bool isDemo = ENABLE_DEMO_MODE;
 
+  // Hall-vs-GPS sanity window (60 s, log-only - never auto-corrects): while
+  // Hall is the counting source and GPS is trusted, the GPS distance over
+  // the same intervals is measured alongside. A >5 % gap surfaces in the
+  // log so the cause (wrong WHEEL_CIRCUMFERENCE_MM, tire size/slip, Hall
+  // edges being missed) can be diagnosed by a human.
+  static unsigned long driftStartMs = 0;
+  static double driftHallKm = 0.0;
+  static double driftGpsKm = 0.0;
+
   // Determine whether to accumulate distance from Hall pulses or GPS
   // position. In fusion mode the choice is made on the WHEEL ROLLING STATE,
   // not on whether this single 20 ms tick happened to swallow a pulse: a
@@ -1008,6 +1031,11 @@ void updateGPSOdometer() {
   if (useHallDistance && pulses > 0) {
     double dKm = (double)pulses * WHEEL_DIST_PER_PULSE_KM;
     tripDistanceKm += dKm;
+    if (hallRollingNow && isGpsValid && getFilteredSpeed() >= GPS_START_KMH) {
+      if (driftStartMs == 0)
+        driftStartMs = millis();
+      driftHallKm += dKm;
+    }
     if (isDemo) {
       demoOdoKm += dKm;
     } else {
@@ -1061,6 +1089,29 @@ void updateGPSOdometer() {
                     distanceMeters);
         }
       }
+    }
+  }
+
+  // GPS side of the Hall-vs-GPS sanity window: measure (do not count) the
+  // distance this fix interval would have added, then close the window.
+  if (hallRollingNow && useHallDistance && isGpsValid && fixFresh &&
+      hasLastPos && getFilteredSpeed() >= GPS_START_KMH) {
+    double dM = TinyGPSPlus::distanceBetween(fixLat, fixLon, lastLat, lastLon);
+    if (dM < 500.0)
+      driftGpsKm += dM / 1000.0;
+    if (driftStartMs == 0)
+      driftStartMs = millis();
+    if (millis() - driftStartMs >= 60000) {
+      if (driftHallKm >= 0.3 && driftGpsKm >= 0.3) {
+        double pct = (driftHallKm - driftGpsKm) / driftGpsKm * 100.0;
+        if (pct > 5.0 || pct < -5.0)
+          logPrintf("ODO drift: hall %.2f km vs gps %.2f km (%+.1f%%) - "
+                    "check wheel size / Hall sensor\n",
+                    driftHallKm, driftGpsKm, pct);
+      }
+      driftHallKm = 0.0;
+      driftGpsKm = 0.0;
+      driftStartMs = 0;
     }
   }
 
