@@ -943,15 +943,42 @@ void updateGPSOdometer() {
   // touched - demo mileage can never corrupt the stored real odometer.
   bool isDemo = ENABLE_DEMO_MODE;
 
-  // Determine whether to accumulate distance from Hall pulses or GPS position
+  // Capture the fix ONCE, before anything can consume TinyGPS++'s one-shot
+  // "updated" flag: lat()/lng() clear it as a side effect, so reading it
+  // inside distanceBetween() used to leave nothing for the anchor update
+  // further down (the anchor stayed pinned at the last stop, every fix then
+  // added distance(current -> stale anchor) again, and the 500 m guard
+  // froze the odometer once that stale span exceeded 500 m).
+  bool fixFresh = false;
+  double fixLat = 0.0, fixLon = 0.0;
+  if (gps.location.isUpdated()) {
+    fixLat = gps.location.lat();
+    fixLon = gps.location.lng();
+    fixFresh = true;
+  }
+
+  // Determine whether to accumulate distance from Hall pulses or GPS
+  // position. In fusion mode the choice is made on the WHEEL ROLLING STATE,
+  // not on whether this single 20 ms tick happened to swallow a pulse: a
+  // per-tick (pulses > 0) test let the GPS branch fire on the ~70% of fix
+  // ticks that contain no pulse at speed, adding GPS distance on top of the
+  // Hall distance already counted in the other ticks (~2x double-count).
+  bool hallRollingNow = false;
+  portENTER_CRITICAL(&hallMux);
+  hallRollingNow = hallRolling &&
+                   (micros() - (unsigned long)lastHallPulseTimeUs <
+                        2UL * STANDSTILL_TIMEOUT_US);
+  portEXIT_CRITICAL(&hallMux);
+
   bool useHallDistance = false;
   if (SPEED_SOURCE_MODE == 0) {
     useHallDistance = true; // Hall only: always use wheel pulses
   } else if (SPEED_SOURCE_MODE == 2) {
-    // In fusion mode, Hall pulses are preferred for millimeter accuracy.
-    // If Hall sensor produces pulses, use them. If Hall sensor is inactive (0 pulses)
-    // while moving by GPS, fall back to GPS distance.
-    useHallDistance = (pulses > 0);
+    // In fusion mode, Hall pulses are preferred for millimeter accuracy
+    // while the wheel is rolling. GPS distance is the fallback only while
+    // the Hall sensor is not producing pulses (dead sensor, or before the
+    // roll is recognized).
+    useHallDistance = hallRollingNow;
   }
 
   if (useHallDistance && pulses > 0) {
@@ -963,15 +990,18 @@ void updateGPSOdometer() {
       totalDistanceKm += dKm;
       if (totalDistanceKm - lastSavedOdo >= 1.0) {
         preferences.begin("dashboard", false);
-        preferences.putDouble("odo", totalDistanceKm);
+        bool saved = preferences.putDouble("odo", totalDistanceKm);
         preferences.end();
-        lastSavedOdo = totalDistanceKm;
+        // Only advance the save marker on success: a failed write must be
+        // retried at the next boundary instead of deferring another 1 km.
+        if (saved)
+          lastSavedOdo = totalDistanceKm;
       }
     }
-  } else if (isGpsValid && gps.location.isUpdated()) {
+  } else if (!useHallDistance && isGpsValid && fixFresh) {
     if (getFilteredSpeed() > 0.0f && hasLastPos) {
-      double distanceMeters = TinyGPSPlus::distanceBetween(
-          gps.location.lat(), gps.location.lng(), lastLat, lastLon);
+      double distanceMeters =
+          TinyGPSPlus::distanceBetween(fixLat, fixLon, lastLat, lastLon);
       if (distanceMeters < 500.0) {
         double dKm = (distanceMeters / 1000.0);
         tripDistanceKm += dKm;
@@ -981,18 +1011,35 @@ void updateGPSOdometer() {
           totalDistanceKm += dKm;
           if (totalDistanceKm - lastSavedOdo >= 1.0) {
             preferences.begin("dashboard", false);
-            preferences.putDouble("odo", totalDistanceKm);
+            bool saved = preferences.putDouble("odo", totalDistanceKm);
             preferences.end();
-            lastSavedOdo = totalDistanceKm;
+            if (saved)
+              lastSavedOdo = totalDistanceKm;
           }
+        }
+      } else {
+        // The 500 m guard rejects GPS teleports. With a per-fix anchor a
+        // rejection here means a genuine >500 m jump between two 1 Hz fixes
+        // (tunnel, urban canyon, glitch): that stretch is not counted, so
+        // surface it in the log (rate-limited to at most once a minute).
+        static unsigned long lastGuardLogMs = 0;
+        if (millis() - lastGuardLogMs > 60000) {
+          lastGuardLogMs = millis();
+          logPrintf("ODO: %.0f m fix jump rejected by 500 m guard\n",
+                    distanceMeters);
         }
       }
     }
   }
 
-  if (isGpsValid && gps.location.isUpdated()) {
-    lastLat = gps.location.lat();
-    lastLon = gps.location.lng();
+  // The anchor ALWAYS advances on a fresh valid fix, whether or not its
+  // distance was accumulated (Hall mode covers the distance, the anchor
+  // must still stay current for the GPS fallback). This block used to be
+  // gated on the same isUpdated() flag the distance branch had already
+  // consumed, so it never ran while the odometer was accumulating.
+  if (isGpsValid && fixFresh) {
+    lastLat = fixLat;
+    lastLon = fixLon;
     hasLastPos = true;
   }
 }
