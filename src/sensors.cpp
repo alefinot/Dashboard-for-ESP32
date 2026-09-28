@@ -485,10 +485,16 @@ volatile unsigned long g_sensorLastTickMs = 0;
 void IRAM_ATTR hallSensorISR() {
   hallDbgEdges++;
   // Layer 1: Pulse-Width Qualification (Glitch Filter)
-  // Real magnet passes hold GPIO33 LOW for >140 µs (even at 200 km/h).
-  // Spark plug EMI transients ring and collapse back to HIGH within <10 µs.
-  // Wait 25 µs: if the pin has already bounced back to HIGH, reject the glitch!
-  esp_rom_delay_us(25);
+  // Real magnet passes hold GPIO33 LOW for hundreds of microseconds - one
+  // revolution at 200 km/h is still 29.7 ms long - while spark plug EMI rings
+  // and collapses back to HIGH within <10 µs. Wait HALL_PULSE_MIN_US (WebUI
+  // tunable, default 150 µs): if the pin is HIGH again by then, the glitch is
+  // dropped before any timestamping or interval logic runs. Clamped to
+  // 10..1000 µs so a mistuned value can never stall the ISR.
+  int pulseMinUs = HALL_PULSE_MIN_US;
+  if (pulseMinUs < 10) pulseMinUs = 10;
+  if (pulseMinUs > 1000) pulseMinUs = 1000;
+  esp_rom_delay_us(pulseMinUs);
   if ((REG_READ(GPIO_IN1_REG) & (1UL << (HALL_SENSOR_PIN - 32))) != 0) {
     hallDbgL1Reject++;
     return;

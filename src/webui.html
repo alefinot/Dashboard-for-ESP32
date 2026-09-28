@@ -1145,6 +1145,7 @@ const DEFAULTS = {
     SPEED_SOURCE_HOLD_MS: 500,
     HALL_MEDIAN_SAMPLES: 3,
     HALL_PERIOD_GUARD: 8,
+    HALL_PULSE_MIN_US: 150,
     ACCEL_START_SPEED: 1.0,
     ACCEL_TARGET_SPEED: 50.0,
     ACCEL_MAX_TIME: 9.99,
@@ -1595,6 +1596,7 @@ const configMap = [
             { id: "SPEED_SOURCE_HOLD_MS", label: "Speed Source Hold Time", unit: "ms" },
             { id: "HALL_MEDIAN_SAMPLES", label: "Hall Speed Window (samples, 1 = raw)" },
             { id: "HALL_PERIOD_GUARD", label: "Hall Period Guard (1 = off)" },
+            { id: "HALL_PULSE_MIN_US", label: "Hall Min Pulse Width (10-1000)", unit: "us" },
             { id: "GPS_DEBUG_DEFAULT", label: "Show GPS Debug Overlay" },
         ]
     },

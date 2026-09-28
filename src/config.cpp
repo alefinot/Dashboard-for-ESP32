@@ -64,6 +64,12 @@ int HALL_MEDIAN_SAMPLES = 3;
 // 8x keeps single EMI blips out (a 30 ms blip is ~10x the 297 ms period at 20 km/h);
 // real driving shifts the period <2%/rotation, so 8x never rejects a real pulse.
 int HALL_PERIOD_GUARD = 8;
+// Pulse-width qualification window (Layer 1): after a FALLING edge the ISR
+// waits this long and re-samples the pin. A genuine magnet pass is LOW for
+// hundreds of microseconds (one revolution at 200 km/h is 29.7 ms), while
+// spark-plug EMI rings and collapses back HIGH in <10 us, so 150 us rejects
+// ignition noise with an order of magnitude of physical margin to spare.
+int HALL_PULSE_MIN_US = 150;
 float ACCEL_START_SPEED = 1.0f;
 float ACCEL_TARGET_SPEED = 50.0f;
 float ACCEL_MAX_TIME = 9.99f;
@@ -390,6 +396,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(SPEED_SOURCE_HOLD_MS, "SPD_SRC_HOLD", 500);
   CFG_INT(HALL_MEDIAN_SAMPLES, "HALL_MED_N", 3);
   CFG_INT(HALL_PERIOD_GUARD, "HALL_PRD_GRD", 8);
+  CFG_INT(HALL_PULSE_MIN_US, "HALL_PL_MIN", 150);
   CFG_FLT(ACCEL_START_SPEED, "ACC_STRT", 1.0f);
   CFG_FLT(ACCEL_TARGET_SPEED, "ACC_TGT", 50.0f);
   CFG_FLT(ACCEL_MAX_TIME, "ACC_MAX_T", 9.99f);
@@ -672,6 +679,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "SPEED_SOURCE_HOLD_MS": 500,
   "HALL_MEDIAN_SAMPLES": 3,
   "HALL_PERIOD_GUARD": 8,
+  "HALL_PULSE_MIN_US": 150,
   "ACCEL_START_SPEED": 1,
   "ACCEL_TARGET_SPEED": 50,
   "ACCEL_MAX_TIME": 9.99,

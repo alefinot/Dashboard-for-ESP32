@@ -159,6 +159,7 @@ extern int SPEED_SOURCE_MODE;
 extern int SPEED_SOURCE_HOLD_MS;
 extern int HALL_MEDIAN_SAMPLES;
 extern int HALL_PERIOD_GUARD;
+extern int HALL_PULSE_MIN_US;
 extern float ACCEL_START_SPEED;
 extern float ACCEL_TARGET_SPEED;
 extern float ACCEL_MAX_TIME;
