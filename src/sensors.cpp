@@ -402,6 +402,22 @@ float accelResultTime = 0.0f;
 SensorSnapshot g_sensorData;
 SemaphoreHandle_t g_stateMutex = NULL;
 SemaphoreHandle_t prefsMux = NULL;
+GpsFixSnapshot g_gpsFix;
+SemaphoreHandle_t gpsFixMux = NULL;
+
+bool gpsFixSnapshot(double &lat, double &lon) {
+  bool ok = false;
+  if (gpsFixMux)
+    xSemaphoreTake(gpsFixMux, portMAX_DELAY);
+  if (g_gpsFix.seq != 0) {
+    lat = g_gpsFix.lat;
+    lon = g_gpsFix.lon;
+    ok = true;
+  }
+  if (gpsFixMux)
+    xSemaphoreGive(gpsFixMux);
+  return ok;
+}
 volatile unsigned long g_sensorLastTickMs = 0;
 
 // ----------------------------------------------------------------------------
@@ -941,26 +957,29 @@ void updateGPSOdometer() {
   pulses = hallPulseCount;
   hallPulseCount = 0;
   portEXIT_CRITICAL(&hallMux);
+  // Consume the fix published by gpsTask this tick (seq tracking) instead
+  // of touching TinyGPS++ accessors - the odometer is now the only place
+  // that would, and the snapshot pattern keeps weather/telemetry from
+  // stealing the one-shot "updated" flag.
+  static unsigned long lastOdoFixSeq = 0;
+  bool fixFresh = false;
+  double fixLat = 0.0, fixLon = 0.0;
+  if (gpsFixMux)
+    xSemaphoreTake(gpsFixMux, portMAX_DELAY);
+  if (g_gpsFix.seq != lastOdoFixSeq) {
+    lastOdoFixSeq = g_gpsFix.seq;
+    fixFresh = true;
+    fixLat = g_gpsFix.lat;
+    fixLon = g_gpsFix.lon;
+  }
   bool isGpsValid =
-      (gps.location.isValid() && gps.satellites.value() >= MIN_SATELLITES);
+      (g_gpsFix.valid && gps.satellites.value() >= MIN_SATELLITES);
+  if (gpsFixMux)
+    xSemaphoreGive(gpsFixMux);
   // In demo mode the odometer math still runs, but the simulated distance is
   // accumulated into demoOdoKm and the NVS-backed totalDistanceKm is never
   // touched - demo mileage can never corrupt the stored real odometer.
   bool isDemo = ENABLE_DEMO_MODE;
-
-  // Capture the fix ONCE, before anything can consume TinyGPS++'s one-shot
-  // "updated" flag: lat()/lng() clear it as a side effect, so reading it
-  // inside distanceBetween() used to leave nothing for the anchor update
-  // further down (the anchor stayed pinned at the last stop, every fix then
-  // added distance(current -> stale anchor) again, and the 500 m guard
-  // froze the odometer once that stale span exceeded 500 m).
-  bool fixFresh = false;
-  double fixLat = 0.0, fixLon = 0.0;
-  if (gps.location.isUpdated()) {
-    fixLat = gps.location.lat();
-    fixLon = gps.location.lng();
-    fixFresh = true;
-  }
 
   // Determine whether to accumulate distance from Hall pulses or GPS
   // position. In fusion mode the choice is made on the WHEEL ROLLING STATE,
@@ -1440,6 +1459,22 @@ void gpsTask(void *pvParameters) {
                   (unsigned long)((gpsRxBytes - gpsBytesStart) ? gpsEncUsTotal / (gpsRxBytes - gpsBytesStart) : 0),
                   gpsSlowestByteUs);
     }
+    // Publish this tick's fix to the shared snapshot exactly once, as the
+    // only consumer of the TinyGPS++ location accessors in the firmware.
+    // Everything else (odometer, weather, telemetry, logs) reads g_gpsFix.
+    if (gps.location.isUpdated()) {
+      double pubLat = gps.location.lat();
+      double pubLon = gps.location.lng();
+      bool pubValid = gps.location.isValid();
+      if (gpsFixMux)
+        xSemaphoreTake(gpsFixMux, portMAX_DELAY);
+      g_gpsFix.lat = pubLat;
+      g_gpsFix.lon = pubLon;
+      g_gpsFix.valid = pubValid;
+      g_gpsFix.seq++;
+      if (gpsFixMux)
+        xSemaphoreGive(gpsFixMux);
+    }
     if (gpsWatchdogStart == 0)
       gpsWatchdogStart = millis();
     if (!rawDumpLogged && gpsRawIdx >= 8 && millis() - gpsWatchdogStart > 3000) {
@@ -1469,8 +1504,10 @@ void gpsTask(void *pvParameters) {
         logPrintf("GPS: NMEA flowing (chars=%lu) but no satellites - check "
                   "antenna / sky view\n", gps.charsProcessed());
       } else {
+        double lockLat = 0.0, lockLon = 0.0;
+        gpsFixSnapshot(lockLat, lockLon);
         logPrintf("GPS: locked, %d satellites, %.6f/%.6f\n",
-                  gps.satellites.value(), gps.location.lat(), gps.location.lng());
+                  gps.satellites.value(), lockLat, lockLon);
       }
     }
     updateFilteredSpeed();

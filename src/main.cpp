@@ -151,6 +151,11 @@ void setup() {
     logPrintf("*** FATAL: prefsMux allocation failed ***\n");
     ESP.restart();
   }
+  gpsFixMux = xSemaphoreCreateMutex();
+  if (gpsFixMux == NULL) {
+    logPrintf("*** FATAL: gpsFixMux allocation failed ***\n");
+    ESP.restart();
+  }
   pinMode(CS_DISPLAY, OUTPUT);
   digitalWrite(CS_DISPLAY, HIGH);
   // arduino-esp32 3.x: ledcSetup/ledcAttachPin are gone - ledcAttach merges them
@@ -550,6 +555,8 @@ void loop() {
     const char *speedSrc =
         (snap.speedSourceMode == 1) ? "GPS" :
         (snap.speedSourceMode == 2) ? "G+H" : "HALL";
+    double valLat = 0.0, valLon = 0.0;
+    gpsFixSnapshot(valLat, valLon);
     float gpsSpeed = gps.speed.isValid() ? gps.speed.kmph() : 0.0f;
     float hdop = gps.hdop.isValid() ? gps.hdop.hdop() : 0.0f;
     float altitude = gps.altitude.isValid() ? gps.altitude.meters() : 0.0f;
@@ -567,7 +574,7 @@ void loop() {
               snap.currentSpeed, speedSrc, snap.batteryVoltage,
               snap.engineTemperature, snap.fuelLiters, snap.fuelPercentage,
               snap.satellites, hdop, altitude,
-              gps.location.lat(), gps.location.lng(), gpsSpeed,
+              valLat, valLon, gpsSpeed,
               snap.totalDistanceKm, tripDistanceKm,
               snap.averageSpeed, snap.averageKml, snap.instantKml,
               snap.accelResultTime);

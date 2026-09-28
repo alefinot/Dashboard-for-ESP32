@@ -361,6 +361,25 @@ extern Preferences preferences;
 // loopTask saves on sleep/reboot. Without this, concurrent begin/put/end
 // races can silently lose an NVS write.
 extern SemaphoreHandle_t prefsMux;
+
+// Latest GPS fix published by gpsTask after each NMEA commit. TinyGPS++
+// location accessors are single-consumer (lat()/lng() clear the one-shot
+// "updated" flag that isUpdated() reports) and their doubles must not be
+// read cross-task: the weather fetch used to steal the odometer's pending
+// fix, and unsynchronized 64-bit reads can tear mid-write. Every consumer
+// outside gpsTask must use gpsFixSnapshot() instead of gps.location.*().
+struct GpsFixSnapshot {
+  double lat = 0.0;
+  double lon = 0.0;
+  unsigned long seq = 0; // incremented once per published fix
+  bool valid = false;    // location validity at publish time
+};
+extern GpsFixSnapshot g_gpsFix;
+extern SemaphoreHandle_t gpsFixMux;
+
+// Thread-safe copy of the latest published fix. Returns false (leaving the
+// arguments untouched) while no fix has been published yet.
+bool gpsFixSnapshot(double &lat, double &lon);
 extern WebServer server;
 
 extern bool forceFullRedraw;

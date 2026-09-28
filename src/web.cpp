@@ -133,13 +133,14 @@ void updateWeather() {
   }
   HTTPClient http;
   
+  // Read the GPS position from the published snapshot, NOT from
+  // gps.location.lat()/lng(): this task runs on a different core than
+  // gpsTask, and consuming the one-shot TinyGPS++ "updated" flag here
+  // silently robs the odometer of a fix (and a 64-bit cross-task read can
+  // tear mid-write).
   double lat = WEATHER_LAT;
   double lon = WEATHER_LON;
-  bool gpsFix = gps.location.isValid();
-  if (gpsFix) {
-    lat = gps.location.lat();
-    lon = gps.location.lng();
-  }
+  bool gpsFix = gpsFixSnapshot(lat, lon);
 
   // City name follows the coordinates: only reverse-geocode a live GPS fix,
   // otherwise fall back to the saved WEATHER_CITY derived from WEATHER_LAT/LON.
