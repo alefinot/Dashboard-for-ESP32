@@ -418,7 +418,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
 - `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull (checks once per boot while enabled).
 - `OTA_PULL_URL` (default=""): HTTPS URL of the target firmware binary.
-- `OTA_CURRENT_VERSION` (default="1.3.6"): Version string compared against the cloud manifest.
+- `OTA_CURRENT_VERSION` (default="1.3.8"): Version string compared against the cloud manifest.
 
 #### Ambient Light (Auto-Brightness)
 - `LIGHT_SENSOR_DARK_VAL`: Dark-reference ambient light value (calibrated via `/api/ambient/cal-dark`).
@@ -539,6 +539,14 @@ In Demo Mode:
 ---
 
 ## Changelog
+
+### V1.3.8 — Odometer accuracy: fusion double-count fix, GPS anchor fix, persistence and sensor hardening
+- **Fusion double-count fixed** — in Sensor Fusion mode the distance source is chosen on the **wheel rolling state**, not on whether one 20 ms tick happened to catch a Hall pulse. Previously most 1 Hz GPS-fix ticks contained no pulse and ran the GPS distance branch *on top of* the Hall distance already counted in the other ticks, so the odometer grew up to ~2× at speed.
+- **Stale GPS anchor fixed (the stop → big-jump symptom)** — the GPS distance branch consumed TinyGPS++'s one-shot `updated` flag before the anchor update could run, so while accumulating the anchor stayed pinned at the last stop: every fix re-added `distance(current → stale anchor)` (growing bursts) until the span passed the 500 m guard and the odometer froze mid-ride, releasing only with a jump after a stop. Fixes are now captured once per fix and the anchor advances on every fresh valid fix.
+- **Odometer persistence hardened** — all writes to the shared `preferences` object (gpsTask 1 km saves, WebUI `POST /api/odo`, sleep/reboot save) are serialized by a dedicated `prefsMux` mutex; the save marker (`lastSavedOdo`) only advances when the NVS write actually succeeds.
+- **GPS fix snapshot** — `gpsTask` publishes every fix once to a mutex-guarded snapshot (`g_gpsFix`); the odometer, weather fetch and debug telemetry all read that copy. Cross-task reads can no longer steal the odometer's pending fix (weather fetch used to) or tear 64-bit coordinates mid-write.
+- **Standstill phantom-pulse guard** — the first Hall edge after a stop is credited only when a confirming edge arrives within the standstill window (one real revolution later). Parked ignition-EMI blips no longer creep phantom kilometers onto the odometer; real roll starts count exactly as before.
+- **New diagnostics (log-only, nothing is auto-corrected)** — `ODO: <n> m fix jump rejected by 500 m guard` (rate-limited to 1/min) surfaces uncounted GPS teleport stretches, and `ODO drift: hall X km vs gps Y km (±N %)` warns when Hall and GPS disagree by more than 5 % over any 60 s window (wrong wheel circumference, tire slip or missed Hall edges).
 
 ### V1.3.7 — Hall 5-layer defense pipeline, anti-collapse baseline, slew-rate limiter, pure integer ISR, sensor fusion overhaul
 - **Layer 1: ISR pulse-width qualification** — on `FALLING` interrupt, delays 25 µs and directly samples the GPIO33 input register; spark ignition EMI ringing (<10 µs) is dropped immediately before any timestamping or interval logic runs, while genuine wheel magnet pulses (>140 µs) pass through cleanly.
