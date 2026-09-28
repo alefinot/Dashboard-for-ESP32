@@ -1063,6 +1063,34 @@ void processFuelSensor() {
 // ----------------------------------------------------------------------------
 // Odometer (Hall pulses + GPS distance)
 // ----------------------------------------------------------------------------
+// Persist the odometer with a floor between attempts. The save marker
+// (lastSavedOdo) advances only when the write succeeds, so a failing write
+// leaves the ">= 1 km since last save" condition true forever - without a
+// floor that is a begin()/putDouble()/end() triple on every 20 ms odometer
+// tick. Flash writes suspend flash-resident code on BOTH cores, so a stuck
+// write stalls the whole dashboard and looks like a jerky display. The 30 s
+// floor is far below the 1 km boundary cadence, so normal wear discipline
+// (one write per full km) is unchanged.
+static void saveOdometerNvs() {
+  static unsigned long lastAttemptMs = 0;
+  unsigned long nowMs = millis();
+  if (lastAttemptMs != 0 && nowMs - lastAttemptMs < 30000UL)
+    return;
+  lastAttemptMs = nowMs;
+  if (prefsMux)
+    xSemaphoreTake(prefsMux, portMAX_DELAY);
+  preferences.begin("dashboard", false);
+  bool saved = preferences.putDouble("odo", totalDistanceKm);
+  preferences.end();
+  if (prefsMux)
+    xSemaphoreGive(prefsMux);
+  if (saved)
+    lastSavedOdo = totalDistanceKm;
+  else
+    logPrintf("ODO: NVS save failed - %.2f km not persisted, retrying in 30 s\n",
+              totalDistanceKm);
+}
+
 void updateGPSOdometer() {
   // Demo mode never sleeps on the power-sense pin (no real power module).
   if (ENABLE_POWER_SENSE && !ENABLE_DEMO_MODE &&
@@ -1145,19 +1173,8 @@ void updateGPSOdometer() {
       demoOdoKm += dKm;
     } else {
       totalDistanceKm += dKm;
-      if (totalDistanceKm - lastSavedOdo >= 1.0) {
-        if (prefsMux)
-          xSemaphoreTake(prefsMux, portMAX_DELAY);
-        preferences.begin("dashboard", false);
-        bool saved = preferences.putDouble("odo", totalDistanceKm);
-        preferences.end();
-        if (prefsMux)
-          xSemaphoreGive(prefsMux);
-        // Only advance the save marker on success: a failed write must be
-        // retried at the next boundary instead of deferring another 1 km.
-        if (saved)
-          lastSavedOdo = totalDistanceKm;
-      }
+      if (totalDistanceKm - lastSavedOdo >= 1.0)
+        saveOdometerNvs();
     }
   } else if (!useHallDistance && isGpsValid && fixFresh) {
     if (getFilteredSpeed() > 0.0f && hasLastPos) {
@@ -1170,17 +1187,8 @@ void updateGPSOdometer() {
           demoOdoKm += dKm;
         } else {
           totalDistanceKm += dKm;
-          if (totalDistanceKm - lastSavedOdo >= 1.0) {
-            if (prefsMux)
-              xSemaphoreTake(prefsMux, portMAX_DELAY);
-            preferences.begin("dashboard", false);
-            bool saved = preferences.putDouble("odo", totalDistanceKm);
-            preferences.end();
-            if (prefsMux)
-              xSemaphoreGive(prefsMux);
-            if (saved)
-              lastSavedOdo = totalDistanceKm;
-          }
+          if (totalDistanceKm - lastSavedOdo >= 1.0)
+            saveOdometerNvs();
         }
       } else {
         // The 500 m guard rejects GPS teleports. With a per-fix anchor a
