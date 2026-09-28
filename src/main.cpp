@@ -146,6 +146,11 @@ void setup() {
     logPrintf("*** FATAL: g_stateMutex allocation failed ***\n");
     ESP.restart();
   }
+  prefsMux = xSemaphoreCreateMutex();
+  if (prefsMux == NULL) {
+    logPrintf("*** FATAL: prefsMux allocation failed ***\n");
+    ESP.restart();
+  }
   pinMode(CS_DISPLAY, OUTPUT);
   digitalWrite(CS_DISPLAY, HIGH);
   // arduino-esp32 3.x: ledcSetup/ledcAttachPin are gone - ledcAttach merges them
@@ -220,9 +225,14 @@ void setup() {
 
   updateSplashProgress(40);
 
+  if (prefsMux)
+    xSemaphoreTake(prefsMux, portMAX_DELAY);
   preferences.begin("dashboard", false);
   totalDistanceKm = preferences.getDouble("odo", 0.0);
   lastSavedOdo = totalDistanceKm;
+  preferences.end();
+  if (prefsMux)
+    xSemaphoreGive(prefsMux);
 
   updateSplashProgress(60);
   for (int i = 0; i < 10; i++) {

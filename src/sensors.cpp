@@ -385,9 +385,13 @@ void setOdometerKm(double km) {
   totalDistanceKm = km;
   lastSavedOdo = km;
   g_sensorData.totalDistanceKm = km;
+  if (prefsMux)
+    xSemaphoreTake(prefsMux, portMAX_DELAY);
   preferences.begin("dashboard", false);
   preferences.putDouble("odo", km);
   preferences.end();
+  if (prefsMux)
+    xSemaphoreGive(prefsMux);
   logPrintf("Odometer set to %.1f km\n", km);
 }
 
@@ -397,6 +401,7 @@ float accelResultTime = 0.0f;
 
 SensorSnapshot g_sensorData;
 SemaphoreHandle_t g_stateMutex = NULL;
+SemaphoreHandle_t prefsMux = NULL;
 volatile unsigned long g_sensorLastTickMs = 0;
 
 // ----------------------------------------------------------------------------
@@ -989,9 +994,13 @@ void updateGPSOdometer() {
     } else {
       totalDistanceKm += dKm;
       if (totalDistanceKm - lastSavedOdo >= 1.0) {
+        if (prefsMux)
+          xSemaphoreTake(prefsMux, portMAX_DELAY);
         preferences.begin("dashboard", false);
         bool saved = preferences.putDouble("odo", totalDistanceKm);
         preferences.end();
+        if (prefsMux)
+          xSemaphoreGive(prefsMux);
         // Only advance the save marker on success: a failed write must be
         // retried at the next boundary instead of deferring another 1 km.
         if (saved)
@@ -1010,9 +1019,13 @@ void updateGPSOdometer() {
         } else {
           totalDistanceKm += dKm;
           if (totalDistanceKm - lastSavedOdo >= 1.0) {
+            if (prefsMux)
+              xSemaphoreTake(prefsMux, portMAX_DELAY);
             preferences.begin("dashboard", false);
             bool saved = preferences.putDouble("odo", totalDistanceKm);
             preferences.end();
+            if (prefsMux)
+              xSemaphoreGive(prefsMux);
             if (saved)
               lastSavedOdo = totalDistanceKm;
           }

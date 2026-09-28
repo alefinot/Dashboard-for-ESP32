@@ -356,6 +356,11 @@ void logPrintf(const char *fmt, ...);
 // Shared state
 // ----------------------------------------------------------------------------
 extern Preferences preferences;
+// Guards the shared `preferences` object (single internal NVS handle):
+// gpsTask writes the odometer, webServerTask handles POST /api/odo,
+// loopTask saves on sleep/reboot. Without this, concurrent begin/put/end
+// races can silently lose an NVS write.
+extern SemaphoreHandle_t prefsMux;
 extern WebServer server;
 
 extern bool forceFullRedraw;

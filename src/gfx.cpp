@@ -592,9 +592,13 @@ void updateSplashProgress(int targetProgress) {
 }
 
 void showGoodbyeScreen(bool isSleep) {
+  if (prefsMux)
+    xSemaphoreTake(prefsMux, portMAX_DELAY);
   preferences.begin("dashboard", false);
   preferences.putDouble("odo", totalDistanceKm);
   preferences.end();
+  if (prefsMux)
+    xSemaphoreGive(prefsMux);
 
   int fadeTarget = currentBrightnessTarget;
   logPrintf("goodbye fade-out: fadeTarget=%d\n", fadeTarget);
