@@ -221,40 +221,18 @@ static void demoGpsSentence() {
 }
 
 // ----------------------------------------------------------------------------
-// BZGNSS P25 Pro (u-blox M10) UBX-only operation
-// The module streams UBX NAV-PVT frames (0x01 0x07) at its configured rate.
-// We parse those directly and synthesize NMEA for TinyGPSPlus - no module
-// configuration is required or attempted, so an unresponsive RX line or a
-// UBX-only input protocol cannot break anything.
+// BZGNSS P25 Pro (u-blox M10) - receive-only operation
+// The module arrives preconfigured and streams UBX NAV-PVT frames (0x01 0x07)
+// at its own rate. This firmware only reads: there is no code path that writes
+// to gpsSerial, so the ESP never sends a UBX command (no CFG-RST, no CFG-CFG,
+// no rate or protocol reconfiguration). Reconfiguring a module is a u-center2
+// job. The baud sweep below is passive - it reopens the ESP's own UART at
+// candidate rates and listens; it never transmits.
 // ----------------------------------------------------------------------------
-// UBX frame (UBX-13003221 s32.2): 0xB5 0x62, CLASS, ID, LEN_L, LEN_H, PAYLOAD,
-// CK_A, CK_B - LEN is 16-bit little-endian and counts the payload only. The
-// Fletcher-8 checksum (s32.4) runs over CLASS, ID, LEN_L, LEN_H and PAYLOAD;
-// the preamble is excluded. Writing a single length byte made the module read
-// LEN = (payload[0] << 8) | len and reject every frame (issue #11), so the
-// revive path below had never worked.
-static void ubxSend(const uint8_t *payload, uint8_t cls, uint8_t id, uint16_t len) {
-  uint8_t lenL = (uint8_t)(len & 0xFF), lenH = (uint8_t)((len >> 8) & 0xFF);
-  uint8_t ckA = 0, ckB = 0;
-  // Same accumulation order as the bytes on the wire.
-  ckA += cls; ckB += ckA;
-  ckA += id;  ckB += ckA;
-  ckA += lenL; ckB += ckA;
-  ckA += lenH; ckB += ckA;
-  for (uint16_t i = 0; i < len; i++) {
-    ckA += payload[i];
-    ckB += ckA;
-  }
-  gpsSerial.write(0xB5);
-  gpsSerial.write(0x62);
-  gpsSerial.write(cls);
-  gpsSerial.write(id);
-  gpsSerial.write(lenL);
-  gpsSerial.write(lenH);
-  gpsSerial.write(payload, len);
-  gpsSerial.write(ckA);
-  gpsSerial.write(ckB);
-}
+// UBX frame layout, for the receive parser (UBX-13003221 s32.2): 0xB5 0x62,
+// CLASS, ID, LEN_L, LEN_H, PAYLOAD, CK_A, CK_B - LEN is 16-bit little-endian
+// and counts the payload only, and the Fletcher-8 checksum (s32.4) covers
+// CLASS, ID, LEN_L, LEN_H and PAYLOAD with the preamble excluded.
 
 // Scans the RX line for a sync pattern at the current baud. Returns true and
 // sets *isUbx when NMEA ('$G..'/'$P..') or UBX (0xB5 0x62) traffic is seen.
@@ -321,30 +299,15 @@ void configureGNSS() {
   uint32_t detectedBaud = gpsSweepBaud(ubxSeen);
 
   if (detectedBaud == 0) {
-    // 1b. Nothing received. Try to revive a module whose UART output was
-    //     disabled by a previous bad config (CFG-CFG clear + soft reset),
-    //     then sweep again.
-    logPrintf("GNSS: no traffic - sending factory reset (CFG-CFG clear + "
-              "soft reset) at 115200...\n");
-    gpsSerial.begin(115200, SERIAL_8N1, GNSS_UART2_RX_PIN, GNSS_UART2_TX_PIN);
-    uint8_t clr[13] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02};
-    ubxSend(clr, 0x06, 0x09, sizeof(clr)); // CFG-CFG: clear all stored config
-    uint8_t rst[4] = {0x00, 0x00, 0x01, 0x00};
-    ubxSend(rst, 0x06, 0x04, sizeof(rst)); // CFG-RST: controlled software reset
-    delay(2500); // module reboots with factory defaults
-    while (gpsSerial.available()) gpsSerial.read();
-    detectedBaud = gpsSweepBaud(ubxSeen);
-    if (detectedBaud == 0) {
-      gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GNSS_UART2_RX_PIN, GNSS_UART2_TX_PIN);
-      logPrintf("GNSS: still no traffic after factory reset - using saved "
-                "GPS_BAUD=%d. Verify the module itself with u-center2 and "
-                "check wiring: module TX->ESP GPIO16, module RX->ESP GPIO17, "
-                "shared GND, VCC 3.3-5V\n", GPS_BAUD);
-      return;
-    }
-    logPrintf("GNSS: module revived by factory reset @ %lu baud\n",
-              detectedBaud);
+    // Nothing heard on the RX line. This firmware never configures or resets
+    // the module, so there is no revival to attempt: leave the UART at the
+    // saved baud rate and say what to check.
+    gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GNSS_UART2_RX_PIN, GNSS_UART2_TX_PIN);
+    logPrintf("GNSS: no traffic on RX - check the module wiring (module TX -> "
+              "ESP GPIO%d, shared GND, VCC 3.3-5V) and the saved GPS_BAUD=%d. "
+              "The module itself is configured with u-center2, not by this "
+              "firmware.\n", GNSS_UART2_RX_PIN, GPS_BAUD);
+    return;
   }
 
   if (detectedBaud != (uint32_t)GPS_BAUD) {

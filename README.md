@@ -104,7 +104,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **Microcontroller** | ESP32-WROOM-32 | Xtensa 32-bit LX6 | Dual-core 240 MHz, 520 KB SRAM, 4 MB SPI Flash, RTC IO |
 | **Display Panel** | ILI9488 TFT LCD (4.0") | SPI (16-bit RGB565) | 480×320 pixels, 60 MHz SPI bus speed, hardware CS/DC/RST |
 | **Display Backlight** | LED Backlight Channel | LEDC PWM (Channel 0) | 1 kHz hardware PWM, 256 brightness levels, logarithmic fading |
-| **GNSS Module** | BZGNSS P25 Pro (u-blox M10) | UART2 (RX=25, TX=26) | 115200 baud (configurable), NMEA 0183 (forced at boot via UBX), 10 Hz update rate, multi-constellation (GPS/GLONASS/BDS/Galileo), UTC epoch time synchronization |
+| **GNSS Module** | BZGNSS P25 Pro (u-blox M10) | UART2 (RX=25, TX=26) | 115200 baud (configurable), UBX NAV-PVT / NMEA 0183 stream (module is preconfigured — the firmware is receive-only), 10 Hz update rate, multi-constellation (GPS/GLONASS/BDS/Galileo), UTC epoch time synchronization |
 | **Wheel Speed Sensor** | Hall Effect Interrupt | GPIO33 (Input Pullup) | Hardware Falling-Edge ISR, microsecond interval timing |
 | **Fuel Level Sensor** | Resistive Sender (capacitive touch removed in v1.3.6) | GPIO32 (ADC1_CH4) | Analog 0–3.3V, 20-point calibration table, EMA smoothing filter |
 | **Engine Temp Sensor** | NTC Thermistor (10k/100k) | GPIO36 (ADC1_CH0) | Analog 0–3.3V, Steinhart-Hart equation, voltage divider balance |
@@ -400,7 +400,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `NTC_R25` (default=10000.0): Thermistor resistance at 25 °C (R25) in ohms.
 - `NTC_BETA` (default=3950.0): Thermistor Beta coefficient.
 - `NTC_TEMP_OFFSET` (default=0.0): Fixed temperature offset (°C) added to the Steinhart result.
-- `GPS_BAUD` (default=115200): UART baud rate for the GNSS module. On boot the module is forced into NMEA output at this baud with a 10 Hz update rate via u-blox UBX commands (compatible with BZGNSS P25 Pro / M10 receivers).
+- `GPS_BAUD` (default=115200): UART baud rate for the GNSS module. On boot the ESP listens passively across the common baud rates and stores the first rate at which the module's own traffic is seen. The module is **never** configured or reset by the firmware — no UBX command is ever transmitted; use u-center2 to change the module itself.
 - `MIN_SATELLITES` (default=5): Minimum GPS satellite lock requirement.
 - `OPTIMAL_SATELLITES` (default=8): Satellite count threshold for full GPS speed reliance.
 - `MAX_SPEED_DELTA_KMH` (default=5.0): Maximum allowable difference between GPS and Hall speed before falling back.
