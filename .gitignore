@@ -15,3 +15,6 @@ Implementation plans/
 # graphify knowledge-graph tooling and outputs (local only)
 graphify-out/
 graphify-watch.bat
+
+# OTA release signing private key - NEVER commit (scripts/ota_sign.py)
+keys/

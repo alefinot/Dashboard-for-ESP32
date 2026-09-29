@@ -1,8 +1,10 @@
 #include "dashboard.h"
 #include "bootinfo.h"
+#include "otasign.h"
 #include <ArduinoOTA.h>
 #include <Update.h>
 #include <ESPmDNS.h>
+#include <esp_app_format.h>
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
 #include <esp_sntp.h>
@@ -320,6 +322,121 @@ static unsigned long lastOtaCheckMs = 0;
 const unsigned long OTA_RECHECK_MIN_MS = 60000;
 }
 
+namespace {
+// One flash-write session at a time. The pull task and the Web UI upload
+// handler both drive the singleton Update object; two sessions open at once
+// write interleaved into the same OTA slot and produce an image that will not
+// boot. The 15-minute pull-overrun reset used to clear the "busy" latch while
+// the first session was still open, which is exactly how that happened
+// (issue #24).
+volatile bool otaFlashSessionOpen = false;
+// Set when a pull task was reset while it still held a flash session open. The
+// slot state is unknown at that point, so no further OTA is attempted until the
+// unit reboots.
+volatile bool otaSessionPoisoned = false;
+}
+
+// Update.begin / abort wrapped in the interlock, so the two OTA entry points can
+// never overlap and no caller can activate an image from a session it did not
+// open.
+static bool otaFlashOpen(size_t size) {
+  if (otaSessionPoisoned) {
+    logPrintf("OTA: no flash session - a previous OTA was reset mid-write (reboot required)\n");
+    return false;
+  }
+  if (otaFlashSessionOpen) {
+    logPrintf("OTA: Update.begin refused - a flash session is already open\n");
+    return false;
+  }
+  if (!Update.begin(size)) return false;
+  otaFlashSessionOpen = true;
+  return true;
+}
+
+static void otaFlashClose() { otaFlashSessionOpen = false; }
+
+static void otaFlashAbort() {
+  if (!otaFlashSessionOpen) return;  // already closed / never opened
+  otaFlashSessionOpen = false;
+  Update.abort();
+}
+
+// TLS: check the server certificate against the CA bundle compiled into the
+// core. setInsecure() accepted any certificate, which made an "HTTPS" pull
+// trivially interceptable by anyone on the network (SECURITY plan 2).
+static WiFiClient *newHttpClient(const char *url) {
+  if (strncmp(url, "https://", 8) == 0) {
+    WiFiClientSecure *ssl = new WiFiClientSecure();
+    ssl->useBuiltinCACertBundle();
+    return ssl;
+  }
+  return new WiFiClient();
+}
+
+// mbedTLS keeps a human-readable reason for a failed handshake; without it a
+// rejected certificate looks exactly like a dead server.
+static void logTlsError(const char *url, WiFiClient *client) {
+  if (strncmp(url, "https://", 8) != 0 || !client) return;
+  char err[128] = "";
+  static_cast<WiFiClientSecure *>(client)->lastError(err, sizeof(err));
+  logPrintf("OTA Pull: TLS: %s\n", err);
+}
+
+// Fetch the detached signature for an image: <firmwareUrl>.sig, kept as a
+// sibling release asset (firmware.bin -> firmware.bin.sig). Returns the number
+// of bytes read, or 0 if the asset is missing or unreadable - and 0 always
+// means "refuse the update", never "no signature needed".
+static size_t fetchSignatureAsset(const char *firmwareUrl, uint8_t *buf,
+                                  size_t cap) {
+  char sigUrl[300];
+  if (snprintf(sigUrl, sizeof(sigUrl), "%s.sig", firmwareUrl) >=
+      (int)sizeof(sigUrl)) {
+    logPrintf("OTA Pull: signature URL too long\n");
+    return 0;
+  }
+  for (int attempt = 0; attempt < 2; attempt++) {
+    WiFiClient *client = newHttpClient(sigUrl);
+    size_t got = 0;
+    {
+      HTTPClient http;
+      if (!http.begin(*client, sigUrl)) {
+        logPrintf("OTA Pull: signature begin failed\n");
+      } else {
+        http.setTimeout(10000);
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+        http.addHeader("Accept-Encoding", "identity");
+        int httpCode = http.GET();
+        long len = http.getSize();
+        if (httpCode != HTTP_CODE_OK) {
+          logPrintf("OTA Pull: signature fetch HTTP %d (%s)\n", httpCode,
+                    HTTPClient::errorToString(httpCode).c_str());
+          logTlsError(sigUrl, client);
+        } else if (len > (long)cap) {
+          logPrintf("OTA Pull: signature asset too big (%ld bytes)\n", len);
+        } else {
+          // Read exactly what the server announced: Stream::readBytes would
+          // otherwise sit out its timeout waiting for bytes that never come.
+          size_t want = (len >= 0 && len <= (long)cap) ? (size_t)len : cap;
+          got = http.getStream().readBytes((char *)buf, (int)want);
+          if (len >= 0 && got != want) {
+            logPrintf("OTA Pull: signature short read (%zu of %zu bytes)\n",
+                      got, want);
+            got = 0;
+          }
+        }
+        http.end();
+      }
+    }
+    delete client;
+    if (got > 0 && got <= cap) {
+      logPrintf("OTA Pull: signature asset %zu bytes\n", got);
+      return got;
+    }
+    if (attempt == 0) vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+  return 0;
+}
+
 void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
   if (!OTA_PULL_ENABLED && !manual) return;
   if (WiFi.status() != WL_CONNECTED) {
@@ -392,15 +509,7 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
     bool beginFailed = false;
 
     for (int attempt = 0; attempt < 3; attempt++) {
-      WiFiClient *client = nullptr;
-
-      if (strncmp(OTA_PULL_URL, "https://", 8) == 0) {
-        WiFiClientSecure *ssl = new WiFiClientSecure();
-        ssl->setInsecure();
-        client = ssl;
-      } else {
-        client = new WiFiClient();
-      }
+      WiFiClient *client = newHttpClient(OTA_PULL_URL);
 
       {
         HTTPClient http;
@@ -421,6 +530,7 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
           } else {
             logPrintf("OTA Pull: attempt %d/%d -> HTTP %d (%s)\n", attempt + 1, 3,
                       httpCode, HTTPClient::errorToString(httpCode).c_str());
+            logTlsError(OTA_PULL_URL, client);
           }
           http.end();
         }
@@ -524,9 +634,53 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
   otaUpdateSuccess = false;
   pendingOtaScreen = true;
 
-  // Each attempt re-establishes a fresh TLS connection and resumes the flash
-  // write from the last byte via an HTTP Range request. A single stalled link
-  // no longer aborts the whole 1.4MB firmware pull.
+  // --- signature gate (SECURITY plan 2) -----------------------------------
+  // The image is only activated when a detached signature (<url>.sig) verifies
+  // against the public key compiled into this unit (include/ota_pubkey.h, see
+  // scripts/ota_sign.py). A missing signature is a refusal, not a pass. The
+  // hash has to cover every byte exactly once, so the byte-range resume below
+  // is switched off when signing is enforced.
+#ifdef OTA_ALLOW_UNSIGNED
+  const bool requireSig = false;
+  logPrintf("OTA Pull: WARNING - signature check OFF (OTA_ALLOW_UNSIGNED bench build)\n");
+#else
+  const bool requireSig = true;
+#endif
+  static uint8_t sigBuf[OTA_SIG_MAX_LEN];
+  size_t sigLen = 0;
+  if (otaSessionPoisoned) {
+    logPrintf("OTA Pull: a previous OTA was reset mid-write - no further OTA until reboot\n");
+    setOtaPullStatus("error: OTA locked until reboot");
+    otaUpdateInProgress = false;
+    pendingOtaScreen = false;
+    forceFullRedraw = true;
+    return;
+  }
+  if (requireSig) {
+    if (!otaSigningAvailable()) {
+      logPrintf("OTA Pull: no signing key compiled in - update refused\n");
+      setOtaPullStatus("error: no signing key compiled in");
+      otaUpdateInProgress = false;
+      pendingOtaScreen = false;
+      forceFullRedraw = true;
+      return;
+    }
+    sigLen = fetchSignatureAsset(firmwareUrl, sigBuf, sizeof(sigBuf));
+    if (sigLen == 0) {
+      logPrintf("OTA Pull: no signature asset for %s - update refused\n",
+                firmwareUrl);
+      setOtaPullStatus("error: signature not found - update refused");
+      otaUpdateInProgress = false;
+      pendingOtaScreen = false;
+      forceFullRedraw = true;
+      return;
+    }
+  }
+
+  // Each attempt re-establishes a fresh TLS connection. When the link stalls
+  // mid-image the pull resumes from the last byte via an HTTP Range request -
+  // unless a signature is required, where a resumed range would skip bytes the
+  // hash has to cover, so the attempt restarts the whole image instead.
   const unsigned long READ_STALL_MS = 10000; // no data this long -> reconnect
   const int MAX_OTA_ATTEMPTS = 5;
 
@@ -542,7 +696,7 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
   // being reaped), and a single transient failure must not kill the pull.
   auto openFlash = [](size_t sz) -> bool {
     for (int b = 0; b < 3; b++) {
-      if (Update.begin(sz)) return true;
+      if (otaFlashOpen(sz)) return true;
       logPrintf("OTA Pull: Update.begin failed (try %d/3) heap=%lu maxAlloc=%lu\n",
                 b + 1, (unsigned long)ESP.getFreeHeap(),
                 (unsigned long)ESP.getMaxAllocHeap());
@@ -559,14 +713,7 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
     // socket still closing out (and OOMing the handshake under fragmentation).
     if (attempt > 0) vTaskDelay(pdMS_TO_TICKS(500L + (1UL << attempt) * 1000L));
 
-    WiFiClient *client = nullptr;
-    if (strncmp(firmwareUrl, "https://", 8) == 0) {
-      WiFiClientSecure *ssl = new WiFiClientSecure();
-      ssl->setInsecure();
-      client = ssl;
-    } else {
-      client = new WiFiClient();
-    }
+    WiFiClient *client = newHttpClient(firmwareUrl);
 
     {
       HTTPClient http;
@@ -631,6 +778,7 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
           delete client;
           break;
         }
+        otaImageHashBegin();
         updateOpen = true;
         logPrintf("OTA Pull: flash open, %lu bytes, heap=%lu maxAlloc=%lu\n",
                   (unsigned long)totalSize, (unsigned long)ESP.getFreeHeap(),
@@ -638,7 +786,7 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
       } else if (httpCode == HTTP_CODE_OK) {
         // Server ignored the Range header and re-sent the whole body. The only
         // safe response is to restart the flash write and stream from zero.
-        Update.abort();
+        otaFlashAbort();
         if (!openFlash((size_t)totalSize)) {
           setOtaPullStatus("error: update.begin failed");
           http.end();
@@ -646,6 +794,7 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
           break;
         }
         written = 0;
+        otaImageHashBegin();
       } else if (httpCode != HTTP_CODE_PARTIAL_CONTENT) {
         logPrintf("OTA Pull: resume HTTP %d (%s)\n", httpCode,
                   HTTPClient::errorToString(httpCode).c_str());
@@ -673,6 +822,14 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
             written += w;
             lastReadMs = millis();
             updateOTAProgress(written, totalSize);
+            if (requireSig && !otaImageHashUpdate(buf, w)) {
+              // The hash has to cover exactly the bytes sitting in the slot. If
+              // it breaks there is no honest way to continue - the restart path
+              // re-begins the hash at byte 0.
+              logPrintf("OTA Pull: hash update failed at %zu bytes\n", written);
+              stalled = true;
+              break;
+            }
           }
         } else {
           if (!client->connected() || millis() - lastReadMs > READ_STALL_MS) {
@@ -691,18 +848,55 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
     delete client;
 
     if (!stalled) break;
-    stalled = false; // next attempt resumes from `written`
-    if (written < (size_t)totalSize)
+    stalled = false;
+    if (requireSig && updateOpen) {
+      // Signed images are never resumed: the signature covers the whole file,
+      // so bytes skipped by a Range request would never reach the hash. Throw
+      // the partial slot away and stream the image again from byte 0.
+      logPrintf("OTA Pull: signed mode - partial image discarded, restarting from byte 0\n");
+      otaFlashAbort();
+      updateOpen = false;
+      written = 0;
+      totalSize = 0;
+    } else if (written < (size_t)totalSize) {
+      // Unsigned (bench) builds keep the byte-range resume behaviour.
       logPrintf("OTA Pull: reconnecting to resume at %lu/%lu (heap=%lu maxAlloc=%lu)\n",
                 (unsigned long)written, (unsigned long)totalSize,
                 (unsigned long)ESP.getFreeHeap(),
                 (unsigned long)ESP.getMaxAllocHeap());
+    }
   }
 
   otaPullDownloading = false;   // resume web serving
 
+  // The signature is checked here, before Update.end(true): end() is the call
+  // that makes the new slot bootable, so nothing may reach it unless the image
+  // is complete AND (when signing is enforced) signed by the key compiled into
+  // this unit.
+  bool accepted = false;
+  if (updateOpen && written >= (size_t)totalSize) {
+    if (!requireSig) {
+      accepted = true;  // bench build with OTA_ALLOW_UNSIGNED only
+    } else {
+      uint8_t digest[32];
+      int pkErr = 0;
+      if (!otaImageHashFinish(digest)) {
+        logPrintf("OTA Pull: image hash could not be finalized\n");
+        setOtaPullStatus("error: image hash failed");
+      } else if (otaVerifyImage(digest, newVersion, sigBuf, sigLen, &pkErr)) {
+        logPrintf("OTA Pull: signature VALID for v%s\n", newVersion);
+        accepted = true;
+      } else {
+        logPrintf("OTA Pull: signature INVALID (mbedTLS -0x%x) - v%s NOT flashed\n",
+                  (unsigned)(-pkErr), newVersion);
+        setOtaPullStatus("error: signature invalid - update refused");
+      }
+    }
+  }
+
   if (updateOpen) {
-    if (written >= (size_t)totalSize && Update.end(true)) {
+    if (accepted && written >= (size_t)totalSize && Update.end(true)) {
+      otaFlashClose();
       logPrintf("OTA Pull: success %zu bytes\n", written);
       otaUpdateSuccess = true;
       otaProgressTarget = 258;
@@ -722,16 +916,19 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
       logPrintf("OTA Pull: rebooting\n");
       bootinfo_tag_reboot("ota-pull");
       ESP.restart();
-    } else if (written >= (size_t)totalSize) {
+    } else if (accepted) {
       Update.printError(Serial);
       setOtaPullStatus("error: update.end failed");
       logPrintf("OTA Pull: end failed after %zu bytes\n", written);
+    } else if (written >= (size_t)totalSize) {
+      logPrintf("OTA Pull: %lu bytes in the slot but the image was not activated\n",
+                (unsigned long)totalSize);
     } else {
       logPrintf("OTA Pull: incomplete download (%zu/%lu bytes), discarding\n",
                 written, (unsigned long)totalSize);
-      Update.abort();
       setOtaPullStatus("error: download incomplete");
     }
+    otaFlashAbort();  // no-op when the session was already closed by end()/abort
   }
 
   if (!otaUpdateSuccess) {
@@ -1064,18 +1261,63 @@ void webServerTask(void *pvParameters) {
     }
   }, []() {
     HTTPUpload &upload = server.upload();
+    // Per-upload bookkeeping (issue #28). Only one upload can be in flight and
+    // this handler only runs from the web task, so function-scope statics are
+    // safe; they are re-armed on UPLOAD_FILE_START.
+    static size_t uploadWritten = 0;   // bytes accepted into the OTA slot
+    static size_t uploadSeen = 0;      // bytes the client has handed us
+    static bool uploadFailed = false;  // set once, ignores the rest of the body
+    static uint8_t uploadMagic[2] = {0, 0};  // first bytes: image header check
+
     if (upload.status == UPLOAD_FILE_START) {
+      uploadWritten = 0;
+      uploadSeen = 0;
+      uploadFailed = false;
+      uploadMagic[0] = uploadMagic[1] = 0;
+      if (otaSessionPoisoned || otaFlashSessionOpen) {
+        // The slot is already being written by a pull (or a reset pull left it
+        // in an unknown state). A second writer would corrupt the image.
+        logPrintf("OTA web: upload refused - OTA slot busy\n");
+        uploadFailed = true;
+        return;
+      }
       otaUpdateSuccess = false;
       otaUpdateInProgress = true;
       pendingOtaScreen = true;
       logPrintf("OTA web: start %s\n", upload.filename.c_str());
-      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      if (!otaFlashOpen(UPDATE_SIZE_UNKNOWN)) {
         Update.printError(Serial);
+        uploadFailed = true;
       }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (uploadFailed) return;
+      uploadSeen += upload.currentSize;
+      // UPDATE_SIZE_UNKNOWN means nothing bounds this write, and Update.end(true)
+      // marks whatever arrived as bootable - so a too-big or truncated upload
+      // used to be activated. Bound it by the real OTA partition and check the
+      // image header before activating.
+      const esp_partition_t *slot = esp_ota_get_next_update_partition(NULL);
+      size_t slotSize = slot ? slot->size : (size_t)ESP.getFreeSketchSpace();
+      if (uploadSeen > slotSize) {
+        logPrintf("OTA web: upload bigger than the OTA slot (%zu bytes) - aborted\n",
+                  uploadSeen);
+        otaFlashAbort();
+        uploadFailed = true;
+        return;
+      }
+      if (uploadWritten == 0 && upload.currentSize >= 2) {
+        uploadMagic[0] = upload.buf[0];
+        uploadMagic[1] = upload.buf[1];
+      }
       if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
         Update.printError(Serial);
+        logPrintf("OTA web: write failed at %zu bytes - upload aborted\n",
+                  uploadWritten);
+        otaFlashAbort();
+        uploadFailed = true;
+        return;
       }
+      uploadWritten += upload.currentSize;
       // upload.totalSize is cumulative bytes received so far during upload.
       // Scaling target progress up to max 240 during writing prevents
       // premature reboot (fillW >= 258) before Update.end(true) runs.
@@ -1084,12 +1326,33 @@ void webServerTask(void *pvParameters) {
       if (targetW > 240) targetW = 240;
       if (targetW > otaProgressTarget) otaProgressTarget = targetW;
     } else if (upload.status == UPLOAD_FILE_END) {
+      if (uploadFailed) {
+        logPrintf("OTA web: upload discarded (%zu bytes)\n", uploadWritten);
+        otaUpdateInProgress = false;
+        forceFullRedraw = true;
+        return;
+      }
+      // Reject a wrong or truncated file before end(true) would make it
+      // bootable: ESP image magic, plausible segment count, plausible size, and
+      // a byte count that matches what the client actually sent.
+      if (uploadWritten != uploadSeen || uploadWritten < 4096 ||
+          uploadMagic[0] != ESP_IMAGE_HEADER_MAGIC ||
+          uploadMagic[1] > ESP_IMAGE_MAX_SEGMENTS) {
+        logPrintf("OTA web: %zu bytes rejected (magic 0x%02X, segments %u) - not activated\n",
+                  uploadWritten, uploadMagic[0], uploadMagic[1]);
+        otaFlashAbort();
+        otaUpdateInProgress = false;
+        forceFullRedraw = true;
+        return;
+      }
       if (Update.end(true)) {
+        otaFlashClose();
         logPrintf("OTA web: success %u bytes\n", upload.totalSize);
         otaUpdateSuccess = true;
         otaProgressTarget = 258;
       } else {
         Update.printError(Serial);
+        otaFlashAbort();
         otaUpdateInProgress = false;
         forceFullRedraw = true;
       }
@@ -1279,8 +1542,18 @@ void webServerTask(void *pvParameters) {
       otaPullDownloading = false;
     if (otaPullTaskRunning && pullStartedAt &&
         millis() - pullStartedAt > 900000UL) {
-      logPrintf("OTA Pull: task overrun, resetting OTA state\n");
-      otaUpdateInProgress = false;
+      // The pull task has run 15 minutes. Freeing the web loop is right, but
+      // clearing the busy latch while a flash session was still open let a
+      // second pull call Update.begin() on top of the first, and both wrote
+      // into the same slot (issue #24). With a session open the slot state is
+      // unknown, so OTA stays locked until the unit reboots.
+      if (otaFlashSessionOpen) {
+        logPrintf("OTA Pull: task overrun with a flash session open - OTA locked until reboot\n");
+        otaSessionPoisoned = true;
+      } else {
+        logPrintf("OTA Pull: task overrun, resetting OTA state\n");
+        otaUpdateInProgress = false;
+      }
       otaPullTaskRunning = false;
       otaPullDownloading = false;
       pullStartedAt = 0;
