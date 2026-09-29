@@ -1813,7 +1813,10 @@ if (!vlw120Ready) {
     }
   }
 
-  // --- Fuel Liters (4 fixed cells: tens, ones, dot, tenths) ---
+  // --- Fuel Liters (FUEL_INT_DIGITS + dot + FUEL_DEC_DIGITS cells) ---
+  // The shipped default (1 + 1) gives 3 cells, so the readout caps at 9.5 L;
+  // users who log more than 9.9 L raise FUEL_INT_DIGITS to 2 in the WebUI
+  // ("Fuel & Battery" card -> Fuel LTRS -> Integer Digits).
   float displayFuelLtrs = displaySnap.fuelLiters;
   if (UNITS_IMPERIAL) displayFuelLtrs = litersToGal(displaySnap.fuelLiters);
   displayFuelLtrs = clampToCells(displayFuelLtrs, FUEL_INT_DIGITS, FUEL_DEC_DIGITS);
