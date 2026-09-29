@@ -227,20 +227,30 @@ static void demoGpsSentence() {
 // configuration is required or attempted, so an unresponsive RX line or a
 // UBX-only input protocol cannot break anything.
 // ----------------------------------------------------------------------------
-static void ubxSend(const uint8_t *payload, uint8_t cls, uint8_t id, uint8_t len) {
+// UBX frame (UBX-13003221 s32.2): 0xB5 0x62, CLASS, ID, LEN_L, LEN_H, PAYLOAD,
+// CK_A, CK_B - LEN is 16-bit little-endian and counts the payload only. The
+// Fletcher-8 checksum (s32.4) runs over CLASS, ID, LEN_L, LEN_H and PAYLOAD;
+// the preamble is excluded. Writing a single length byte made the module read
+// LEN = (payload[0] << 8) | len and reject every frame (issue #11), so the
+// revive path below had never worked.
+static void ubxSend(const uint8_t *payload, uint8_t cls, uint8_t id, uint16_t len) {
+  uint8_t lenL = (uint8_t)(len & 0xFF), lenH = (uint8_t)((len >> 8) & 0xFF);
   uint8_t ckA = 0, ckB = 0;
-  for (uint8_t i = 0; i < len; i++) {
+  // Same accumulation order as the bytes on the wire.
+  ckA += cls; ckB += ckA;
+  ckA += id;  ckB += ckA;
+  ckA += lenL; ckB += ckA;
+  ckA += lenH; ckB += ckA;
+  for (uint16_t i = 0; i < len; i++) {
     ckA += payload[i];
     ckB += ckA;
   }
-  ckA += cls; ckB += ckA;
-  ckA += id;  ckB += ckA;
-  ckA += len; ckB += ckA;
   gpsSerial.write(0xB5);
   gpsSerial.write(0x62);
   gpsSerial.write(cls);
   gpsSerial.write(id);
-  gpsSerial.write(len);
+  gpsSerial.write(lenL);
+  gpsSerial.write(lenH);
   gpsSerial.write(payload, len);
   gpsSerial.write(ckA);
   gpsSerial.write(ckB);
