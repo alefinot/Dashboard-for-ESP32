@@ -179,6 +179,8 @@ Capping $W_{\text{gps}}$ at 0.5 ensures Hall sensor's zero-latency dynamic throt
 To protect the ESP32 NVS Flash memory from wear, distance accumulation runs continuously in RAM. The odometer writes to non-volatile storage **only after accumulating a full 1.0 km increment**:
 $$\Delta D_{\text{ram}} \ge 1.0\text{ km} \implies \text{Preferences.putDouble("odo", } D_{\text{total}}\text{)}$$
 
+**Sharing the odometer across cores.** The odometer is a 64-bit `double`, and a 64-bit load/store on ESP32 is two 32-bit bus cycles: a read that lands between the two halves of a write returns a mixture of two different distances. The totals therefore live file-local in `src/sensors.cpp` and every other task reaches them through the locked accessors `odoGet()`, `odoSet()`, `odoAdd()` (read-modify-write in one critical section), `odoLastSaved()` and `odoMarkSaved()`, guarded by a dedicated spinlock (`odoMux`) — deliberately *not* `g_stateMutex`, so the display never waits behind sensor or NVS work and the critical sections stay a few instructions long. The accessors never write flash; the 1 km wear discipline above is unchanged.
+
 ---
 
 ### 2. Anti-Aliased GFX Engine & 7-Segment Fonts
@@ -361,7 +363,7 @@ The management portal features a modern grouped card-based layout:
 | `/api/ota/pull` | `POST` | Triggers cloud OTA pull (checks `OTA_PULL_URL`) | None | `text/plain` |
 | `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled`, `url`, `current_version`, `build_version`, `version_override`, `previous_version`, `status`) | None | `application/json` |
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
-| `/api/perf` | `GET` | Live telemetry (CPU, Heap, FPS, WiFi, partitions) | None | `application/json` |
+| `/api/perf` | `GET` | Live telemetry (CPU, Heap, task stack headroom, FPS, WiFi, partitions) | None | `application/json` |
 | `/api/health` | `GET` | Quick heap / mem-saver / uptime health probe | None | `application/json` |
 | `/api/boot` | `GET` | Boot/reboot forensics (reset reason, storm, last-reboot tag, heap watermark) | None | `application/json` |
 

@@ -491,8 +491,14 @@ extern float fuelLiters;
 extern int fuelPercentage;
 extern float batteryVoltage;
 extern float engineTemperature;
-extern double totalDistanceKm;
-extern double lastSavedOdo;
+// Odometer accessors (issue #14). The odometer doubles live in sensors.cpp and
+// are 64-bit values shared across cores, so cross-task code must go through
+// these - a raw read can mix the two 32-bit halves of different values.
+double odoGet();
+void odoSet(double km);
+double odoAdd(double dKm);
+double odoLastSaved();
+void odoMarkSaved(double km);
 void setOdometerKm(double km);
 extern double lastLat;
 extern double lastLon;
@@ -519,6 +525,10 @@ extern unsigned long movingTimeMs;
 extern volatile unsigned long tripResetNoticeMs;
 // Set by the Web UI reset endpoint, consumed by the sensor task.
 extern volatile bool pendingTripReset;
+// Task handles for the /api/perf stack headroom report (issue #27).
+extern TaskHandle_t sensorTaskHandle;
+extern TaskHandle_t gpsTaskHandle;
+extern TaskHandle_t webTaskHandle;
 extern float instantKml;
 extern float averageKml;
 extern float averageSpeed;

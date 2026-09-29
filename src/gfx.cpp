@@ -611,7 +611,7 @@ void showGoodbyeScreen(bool isSleep) {
   if (prefsMux)
     xSemaphoreTake(prefsMux, portMAX_DELAY);
   preferences.begin("dashboard", false);
-  preferences.putDouble("odo", totalDistanceKm);
+  preferences.putDouble("odo", odoGet());
   preferences.end();
   if (prefsMux)
     xSemaphoreGive(prefsMux);
@@ -891,6 +891,12 @@ void drawGpsDebugOverlay() {
            (int)ubxLastFixType, (int)ubxLastNumSv, ubxLastLat, ubxLastLon);
   if (strcmp(gpsBuf, lastGpsStr) == 0)
     return;
+  // Cache the complete two-line string BEFORE it is split for drawing. The
+  // strcpy used to sit at the bottom of this function, after the '\n' had been
+  // replaced with a terminator, so the cache only ever held the first line and
+  // the strcmp guard above could never match - the strip repainted on every
+  // 500 ms sample even when every value was static (issue #15).
+  snprintf(lastGpsStr, sizeof(lastGpsStr), "%s", gpsBuf);
 
   int w = display.width();
   int lineH = 14;
@@ -911,6 +917,5 @@ void drawGpsDebugOverlay() {
     display.print(gpsBuf);
   }
   drawDebugBox(display, 0, 0, w, stripH);
-  strcpy(lastGpsStr, gpsBuf);
   display.endWrite();
 }

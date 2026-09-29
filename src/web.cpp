@@ -1175,7 +1175,7 @@ void webServerTask(void *pvParameters) {
 
   server.on("/api/odo", HTTP_GET, []() {
     JsonDocument doc;
-    doc["km"] = totalDistanceKm;
+    doc["km"] = odoGet();
     String out;
     serializeJson(doc, out);
     server.send(200, "application/json", out);
@@ -1205,7 +1205,7 @@ void webServerTask(void *pvParameters) {
       setOdometerKm(doc["km"].as<double>());
       forceFullRedraw = true;
       JsonDocument resp;
-      resp["km"] = totalDistanceKm;
+      resp["km"] = odoGet();
       String out;
       serializeJson(resp, out);
       server.send(200, "application/json", out);
@@ -1479,6 +1479,17 @@ void webServerTask(void *pvParameters) {
     doc["uptime_s"] = millis() / 1000;
     doc["free_heap"] = ESP.getFreeHeap();
     doc["min_free_heap"] = ESP.getMinFreeHeap();
+
+    // Stack headroom in bytes (issue #27) - the smallest free stack each of our
+    // tasks has had since boot. This is deliberately measurement only: the GPS
+    // task stack and its 1 KB parse buffer stay exactly as they are, and these
+    // numbers are the evidence for any future change. ESP-IDF's
+    // uxTaskGetStackHighWaterMark() reports bytes (vanilla FreeRTOS reports
+    // words), and a 0/NULL handle simply means the task has not started yet.
+    JsonObject stackFree = doc["stack_free"].to<JsonObject>();
+    stackFree["SensorTaskCore1"] = uxTaskGetStackHighWaterMark(sensorTaskHandle);
+    stackFree["GpsTaskCore0"] = uxTaskGetStackHighWaterMark(gpsTaskHandle);
+    stackFree["WebTaskCore0"] = uxTaskGetStackHighWaterMark(webTaskHandle);
     doc["mem_saver"] = memSaverActive ? 1 : 0;
     doc["heap_size"] = ESP.getHeapSize();
     doc["psram_size"] = ESP.getPsramSize();

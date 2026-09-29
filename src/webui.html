@@ -1021,6 +1021,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
             <div class="perf-row"><span class="perf-label">WiFi Clients</span><span class="perf-value" id="p-wifi">0</span></div>
             <div class="perf-row"><span class="perf-label">SPI Bus</span><span class="perf-value" id="p-spi">60 MHz</span></div>
             <div class="perf-row"><span class="perf-label">Heap</span><span class="perf-value" id="p-heap">--</span></div>
+            <div class="perf-row"><span class="perf-label">Stack free</span><span class="perf-value" id="p-stacks">--</span></div>
         </div>
         <div class="perf-card" style="grid-column:1/-1;">
             <h4>CPU Performance</h4>
@@ -3105,6 +3106,18 @@ function updatePerf() {
         set('p-uptime', Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m '+(s%60)+'s');
         set('p-wifi', d.wifi_clients);
         set('p-heap', (d.free_heap / 1024).toFixed(0) + 'KB free / min ' + (d.min_free_heap / 1024).toFixed(0) + 'KB' + (d.mem_saver ? ' (mem-saver ON)' : ''));
+        // FreeRTOS stack headroom per task, bytes (issue #27). Measurement only -
+        // the numbers are here so a stack change can be justified by evidence.
+        if (d.stack_free) {
+            let stackNames = { SensorTaskCore1: 'sensor c1', GpsTaskCore0: 'gps c0', WebTaskCore0: 'web c0' };
+            let stackBits = [], tight = false;
+            for (let k in d.stack_free) {
+                let v = d.stack_free[k];
+                if (v < 700) tight = true;
+                stackBits.push((stackNames[k] || k) + ' ' + (v / 1024).toFixed(1) + 'K');
+            }
+            set('p-stacks', stackBits.join(' · ') + (tight ? ' · LOW' : ''));
+        }
         set('p-spi', (d.spi_speed / 1e6).toFixed(0) + ' MHz');
     }).catch(() => {});
 }

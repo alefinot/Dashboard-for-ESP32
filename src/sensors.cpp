@@ -345,8 +345,62 @@ float fuelLiters = 0.0f;
 int fuelPercentage = 0;
 float batteryVoltage = 0.0f;
 float engineTemperature = 0.0f;
-double totalDistanceKm = 0.0;
-double lastSavedOdo = 0.0;
+// Deliberately file-local: dashboard.h no longer exports these, so no other
+// translation unit can reach the odometer except through the locked accessors
+// below (issue #14).
+static double totalDistanceKm = 0.0;
+static double lastSavedOdo = 0.0;
+
+// Issue #14: the odometer is a 64-bit double touched by the GPS task (add +
+// NVS save), the web task (WebUI set / GET /api/odo) and the snapshot path that
+// feeds the display. On ESP32 a 64-bit access is two 32-bit bus cycles, so a
+// read that straddles a write can mix the halves of two different values and
+// return a plausible-looking nonsense distance. Everything goes through the
+// accessors below, guarded by a dedicated spinlock rather than g_stateMutex:
+// the critical sections are a handful of instructions, so nothing - least of
+// all the display - ever waits behind NVS or sensor work.
+static portMUX_TYPE odoMux = portMUX_INITIALIZER_UNLOCKED;
+
+double odoGet() {
+  double km;
+  portENTER_CRITICAL(&odoMux);
+  km = totalDistanceKm;
+  portEXIT_CRITICAL(&odoMux);
+  return km;
+}
+
+void odoSet(double km) {
+  portENTER_CRITICAL(&odoMux);
+  totalDistanceKm = km;
+  portEXIT_CRITICAL(&odoMux);
+}
+
+// Read-modify-write in one critical section. Returns the new total so the
+// caller can decide about the 1 km NVS write without racing a second read.
+double odoAdd(double dKm) {
+  double after;
+  portENTER_CRITICAL(&odoMux);
+  totalDistanceKm += dKm;
+  after = totalDistanceKm;
+  portEXIT_CRITICAL(&odoMux);
+  return after;
+}
+
+// The "what is already in flash" marker is a double too, and the web task
+// writes it in setOdometerKm() while the GPS task reads it in the 1 km check.
+double odoLastSaved() {
+  double km;
+  portENTER_CRITICAL(&odoMux);
+  km = lastSavedOdo;
+  portEXIT_CRITICAL(&odoMux);
+  return km;
+}
+
+void odoMarkSaved(double km) {
+  portENTER_CRITICAL(&odoMux);
+  lastSavedOdo = km;
+  portEXIT_CRITICAL(&odoMux);
+}
 double lastLat = 0.0;
 double lastLon = 0.0;
 bool hasLastPos = false;
@@ -453,9 +507,15 @@ void resetTripStats(const char *reason) {
 
 void setOdometerKm(double km) {
   if (km < 0.0) km = 0.0;
-  totalDistanceKm = km;
-  lastSavedOdo = km;
+  odoSet(km);
+  odoMarkSaved(km);
+  // The snapshot copy belongs to the g_stateMutex-protected block, so a display
+  // frame cannot read the new odometer next to half-updated sensor fields.
+  if (g_stateMutex)
+    xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(50));
   g_sensorData.totalDistanceKm = km;
+  if (g_stateMutex)
+    xSemaphoreGive(g_stateMutex);
   if (prefsMux)
     xSemaphoreTake(prefsMux, portMAX_DELAY);
   preferences.begin("dashboard", false);
@@ -1107,16 +1167,17 @@ static void saveOdometerNvs() {
   lastAttemptMs = nowMs;
   if (prefsMux)
     xSemaphoreTake(prefsMux, portMAX_DELAY);
+  double odoNow = odoGet();
   preferences.begin("dashboard", false);
-  bool saved = preferences.putDouble("odo", totalDistanceKm);
+  bool saved = preferences.putDouble("odo", odoNow);
   preferences.end();
   if (prefsMux)
     xSemaphoreGive(prefsMux);
   if (saved)
-    lastSavedOdo = totalDistanceKm;
+    odoMarkSaved(odoNow);
   else
     logPrintf("ODO: NVS save failed - %.2f km not persisted, retrying in 30 s\n",
-              totalDistanceKm);
+              odoNow);
 }
 
 void updateGPSOdometer() {
@@ -1200,8 +1261,7 @@ void updateGPSOdometer() {
     if (isDemo) {
       demoOdoKm += dKm;
     } else {
-      totalDistanceKm += dKm;
-      if (totalDistanceKm - lastSavedOdo >= 1.0)
+      if (odoAdd(dKm) - odoLastSaved() >= 1.0)
         saveOdometerNvs();
     }
   } else if (!useHallDistance && isGpsValid && fixFresh) {
@@ -1214,8 +1274,7 @@ void updateGPSOdometer() {
         if (isDemo) {
           demoOdoKm += dKm;
         } else {
-          totalDistanceKm += dKm;
-          if (totalDistanceKm - lastSavedOdo >= 1.0)
+          if (odoAdd(dKm) - odoLastSaved() >= 1.0)
             saveOdometerNvs();
         }
       } else {
@@ -1899,6 +1958,7 @@ void sensorTask(void *pvParameters) {
     GpsFixSnapshot fix;
     gpsSnapshotCopy(fix);
 
+    double odoNow = odoGet();
     if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
       g_sensorData.currentSpeed = currentCachedSpeed;
       g_sensorData.fuelLiters = fuelLiters;
@@ -1909,7 +1969,7 @@ void sensorTask(void *pvParameters) {
       // Demo mode: the odometer math has accumulated simulated distance into
       // demoOdoKm (NVS untouched) - surface it as a display-only total.
       g_sensorData.totalDistanceKm =
-          ENABLE_DEMO_MODE ? (totalDistanceKm + demoOdoKm) : totalDistanceKm;
+          ENABLE_DEMO_MODE ? (odoNow + demoOdoKm) : odoNow;
       g_sensorData.accelResultTime = accelResultTime;
       g_sensorData.accelState = accelState;
       g_sensorData.instantKml = instantKml;

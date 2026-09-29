@@ -100,6 +100,12 @@ void logPrintf(const char *fmt, ...) {
   }
 }
 
+// Task handles, kept for one purpose only: /api/perf reports the FreeRTOS stack
+// high-water mark of each task (issue #27). Nothing else uses them.
+TaskHandle_t sensorTaskHandle = NULL;
+TaskHandle_t gpsTaskHandle = NULL;
+TaskHandle_t webTaskHandle = NULL;
+
 void setup() {
   setCpuFrequencyMhz(240);
   Serial.setTxBufferSize(256);
@@ -270,9 +276,10 @@ void setup() {
   if (prefsMux)
     xSemaphoreTake(prefsMux, portMAX_DELAY);
   preferences.begin("dashboard", false);
-  totalDistanceKm = preferences.getDouble("odo", 0.0);
-  lastSavedOdo = totalDistanceKm;
+  double odoBoot = preferences.getDouble("odo", 0.0);
   preferences.end();
+  odoSet(odoBoot);
+  odoMarkSaved(odoBoot);
   if (prefsMux)
     xSemaphoreGive(prefsMux);
 
@@ -315,11 +322,12 @@ void setup() {
 // sensorTask (core 1, prio 2 > loopTask prio 1) owns only the short I2C/ADC
 // reads + snapshot: a few ms per 20ms tick, preempting the display briefly
 // then sleeping, so rendering keeps its ~62.5fps while values stay live.
-  xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore1", 4096, NULL, 2, NULL,
-                           1);
-  xTaskCreatePinnedToCore(gpsTask, "GpsTaskCore0", 4096, NULL, 2, NULL, 0);
-  xTaskCreatePinnedToCore(webServerTask, "WebTaskCore0", 6144, NULL, 1, NULL,
+  xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore1", 4096, NULL, 2,
+                           &sensorTaskHandle, 1);
+  xTaskCreatePinnedToCore(gpsTask, "GpsTaskCore0", 4096, NULL, 2, &gpsTaskHandle,
                            0);
+  xTaskCreatePinnedToCore(webServerTask, "WebTaskCore0", 6144, NULL, 1,
+                           &webTaskHandle, 0);
   xTaskCreatePinnedToCore(cpuProbeTask, "CPUProbe0", 2048, (void *)0, 1, NULL, 0);
   xTaskCreatePinnedToCore(cpuProbeTask, "CPUProbe1", 2048, (void *)1, 1, NULL, 1);
 
