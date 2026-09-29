@@ -26,6 +26,14 @@ bool pendingInvertDisplay = false;
 int pendingBacklightValue = -1;
 int currentBrightnessTarget = 0;
 
+// Config-save handoff (issue #10): the web task parses and writes the config,
+// the display loop applies the panel-bus and CPU-frequency changes at a frame
+// gap, and no frame is painted while the parameter group is being rewritten.
+volatile bool pendingApplyBusConfig = false;
+volatile bool pendingCpuReeval = false;
+volatile bool configSaveInProgress = false;
+volatile unsigned long configSaveStartMs = 0;
+
 // Web-task watchdog state: disarmed when the device shows a fast-reboot loop
 // so a watchdog can't brick the device by restarting it forever.
 static bool watchdogDisabled = false;
@@ -289,6 +297,28 @@ void setup() {
   logPrintf("Setup done\n");
 }
 
+// Panel-bus reconfiguration and CPU-frequency switching requested by a config
+// save. These used to run inside the POST /api/config handler on core 0 while
+// this core was drawing: _bus_instance.config() on a live bus during a
+// LovyanGFX transaction (corrupted frames at best), and an APB/clock change
+// under an in-flight SPI transfer. Both are applied here, at the frame gap,
+// before anything is drawn (issue #10).
+static void processConfigApply() {
+  if (pendingApplyBusConfig) {
+    pendingApplyBusConfig = false;
+    display.applyBusConfig();
+    forceFullRedraw = true;
+  }
+  if (pendingCpuReeval) {
+    pendingCpuReeval = false;
+    uint32_t freq = ENABLE_DYNAMIC_CPU ? 240 : MANUAL_CPU_FREQ;
+    if (getCpuFrequencyMhz() != freq) {
+      setCpuFrequencyMhz(freq);
+      logPrintf("CPU: %dMHz (config change)\n", (int)freq);
+    }
+  }
+}
+
 void loop() {
   if (pendingSleep)
     showGoodbyeScreen(true);
@@ -397,10 +427,21 @@ void loop() {
   // so the big UI buffers never starve the /api/config handler or TLS stack.
   processMemSaverRelease();
 
+  // Bus / CPU-frequency changes requested by the config-save handler, applied at
+  // the safe point between frames (issue #10).
+  processConfigApply();
+
   // Rebuilds the speed sprite dropped by either release above. Runs here, at a
   // safe point between frames, so the VLW parse + allocation never stalls a
   // draw frame (previously it ran mid-frame on the next speed change).
   ensureSpeedSprite();
+
+  // A config save rewrites ~90 parameters as a group (layout geometry, offsets,
+  // digit counts). Painting while that write is in flight can capture a
+  // half-old/half-new set, so the screen keeps the previous frame until the
+  // writer is done. Bounded, and non-blocking, so a writer that never clears
+  // the flag cannot freeze the display.
+  if (configSaveInProgress && (millis() - configSaveStartMs) < 2000) return;
 
   SensorSnapshot snap;
   if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(5)) == pdTRUE) {

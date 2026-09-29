@@ -1108,9 +1108,19 @@ void webServerTask(void *pvParameters) {
       vTaskDelay(pdMS_TO_TICKS(50));
     }
 
+    // The parameters are written as one group. Painting is paused for the
+    // duration so the display never renders a half-old/half-new set (geometry,
+    // offsets and digit counts belong together), and the live panel bus plus the
+    // CPU-frequency switch are handed to the display loop, which owns the bus and
+    // applies them between frames - never inside a LovyanGFX transaction
+    // (issue #10).
+    configSaveStartMs = millis();
+    configSaveInProgress = true;
     processConfig(2, &doc);
     recalculateDerivedParams();
-    display.applyBusConfig();
+    configSaveInProgress = false;
+    pendingApplyBusConfig = true;
+    pendingCpuReeval = true;
     // If the save touched the weather location/city/locale/interval, ask the
     // fetch loop to refresh right away so the widget shows the new city's
     // weather immediately instead of after the next scheduled interval.
@@ -1119,12 +1129,8 @@ void webServerTask(void *pvParameters) {
         !doc["WEATHER_LOCALE"].isNull()) {
       weatherRefreshRequested = true;
     }
-    // Apply CPU frequency immediately
-    {
-      uint32_t freq = ENABLE_DYNAMIC_CPU ? 240 : MANUAL_CPU_FREQ;
-      setCpuFrequencyMhz(freq);
-      logPrintf("CPU: %dMHz (config change)\n", freq);
-    }
+    // CPU frequency: applied by the display loop on the core that draws
+    // (processConfigApply), so the clock never changes under an SPI transfer.
     server.send(200, "application/json", "{\"status\":\"ok\"}");
     forceFullRedraw = true;
     pendingInvertDisplay = true;

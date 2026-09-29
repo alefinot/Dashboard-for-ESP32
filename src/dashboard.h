@@ -407,6 +407,11 @@ extern volatile int otaProgressFillW;
 extern volatile int otaProgressTarget;
 
 extern bool pendingInvertDisplay;
+// Config-save handoff between the web task and the display loop (issue #10)
+extern volatile bool pendingApplyBusConfig;
+extern volatile bool pendingCpuReeval;
+extern volatile bool configSaveInProgress;
+extern volatile unsigned long configSaveStartMs;
 extern int pendingBacklightValue;
 
 extern LGFX_ST7789_4 display;
