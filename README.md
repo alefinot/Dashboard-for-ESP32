@@ -102,8 +102,8 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | Component | Part / Model | Protocol / Signal | Specifications |
 | :--- | :--- | :--- | :--- |
 | **Microcontroller** | ESP32-WROOM-32 | Xtensa 32-bit LX6 | Dual-core 240 MHz, 520 KB SRAM, 4 MB SPI Flash, RTC IO |
-| **Display Panel** | ILI9488 TFT LCD (4.0") | SPI (16-bit RGB565) | 480×320 pixels, 60 MHz SPI bus speed, hardware CS/DC/RST |
-| **Display Backlight** | LED Backlight Channel | LEDC PWM (Channel 0) | 1 kHz hardware PWM, 256 brightness levels, logarithmic fading |
+| **Display Panel** | ILI9488 TFT LCD (4.0") | SPI3 (16-bit RGB565) — SCLK GPIO18, MOSI GPIO23, CS GPIO5, DC GPIO27, RST GPIO14 (no MISO) | 480×320 pixels, 60 MHz SPI bus speed (clamped to 1–80 MHz), hardware CS/DC/RST |
+| **Display Backlight** | LED Backlight (`BL_DISPLAY`, GPIO12) | LEDC PWM — pin-based `ledcAttach(BL_DISPLAY, 1000, 8)` | 1 kHz hardware PWM, 8-bit resolution (256 brightness levels), logarithmic fading; the LEDC channel is assigned by the arduino-esp32 3.x wrapper |
 | **GNSS Module** | BZGNSS P25 Pro (u-blox M10) | UART2 (RX=GPIO16, TX=GPIO17) | 115200 baud (configurable), UBX NAV-PVT / NMEA 0183 stream (module is preconfigured — the firmware is receive-only), 10 Hz update rate, multi-constellation (GPS/GLONASS/BDS/Galileo), UTC epoch time synchronization |
 | **Wheel Speed Sensor** | Hall Effect Interrupt | GPIO33 (Input Pullup) | Hardware Falling-Edge ISR, microsecond interval timing |
 | **Fuel Level Sensor** | Resistive Sender (capacitive touch removed in v1.3.6) | GPIO32 (ADC1_CH4) | Analog 0–3.3V, 20-point calibration table, EMA smoothing filter |
