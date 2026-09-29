@@ -129,6 +129,16 @@ static bool reverseGeocode(double lat, double lon, String &out) {
   return true;
 }
 
+// Bounded text copy: always leaves a NUL inside dst, so a display task that
+// samples the shared weather arrays mid-copy still sees a terminated string
+// (issue #8).
+static void copyFixed(char *dst, size_t n, const char *src) {
+  size_t len = strlen(src);
+  if (len > n - 1) len = n - 1;
+  memcpy(dst, src, len);
+  dst[len] = 0;
+}
+
 void updateWeather() {
   if (WiFi.status() != WL_CONNECTED) {
     return;
@@ -179,36 +189,43 @@ void updateWeather() {
     DeserializationError error = deserializeJson(doc, payload);
     if (!error) {
       if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        g_weatherData.temperature = doc["current"]["temperature_2m"] | 0.0f;
-        g_weatherData.humidity = doc["current"]["relative_humidity_2m"] | 0;
-        g_weatherData.weatherCode = doc["current"]["weather_code"] | 0;
-        g_weatherData.cloudCover = doc["current"]["cloud_cover"] | 0;
-        g_weatherData.windSpeed = doc["current"]["wind_speed_10m"] | 0.0f;
-        g_weatherData.windDirection = doc["current"]["wind_direction_10m"] | 0.0f;
-        
+        // Build the whole update locally first, then commit it as one
+        // straight-line copy into the shared struct: the display task reads
+        // these fields without the mutex, so the window in which it can sample
+        // a half-written update must contain no free and no allocation
+        // (issue #8).
+        float t = doc["current"]["temperature_2m"] | 0.0f;
+        int hum = doc["current"]["relative_humidity_2m"] | 0;
+        int code = doc["current"]["weather_code"] | 0;
+        int cloud = doc["current"]["cloud_cover"] | 0;
+        float wind = doc["current"]["wind_speed_10m"] | 0.0f;
+        float windDir = doc["current"]["wind_direction_10m"] | 0.0f;
+        const char *sunriseSrc = "--:--", *sunsetSrc = "--:--";
         if (doc["daily"]["sunrise"].is<JsonArray>()) {
-          const char* sunrise = doc["daily"]["sunrise"][0] | "";
-          if (strlen(sunrise) >= 16) {
-            g_weatherData.sunriseTime = String(sunrise).substring(11);
-          } else {
-            g_weatherData.sunriseTime = "--:--";
-          }
-        } else {
-          g_weatherData.sunriseTime = "--:--";
+          const char *v = doc["daily"]["sunrise"][0] | "";
+          if (strlen(v) >= 16) sunriseSrc = v + 11;  // "HH:MM" of the ISO stamp
         }
         if (doc["daily"]["sunset"].is<JsonArray>()) {
-          const char* sunset = doc["daily"]["sunset"][0] | "";
-          if (strlen(sunset) >= 16) {
-            g_weatherData.sunsetTime = String(sunset).substring(11);
-          } else {
-            g_weatherData.sunsetTime = "--:--";
-          }
-        } else {
-          g_weatherData.sunsetTime = "--:--";
+          const char *v = doc["daily"]["sunset"][0] | "";
+          if (strlen(v) >= 16) sunsetSrc = v + 11;
         }
+        char sunrise[8], sunset[8], city[48];
+        copyFixed(sunrise, sizeof(sunrise), sunriseSrc);
+        copyFixed(sunset, sizeof(sunset), sunsetSrc);
+        copyFixed(city, sizeof(city),
+                  resolvedCity.length() > 0 ? resolvedCity.c_str() : WEATHER_CITY);
+
+        g_weatherData.temperature = t;
+        g_weatherData.humidity = hum;
+        g_weatherData.weatherCode = code;
+        g_weatherData.cloudCover = cloud;
+        g_weatherData.windSpeed = wind;
+        g_weatherData.windDirection = windDir;
+        memcpy(g_weatherData.sunriseTime, sunrise, sizeof(sunrise));
+        memcpy(g_weatherData.sunsetTime, sunset, sizeof(sunset));
+        memcpy(g_weatherData.cityName, city, sizeof(city));
         g_weatherData.valid = true;
         g_weatherData.lastUpdated = millis();
-        g_weatherData.cityName = (resolvedCity.length() > 0) ? resolvedCity : String(WEATHER_CITY);
         xSemaphoreGive(g_stateMutex);
       }
       logPrintf("Weather: success! Temp=%.1fC, Hum=%d%%\n", 

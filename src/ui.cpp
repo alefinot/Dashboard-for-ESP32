@@ -279,16 +279,25 @@ static void drawDsDigitPair(LGFX_ST7789_4 &g, const char *str, int baseX, int y)
 // Weather day/night state. Uses the fetched sunrise/sunset times when
 // available, otherwise falls back to the fixed NIGHT_MODE window.
 // ----------------------------------------------------------------------------
+// Bounded copy for the weather change cache. The shared weather text fields
+// are fixed-size arrays, not Strings (issue #8).
+static void copyWeatherText(char *dst, size_t n, const char *src) {
+  size_t len = strlen(src);
+  if (len > n - 1) len = n - 1;
+  memcpy(dst, src, len);
+  dst[len] = 0;
+}
+
 static bool weatherIsNight(const SensorSnapshot &snap) {
   int sunriseMin = -1, sunsetMin = -1;
-  if (g_weatherData.sunriseTime.length() >= 5) {
+  if (strlen(g_weatherData.sunriseTime) >= 5) {
     int h, m;
-    if (sscanf(g_weatherData.sunriseTime.c_str(), "%d:%d", &h, &m) == 2)
+    if (sscanf(g_weatherData.sunriseTime, "%d:%d", &h, &m) == 2)
       sunriseMin = h * 60 + m;
   }
-  if (g_weatherData.sunsetTime.length() >= 5) {
+  if (strlen(g_weatherData.sunsetTime) >= 5) {
     int h, m;
-    if (sscanf(g_weatherData.sunsetTime.c_str(), "%d:%d", &h, &m) == 2)
+    if (sscanf(g_weatherData.sunsetTime, "%d:%d", &h, &m) == 2)
       sunsetMin = h * 60 + m;
   }
   if (sunriseMin >= 0 && sunsetMin >= 0) {
@@ -1918,8 +1927,8 @@ if (!vlw120Ready) {
   static float lastTemp = -999.0f;
   static int lastHum = -1;
   static int lastCode = -1;
-  static String lastSunset = "";
-  static String lastSunrise = "";
+  static char lastSunset[8] = "";
+  static char lastSunrise[8] = "";
   static char lastCity[48] = "";
   static bool lastWeatherNight = false;
 
@@ -1930,7 +1939,7 @@ if (!vlw120Ready) {
   bool weatherNight = weatherIsNight(displaySnap);
   bool weatherNightChanged = (weatherNight != lastWeatherNight);
 
-  const char *dispCitySrc = (g_weatherData.cityName.length() > 0) ? g_weatherData.cityName.c_str() : WEATHER_CITY;
+  const char *dispCitySrc = (g_weatherData.cityName[0] != 0) ? g_weatherData.cityName : WEATHER_CITY;
 
   if ((lastWx != wx || lastWy != wy || lastWeatherShow != showWeather || forceDraw) && lastWeatherShow) {
     display.fillRect(lastWx - 2, lastWy - 2, 480 + 4, 28 + 4, TFT_BLACK);
@@ -1939,8 +1948,8 @@ if (!vlw120Ready) {
   bool weatherChanged = (g_weatherData.temperature != lastTemp ||
                          g_weatherData.humidity != lastHum ||
                          g_weatherData.weatherCode != lastCode ||
-                         g_weatherData.sunsetTime != lastSunset ||
-                         g_weatherData.sunriseTime != lastSunrise ||
+                         strcmp(g_weatherData.sunsetTime, lastSunset) != 0 ||
+                         strcmp(g_weatherData.sunriseTime, lastSunrise) != 0 ||
                          strcmp(dispCitySrc, lastCity) != 0) ||
                         weatherNightChanged;
 
@@ -1949,8 +1958,8 @@ if (!vlw120Ready) {
       lastTemp = g_weatherData.temperature;
       lastHum = g_weatherData.humidity;
       lastCode = g_weatherData.weatherCode;
-      lastSunset = g_weatherData.sunsetTime;
-      lastSunrise = g_weatherData.sunriseTime;
+      copyWeatherText(lastSunset, sizeof(lastSunset), g_weatherData.sunsetTime);
+      copyWeatherText(lastSunrise, sizeof(lastSunrise), g_weatherData.sunriseTime);
       strncpy(lastCity, dispCitySrc, sizeof(lastCity) - 1);
       lastCity[sizeof(lastCity) - 1] = 0;
       lastWx = wx;
@@ -2214,7 +2223,7 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
   display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
 
   char dispCity[48];
-  const char *citySrc = (g_weatherData.cityName.length() > 0) ? g_weatherData.cityName.c_str() : WEATHER_CITY;
+  const char *citySrc = (g_weatherData.cityName[0] != 0) ? g_weatherData.cityName : WEATHER_CITY;
   snprintf(dispCity, sizeof(dispCity), "%s", citySrc);
 
   char tempStr[16];
@@ -2230,7 +2239,7 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
                                  : g_weatherData.windSpeed / 3.6f;
   const char* windDir = getWindCardinal(g_weatherData.windDirection);
   snprintf(windStr, sizeof(windStr), "%.1f %s", windVal, windDir);
-  const char *sunsetStr = g_weatherData.sunsetTime.length() > 0 ? g_weatherData.sunsetTime.c_str() : "--:--";
+  const char *sunsetStr = g_weatherData.sunsetTime[0] != 0 ? g_weatherData.sunsetTime : "--:--";
 
   // Measure every text so the row can be spaced equally at runtime.
   int16_t bx1, by1; uint16_t tw, th;

@@ -627,9 +627,15 @@ struct WeatherData {
   float windDirection = 0.0f;
   int weatherCode = 0;
   int cloudCover = 0;
-  String sunsetTime = "";
-  String sunriseTime = "";
-  String cityName = "";
+  // Fixed-size text buffers instead of Strings (issue #8): the weather fetch
+  // task writes these while the display task reads them without the mutex, and
+  // String::operator= frees the old buffer - a refresh landing between c_str()
+  // and its use was a use-after-free. These arrays never reallocate, and every
+  // writer leaves a NUL inside the bounds, so a sample taken mid-copy can at
+  // worst show one garbled label; it can never dangle, leak or overrun.
+  char sunsetTime[8] = ""; // "HH:MM"
+  char sunriseTime[8] = "";
+  char cityName[48] = "";  // same width as WEATHER_CITY
   bool valid = false;
   unsigned long lastUpdated = 0;
 };
