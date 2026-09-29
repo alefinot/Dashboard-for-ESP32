@@ -157,6 +157,7 @@ int WEATHER_REFRESH_MIN = 1;
 char WEATHER_LOCALE[16] = "it";
 WeatherData g_weatherData;
 bool ENABLE_POWER_SENSE = false;
+int POWER_SENSE_OFF_MS = 10000;
 bool ENABLE_CIRCLE_TEST = false;
 bool ENABLE_DEMO_MODE = false;
 bool ADV_MODE = false;
@@ -812,6 +813,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(WEATHER_REFRESH_MIN, "WEATH_RFR", 1, 1, 1440);
   CFG_STR(WEATHER_LOCALE, "WEATH_LOCALE", "it");
   CFG_BOOL(ENABLE_POWER_SENSE, "PWR_SNS", false);
+  CFG_INT(POWER_SENSE_OFF_MS, "PWR_OFF_MS", 10000, 500, 120000);
   CFG_BOOL(ENABLE_CIRCLE_TEST, "CIRC_TST", false);
   CFG_BOOL(ENABLE_DEMO_MODE, "DEMO_MODE", false);
   CFG_BOOL(ENABLE_ANTIALIASING, "EN_AA", true);
@@ -1125,6 +1127,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "WEATHER_REFRESH_MIN": 1,
   "WEATHER_LOCALE": "it",
   "ENABLE_POWER_SENSE": false,
+  "POWER_SENSE_OFF_MS": 10000,
   "ENABLE_CIRCLE_TEST": false,
   "ENABLE_DEMO_MODE": false,
   "ADV_MODE": false,

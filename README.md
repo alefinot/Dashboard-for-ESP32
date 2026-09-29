@@ -307,11 +307,13 @@ The governor uses a 3-state machine with hysteresis deadbands to prevent frequen
 ```
 
 #### Ignition Loss & Deep Sleep Transition
-When `ENABLE_POWER_SENSE` is enabled and `POWER_SENSE_PIN` (GPIO4) drops LOW:
+When `ENABLE_POWER_SENSE` is enabled and `POWER_SENSE_PIN` (GPIO4) stays **continuously LOW for `POWER_SENSE_OFF_MS`** (default 10 s, 500–120000 ms):
 1. Plays goodbye screen animation (`showGoodbyeScreen(true)`).
 2. Fades display backlight down to 0% via LEDC PWM.
 3. Configures RTC EXT0 wake-up trigger on GPIO4 (High level).
 4. Invokes `esp_deep_sleep_start()`.
+
+The line is debounced in software (`powerSenseOffConfirmed()` in `src/sensors.cpp`): the timer restarts on every HIGH, so ignition bounce, a load-dump dip or a flaky ground of a few milliseconds up to several seconds cannot stall the GPS/odometer task or put the unit to sleep (issue #26). A single LOW sample used to be enough. Side effect: key-off costs `POWER_SENSE_OFF_MS` of live current draw before the goodbye screen and sleep; wake behaviour is unchanged (EXT0 on GPIO4 going HIGH).
 
 ---
 
@@ -397,6 +399,7 @@ Bands are also checked offline by `python scripts/verify_config_ranges.py`: ever
 - `CPU_THROTTLE_TEMP_CRIT` (default=70): Critical temperature threshold in °C.
 
 #### Web UI
+- `POWER_SENSE_OFF_MS` (default=10000): How long `POWER_SENSE_PIN` (GPIO4) must stay continuously LOW before the unit plays the goodbye screen and deep-sleeps (500–120000 ms). Any HIGH restarts the window, so ignition bounce and supply dips cannot stall the GPS task or sleep the dash (issue #26). Only used when `ENABLE_POWER_SENSE` is on.
 - `ADV_MODE` (default=false): Global “Advanced Mode” toggle in the Web UI. When enabled, advanced and technical settings (CPU, GPS, Polling Rates, technical display options, advanced WiFi, and sensor-calibration internals) are shown as normal rows in their groups; when disabled they are hidden.
 
 #### Display & Visual Design

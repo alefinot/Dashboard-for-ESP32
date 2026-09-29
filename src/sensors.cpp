@@ -1180,10 +1180,35 @@ static void saveOdometerNvs() {
               odoNow);
 }
 
+// Issue #26: one debounced power-sense decision, owned by this file. A single
+// LOW sample used to be enough to park gpsTask in an endless vTaskDelay loop -
+// ignition bounce, a load-dump dip or a bad ground could stall the GPS/odometer
+// path for the rest of the session. The line now has to stay LOW continuously
+// for POWER_SENSE_OFF_MS (default 10 s) before anything acts on it, and any HIGH
+// restarts the window.
+static unsigned long powerLowSinceMs = 0;
+
+bool powerSenseOffConfirmed() {
+  if (!ENABLE_POWER_SENSE)
+    return false;
+  if (digitalRead(POWER_SENSE_PIN) != LOW) {
+    powerLowSinceMs = 0;
+    return false;
+  }
+  unsigned long nowMs = millis();
+  if (powerLowSinceMs == 0) {
+    powerLowSinceMs = nowMs;
+    return false;
+  }
+  if (nowMs - powerLowSinceMs < (unsigned long)POWER_SENSE_OFF_MS)
+    return false;
+  logPrintf("Power sense LOW for %d ms - sleeping\n", POWER_SENSE_OFF_MS);
+  return true;
+}
+
 void updateGPSOdometer() {
   // Demo mode never sleeps on the power-sense pin (no real power module).
-  if (ENABLE_POWER_SENSE && !ENABLE_DEMO_MODE &&
-      digitalRead(POWER_SENSE_PIN) == LOW) {
+  if (!ENABLE_DEMO_MODE && powerSenseOffConfirmed()) {
     pendingSleep = true;
     while (1)
       vTaskDelay(pdMS_TO_TICKS(100));

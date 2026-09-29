@@ -260,6 +260,8 @@ extern bool SHOW_ELEMENT_MAX_SPEED;
 extern bool SHOW_ELEMENT_FUEL_LTRS;
 extern bool SHOW_GHOST_DIGITS;
 extern bool ENABLE_POWER_SENSE;
+// How long the power-sense line must stay LOW before the unit sleeps (#26).
+extern int POWER_SENSE_OFF_MS;
 extern bool ENABLE_CIRCLE_TEST;
 extern bool ENABLE_DEMO_MODE;
 extern bool ADV_MODE;
@@ -442,6 +444,8 @@ extern WebServer server;
 
 extern bool forceFullRedraw;
 extern volatile bool pendingSleep;
+// Debounced power-sense read, owned by sensors.cpp (issue #26).
+bool powerSenseOffConfirmed();
 extern volatile bool pendingReboot;
 extern volatile bool otaUpdateInProgress;
 extern volatile bool otaUpdateSuccess;
