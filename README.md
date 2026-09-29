@@ -104,7 +104,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **Microcontroller** | ESP32-WROOM-32 | Xtensa 32-bit LX6 | Dual-core 240 MHz, 520 KB SRAM, 4 MB SPI Flash, RTC IO |
 | **Display Panel** | ILI9488 TFT LCD (4.0") | SPI (16-bit RGB565) | 480×320 pixels, 60 MHz SPI bus speed, hardware CS/DC/RST |
 | **Display Backlight** | LED Backlight Channel | LEDC PWM (Channel 0) | 1 kHz hardware PWM, 256 brightness levels, logarithmic fading |
-| **GNSS Module** | BZGNSS P25 Pro (u-blox M10) | UART2 (RX=25, TX=26) | 115200 baud (configurable), UBX NAV-PVT / NMEA 0183 stream (module is preconfigured — the firmware is receive-only), 10 Hz update rate, multi-constellation (GPS/GLONASS/BDS/Galileo), UTC epoch time synchronization |
+| **GNSS Module** | BZGNSS P25 Pro (u-blox M10) | UART2 (RX=GPIO16, TX=GPIO17) | 115200 baud (configurable), UBX NAV-PVT / NMEA 0183 stream (module is preconfigured — the firmware is receive-only), 10 Hz update rate, multi-constellation (GPS/GLONASS/BDS/Galileo), UTC epoch time synchronization |
 | **Wheel Speed Sensor** | Hall Effect Interrupt | GPIO33 (Input Pullup) | Hardware Falling-Edge ISR, microsecond interval timing |
 | **Fuel Level Sensor** | Resistive Sender (capacitive touch removed in v1.3.6) | GPIO32 (ADC1_CH4) | Analog 0–3.3V, 20-point calibration table, EMA smoothing filter |
 | **Engine Temp Sensor** | NTC Thermistor (10k/100k) | GPIO36 (ADC1_CH0) | Analog 0–3.3V, Steinhart-Hart equation, voltage divider balance |
@@ -117,26 +117,29 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 
 | ESP32 Pin | Function Name | Peripheral Type | Signal Direction | Hardware Configuration & Notes |
 | :---: | :--- | :--- | :---: | :--- |
+| **GPIO0** | BOOT | Factory Reset | Input (Pullup) | `pinMode(0, INPUT_PULLUP)`; hold BOOT for 8 s within the first 30 s after boot to wipe the config |
+| **GPIO1** | Console TX | Debug Console | Output | `Serial.setPins(1, 3)` pins the console explicitly (arduino-esp32 3.x moved the UART1 default to GPIO26/27) |
+| **GPIO3** | Console RX | Debug Console | Input | Same `Serial.setPins(1, 3)` call |
 | **GPIO4** | `POWER_SENSE_PIN` | Power Sense | Input (No Pull) | Ignition sense line; triggers EXT0 RTC wake up from deep sleep |
 | **GPIO5** | `CS_DISPLAY` | SPI Chip Select | Output | Hardware SPI CS for ILI9488 Display |
-| **GPIO12** | `BL_DISPLAY` | Backlight PWM | Output | Attached to ESP32 LEDC Channel 0 (1 kHz PWM) |
+| **GPIO12** | `BL_DISPLAY` | Backlight PWM | Output | Pin-based `ledcAttach(BL_DISPLAY, 1000, 8)` — 1 kHz PWM, 8-bit resolution |
 | **GPIO14** | `SPI_RST` | Display Reset | Output | Active-Low hardware reset line for ILI9488 |
-| **GPIO18** | `SPI_CLK` | SPI Clock | Output | Hardware SPI SCK pin (60 MHz) |
-| **GPIO23** | `SPI_MOSI` | SPI Master Out | Output | Hardware SPI MOSI pin for LCD data command stream |
-| **GPIO25** | `RXD2` | GPS Serial RX | Input | Connected to GNSS Module TX pin (UART2) |
-| **GPIO26** | `TXD2` | GPS Serial TX | Output | Connected to GNSS Module RX pin (UART2) |
+| **GPIO16** | `GNSS_UART2_RX_PIN` | GPS Serial RX (UART2) | Input | Connected to the GNSS module TX pin. Receive-only: the firmware never transmits to the module |
+| **GPIO17** | `GNSS_UART2_TX_PIN` | GPS Serial TX (UART2) | Output | Connected to the GNSS module RX pin; configured but idle - no UBX command is ever sent |
+| **GPIO18** | `cfg.pin_sclk` | SPI Clock | Output | Hardcoded in `gfx.cpp` (SPI3_HOST), 60 MHz default |
+| **GPIO23** | `cfg.pin_mosi` | SPI Master Out | Output | Hardcoded in `gfx.cpp`, LCD data/command stream |
 | **GPIO27** | `SPI_DC` | Data / Command | Output | High = Data, Low = Command for ILI9488 controller |
 | **GPIO32** | `FUEL_TOUCH_PIN` | Fuel ADC | Input | Dedicated ADC1 Channel 4 pin for fuel level reading (resistive sender; capacitive touch removed in v1.3.6) |
 | **GPIO33** | `HALL_SENSOR_PIN` | Hall Interrupt | Input (Pullup) | Falling-edge hardware interrupt for wheel magnet pulses |
 | **GPIO34** | `LIGHT_SENSOR_PIN` | Ambient Light | Input (No Pull) | LDR ambient light sensor for auto-brightness (calibrated via `/api/ambient/cal-dark` / `cal-bright`) |
-| **GPIO35** | `BATTERY_SENSE_PIN`| Battery ADC | Input (No Pull) | Connected to 5.7:1 precision resistor divider node |
+| **GPIO35** | `BATTERY_SENSE_PIN` | Battery ADC | Input (No Pull) | Connected to 5.7:1 precision resistor divider node |
 | **GPIO36** | `TEMP_SENSE_PIN` | Engine Temp ADC | Input (No Pull) | Connected to NTC thermistor / balance resistor divider node |
 
 > [!IMPORTANT]
 > GPIO32 is dedicated to the fuel ADC input to avoid pin-sharing conflicts with the GPIO33 Hall interrupt hardware line.
 
 > [!NOTE]
-> The current code carries temporary isolation-test pins for `RXD2` (GPIO16) and `TXD2` (GPIO17), as flagged in `dashboard.h`. The matrix above reflects the board's intended wiring (GPIO25/26 for GNSS serial).
+> This matrix matches the code (`src/dashboard.h` pin defines and the hardcoded display SPI pins in `src/gfx.cpp`), which is the source of truth. The GNSS serial pair moved from GPIO25/26 to **GPIO16/17** during the pin-swap test and stayed there. The display SPI bus has no MISO line (`cfg.pin_miso = -1`), and GPIO21/22 (former compass I²C) are unused.
 
 ---
 
