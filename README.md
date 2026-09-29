@@ -317,6 +317,9 @@ Dashboard++ embeds a single-page management portal directly into flash memory (`
 - **SoftAP Mode:** Emits AP SSID `Dashboard_Config` (Default IP: `192.168.4.1`). Always up alongside the client connection (`WIFI_AP_STA`), secured by `AP_PASSWORD` (empty or 8–63 characters).
 - **Multi-SSID Client Mode:** Can store up to 4 fallback WiFi network profiles (`WIFI_SSID_1` through `WIFI_SSID_4`). Automatically attempts connection on boot.
 
+> [!IMPORTANT]
+> **Access model (deliberate).** The config portal and the REST API have **no login** — access control is the Wi-Fi itself. `AP_PASSWORD` must be empty or 8–63 characters; a shorter value is rejected and the default (`12345678`) is restored, so the hotspot can never come up with a password the ESP32 silently refused. **Change that default before using the dashboard on a public network**: anyone who joins the hotspot (or reaches the dashboard's LAN IP) can change settings and flash firmware.
+
 ### Web UI Features
 The management portal features a modern grouped card-based layout:
 - **Collapsible sections** with smooth accordion animations (non-JS fallback)
@@ -419,7 +422,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `WIFI_RETRY_MODE` (default=1): Search policy — `0` = one cycle, `1` = fixed-time (`WIFI_RETRY_SECONDS`), `2` = search forever. Same policy governs reconnects after a lost link.
 - `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
 - `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull (checks once per boot while enabled).
-- `OTA_PULL_URL` (default=""): HTTPS URL of the target firmware binary.
+- `OTA_PULL_URL` (default=""): HTTPS URL of the update **manifest** — either JSON with `version` + `firmware_url`, or the GitHub `releases/latest` API URL (first `.bin` asset is used). The matching signature is fetched from `<firmware_url>.sig`.
 - `VERSION_OVERRIDE` (default=""): Optional version **label**. When set, the unit reports this string instead of its compiled-in build version (`FW_VERSION` in `src/config.cpp`) — for display and as the reference version of the cloud OTA check, which is how you test an update pull against an arbitrary version. It never changes the firmware image, and nothing fetched from the network ever writes it (the previous behaviour of storing the manifest's version is why a unit could report a version it never ran). The real build version is always exposed read-only as `build_version` (`GET /api/config`) and shown in the WebUI (System → Firmware Update). NVS key `VER_OVR`.
 
 #### Ambient Light (Auto-Brightness)
@@ -521,6 +524,67 @@ platformio run -t upload --upload-port 192.168.4.1
 2. Open the **System Actions** section.
 3. Click **Choose File**, select the `.pio/build/esp32dev/firmware.bin` file, and click **Upload**.
 
+The upload path is a local developer path: it is **not** signature-checked, but it
+is bounded by the real OTA partition size, and an upload whose byte count is
+inconsistent or whose ESP image header does not look like firmware (magic `0xE9`,
+plausible segment count, at least 4 KB) is discarded instead of activated.
+
+#### Cloud OTA Pull & Firmware Signing
+
+The cloud pull (Web UI → **System & Modes** → *Cloud OTA Pull*) reads a small JSON
+manifest from `OTA_PULL_URL`, then downloads and flashes the image it points at:
+
+```json
+{ "version": "1.3.9",
+  "firmware_url": "https://github.com/alefinot/Dashboard-for-ESP32/releases/download/V1.3.9/firmware.bin" }
+```
+
+`OTA_PULL_URL` may also point straight at the GitHub API
+(`https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest`), in
+which case the first `.bin` asset of that release is used — keep **one** `.bin`
+asset per release so the wrong file can never be picked.
+
+Every pulled image is verified before it is allowed to boot:
+
+| Guard | What happens when it fails |
+|---|---|
+| TLS certificate checked against the CA bundle compiled into the core | connection refused, mbedTLS reason logged |
+| Manifest version differs from the compiled-in `FW_VERSION` | "already up-to-date", nothing downloaded |
+| Sibling asset `<firmware_url>.sig` exists and is readable | update refused (a missing signature is never a pass) |
+| ECDSA P-256 / SHA-256 signature valid over `sha256(firmware.bin)` + version | slot discarded, no reboot, reason shown in the Web UI |
+| Every byte hashed exactly once | byte-range resume is switched off while signing is enforced; the image restarts from byte 0 |
+
+`Update.end(true)` — the call that makes the new slot bootable — runs **only
+after** the signature verifies. The public key is compiled into the firmware
+(`include/ota_pubkey.h`); a firmware image built without it refuses every pull.
+
+**Signing a release (maintainer side)**
+
+The private key never enters the repository (`keys/` is gitignored); only its
+public half is committed, generated into `include/ota_pubkey.h` (generated file —
+regenerate with the script, never hand-edit):
+
+```bash
+python scripts/ota_sign.py keygen                                  # once, on the signing machine
+python scripts/ota_sign.py pubkey                                  # refresh include/ota_pubkey.h
+python scripts/ota_sign.py sign   1.3.9 .pio/build/esp32dev/firmware.bin
+python scripts/ota_sign.py verify 1.3.9 .pio/build/esp32dev/firmware.bin
+```
+
+`sign` writes `firmware.bin.sig` next to the binary — a DER ECDSA P-256 signature
+over `sha256(firmware.bin) || 0x0A || version`. Upload it as a **sibling release
+asset**; a release without the `.sig` will not install on any device. The signed
+version is the plain number (`1.3.9`), while the release *tag* is `V1.3.9`.
+
+Keep `keys/ota_sign_key.pem` backed up offline and private: lose it and no future
+signed release can be built; leak it and anyone can ship firmware to every device.
+
+> [!NOTE]
+> **Bench builds only.** Adding `-DOTA_ALLOW_UNSIGNED` to `platformio.ini` builds
+> the pull path without the signature check (the Web UI logs a warning on every
+> pull). Never publish a release built with that flag. USB serial flashing and
+> ArduinoOTA (`espota`) stay unsigned by design — they are local developer paths.
+
 ---
 
 ## Simulation & Demo Mode
@@ -541,6 +605,17 @@ In Demo Mode:
 ---
 
 ## Changelog
+
+### V1.3.9 — Signed OTA firmware, truthful version identity, hotspot password guard
+- **Firmware signing (cloud OTA pull)** — every pulled image is verified against an ECDSA P-256 / SHA-256 signature (`firmware.bin.sig`, a sibling release asset) before `Update.end()` marks the new slot bootable. The public key is compiled in (`include/ota_pubkey.h`, generated by `scripts/ota_sign.py`); the private key stays on the signing machine (`keys/`, gitignored). Missing signature, wrong version or a tampered binary = update refused, current firmware untouched. See *Cloud OTA Pull & Firmware Signing*.
+- **TLS is actually verified** — the pull used `setInsecure()`, which accepted any certificate. HTTPS pulls now validate the server against the CA bundle built into the core, and a rejected certificate is logged with the mbedTLS reason instead of looking like a dead server.
+- **No resume while signing** — a signature covers the whole image, so a byte-range resume would skip bytes the hash never saw. A stalled signed pull discards the partial slot and restarts from byte 0.
+- **One flash session at a time (#24)** — the 15-minute pull-overrun guard used to clear the "busy" latch while the first session still held the OTA slot open, letting a second pull write into the same slot. `Update.begin/abort/end` are now behind an interlock shared by the pull task and the Web UI upload; a reset with a session still open locks OTA until reboot.
+- **Web OTA upload hardening (#28)** — uploads are bounded by the real OTA partition size, every `Update.write()` is checked, the session aborts on the first error, and a file that is too small or does not start with a plausible ESP image header is discarded instead of being activated and boot-looping the unit.
+- **Version identity is the build, not NVS** — `FW_VERSION` in `src/config.cpp` is the compiled-in truth; the WebUI field is now a display/pull-test label (`VERSION_OVERRIDE`). The manifest's claimed version is no longer written to NVS, so a device can no longer report "up to date" with a firmware it never ran.
+- **Boot provenance** — the `bootinfo` namespace records what was running before: `BOOTINFO: firmware v1.3.9 running (previous: 1.3.8)` after an update, plus `build_version` / `version_override` / `previous_version` in `/api/ota/check`.
+- **Hotspot password guard (#45)** — an `AP_PASSWORD` of 1–7 characters was rejected by the ESP32 radio, so the config hotspot silently never came up (and the old password stayed in NVS). Short values are now refused with a log line and the default is restored; `WiFi.softAP()` failures are checked and logged; the WebUI warns while the default password is in use.
+- Flash usage grows from ~84.7 % to ~88.6 % of the OTA slot (mbedTLS ECDSA/SHA-256 verification code); RAM is unchanged.
 
 ### V1.3.8 — Odometer accuracy: fusion double-count fix, GPS anchor fix, persistence and sensor hardening
 - **Fusion double-count fixed** — in Sensor Fusion mode the distance source is chosen on the **wheel rolling state**, not on whether one 20 ms tick happened to catch a Hall pulse. Previously most 1 Hz GPS-fix ticks contained no pulse and ran the GPS distance branch *on top of* the Hall distance already counted in the other ticks, so the odometer grew up to ~2× at speed.

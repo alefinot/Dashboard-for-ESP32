@@ -13,6 +13,7 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
 - When the user says **"release the ESP code"**, bump the version by **+0.0.1** (patch bump, e.g. `1.3.2` → `1.3.3`) unless the user explicitly states the exact target version.
 - The firmware version string is `FW_VERSION` in `src/config.cpp` — **one compiled-in constant**. It is not stored in NVS and nothing fetched from the network can change it. (`VERSION_OVERRIDE` is a separate, user-set label for display and pull testing — not the build identity. The old `OTA_CURRENT_VERSION` / NVS `OTA_VER` pair is gone.)
 - Commit the bump on `main` (per rule 2).
+- **Sign the release binary before publishing**: `python scripts/ota_sign.py sign <version> .pio/build/esp32dev/firmware.bin` (plain version, no leading `V`), then upload the generated `firmware.bin.sig` as a release asset (rule 27). The private key lives in `keys/` — gitignored, never committed, never pushed; `include/ota_pubkey.h` is generated from it (`python scripts/ota_sign.py pubkey`) and is committed. A release without its `.sig` will not install on any device.
 
 ## 4. README on Important Releases
 - If a version bump includes **important changes** that must be reflected in the documentation, update `README.md` too (changelog entry and any affected reference sections).
@@ -100,9 +101,9 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
 ## 26. Plan-First for Big Features
 - Non-trivial features: first write an implementation plan into `Implementation plans/` and get the user's sign-off before coding starts.
 
-## 27. Release Assets — Always Ship firmware.bin and the APK
-- Every GitHub release must attach **both** artifacts: the ESP firmware binary (`.pio/build/esp32dev/firmware.bin`) and the Android app debug APK (`android/app/build/outputs/apk/debug/app-debug.apk`).
-- A release with only one of the two artifacts is incomplete.
+## 27. Release Assets — Always Ship firmware.bin, firmware.bin.sig and the APK
+- Every GitHub release must attach **all three** artifacts: the ESP firmware binary (`.pio/build/esp32dev/firmware.bin`), its signature (`.pio/build/esp32dev/firmware.bin.sig`, produced by `scripts/ota_sign.py` for that exact version — rule 3), and the Android app debug APK (`android/app/build/outputs/apk/debug/app-debug.apk`).
+- A release missing any of the three is incomplete. Ship exactly **one** `.bin` asset per release — the pull path takes the first `.bin` it sees.
 
 ## 28. GitHub Release Title Format
 - Release titles are **just `Vx.x.x`** (e.g. `V1.3.3`) — no extra text, matching how they were titled before.
