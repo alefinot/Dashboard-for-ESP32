@@ -369,6 +369,18 @@ The management portal features a modern grouped card-based layout:
 
 Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, serialize, and deserialize over 60 configuration variables from ESP32 NVS flash storage.
 
+### Numeric Range Validation (issue #21)
+
+Every numeric parameter carries an explicit **known-good band** in its `CFG_INT` / `CFG_UINT` / `CFG_FLT` declaration in `src/config.cpp` — that table is the single source of truth. The band is enforced on **all three write paths** (boot load, `POST /api/config`, and config restore): an out-of-range value is **clamped to the nearest end of the band, logged by name, and the clamped value is what gets written to NVS** — a bad value never reaches the running system, and a restore is never rejected outright because one field is off.
+
+- **Non-finite floats** (`nan`, `inf`) fall back to the parameter's default rather than poisoning a calculation.
+- **Cross-field rules** are repaired after the per-field clamps, in one place (`sanitizeConfigPairs()`): `TEMP_BAR_MIN < TEMP_BAR_MAX`, `TEMP_WARN_YEL <= TEMP_WARN_RED`, `FUEL_WARN_RED <= FUEL_WARN_YEL` (fuel is mirrored — it turns red *below* its marker), `LIGHT_SENSOR_DARK_VAL < LIGHT_SENSOR_BRIGHT_VAL`, `MIN_SATELLITES <= OPTIMAL_SATELLITES`, `CPU_THROTTLE_TEMP_WARN <= CPU_THROTTLE_TEMP_CRIT`.
+- **Enumerated parameters** are snapped to the nearest legal step: `GPS_BAUD` to a standard u-blox rate (1200…921600), `MANUAL_CPU_FREQ` to 80 / 160 / 240 MHz. `DISPLAY_ROTATION` is masked to 0–3, `WHEEL_CIRCUMFERENCE_MM` has always been floored at 1 (it is a divisor).
+- **Fuel calibration table** (`touchTable`) cells are clamped to the raw ADC range 0–4095 on load and on restore.
+- The **WebUI mirrors the same bands** so a bad entry is caught before it is posted: numeric inputs get `min`/`max` from a `FIRMWARE_LIMITS` table generated out of `config.cpp` (`python scripts/make_webui_limits.py` regenerates it after any band change), an out-of-range entry is corrected in the box and listed in the save message, and an emptied numeric box falls back to its default instead of posting a blank (which the device used to read as `0`).
+
+Bands are also checked offline by `python scripts/verify_config_ranges.py`: every numeric parameter must have a band, no shipped default may fall outside its own band, and the cross-field rules must hold for the factory values.
+
 ### Key Configuration Categories
 
 #### System & Performance

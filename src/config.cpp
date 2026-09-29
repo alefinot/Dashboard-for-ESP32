@@ -278,23 +278,93 @@ int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400,
 // ----------------------------------------------------------------------------
 // NVS config macros
 // ----------------------------------------------------------------------------
-#define CFG_INT(var, nvsKey, defVal)                                           \
+// Every numeric parameter carries its own allowed band next to its default
+// value (issue #21: CFG_INT/CFG_FLT applied whatever the source handed them -
+// a negative wheel circumference, TARGET_FPS 0, an 8-digit odometer - and that
+// value then went straight into division by zero, buffer sizing, the display
+// layout and the CPU/SPI clocks). The band is enforced on both paths that can
+// feed a value in:
+//   mode 0 - the NVS load at boot (protects against a corrupted or hand-edited
+//            namespace, and against a value written by an older firmware),
+//   mode 2 - POST /api/config and the backup restore, before the value is
+//            written back to NVS, so a rejected value is never stored.
+// Out-of-range values are clamped and logged, never rejected: a unit that was
+// handed a bad backup must still boot and stay reachable on the config portal.
+// sanitizeConfigPairs() below adds the cross-field rules a single band cannot
+// express (min/max ordering, satellite thresholds, standard baud and CPU clock
+// steps) and sanitizeDigitCounts() keeps the digit-count budget.
+static void clampCfgInt(const char *name, int *v, int lo, int hi) {
+  if (*v < lo || *v > hi) {
+    logPrintf("Config: %s=%d out of range [%d..%d], clamped to %d\n", name, *v,
+              lo, hi, (*v < lo) ? lo : hi);
+    *v = (*v < lo) ? lo : hi;
+  }
+}
+
+// Floats need their own path: a NaN compares false against everything, so
+// constrain() would pass it straight through and it would then poison every
+// later computation (a NaN wheel circumference makes the odometer NaN forever).
+// A non-finite value falls back to the parameter's default.
+static void clampCfgFloat(const char *name, float *v, float lo, float hi,
+                          float dflt) {
+  if (!std::isfinite((double)*v)) {
+    logPrintf("Config: %s is not a finite number, using default %.3f\n", name,
+              (double)dflt);
+    *v = dflt;
+    return;
+  }
+  if (*v < lo || *v > hi) {
+    logPrintf("Config: %s=%.3f out of range [%.3f..%.3f], clamped to %.3f\n",
+              name, (double)*v, (double)lo, (double)hi,
+              (double)(*v < lo ? lo : hi));
+    *v = (*v < lo) ? lo : hi;
+  }
+}
+
+// Unsigned parameters are validated through a signed window: a value posted as
+// negative wraps to a huge unsigned number, which would clamp to the top of the
+// band instead of the bottom. The SPI clock is the case this protects.
+static uint32_t clampCfgUnsigned(const char *name, long long v, long long lo,
+                                 long long hi) {
+  if (v < lo || v > hi) {
+    logPrintf("Config: %s=%lld out of range [%lld..%lld], clamped to %lld\n",
+              name, v, lo, hi, v < lo ? lo : hi);
+    v = (v < lo) ? lo : hi;
+  }
+  return (uint32_t)v;
+}
+
+#define CFG_INT(var, nvsKey, defVal, lo, hi)                                   \
   if (mode == 0) {                                                             \
     var = pref.getInt(nvsKey, defVal);                                         \
+    clampCfgInt(#var, &var, lo, hi);                                           \
   } else if (mode == 1) {                                                      \
     (*doc)[#var] = var;                                                        \
   } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
     var = (*doc)[#var].as<int>();                                              \
+    clampCfgInt(#var, &var, lo, hi);                                           \
     pref.putInt(nvsKey, var);                                                  \
   }
 
-#define CFG_FLT(var, nvsKey, defVal)                                           \
+#define CFG_UINT(var, nvsKey, defVal, lo, hi)                                   \
+  if (mode == 0) {                                                             \
+    var = clampCfgUnsigned(#var, pref.getInt(nvsKey, defVal), lo, hi);          \
+  } else if (mode == 1) {                                                      \
+    (*doc)[#var] = var;                                                        \
+  } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
+    var = clampCfgUnsigned(#var, (*doc)[#var].as<long long>(), lo, hi);         \
+    pref.putInt(nvsKey, (int)var);                                             \
+  }
+
+#define CFG_FLT(var, nvsKey, defVal, lo, hi)                                   \
   if (mode == 0) {                                                             \
     var = pref.getFloat(nvsKey, defVal);                                       \
+    clampCfgFloat(#var, &var, lo, hi, (float)defVal);                          \
   } else if (mode == 1) {                                                      \
     (*doc)[#var] = var;                                                        \
   } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
     var = (*doc)[#var].as<float>();                                            \
+    clampCfgFloat(#var, &var, lo, hi, (float)defVal);                          \
     pref.putFloat(nvsKey, var);                                                \
   }
 
@@ -474,37 +544,131 @@ void sanitizeDigitCounts() {
   }
 }
 
+// ----------------------------------------------------------------------------
+// Cross-field and enumerated config validation (issue #21)
+// ----------------------------------------------------------------------------
+// A per-parameter band cannot express the rules that involve two parameters, or
+// the ones where only a handful of values are meaningful. Both cases exist in
+// this config:
+//   - a bar whose maximum is below its minimum renders as a permanently full or
+//     permanently empty gauge, and a warning threshold outside the bar band can
+//     never be reached (or is always reached);
+//   - GPS_BAUD and MANUAL_CPU_FREQ are enumerations wearing integer clothes:
+//     the UART only works at standard rates and setCpuFrequencyMhz() only
+//     accepts 80/160/240 - an arbitrary value in between silently breaks the
+//     link or leaves the CPU at the previous clock.
+// Like sanitizeDigitCounts(), corrections are RAM-only: an out-of-range stored
+// value is corrected again on every load, and the next save stores the
+// corrected one.
+static void snapToNearest(const char *name, int *v, const int *options,
+                          int count, int lo, int hi) {
+  if (*v < lo || *v > hi) return;  // the band check already reported this one
+  for (int i = 0; i < count; i++)
+    if (options[i] == *v) return;
+  int best = options[0];
+  for (int i = 1; i < count; i++) {
+    if (abs(options[i] - *v) < abs(best - *v)) best = options[i];
+  }
+  logPrintf("Config: %s=%d is not a supported value, using %d\n", name, *v,
+            best);
+  *v = best;
+}
+
+void sanitizeConfigPairs() {
+  // Bar ranges: min must stay below max.
+  if (TEMP_BAR_MIN >= TEMP_BAR_MAX) {
+    logPrintf("Config: TEMP_BAR_MIN=%d >= TEMP_BAR_MAX=%d, using bar %d..%d\n",
+              TEMP_BAR_MIN, TEMP_BAR_MAX, TEMP_BAR_MIN, TEMP_BAR_MIN + 1);
+    TEMP_BAR_MAX = TEMP_BAR_MIN + 1;
+  }
+  // Colour thresholds are hot-side markers: RED is the hotter of the two and
+  // both live inside the bar band, otherwise a colour can never show.
+  if (TEMP_WARN_YEL > TEMP_WARN_RED) {
+    logPrintf("Config: TEMP_WARN_YEL=%d above TEMP_WARN_RED=%d, lowered\n",
+              TEMP_WARN_YEL, TEMP_WARN_RED);
+    TEMP_WARN_YEL = TEMP_WARN_RED;
+  }
+  if (TEMP_WARN_RED < TEMP_BAR_MIN || TEMP_WARN_RED > TEMP_BAR_MAX)
+    logPrintf("Config: TEMP_WARN_RED=%d outside the bar %d..%d, it will never "
+              "show\n",
+              TEMP_WARN_RED, TEMP_BAR_MIN, TEMP_BAR_MAX);
+  // Fuel is the mirror image: the gauge turns red BELOW its marker, so the red
+  // threshold has to sit under the yellow one.
+  if (FUEL_WARN_RED > FUEL_WARN_YEL) {
+    logPrintf("Config: FUEL_WARN_RED=%d above FUEL_WARN_YEL=%d, lowered\n",
+              FUEL_WARN_RED, FUEL_WARN_YEL);
+    FUEL_WARN_RED = FUEL_WARN_YEL;
+  }
+  // Automatic brightness compares the light sensor against these two values.
+  if (LIGHT_SENSOR_DARK_VAL >= LIGHT_SENSOR_BRIGHT_VAL) {
+    logPrintf("Config: LIGHT_SENSOR_DARK_VAL=%d >= LIGHT_SENSOR_BRIGHT_VAL=%d, "
+              "using %d..%d\n",
+              LIGHT_SENSOR_DARK_VAL, LIGHT_SENSOR_BRIGHT_VAL,
+              LIGHT_SENSOR_DARK_VAL, LIGHT_SENSOR_DARK_VAL + 1);
+    LIGHT_SENSOR_BRIGHT_VAL = LIGHT_SENSOR_DARK_VAL + 1;
+  }
+  // The GPS quality ramp: optimal must not sit below the minimum.
+  if (OPTIMAL_SATELLITES < MIN_SATELLITES) {
+    logPrintf("Config: OPTIMAL_SATELLITES=%d below MIN_SATELLITES=%d, raised\n",
+              OPTIMAL_SATELLITES, MIN_SATELLITES);
+    OPTIMAL_SATELLITES = MIN_SATELLITES;
+  }
+  // CPU throttling: the warning has to come before the critical step-down.
+  if (CPU_THROTTLE_TEMP_CRIT < CPU_THROTTLE_TEMP_WARN) {
+    logPrintf("Config: CPU_THROTTLE_TEMP_CRIT=%d below WARN=%d, raised\n",
+              CPU_THROTTLE_TEMP_CRIT, CPU_THROTTLE_TEMP_WARN);
+    CPU_THROTTLE_TEMP_CRIT = CPU_THROTTLE_TEMP_WARN;
+  }
+  // The dashboard centre has to be on the panel.
+  if (BIG_CENTER_X > DISPLAY_WIDTH || BIG_CENTER_Y > DISPLAY_HEIGHT) {
+    logPrintf("Config: BIG_CENTER %d,%d outside the %dx%d panel\n",
+              BIG_CENTER_X, BIG_CENTER_Y, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    BIG_CENTER_X = constrain(BIG_CENTER_X, 0, DISPLAY_WIDTH);
+    BIG_CENTER_Y = constrain(BIG_CENTER_Y, 0, DISPLAY_HEIGHT);
+  }
+  // UART rates the u-blox side actually uses, and the three CPU clocks the
+  // Arduino core supports.
+  static const int BAUDS[] = {1200,   2400,   4800,   9600,   19200,  38400,
+                              57600,  74400,  115200, 230400, 460800, 921600};
+  snapToNearest("GPS_BAUD", &GPS_BAUD, BAUDS,
+                (int)(sizeof(BAUDS) / sizeof(BAUDS[0])), 1200, 921600);
+  static const int CPU_MHZ[] = {80, 160, 240};
+  snapToNearest("MANUAL_CPU_FREQ", &MANUAL_CPU_FREQ, CPU_MHZ,
+                (int)(sizeof(CPU_MHZ) / sizeof(CPU_MHZ[0])), 80, 240);
+}
+
 void processConfig(int mode, JsonDocument *doc) {
   Preferences pref;
   if (mode == 0 || mode == 2)
     pref.begin("cfg", false);
 
-  CFG_INT(DISPLAY_ROTATION, "DISP_ROT", 1);
+  CFG_INT(DISPLAY_ROTATION, "DISP_ROT", 1, 0, 3);
   CFG_BOOL(UNITS_IMPERIAL, "UNITS_IMP", false);
   CFG_BOOL(ADV_MODE, "ADV_MODE", false);
-  CFG_INT(SPI_BUS_SPEED, "SPI_FREQ", 60000000);
-  CFG_INT(DISPLAY_WIDTH, "DISP_W", 480);
-  CFG_INT(DISPLAY_HEIGHT, "DISP_H", 320);
-  CFG_INT(TARGET_FPS, "TGT_FPS", 60);
-  CFG_INT(BACKLIGHT_BRIGHTNESS, "BL_BRIGHT", 100);
+  CFG_UINT(SPI_BUS_SPEED, "SPI_FREQ", 60000000, SPI_SPEED_MIN_HZ,
+           SPI_SPEED_MAX_HZ);
+  CFG_INT(DISPLAY_WIDTH, "DISP_W", 480, 16, 2048);
+  CFG_INT(DISPLAY_HEIGHT, "DISP_H", 320, 16, 2048);
+  CFG_INT(TARGET_FPS, "TGT_FPS", 60, 1, 120);
+  CFG_INT(BACKLIGHT_BRIGHTNESS, "BL_BRIGHT", 100, 0, 100);
   CFG_BOOL(ENABLE_AUTO_BRIGHTNESS, "EN_AUTO_BL", true);
-  CFG_INT(LIGHT_SENSOR_DARK_VAL, "LIGHT_DARK", 432);
-  CFG_INT(LIGHT_SENSOR_BRIGHT_VAL, "LIGHT_BRIGHT", 2851);
-  CFG_INT(AUTO_BRIGHT_DARK, "AB_DARK", 13);
-  CFG_INT(AUTO_BRIGHT_LIGHT, "AB_LIGHT", 100);
-  CFG_INT(AUTO_BRIGHT_FADE_MS, "AB_FADE", 4000);
-  CFG_INT(FADE_DURATION_MS, "FADE_DUR", 700);
+  CFG_INT(LIGHT_SENSOR_DARK_VAL, "LIGHT_DARK", 432, 0, 4095);
+  CFG_INT(LIGHT_SENSOR_BRIGHT_VAL, "LIGHT_BRIGHT", 2851, 0, 4095);
+  CFG_INT(AUTO_BRIGHT_DARK, "AB_DARK", 13, 0, 100);
+  CFG_INT(AUTO_BRIGHT_LIGHT, "AB_LIGHT", 100, 0, 100);
+  CFG_INT(AUTO_BRIGHT_FADE_MS, "AB_FADE", 4000, 0, 60000);
+  CFG_INT(FADE_DURATION_MS, "FADE_DUR", 700, 0, 10000);
   CFG_STR(SPLASH_SIGNATURE, "SPLASH_SIG", "by @ale.finot");
   CFG_STR(REBOOT_SIGNATURE, "REBOOT_SIG", "Dashboard++ by @ale.finot");
   CFG_STR(DASHBOARD_SIGNATURE, "DASH_SIG",
           "<<<<<<    Dashboard++ by @ale.finot    >>>>>>");
 
-  CFG_INT(TEMP_BAR_MIN, "TMP_BAR_MIN", 10);
-  CFG_INT(TEMP_BAR_MAX, "TMP_BAR_MAX", 110);
-  CFG_INT(TEMP_WARN_RED, "TMP_WRN_R", 90);
-  CFG_INT(TEMP_WARN_YEL, "TMP_WRN_Y", 45);
-  CFG_INT(FUEL_WARN_RED, "FUL_WRN_R", 20);
-  CFG_INT(FUEL_WARN_YEL, "FUL_WRN_Y", 45);
+  CFG_INT(TEMP_BAR_MIN, "TMP_BAR_MIN", 10, -40, 300);
+  CFG_INT(TEMP_BAR_MAX, "TMP_BAR_MAX", 110, -40, 300);
+  CFG_INT(TEMP_WARN_RED, "TMP_WRN_R", 90, -40, 300);
+  CFG_INT(TEMP_WARN_YEL, "TMP_WRN_Y", 45, -40, 300);
+  CFG_INT(FUEL_WARN_RED, "FUL_WRN_R", 20, 0, 100);
+  CFG_INT(FUEL_WARN_YEL, "FUL_WRN_Y", 45, 0, 100);
 
   CFG_STR(COLOR_TEMP_NORM, "C_TMP_N", "#00ffff");
   CFG_STR(COLOR_TEMP_WARN, "C_TMP_W", "#ff8c00");
@@ -514,78 +678,78 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_STR(COLOR_FUEL_CRIT, "C_FUL_C", "#ff0000");
   CFG_STR(GHOST_COLOR_STR, "GHOST_C", "#474747");
 
-  CFG_FLT(WHEEL_CIRCUMFERENCE_MM, "WHL_CIRC", 1650.0f);
-  CFG_FLT(FUEL_FILTER_ALPHA, "FUEL_FILT", 0.08f);
-  CFG_FLT(REFUEL_RESET_LITERS, "RFUEL_RST", 2.0f);
-  CFG_INT(FUEL_TOUCH_POINTS, "FTL_PTS", 8);
-  CFG_FLT(BATTERY_SCALE, "BAT_SCALE", 5.7f);
-  CFG_FLT(BATTERY_OFFSET, "BAT_OFFS", 0.2f);
-  CFG_FLT(NTC_R_BALANCE, "NTC_BAL", 10000.0f);
-  CFG_FLT(NTC_R25, "NTC_R25", 10000.0f);
-  CFG_FLT(NTC_BETA, "NTC_BETA", 3950.0f);
-  CFG_FLT(NTC_TEMP_OFFSET, "NTC_OFFS", 0.0f);
-  CFG_INT(GPS_BAUD, "GPS_BAUD", 115200);
-  CFG_INT(MIN_SATELLITES, "MIN_SAT", 8);
-  CFG_INT(OPTIMAL_SATELLITES, "OPT_SAT", 12);
-  CFG_FLT(MAX_SPEED_DELTA_KMH, "MAX_SPD_DELT", 5.0f);
-  CFG_FLT(MIN_SPEED_THRESHOLD, "MIN_SPD_THR", 1.0f);
-  CFG_FLT(GPS_START_KMH, "GPS_START", 3.0f);
-  CFG_INT(GPS_STOP_SETTLE_MS, "GPS_STL_MS", 1500);
-  CFG_FLT(GPS_MIN_DEV_KMH, "GPS_MIN_DV", 1.0f);
-  CFG_INT(SPEED_SOURCE_MODE, "SPD_SRC_MODE", 2);
-  CFG_INT(SPEED_SOURCE_HOLD_MS, "SPD_SRC_HOLD", 500);
-  CFG_INT(HALL_MEDIAN_SAMPLES, "HALL_MED_N", 3);
-  CFG_INT(HALL_PERIOD_GUARD, "HALL_PRD_GRD", 8);
-  CFG_INT(HALL_PULSE_MIN_US, "HALL_PL_MIN", 150);
-  CFG_FLT(ACCEL_START_SPEED, "ACC_STRT", 1.0f);
-  CFG_FLT(ACCEL_TARGET_SPEED, "ACC_TGT", 50.0f);
-  CFG_FLT(ACCEL_MAX_TIME, "ACC_MAX_T", 9.99f);
+  CFG_FLT(WHEEL_CIRCUMFERENCE_MM, "WHL_CIRC", 1650.0f, 50.0f, 10000.0f);
+  CFG_FLT(FUEL_FILTER_ALPHA, "FUEL_FILT", 0.08f, 0.001f, 1.0f);
+  CFG_FLT(REFUEL_RESET_LITERS, "RFUEL_RST", 2.0f, 0.1f, 100.0f);
+  CFG_INT(FUEL_TOUCH_POINTS, "FTL_PTS", 8, 2, 20);
+  CFG_FLT(BATTERY_SCALE, "BAT_SCALE", 5.7f, 0.01f, 1000.0f);
+  CFG_FLT(BATTERY_OFFSET, "BAT_OFFS", 0.2f, -50.0f, 50.0f);
+  CFG_FLT(NTC_R_BALANCE, "NTC_BAL", 10000.0f, 100.0f, 10000000.0f);
+  CFG_FLT(NTC_R25, "NTC_R25", 10000.0f, 100.0f, 10000000.0f);
+  CFG_FLT(NTC_BETA, "NTC_BETA", 3950.0f, 1000.0f, 20000.0f);
+  CFG_FLT(NTC_TEMP_OFFSET, "NTC_OFFS", 0.0f, -50.0f, 50.0f);
+  CFG_INT(GPS_BAUD, "GPS_BAUD", 115200, 1200, 921600);
+  CFG_INT(MIN_SATELLITES, "MIN_SAT", 8, 1, 32);
+  CFG_INT(OPTIMAL_SATELLITES, "OPT_SAT", 12, 1, 32);
+  CFG_FLT(MAX_SPEED_DELTA_KMH, "MAX_SPD_DELT", 5.0f, 0.01f, 100.0f);
+  CFG_FLT(MIN_SPEED_THRESHOLD, "MIN_SPD_THR", 1.0f, 0.0f, 50.0f);
+  CFG_FLT(GPS_START_KMH, "GPS_START", 3.0f, 0.0f, 200.0f);
+  CFG_INT(GPS_STOP_SETTLE_MS, "GPS_STL_MS", 1500, 0, 60000);
+  CFG_FLT(GPS_MIN_DEV_KMH, "GPS_MIN_DV", 1.0f, 0.0f, 50.0f);
+  CFG_INT(SPEED_SOURCE_MODE, "SPD_SRC_MODE", 2, 0, 2);
+  CFG_INT(SPEED_SOURCE_HOLD_MS, "SPD_SRC_HOLD", 500, 0, 10000);
+  CFG_INT(HALL_MEDIAN_SAMPLES, "HALL_MED_N", 3, 1, 31);
+  CFG_INT(HALL_PERIOD_GUARD, "HALL_PRD_GRD", 8, 1, 100);
+  CFG_INT(HALL_PULSE_MIN_US, "HALL_PL_MIN", 150, 10, 1000);
+  CFG_FLT(ACCEL_START_SPEED, "ACC_STRT", 1.0f, 0.0f, 200.0f);
+  CFG_FLT(ACCEL_TARGET_SPEED, "ACC_TGT", 50.0f, 1.0f, 400.0f);
+  CFG_FLT(ACCEL_MAX_TIME, "ACC_MAX_T", 9.99f, 0.1f, 999.99f);
 
   CFG_STR(ACCEL_BADGE_LINE1, "ACC_BDG_1", "0-50");
   CFG_STR(ACCEL_BADGE_LINE2, "ACC_BDG_2", "km/h");
 
-  CFG_INT(BIG_CENTER_X, "BCX", 240);
-  CFG_INT(BIG_CENTER_Y, "BCY", 160);
+  CFG_INT(BIG_CENTER_X, "BCX", 240, 0, 4095);
+  CFG_INT(BIG_CENTER_Y, "BCY", 160, 0, 4095);
 
-  CFG_INT(OFFSET_BIG_TIME_X, "O_BTIME_X", 107);
-  CFG_INT(OFFSET_BIG_TIME_Y, "O_BTIME_Y", -91);
-  CFG_INT(OFFSET_BIG_DATE_X, "O_BDATE_X", -131);
-  CFG_INT(OFFSET_BIG_DATE_Y, "O_BDATE_Y", -91);
-  CFG_INT(OFFSET_BIG_SIGNATURE_X, "O_BSIG_X", 0);
-  CFG_INT(OFFSET_BIG_SIGNATURE_Y, "O_BSIG_Y", -75);
-  CFG_INT(OFFSET_BIG_SPEED_NUM_X, "O_BSN_X", 0);
-  CFG_INT(OFFSET_BIG_SPEED_NUM_Y, "O_BSN_Y", -3);
-  CFG_INT(OFFSET_BIG_SPEED_UNIT_X, "O_BSU_X", 106);
-  CFG_INT(OFFSET_BIG_SPEED_UNIT_Y, "O_BSU_Y", 56);
-  CFG_INT(OFFSET_BIG_ODO_X, "O_BODO_X", 22);
-  CFG_INT(OFFSET_BIG_ODO_Y, "O_BODO_Y", 126);
-  CFG_INT(OFFSET_BIG_SAT_X, "O_BSAT_X", 179);
-  CFG_INT(OFFSET_BIG_SAT_Y, "O_BSAT_Y", -114);
-  CFG_INT(OFFSET_BIG_TMR_X, "O_BTMR_X", -53);
-  CFG_INT(OFFSET_BIG_TMR_Y, "O_BTMR_Y", -46);
-  CFG_INT(OFFSET_BIG_BAT_X, "O_BBAT_X", -112);
-  CFG_INT(OFFSET_BIG_BAT_Y, "O_BBAT_Y", 123);
-  CFG_INT(SIDEBAR_LEFT_X, "SBAR_L_X", 10);
-  CFG_INT(SIDEBAR_LEFT_Y, "SBAR_L_Y", 95);
-  CFG_INT(SIDEBAR_RIGHT_X, "SBAR_R_X", 462);
-  CFG_INT(SIDEBAR_RIGHT_Y, "SBAR_R_Y", 95);
-  CFG_INT(OFFSET_HALL_ICON_X, "O_HALL_X", 0);
-  CFG_INT(OFFSET_HALL_ICON_Y, "O_HALL_Y", -100);
-  CFG_INT(OFFSET_WIFI_ICON_X, "O_WIFI_X", 204);
-  CFG_INT(OFFSET_WIFI_ICON_Y, "O_WIFI_Y", -108);
-  CFG_INT(OFFSET_INST_KML_X, "O_INST_X", 60);
-  CFG_INT(OFFSET_INST_KML_Y, "O_INST_Y", -25);
-  CFG_INT(OFFSET_AVG_KML_X, "O_AVG_X", 160);
-  CFG_INT(OFFSET_AVG_KML_Y, "O_AVG_Y", -25);
-  CFG_INT(OFFSET_AVG_SPEED_X, "O_AVG_SPD_X", -163);
-  CFG_INT(OFFSET_AVG_SPEED_Y, "O_AVG_SPD_Y", -25);
-  CFG_INT(OFFSET_MAX_SPEED_X, "O_MAX_SPD_X", -60);
-  CFG_INT(OFFSET_MAX_SPEED_Y, "O_MAX_SPD_Y", -25);
-  CFG_INT(OFFSET_FUEL_LTRS_X, "O_FLTRS_X", 132);
-  CFG_INT(OFFSET_FUEL_LTRS_Y, "O_FLTRS_Y", 123);
+  CFG_INT(OFFSET_BIG_TIME_X, "O_BTIME_X", 107, -4096, 4096);
+  CFG_INT(OFFSET_BIG_TIME_Y, "O_BTIME_Y", -91, -4096, 4096);
+  CFG_INT(OFFSET_BIG_DATE_X, "O_BDATE_X", -131, -4096, 4096);
+  CFG_INT(OFFSET_BIG_DATE_Y, "O_BDATE_Y", -91, -4096, 4096);
+  CFG_INT(OFFSET_BIG_SIGNATURE_X, "O_BSIG_X", 0, -4096, 4096);
+  CFG_INT(OFFSET_BIG_SIGNATURE_Y, "O_BSIG_Y", -75, -4096, 4096);
+  CFG_INT(OFFSET_BIG_SPEED_NUM_X, "O_BSN_X", 0, -4096, 4096);
+  CFG_INT(OFFSET_BIG_SPEED_NUM_Y, "O_BSN_Y", -3, -4096, 4096);
+  CFG_INT(OFFSET_BIG_SPEED_UNIT_X, "O_BSU_X", 106, -4096, 4096);
+  CFG_INT(OFFSET_BIG_SPEED_UNIT_Y, "O_BSU_Y", 56, -4096, 4096);
+  CFG_INT(OFFSET_BIG_ODO_X, "O_BODO_X", 22, -4096, 4096);
+  CFG_INT(OFFSET_BIG_ODO_Y, "O_BODO_Y", 126, -4096, 4096);
+  CFG_INT(OFFSET_BIG_SAT_X, "O_BSAT_X", 179, -4096, 4096);
+  CFG_INT(OFFSET_BIG_SAT_Y, "O_BSAT_Y", -114, -4096, 4096);
+  CFG_INT(OFFSET_BIG_TMR_X, "O_BTMR_X", -53, -4096, 4096);
+  CFG_INT(OFFSET_BIG_TMR_Y, "O_BTMR_Y", -46, -4096, 4096);
+  CFG_INT(OFFSET_BIG_BAT_X, "O_BBAT_X", -112, -4096, 4096);
+  CFG_INT(OFFSET_BIG_BAT_Y, "O_BBAT_Y", 123, -4096, 4096);
+  CFG_INT(SIDEBAR_LEFT_X, "SBAR_L_X", 10, -4096, 4096);
+  CFG_INT(SIDEBAR_LEFT_Y, "SBAR_L_Y", 95, -4096, 4096);
+  CFG_INT(SIDEBAR_RIGHT_X, "SBAR_R_X", 462, -4096, 4096);
+  CFG_INT(SIDEBAR_RIGHT_Y, "SBAR_R_Y", 95, -4096, 4096);
+  CFG_INT(OFFSET_HALL_ICON_X, "O_HALL_X", 0, -4096, 4096);
+  CFG_INT(OFFSET_HALL_ICON_Y, "O_HALL_Y", -100, -4096, 4096);
+  CFG_INT(OFFSET_WIFI_ICON_X, "O_WIFI_X", 204, -4096, 4096);
+  CFG_INT(OFFSET_WIFI_ICON_Y, "O_WIFI_Y", -108, -4096, 4096);
+  CFG_INT(OFFSET_INST_KML_X, "O_INST_X", 60, -4096, 4096);
+  CFG_INT(OFFSET_INST_KML_Y, "O_INST_Y", -25, -4096, 4096);
+  CFG_INT(OFFSET_AVG_KML_X, "O_AVG_X", 160, -4096, 4096);
+  CFG_INT(OFFSET_AVG_KML_Y, "O_AVG_Y", -25, -4096, 4096);
+  CFG_INT(OFFSET_AVG_SPEED_X, "O_AVG_SPD_X", -163, -4096, 4096);
+  CFG_INT(OFFSET_AVG_SPEED_Y, "O_AVG_SPD_Y", -25, -4096, 4096);
+  CFG_INT(OFFSET_MAX_SPEED_X, "O_MAX_SPD_X", -60, -4096, 4096);
+  CFG_INT(OFFSET_MAX_SPEED_Y, "O_MAX_SPD_Y", -25, -4096, 4096);
+  CFG_INT(OFFSET_FUEL_LTRS_X, "O_FLTRS_X", 132, -4096, 4096);
+  CFG_INT(OFFSET_FUEL_LTRS_Y, "O_FLTRS_Y", 123, -4096, 4096);
 
-  CFG_INT(SIDEBAR_BAR_WIDTH, "SBAR_W", 8);
-  CFG_INT(SIDEBAR_BAR_HEIGHT, "SBAR_H", 190);
+  CFG_INT(SIDEBAR_BAR_WIDTH, "SBAR_W", 8, 1, 2048);
+  CFG_INT(SIDEBAR_BAR_HEIGHT, "SBAR_H", 190, 1, 2048);
   CFG_BOOL(SHOW_ELEMENT_BOUNDS, "SHW_BNDS", false);
   CFG_BOOL(SHOW_ELEMENT_SPEED, "SH_SPD", true);
   CFG_BOOL(SHOW_ELEMENT_SPEED_UNIT, "SH_SPD_UN", true);
@@ -607,57 +771,57 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_BOOL(SHOW_ELEMENT_FUEL_LTRS, "SH_FUL", true);
   CFG_BOOL(SHOW_GHOST_DIGITS, "SH_GHOST", true);
   CFG_BOOL(SHOW_ELEMENT_WEATHER, "SH_WEATH", true);
-  CFG_INT(OFFSET_WEATHER_X, "O_WEATH_X", 0);
-  CFG_INT(OFFSET_WEATHER_Y, "O_WEATH_Y", 146);
+  CFG_INT(OFFSET_WEATHER_X, "O_WEATH_X", 0, -4096, 4096);
+  CFG_INT(OFFSET_WEATHER_Y, "O_WEATH_Y", 146, -4096, 4096);
   CFG_STR(WEATHER_CITY, "WEATH_CITY", "");
-  CFG_FLT(WEATHER_LAT, "WEATH_LAT", 0.0f);
-  CFG_FLT(WEATHER_LON, "WEATH_LON", 0.0f);
-  CFG_INT(WEATHER_REFRESH_MIN, "WEATH_RFR", 1);
+  CFG_FLT(WEATHER_LAT, "WEATH_LAT", 0.0f, -90.0f, 90.0f);
+  CFG_FLT(WEATHER_LON, "WEATH_LON", 0.0f, -180.0f, 180.0f);
+  CFG_INT(WEATHER_REFRESH_MIN, "WEATH_RFR", 1, 1, 1440);
   CFG_STR(WEATHER_LOCALE, "WEATH_LOCALE", "it");
   CFG_BOOL(ENABLE_POWER_SENSE, "PWR_SNS", false);
   CFG_BOOL(ENABLE_CIRCLE_TEST, "CIRC_TST", false);
   CFG_BOOL(ENABLE_DEMO_MODE, "DEMO_MODE", false);
   CFG_BOOL(ENABLE_ANTIALIASING, "EN_AA", true);
-  CFG_FLT(AA_SHARPNESS, "AA_SHARP", 0.2f);
+  CFG_FLT(AA_SHARPNESS, "AA_SHARP", 0.2f, 0.0f, 1.0f);
   CFG_BOOL(SHOW_FPS_COUNTER_DEFAULT, "SHW_FPS", false);
   CFG_BOOL(GPS_DEBUG_DEFAULT, "GPS_DBG", false);
   CFG_BOOL(ENABLE_DYNAMIC_CPU, "DYN_CPU", false);
-  CFG_INT(MANUAL_CPU_FREQ, "MAN_CPU", 240);
+  CFG_INT(MANUAL_CPU_FREQ, "MAN_CPU", 240, 80, 240);
   CFG_BOOL(ENABLE_CPU_THROTTLE, "CPU_THR_EN", false);
-  CFG_INT(CPU_THROTTLE_TEMP_WARN, "CPU_THR_W", 50);
-  CFG_INT(CPU_THROTTLE_TEMP_CRIT, "CPU_THR_C", 60);
+  CFG_INT(CPU_THROTTLE_TEMP_WARN, "CPU_THR_W", 50, -50, 150);
+  CFG_INT(CPU_THROTTLE_TEMP_CRIT, "CPU_THR_C", 60, -50, 150);
   CFG_BOOL(ENABLE_NIGHT_MODE, "EN_NIGHT", false);
-  CFG_INT(NIGHT_MODE_START_HOUR, "NGHT_SRT", 23);
-  CFG_INT(NIGHT_MODE_END_HOUR, "NGHT_END", 0);
-  CFG_INT(NIGHT_BACKLIGHT, "NGHT_BL", 29);
+  CFG_INT(NIGHT_MODE_START_HOUR, "NGHT_SRT", 23, 0, 23);
+  CFG_INT(NIGHT_MODE_END_HOUR, "NGHT_END", 0, 0, 23);
+  CFG_INT(NIGHT_BACKLIGHT, "NGHT_BL", 29, 0, 100);
   CFG_BOOL(DISPLAY_INVERT_COLORS, "INV_COLORS", false);
-  CFG_INT(OFFSET_BIG_FPS_X, "O_FPS_X", -9);
-  CFG_INT(OFFSET_BIG_FPS_Y, "O_FPS_Y", -7);
+  CFG_INT(OFFSET_BIG_FPS_X, "O_FPS_X", -9, -4096, 4096);
+  CFG_INT(OFFSET_BIG_FPS_Y, "O_FPS_Y", -7, -4096, 4096);
 
-  CFG_INT(REFRESH_SPEED_MS, "R_SPD", 250);
-  CFG_INT(REFRESH_BAT_MS, "R_BAT", 2500);
-  CFG_INT(REFRESH_INST_MS, "R_INST", 500);
-  CFG_INT(REFRESH_MAX_SPEED_MS, "R_MAX_SPD", 500);
-  CFG_INT(REFRESH_FUEL_MS, "R_FUEL", 1000);
+  CFG_INT(REFRESH_SPEED_MS, "R_SPD", 250, 10, 60000);
+  CFG_INT(REFRESH_BAT_MS, "R_BAT", 2500, 10, 600000);
+  CFG_INT(REFRESH_INST_MS, "R_INST", 500, 10, 60000);
+  CFG_INT(REFRESH_MAX_SPEED_MS, "R_MAX_SPD", 500, 10, 60000);
+  CFG_INT(REFRESH_FUEL_MS, "R_FUEL", 1000, 10, 60000);
 
-  CFG_INT(SPEED_DIGITS, "SPD_DIG", 2);
-  CFG_INT(SAT_DIGITS, "SAT_DIG", 2);
-  CFG_INT(TMR_INT_DIGITS, "TMR_INT", 1);
-  CFG_INT(TMR_DEC_DIGITS, "TMR_DEC", 2);
-  CFG_INT(BAT_INT_DIGITS, "BAT_INT", 2);
-  CFG_INT(BAT_DEC_DIGITS, "BAT_DEC", 1);
-  CFG_INT(INST_INT_DIGITS, "INST_INT", 2);
-  CFG_INT(INST_DEC_DIGITS, "INST_DEC", 1);
-  CFG_INT(AVG_INT_DIGITS, "AVG_INT", 2);
-  CFG_INT(AVG_DEC_DIGITS, "AVG_DEC", 1);
-  CFG_INT(AVG_SPEED_INT_DIGITS, "AVG_SPD_INT", 2);
-  CFG_INT(AVG_SPEED_DEC_DIGITS, "AVG_SPD_DEC", 0);
-  CFG_INT(MAX_SPEED_INT_DIGITS, "MAX_SPD_INT", 3);
-  CFG_INT(MAX_SPEED_DEC_DIGITS, "MAX_SPD_DEC", 0);
-  CFG_INT(FUEL_INT_DIGITS, "FUEL_INT", 1);
-  CFG_INT(FUEL_DEC_DIGITS, "FUEL_DEC", 1);
-  CFG_INT(ODO_INT_DIGITS, "ODO_INT", 5);
-  CFG_INT(ODO_DEC_DIGITS, "ODO_DEC", 1);
+  CFG_INT(SPEED_DIGITS, "SPD_DIG", 2, 1, 4);
+  CFG_INT(SAT_DIGITS, "SAT_DIG", 2, 1, 3);
+  CFG_INT(TMR_INT_DIGITS, "TMR_INT", 1, 1, 14);
+  CFG_INT(TMR_DEC_DIGITS, "TMR_DEC", 2, 0, 4);
+  CFG_INT(BAT_INT_DIGITS, "BAT_INT", 2, 1, 14);
+  CFG_INT(BAT_DEC_DIGITS, "BAT_DEC", 1, 0, 4);
+  CFG_INT(INST_INT_DIGITS, "INST_INT", 2, 1, 14);
+  CFG_INT(INST_DEC_DIGITS, "INST_DEC", 1, 0, 4);
+  CFG_INT(AVG_INT_DIGITS, "AVG_INT", 2, 1, 14);
+  CFG_INT(AVG_DEC_DIGITS, "AVG_DEC", 1, 0, 4);
+  CFG_INT(AVG_SPEED_INT_DIGITS, "AVG_SPD_INT", 2, 1, 14);
+  CFG_INT(AVG_SPEED_DEC_DIGITS, "AVG_SPD_DEC", 0, 0, 4);
+  CFG_INT(MAX_SPEED_INT_DIGITS, "MAX_SPD_INT", 3, 1, 14);
+  CFG_INT(MAX_SPEED_DEC_DIGITS, "MAX_SPD_DEC", 0, 0, 4);
+  CFG_INT(FUEL_INT_DIGITS, "FUEL_INT", 1, 1, 14);
+  CFG_INT(FUEL_DEC_DIGITS, "FUEL_DEC", 1, 0, 4);
+  CFG_INT(ODO_INT_DIGITS, "ODO_INT", 5, 1, 14);
+  CFG_INT(ODO_DEC_DIGITS, "ODO_DEC", 1, 0, 4);
 
   CFG_STR(WIFI_SSID, "WIFI_SSID", "");
   // WiFi passwords are handled manually (below): never serialized back to the
@@ -667,12 +831,12 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_STR(WIFI_SSID_3, "WIFI_S3", "");
   CFG_STR(WIFI_SSID_4, "WIFI_S4", "");
   CFG_STR(AP_PASSWORD, "AP_PWD", AP_PASSWORD_DEFAULT);
-  CFG_INT(WIFI_TX_POWER_DBM, "WIFI_TXP", 20);
-  CFG_INT(WIFI_RETRY_MODE, "WIFI_RETRY_M", 1);
-  CFG_INT(WIFI_RETRY_SECONDS, "WIFI_RETRY_S", 60);
+  CFG_INT(WIFI_TX_POWER_DBM, "WIFI_TXP", 20, -1, 20);
+  CFG_INT(WIFI_RETRY_MODE, "WIFI_RETRY_M", 1, 0, 2);
+  CFG_INT(WIFI_RETRY_SECONDS, "WIFI_RETRY_S", 60, 1, 86400);
   CFG_BOOL(NTP_ENABLED, "NTP_EN", true);
   CFG_STR(NTP_SERVER, "NTP_SRV", "pool.ntp.org");
-  CFG_INT(TZ_OFFSET_HOURS, "TZ_OFFSET", 1);
+  CFG_INT(TZ_OFFSET_HOURS, "TZ_OFFSET", 1, -14, 14);
   CFG_BOOL(TZ_DST_ENABLED, "TZ_DST", true);
 
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
@@ -713,23 +877,11 @@ void processConfig(int mode, JsonDocument *doc) {
 
   if (mode == 0 || mode == 2) {
     sanitizeDigitCounts();
-    // Panel SPI clock: the value goes straight to LovyanGFX's clock divider, so
-    // 0 or a wrapped negative number blanks/freeze the display (issue #13).
-    if (SPI_BUS_SPEED < SPI_SPEED_MIN_HZ || SPI_BUS_SPEED > SPI_SPEED_MAX_HZ) {
-      uint32_t c = constrain(SPI_BUS_SPEED, SPI_SPEED_MIN_HZ, SPI_SPEED_MAX_HZ);
-      logPrintf("Config: SPI_BUS_SPEED=%lu out of range [%lu..%lu], clamped to %lu\n",
-                (unsigned long)SPI_BUS_SPEED, (unsigned long)SPI_SPEED_MIN_HZ,
-                (unsigned long)SPI_SPEED_MAX_HZ, (unsigned long)c);
-      SPI_BUS_SPEED = c;
-    }
-    if (FUEL_TOUCH_POINTS < 2) FUEL_TOUCH_POINTS = 2;
-    if (FUEL_TOUCH_POINTS > MAX_TOUCH_POINTS) FUEL_TOUCH_POINTS = MAX_TOUCH_POINTS;
-    if (WEATHER_REFRESH_MIN < 1) WEATHER_REFRESH_MIN = 1;
-    if (WEATHER_REFRESH_MIN > 1440) WEATHER_REFRESH_MIN = 1440;
-    if (WIFI_RETRY_MODE < 0) WIFI_RETRY_MODE = 0;
-    if (WIFI_RETRY_MODE > 2) WIFI_RETRY_MODE = 2;
-    if (WIFI_RETRY_SECONDS < 1) WIFI_RETRY_SECONDS = 1;
-    if (WIFI_RETRY_SECONDS > 86400) WIFI_RETRY_SECONDS = 86400;
+    // Bands live in the CFG_INT/CFG_FLT/CFG_UINT lines above - the same table
+    // covers the NVS load, POST /api/config and the backup restore. What is
+    // left here is the validation that needs more than one parameter, plus the
+    // string checks that no numeric band can express.
+    sanitizeConfigPairs();
 
     // The Dashboard_Config hotspot is started on every boot, and the Wi-Fi
     // stack refuses a 1-7 character passphrase outright (framework-
@@ -755,7 +907,7 @@ void processConfig(int mode, JsonDocument *doc) {
     char key[8];
     for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
       snprintf(key, sizeof(key), "TCH_%d", i);
-      touchTable[i] = pref.getInt(key, touchTable[i]);
+      touchTable[i] = constrain(pref.getInt(key, touchTable[i]), 0, 4095);
     }
   } else if (mode == 1) {
     JsonArray arr = (*doc)["touchTable"].to<JsonArray>();
@@ -769,7 +921,10 @@ void processConfig(int mode, JsonDocument *doc) {
       written = (int)arr.size();
       if (written > FUEL_TOUCH_POINTS) written = FUEL_TOUCH_POINTS;
       for (int i = 0; i < written; i++) {
-        touchTable[i] = arr[i].as<int>();
+        // Calibration points are raw 12-bit ADC counts: a value outside
+        // 0..4095 can never be sampled and would silently kill the segment it
+        // belongs to (issue #21).
+        touchTable[i] = constrain((*doc)["touchTable"][i].as<int>(), 0, 4095);
         snprintf(key, sizeof(key), "TCH_%d", i);
         pref.putInt(key, touchTable[i]);
       }
