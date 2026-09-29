@@ -713,6 +713,15 @@ void processConfig(int mode, JsonDocument *doc) {
 
   if (mode == 0 || mode == 2) {
     sanitizeDigitCounts();
+    // Panel SPI clock: the value goes straight to LovyanGFX's clock divider, so
+    // 0 or a wrapped negative number blanks/freeze the display (issue #13).
+    if (SPI_BUS_SPEED < SPI_SPEED_MIN_HZ || SPI_BUS_SPEED > SPI_SPEED_MAX_HZ) {
+      uint32_t c = constrain(SPI_BUS_SPEED, SPI_SPEED_MIN_HZ, SPI_SPEED_MAX_HZ);
+      logPrintf("Config: SPI_BUS_SPEED=%lu out of range [%lu..%lu], clamped to %lu\n",
+                (unsigned long)SPI_BUS_SPEED, (unsigned long)SPI_SPEED_MIN_HZ,
+                (unsigned long)SPI_SPEED_MAX_HZ, (unsigned long)c);
+      SPI_BUS_SPEED = c;
+    }
     if (FUEL_TOUCH_POINTS < 2) FUEL_TOUCH_POINTS = 2;
     if (FUEL_TOUCH_POINTS > MAX_TOUCH_POINTS) FUEL_TOUCH_POINTS = MAX_TOUCH_POINTS;
     if (WEATHER_REFRESH_MIN < 1) WEATHER_REFRESH_MIN = 1;

@@ -370,7 +370,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 
 #### System & Performance
 - `TARGET_FPS` (default=60): Desired display refresh rate (up to ~500 FPS supported, hardware-limited).
-- `SPI_BUS_SPEED` (default=60000000): SPI bus frequency in Hz.
+- `SPI_BUS_SPEED` (default=60000000): SPI bus frequency in Hz. Accepted range **1000000–80000000** (1–80 MHz; WebUI shows MHz). Out-of-range values are clamped on load/save — a `0` or a negative (wrapped) value would otherwise feed LovyanGFX a degenerate clock divider and blank the panel. The read clock is derived as `SPI_BUS_SPEED × 8/5`, computed in 64-bit and clamped to the same band.
 - `ENABLE_DYNAMIC_CPU` (default=false): Toggles automatic CPU frequency scaling (hysteresis-based).
 - `MANUAL_CPU_FREQ` (default=240): Fixed CPU clock frequency (80, 160, or 240 MHz).
 - `ENABLE_CPU_THROTTLE` (default=true): Enables thermal frequency capping.

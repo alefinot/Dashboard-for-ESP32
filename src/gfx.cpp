@@ -7,13 +7,30 @@
 // ----------------------------------------------------------------------------
 // Display device (ILI9488 4-inch TFT)
 // ----------------------------------------------------------------------------
+// Panel SPI clock guard (issue #13): SPI_BUS_SPEED is a user-editable NVS value
+// fed straight into LovyanGFX's clock divider. 0 saturates the divider (the
+// panel stops updating) and a value that wrapped from a negative JSON number
+// selects SPI_CLK_EQU_SYSCLK (full APB clock, beyond the ILI9488 rating). The
+// derived read clock is a *8/5 product that also overflows uint32 for large
+// inputs, so it is computed in 64-bit and clamped to the same band. At the
+// 60 MHz default both values land exactly where they did before.
+static void setSpiClocks(uint32_t &freqWrite, uint32_t &freqRead) {
+  uint32_t w = SPI_BUS_SPEED;
+  if (w < SPI_SPEED_MIN_HZ) w = SPI_SPEED_MIN_HZ;
+  if (w > SPI_SPEED_MAX_HZ) w = SPI_SPEED_MAX_HZ;
+  uint64_t r = ((uint64_t)w * 8u) / 5u;
+  if (r > SPI_SPEED_MAX_HZ) r = SPI_SPEED_MAX_HZ;
+  if (r < SPI_SPEED_MIN_HZ) r = SPI_SPEED_MIN_HZ;
+  freqWrite = w;
+  freqRead = (uint32_t)r;
+}
+
 LGFX_ST7789_4::LGFX_ST7789_4() {
   {
     auto cfg = _bus_instance.config();
     cfg.spi_host = SPI3_HOST;
     cfg.spi_mode = 0;
-    cfg.freq_write = SPI_BUS_SPEED;
-    cfg.freq_read = SPI_BUS_SPEED * 8 / 5;
+    setSpiClocks(cfg.freq_write, cfg.freq_read);
     cfg.pin_sclk = 18;
     cfg.pin_mosi = 23;
     cfg.pin_miso = -1;
@@ -41,8 +58,7 @@ LGFX_ST7789_4::LGFX_ST7789_4() {
 
 void LGFX_ST7789_4::applyBusConfig() {
   auto cfg = _bus_instance.config();
-  cfg.freq_write = SPI_BUS_SPEED;
-  cfg.freq_read = SPI_BUS_SPEED * 8 / 5;
+  setSpiClocks(cfg.freq_write, cfg.freq_read);
   _bus_instance.config(cfg);
 }
 

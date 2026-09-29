@@ -76,6 +76,14 @@ public:
 // Pin assignment (ESP32 WROOM compatible)
 // ----------------------------------------------------------------------------
 extern uint32_t SPI_BUS_SPEED;
+// Accepted panel SPI clock band (issue #13). Classic ESP32 SPI is clocked from
+// the 80 MHz APB, and the ILI9488 write cycle is rated 15 ns (~66 MHz), so
+// 1-80 MHz is the usable range: 0 makes LovyanGFX's divider saturate (a near-
+// zero clock) and a negative value wrapping to ~4.29e9 selects SPI_CLK_EQU_SYSCLK
+// - either way the panel goes blank. Config sanitizer and bus setup share this
+// band so they cannot drift apart.
+constexpr uint32_t SPI_SPEED_MIN_HZ = 1000000UL;
+constexpr uint32_t SPI_SPEED_MAX_HZ = 80000000UL;
 constexpr int HALL_SENSOR_PIN = 33;
 #define SPI_DC 27
 #define SPI_RST 14
