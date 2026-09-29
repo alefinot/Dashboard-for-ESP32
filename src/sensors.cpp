@@ -97,21 +97,22 @@ static volatile unsigned long
     hallIntervalHist[HALL_MEDIAN_MAX] = {0};
 static volatile unsigned int hallHistWriteIdx = 0;
 
-// Hall filter-chain counters (P1 instrumentation). Plain 32-bit volatile
-// increments inside the ISR - no heap, no floats, no locks (the ISR owns the
-// edges). They answer one question with data: at what layer does the parked
+// Hall filter-chain counters (P1 instrumentation). The ISR owns the raw edge
+// count; every later layer is counted in processHallEdges() on the sensor task
+// (issue #30). They answer one question with data: at what layer does the parked
 // ignition EMI die, and does anything reach the accepted stage while the wheel
 // is stationary? Read from gpsTask as per-interval deltas.
-volatile unsigned long hallDbgEdges = 0;      // every ISR entry
-volatile unsigned long hallDbgL1Reject = 0;   // pin back HIGH after pulse-width check
+volatile unsigned long hallDbgEdges = 0;      // every ISR entry (both transitions)
+volatile unsigned long hallDbgL1Reject = 0;   // measured pulse width < HALL_PULSE_MIN_US
 volatile unsigned long hallDbgDebounce = 0;   // gap < DEBOUNCE_US
 volatile unsigned long hallDbgL2Reject = 0;   // anti-collapse baseline reject
 volatile unsigned long hallDbgGuardReject = 0; // HALL_PERIOD_GUARD reject
 volatile unsigned long hallDbgL3Purge = 0;    // standstill branch taken
 volatile unsigned long hallDbgUnconfirmed = 0; // accepted edge held as candidate
 volatile unsigned long hallDbgAccepted = 0;   // edge published to the speed path
+volatile unsigned long hallDbgRingDrop = 0;   // edge dropped because the ring was full
 
-static const int HALL_DBG_N = 8;
+static const int HALL_DBG_N = 9;
 
 void hallDbgSnapshot(unsigned long *out) {
   out[0] = hallDbgEdges;
@@ -122,6 +123,7 @@ void hallDbgSnapshot(unsigned long *out) {
   out[5] = hallDbgL3Purge;
   out[6] = hallDbgUnconfirmed;
   out[7] = hallDbgAccepted;
+  out[8] = hallDbgRingDrop;
 }
 
 // Injects synthetic hall pulses on the sensor task tick: interval is derived
@@ -408,6 +410,41 @@ int splashCurrentProgress = 0;
 float currentCachedSpeed = 0.0f;
 
 portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;
+
+// ----------------------------------------------------------------------------
+// Raw hall edge ring (issue #30)
+//
+// The GPIO ISR used to run the whole glitch filter inline: esp_rom_delay_us
+// (HALL_PULSE_MIN_US, up to 1000 us) plus a pin re-read, with interrupts masked
+// on that core. At 115200 baud a 1 ms stall swallows ~86 bytes of GNSS RX, and
+// every rejected EMI glitch cost that much - a plausible source of dropped NMEA
+// and WiFi jitter at wheel speeds where glitches are common.
+//
+// The ISR now does one thing: stamp the edge. Both transitions are recorded
+// (attachInterrupt is CHANGE), so the pulse width is *measured* from timestamps
+// instead of sampled after a fixed busy-wait, and the entire filter chain runs
+// in processHallEdges() on the sensor task, where it has milliseconds of budget
+// instead of microseconds.
+//
+// Single producer (ISR writes hallEdgeUs/hallEdgeFalling/hallEdgeWrite), single
+// consumer (sensor task writes hallEdgeRead). When the ring is full the ISR
+// drops the incoming edge rather than touching the consumer's index, so the
+// ordering the task sees never breaks. 64 slots cover 63 edges; at DEBOUNCE_US
+// (12 ms) that is 0.75 s of edges against a 20 ms task period.
+// ----------------------------------------------------------------------------
+static constexpr int HALL_EDGE_RING = 64;
+static constexpr unsigned int HALL_EDGE_MASK = HALL_EDGE_RING - 1;
+volatile unsigned long hallEdgeUs[HALL_EDGE_RING];
+volatile uint8_t hallEdgeFalling[HALL_EDGE_RING];  // 1 = pin went LOW (pulse start)
+volatile unsigned int hallEdgeWrite = 0;           // ISR only
+volatile unsigned int hallEdgeRead = 0;            // sensor task only
+
+// Processing latency of the last qualified pulse start, in microseconds: the
+// gap between the edge timestamp and the moment the task validated it. The
+// braking-decay clamp in getHallSpeed() adds it so deferred validation cannot
+// make a perfectly on-time pulse look overdue (issue #30).
+volatile unsigned long hallEdgeLagUs = 0;
+
 volatile unsigned long lastHallPulseTimeUs = 0;
 volatile unsigned long hallPulseIntervalUs = 0;
 volatile unsigned long hallStableIntervalUs = 0;
@@ -565,125 +602,187 @@ volatile unsigned long g_sensorLastTickMs = 0;
 // ----------------------------------------------------------------------------
 // Hall sensor (ISR + speed)
 // ----------------------------------------------------------------------------
+// Issue #30: stamp and leave. Everything that used to run here - the pulse-width
+// busy-wait, the standstill purge, the debounce window, the anti-collapse and
+// period-guard checks and the pulse counting - now runs in processHallEdges() on
+// the sensor task. The ISR keeps only what must happen at interrupt time: read
+// the pin level to tag the transition, timestamp it, publish it.
 void IRAM_ATTR hallSensorISR() {
   hallDbgEdges++;
-  // Layer 1: Pulse-Width Qualification (Glitch Filter)
-  // Real magnet passes hold GPIO33 LOW for hundreds of microseconds - one
-  // revolution at 200 km/h is still 29.7 ms long - while spark plug EMI rings
-  // and collapses back to HIGH within <10 µs. Wait HALL_PULSE_MIN_US (WebUI
-  // tunable, default 150 µs): if the pin is HIGH again by then, the glitch is
-  // dropped before any timestamping or interval logic runs. Clamped to
-  // 10..1000 µs so a mistuned value can never stall the ISR.
+  unsigned int w = hallEdgeWrite;
+  // Full? Drop the incoming edge; the consumer's read index stays untouched so
+  // the task never sees a reordered or half-written sequence.
+  if (((w - hallEdgeRead) & HALL_EDGE_MASK) == HALL_EDGE_MASK) {
+    hallDbgRingDrop++;
+    return;
+  }
+  // Level after the transition: LOW means a pulse started, HIGH means one ended.
+  bool falling = (REG_READ(GPIO_IN1_REG) & (1UL << (HALL_SENSOR_PIN - 32))) == 0;
+  hallEdgeUs[w] = micros();
+  hallEdgeFalling[w] = falling ? 1 : 0;
+  hallEdgeWrite = (w + 1u) & HALL_EDGE_MASK;
+}
+
+// The filter chain, moved out of the ISR (issue #30). Same layers, same reject
+// rules and same diagnostic counters as before - only the timing of the checks
+// changed: they run on the sensor task, from the recorded timestamps, with
+// milliseconds of budget instead of microseconds.
+//
+// Layer 1 (pulse width) is now measured rather than sampled: a pulse is
+// qualified when its rising edge arrives, as (rise - fall) >= HALL_PULSE_MIN_US.
+// The revolution interval is still fall-to-fall, and it is only credited once
+// the pulse that started it has been qualified, which is exactly what the old
+// busy-wait guaranteed.
+static bool hallOpenPulse = false;         // falling edge waiting for its rising edge
+static unsigned long hallOpenPulseUs = 0;  // its timestamp
+
+void processHallEdges() {
   int pulseMinUs = HALL_PULSE_MIN_US;
   if (pulseMinUs < 10) pulseMinUs = 10;
   if (pulseMinUs > 1000) pulseMinUs = 1000;
-  esp_rom_delay_us(pulseMinUs);
-  if ((REG_READ(GPIO_IN1_REG) & (1UL << (HALL_SENSOR_PIN - 32))) != 0) {
-    hallDbgL1Reject++;
-    return;
-  }
 
-  unsigned long now = micros();
-  unsigned long gap = now - lastHallPulseTimeUs;
+  for (;;) {
+    unsigned int r = hallEdgeRead;
+    if (r == hallEdgeWrite)
+      break;
+    unsigned long ts = hallEdgeUs[r];
+    bool falling = hallEdgeFalling[r] != 0;
+    hallEdgeRead = (r + 1u) & HALL_EDGE_MASK;
 
-  // Standstill check: if more than 1.5s has elapsed since the last pulse,
-  // the wheel was stationary. This pulse is the first physical edge of a new
-  // roll: record its timestamp to anchor the next interval, count the distance,
-  // and completely purge the history ring buffer so no stale cruising speeds
-  // poison the speed calculation when moving off from a stop.
-  if (gap > STANDSTILL_TIMEOUT_US) {
-    hallDbgL3Purge++;
-    portENTER_CRITICAL_ISR(&hallMux);
+    if (falling) {
+      if (hallOpenPulse) {
+        // Two falling edges with no rising between: the older pulse never
+        // closed (line stuck low, or noise on the way back up). Keep the newer
+        // edge as the pulse start.
+        hallDbgL1Reject++;
+      }
+      hallOpenPulseUs = ts;
+      hallOpenPulse = true;
+      continue;
+    }
+
+    // Rising edge: the Layer 1 verdict for the open pulse lands here.
+    if (!hallOpenPulse)
+      continue;  // pulse start was lost (boot, ring overflow) - nothing to measure
+    unsigned long widthUs = ts - hallOpenPulseUs;
+    hallOpenPulse = false;
+    if (widthUs < (unsigned long)pulseMinUs) {
+      hallDbgL1Reject++;
+      continue;
+    }
+
+    // Qualified pulse. All gap arithmetic uses the true edge timestamps, exactly
+    // like the ISR version; `now` is the pulse start, not the processing time.
+    unsigned long now = hallOpenPulseUs;
+    unsigned long lag = micros() - now;
+    hallEdgeLagUs = lag > 200000UL ? 200000UL : lag;
+    unsigned long gap = now - lastHallPulseTimeUs;
+
+    // Standstill check: if more than 1.5s has elapsed since the last pulse,
+    // the wheel was stationary. This pulse is the first physical edge of a new
+    // roll: record its timestamp to anchor the next interval, count the
+    // distance, and completely purge the history ring buffer so no stale
+    // cruising speeds poison the speed calculation when moving off from a stop.
+    if (gap > STANDSTILL_TIMEOUT_US) {
+      hallDbgL3Purge++;
+      portENTER_CRITICAL(&hallMux);
+      lastHallPulseTimeUs = now;
+      hallPulseIntervalUs = 0;
+      hallStableIntervalUs = 0;
+      // Anchor only - credited when the next edge confirms an actual revolution.
+      hallPendingAnchor = true;
+      hallRolling = false;
+      // Re-arm the speed lock with the wheel: until a fresh roll is confirmed,
+      // nothing on the pin may move the speedometer.
+      hallCandIntervalUs = 0;
+      hallCandRun = 0;
+      hallSpeedConfirmed = false;
+      for (int i = 0; i < HALL_MEDIAN_MAX; i++) {
+        hallIntervalHist[i] = 0;
+      }
+      hallHistWriteIdx = 0;
+      portEXIT_CRITICAL(&hallMux);
+      continue;
+    }
+
+    // Fast-edge hardware debounce: reject sub-12ms contact bounce or HF noise
+    // (12 ms = 495 km/h on 1650 mm wheel).
+    if (gap < DEBOUNCE_US) {
+      hallDbgDebounce++;
+      continue;
+    }
+
+    portENTER_CRITICAL(&hallMux);
+    unsigned long last = hallStableIntervalUs;
+    if (last == 0) last = hallPulseIntervalUs;
+
+    // Layer 2: Anti-Collapse Timing Baseline (100% integer math, zero float
+    // operations). When actively rolling at speed, reject any impossible sudden
+    // jump (>2x speed increase in 1 turn). Real terrestrial vehicles cannot
+    // double speed in a single wheel revolution (<300 ms). By keeping
+    // lastHallPulseTimeUs and hallStableIntervalUs locked to the verified magnet
+    // timing, ignition sparks cannot collapse the guard during deceleration or
+    // cruising.
+    if (hallRolling && last != 0 &&
+        (unsigned long long)gap * 2ULL < (unsigned long long)last) {
+      hallDbgL2Reject++;
+      portEXIT_CRITICAL(&hallMux);
+      continue;
+    }
+
+    // Layer 2b: HALL_PERIOD_GUARD upper bound. The parameter and the WebUI
+    // control have existed since 1.3.2 but nothing read them - this is the half
+    // of the documented "reject an interval >N or <1/N of the last accepted one"
+    // that Layer 2 does not cover (Layer 2 is the 1/2 lower bound). An interval
+    // N times longer than the last one means the wheel slowed N-fold in a single
+    // revolution, which is not a vehicle manoeuvre; a genuine stop lands in the
+    // standstill branch instead. N = 1 disables the check (WebUI label).
+    if (HALL_PERIOD_GUARD > 1 && last != 0 &&
+        (unsigned long long)gap >
+            (unsigned long long)last *
+                (unsigned long long)(unsigned int)HALL_PERIOD_GUARD) {
+      hallDbgGuardReject++;
+      portEXIT_CRITICAL(&hallMux);
+      continue;
+    }
+
+    // Layer 3b: speed-path confirmation run (see hallSpeedConfirmed above).
+    // Pairwise 2x agreement, HALL_CONFIRM_REVS in a row, unlocks the speed.
+    if (!hallSpeedConfirmed) {
+      bool agrees = hallCandIntervalUs != 0 &&
+                    (unsigned long long)gap * 2ULL >=
+                        (unsigned long long)hallCandIntervalUs &&
+                    (unsigned long long)hallCandIntervalUs * 2ULL >=
+                        (unsigned long long)gap;
+      if (agrees) {
+        hallCandRun++;
+        if (hallCandRun >= HALL_CONFIRM_REVS)
+          hallSpeedConfirmed = true;
+      } else {
+        hallCandRun = 1;
+      }
+      hallCandIntervalUs = gap;
+      if (!hallSpeedConfirmed)
+        hallDbgUnconfirmed++;
+    }
+
+    hallPulseIntervalUs = gap;
+    hallStableIntervalUs = gap;
     lastHallPulseTimeUs = now;
-    hallPulseIntervalUs = 0;
-    hallStableIntervalUs = 0;
-    // Anchor only - credited when the next edge confirms an actual revolution.
-    hallPendingAnchor = true;
-    hallRolling = false;
-    // Re-arm the speed lock with the wheel: until a fresh roll is confirmed,
-    // nothing on the pin may move the speedometer.
-    hallCandIntervalUs = 0;
-    hallCandRun = 0;
-    hallSpeedConfirmed = false;
-    for (int i = 0; i < HALL_MEDIAN_MAX; i++) {
-      hallIntervalHist[i] = 0;
-    }
-    hallHistWriteIdx = 0;
-    portEXIT_CRITICAL_ISR(&hallMux);
-    return;
-  }
-
-  // Fast-edge hardware debounce: reject sub-12ms contact bounce or HF noise
-  // (12 ms = 495 km/h on 1650 mm wheel).
-  if (gap < DEBOUNCE_US) {
-    hallDbgDebounce++;
-    return;
-  }
-
-  portENTER_CRITICAL_ISR(&hallMux);
-  unsigned long last = hallStableIntervalUs;
-  if (last == 0) last = hallPulseIntervalUs;
-
-  // Layer 2: Anti-Collapse Timing Baseline (100% integer math, zero float operations in ISR):
-  // When actively rolling at speed, reject any impossible sudden jump (>2x speed increase in 1 turn).
-  // Real terrestrial vehicles cannot double speed in a single wheel revolution (<300 ms).
-  // By keeping lastHallPulseTimeUs and hallStableIntervalUs locked to the verified magnet timing,
-  // ignition sparks cannot collapse the guard during deceleration or cruising.
-  if (hallRolling && last != 0 && (unsigned long long)gap * 2ULL < (unsigned long long)last) {
-    hallDbgL2Reject++;
-    portEXIT_CRITICAL_ISR(&hallMux);
-    return;
-  }
-
-  // Layer 2b: HALL_PERIOD_GUARD upper bound. The parameter and the WebUI
-  // control have existed since 1.3.2 but nothing read them - this is the half
-  // of the documented "reject an interval >N or <1/N of the last accepted one"
-  // that Layer 2 does not cover (Layer 2 is the 1/2 lower bound). An interval
-  // N times longer than the last one means the wheel slowed N-fold in a single
-  // revolution, which is not a vehicle manoeuvre; a genuine stop lands in the
-  // standstill branch instead. N = 1 disables the check (WebUI label).
-  if (HALL_PERIOD_GUARD > 1 && last != 0 &&
-      (unsigned long long)gap >
-          (unsigned long long)last * (unsigned long long)(unsigned int)HALL_PERIOD_GUARD) {
-    hallDbgGuardReject++;
-    portEXIT_CRITICAL_ISR(&hallMux);
-    return;
-  }
-
-  // Layer 3b: speed-path confirmation run (see hallSpeedConfirmed above).
-  // Pairwise 2x agreement, HALL_CONFIRM_REVS in a row, unlocks the speed.
-  if (!hallSpeedConfirmed) {
-    bool agrees = hallCandIntervalUs != 0 &&
-                  (unsigned long long)gap * 2ULL >= (unsigned long long)hallCandIntervalUs &&
-                  (unsigned long long)hallCandIntervalUs * 2ULL >= (unsigned long long)gap;
-    if (agrees) {
-      hallCandRun++;
-      if (hallCandRun >= HALL_CONFIRM_REVS)
-        hallSpeedConfirmed = true;
+    if (hallPendingAnchor) {
+      // This edge confirms the anchor edge was a real roll (one full
+      // revolution apart): credit both edges now.
+      hallPulseCount = hallPulseCount + 2;
+      hallPendingAnchor = false;
     } else {
-      hallCandRun = 1;
+      hallPulseCount = hallPulseCount + 1;
     }
-    hallCandIntervalUs = gap;
-    if (!hallSpeedConfirmed)
-      hallDbgUnconfirmed++;
+    hallRolling = true;
+    hallDbgAccepted++;
+    hallIntervalHist[hallHistWriteIdx] = gap;
+    hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
+    portEXIT_CRITICAL(&hallMux);
   }
-
-  hallPulseIntervalUs = gap;
-  hallStableIntervalUs = gap;
-  lastHallPulseTimeUs = now;
-  if (hallPendingAnchor) {
-    // This edge confirms the anchor edge was a real roll (one full
-    // revolution apart): credit both edges now.
-    hallPulseCount = hallPulseCount + 2;
-    hallPendingAnchor = false;
-  } else {
-    hallPulseCount = hallPulseCount + 1;
-  }
-  hallRolling = true;
-  hallDbgAccepted++;
-  hallIntervalHist[hallHistWriteIdx] = gap;
-  hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
-  portEXIT_CRITICAL_ISR(&hallMux);
 }
 
 inline float getHallSpeed() {
@@ -754,7 +853,12 @@ inline float getHallSpeed() {
   // Only engage when a pulse is actually overdue (dt > medianInterval * 1.5).
   // During normal riding and accelerating, dt never reaches 1.5x the period,
   // preventing speed oscillation. When stopping, it smoothly glides to 0.
-  unsigned long decayThresholdUs = medianInterval + (medianInterval >> 1);
+  // hallEdgeLagUs compensates for the deferred validation of issue #30: a pulse
+  // that arrived on time is up to one sensor tick older at the moment the task
+  // got round to validating it, and without this term the clamp would bite at
+  // high wheel speed (a 30 ms period plus a 20 ms tick already crosses 1.5x).
+  unsigned long decayThresholdUs =
+      medianInterval + (medianInterval >> 1) + hallEdgeLagUs;
   if (dt > decayThresholdUs) {
     float maxPossibleSpeed = WHEEL_SPEED_FACTOR / (float)dt;
     if (measuredSpeed > maxPossibleSpeed)
@@ -1836,9 +1940,10 @@ void gpsTask(void *pvParameters) {
         hs[i] = d;
       }
       logPrintf("HALL: edges=%lu l1=%lu db=%lu l2=%lu guard=%lu purge=%lu "
-                "held=%lu acc=%lu lastint=%luus hall=%.1f disp=%.1f src=%d "
-                "conf=%d\n",
-                hs[0], hs[1], hs[2], hs[3], hs[4], hs[5], hs[6], hs[7],
+                "held=%lu acc=%lu drop=%lu lag=%luus lastint=%luus hall=%.1f "
+                "disp=%.1f src=%d conf=%d\n",
+                hs[0], hs[1], hs[2], hs[3], hs[4], hs[5], hs[6], hs[7], hs[8],
+                (unsigned long)hallEdgeLagUs,
                 (unsigned long)hallStableIntervalUs, getHallSpeed(),
                 currentCachedSpeed, (int)heldSpeedSourceMode,
                 (int)hallSpeedConfirmed);
@@ -1944,6 +2049,9 @@ void processTripResetButton() {
 
 void sensorTask(void *pvParameters) {
   for (;;) {
+    // Issue #30: turn the raw edge stamps collected by the GPIO ISR into pulses,
+    // intervals and distance credits. Everything the ISR used to decide is here.
+    processHallEdges();
     if (ENABLE_DEMO_MODE)
       simulateRawSensors(); // synthetic hall pulses; the analog
                            // read sites inject their own simulated raw values

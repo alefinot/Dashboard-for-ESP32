@@ -242,8 +242,10 @@ void setup() {
   pinMode(TEMP_SENSE_PIN, INPUT);
   analogSetAttenuation(ADC_11db);
   pinMode(HALL_SENSOR_PIN, INPUT_PULLUP);
+  // CHANGE, not FALLING (issue #30): the pulse width is measured from the
+  // fall/rise pair instead of being sampled after a busy-wait inside the ISR.
   attachInterrupt(digitalPinToInterrupt(HALL_SENSOR_PIN), hallSensorISR,
-                  FALLING);
+                  CHANGE);
   initFuelSensor();
   pinMode(LIGHT_SENSOR_PIN, INPUT);
   // Physical trip-reset button to GND (issue #17); the internal pull-up keeps
