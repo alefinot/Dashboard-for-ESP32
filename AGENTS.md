@@ -11,7 +11,7 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
 
 ## 3. Releasing ESP Code
 - When the user says **"release the ESP code"**, bump the version by **+0.0.1** (patch bump, e.g. `1.3.2` → `1.3.3`) unless the user explicitly states the exact target version.
-- The firmware version string is `OTA_CURRENT_VERSION` in `src/config.cpp` — it appears in 3 places (initial value, `CFG_STR` default, and the backup JSON template). All three must be updated together.
+- The firmware version string is `FW_VERSION` in `src/config.cpp` — **one compiled-in constant**. It is not stored in NVS and nothing fetched from the network can change it. (`VERSION_OVERRIDE` is a separate, user-set label for display and pull testing — not the build identity. The old `OTA_CURRENT_VERSION` / NVS `OTA_VER` pair is gone.)
 - Commit the bump on `main` (per rule 2).
 
 ## 4. README on Important Releases
@@ -116,7 +116,7 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
 ## Project Quick Reference
 - **Firmware:** ESP32 WROOM-32, PlatformIO project in repo root (`platformio.ini`, env `esp32dev`), Arduino framework, LovyanGFX 4.0" ILI9488 480×320 display.
 - **Build:** `pio run` (pre-scripts gzip the web UI and compile VLW fonts — run `pio run`, not a plain compile).
-- **Version:** `OTA_CURRENT_VERSION` in `src/config.cpp` (see rule 3).
+- **Version:** `FW_VERSION` in `src/config.cpp` (see rule 3).
 - **Docs:** `README.md` is the full technical reference (architecture, pinout, REST API, NVS params, changelog).
 - **Plans:** `Implementation plans/` — local-only (never committed/pushed; see rule 6).
 - **Android app:** `android/` — companion app (Kotlin/Compose, Gradle). Always finish with a debug APK build (rule 8).

@@ -252,7 +252,23 @@ bool TZ_DST_ENABLED = true;
 
 bool OTA_PULL_ENABLED = false;
 char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
-char OTA_CURRENT_VERSION[32] = "1.3.8";
+
+// ----------------------------------------------------------------------------
+// Firmware identity
+// ----------------------------------------------------------------------------
+// FW_VERSION is the build identity: compiled in, never stored in NVS, never
+// writable by the update manifest, a config restore or the Web API. It is the
+// one place the release version is written (AGENTS.md rule 3).
+//
+// VERSION_OVERRIDE is a user-set label for display and for testing update
+// pulls against an arbitrary version string. It is deliberately separate from
+// the build identity, and nothing fetched from the network ever writes it -
+// the previous single value (OTA_CURRENT_VERSION / NVS key "OTA_VER") was
+// rewritten from the release manifest after every pull, so the device ended up
+// *claiming* whatever the server said and could decide it was permanently
+// up-to-date (or hold a version brought back by a config backup).
+const char FW_VERSION[] = "1.3.8";
+char VERSION_OVERRIDE[32] = "";
 
 int FUEL_TOUCH_POINTS = 8;
 int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400,
@@ -314,6 +330,39 @@ int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400,
     var = (*doc)[#var].as<bool>();                                             \
     pref.putBool(nvsKey, var);                                                 \
   }
+
+// The version this unit reports: the user override when one is set, otherwise
+// the compiled-in build identity. Display paths and the update check both read
+// this, so a bench override still steers a pull test.
+const char *effectiveVersion() {
+  return (VERSION_OVERRIDE[0] != 0) ? VERSION_OVERRIDE : FW_VERSION;
+}
+
+// Pulls the next numeric group out of a dotted version string, skipping 'v',
+// dots and any other separator ("v1.3.10" -> 1, 3, 10).
+static long nextVersionGroup(const char **s) {
+  const char *p = *s;
+  while (*p && (*p < '0' || *p > '9')) p++;
+  char *end = nullptr;
+  long v = strtol(p, &end, 10);
+  *s = end ? end : p;
+  return v;
+}
+
+// Numeric compare for version strings: -1 if a < b, 0 if equal, +1 if a > b.
+// Compares the first four numeric groups (missing groups count as 0), which
+// fixes the string compare the update check used to do - "1.3.10" is *newer*
+// than "1.3.9", and "1.3.8" vs "1.3.8.0" is the same release, not a new one.
+int versionCmp(const char *a, const char *b) {
+  if (!a) a = "";
+  if (!b) b = "";
+  for (int i = 0; i < 4; i++) {
+    long ga = nextVersionGroup(&a);
+    long gb = nextVersionGroup(&b);
+    if (ga != gb) return (ga < gb) ? -1 : 1;
+  }
+  return 0;
+}
 
 uint16_t hexToRGB565(const char *hex) {
   if (hex == nullptr || hex[0] == 0)
@@ -541,7 +590,7 @@ void processConfig(int mode, JsonDocument *doc) {
 
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
-  CFG_STR(OTA_CURRENT_VERSION, "OTA_VER", "1.3.8");
+  CFG_STR(VERSION_OVERRIDE, "VER_OVR", "");
 
   // WiFi passwords: mode 1 sends empty strings so they never leave the device,
   // mode 2 keeps the stored value when the posted password is empty.
@@ -833,7 +882,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "TZ_DST_ENABLED": true,
   "OTA_PULL_ENABLED": false,
   "OTA_PULL_URL": "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
-  "OTA_CURRENT_VERSION": "1.3.8",
+  "VERSION_OVERRIDE": "",
   "touchTable": [
     950,
     840,

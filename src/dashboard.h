@@ -333,7 +333,13 @@ extern bool TZ_DST_ENABLED;
 
 extern bool OTA_PULL_ENABLED;
 extern char OTA_PULL_URL[192];
-extern char OTA_CURRENT_VERSION[32];
+// Build identity (compile time) and the optional user override. See the
+// comment at their definition in config.cpp: the manifest can never change
+// what the device claims to be.
+extern const char FW_VERSION[];
+extern char VERSION_OVERRIDE[32];
+const char *effectiveVersion();
+int versionCmp(const char *a, const char *b);
 
 // ----------------------------------------------------------------------------
 // Fuel touch table

@@ -30,6 +30,13 @@ bool bootinfo_storm_active();
 // The RTC-persistent boot counter (1 on a clean boot, rising during a storm).
 uint32_t bootinfo_boot_count();
 
+// Build version of the firmware that ran on this unit before the current one
+// ("" if never recorded). bootinfo_init() updates it whenever FW_VERSION
+// differs from the version recorded at the previous boot, so an OTA, a
+// downgrade or a USB reflash is visible in the boot log and in /api/ota/check
+// without trusting anything the device was told over the network.
+const char *bootinfo_previous_version();
+
 // The /api/boot JSON payload (reset reason, boot count, storm state, last
 // reboot tag + heap, heap watermark, live free heap).
 String bootinfo_json();

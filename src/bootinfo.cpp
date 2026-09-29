@@ -21,6 +21,7 @@ static char s_lastRebootTag[48] = "";
 static uint32_t s_lastRebootHeap = 0;
 static uint32_t s_lastMinHeap = 0;
 static char s_resetReason[24] = "?";
+static char s_prevVersion[32] = "";
 
 static const char *resetReasonStr(esp_reset_reason_t r) {
   switch (r) {
@@ -54,6 +55,35 @@ void bootinfo_init() {
     pref.end();
     strncpy(s_lastRebootTag, tag, sizeof(s_lastRebootTag) - 1);
     s_lastRebootTag[sizeof(s_lastRebootTag) - 1] = 0;
+  }
+
+  // Firmware identity bookkeeping. "ranVer" is the build version recorded at
+  // the previous boot, so a difference means different firmware is running -
+  // reached by OTA, USB flash or a downgrade, all logged the same way. The
+  // value always comes from FW_VERSION (compiled in), never from the update
+  // manifest, so the history cannot be rewritten by whatever the device was
+  // told to believe. One NVS write, and only when the version actually
+  // changes.
+  {
+    char ran[32] = "";
+    Preferences vpref;
+    vpref.begin("bootinfo", true);  // read-only
+    vpref.getString("ranVer", ran, sizeof(ran));
+    vpref.getString("prevVer", s_prevVersion, sizeof(s_prevVersion));
+    vpref.end();
+    s_prevVersion[sizeof(s_prevVersion) - 1] = 0;
+
+    if (strcmp(ran, FW_VERSION) != 0) {
+      strncpy(s_prevVersion, ran, sizeof(s_prevVersion) - 1);
+      s_prevVersion[sizeof(s_prevVersion) - 1] = 0;
+      Preferences vw;
+      vw.begin("bootinfo", false);
+      vw.putString("ranVer", FW_VERSION);
+      vw.putString("prevVer", s_prevVersion);
+      vw.end();
+      logPrintf("BOOTINFO: firmware v%s running (previous: %s)\n", FW_VERSION,
+                s_prevVersion[0] ? s_prevVersion : "unknown");
+    }
   }
 
   // Fast-reboot storm latch (moved here from main.cpp so it lives with the
@@ -90,6 +120,8 @@ void bootinfo_tag_reboot(const char *why) {
 bool bootinfo_storm_active() { return s_stormActive; }
 
 uint32_t bootinfo_boot_count() { return s_bootCountNow; }
+
+const char *bootinfo_previous_version() { return s_prevVersion; }
 
 String bootinfo_json() {
   char buf[320];

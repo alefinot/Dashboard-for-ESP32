@@ -481,22 +481,33 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
     }
 
     char curVer[32];
-    snprintf(curVer, sizeof(curVer), "%s", OTA_CURRENT_VERSION);
-    if (curVer[0] == 'v' || curVer[0] == 'V')
-      memmove(curVer, curVer + 1, strlen(curVer));
+    snprintf(curVer, sizeof(curVer), "%s", effectiveVersion());
     if (latestVersion.startsWith("v") || latestVersion.startsWith("V"))
       latestVersion = latestVersion.substring(1);
 
-    logPrintf("OTA Pull: latest=%s current=%s\n", latestVersion.c_str(), curVer);
+    // Numeric compare, not string equality: "1.3.10" is newer than "1.3.9",
+    // and "1.3.8" vs "1.3.8.0" is the same release rather than a new one (the
+    // old string compare re-flashed it forever). The optional 'v' prefix is
+    // handled by versionCmp().
+    int vcmp = versionCmp(latestVersion.c_str(), curVer);
+    logPrintf("OTA Pull: latest=%s current=%s (build v%s%s)\n",
+              latestVersion.c_str(), curVer, FW_VERSION,
+              VERSION_OVERRIDE[0] ? ", override active" : "");
 
-    if (latestVersion.equals(curVer)) {
+    if (vcmp == 0) {
       logPrintf("OTA Pull: already up-to-date\n");
       setOtaPullStatus((String("up-to-date (v") + curVer + ")").c_str());
       return;
     }
 
-    logPrintf("OTA Pull: new firmware v%s available, downloading\n", latestVersion.c_str());
-    setOtaPullStatus(("updating to v" + latestVersion).c_str());
+    if (vcmp < 0)
+      // Going backwards stays available on purpose (bench reflashing of an
+      // older build); it is simply never silent.
+      logPrintf("OTA Pull: downgrade v%s -> v%s, downloading\n", curVer,
+                latestVersion.c_str());
+    else
+      logPrintf("OTA Pull: new firmware v%s available, downloading\n", latestVersion.c_str());
+    setOtaPullStatus(((vcmp > 0 ? String("updating to v") : String("downgrading to v")) + latestVersion).c_str());
     snprintf(fwUrl, sizeof(fwUrl), "%s", firmwareUrl.c_str());
     snprintf(newVer, sizeof(newVer), "%s", latestVersion.c_str());
   }
@@ -695,16 +706,14 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
       logPrintf("OTA Pull: success %zu bytes\n", written);
       otaUpdateSuccess = true;
       otaProgressTarget = 258;
-      // Record the new version in NVS so the next check reports up-to-date
-      // instead of re-downloading the same release. A failed write is not
-      // fatal: the worst case is one re-download of the same version.
-      {
-        Preferences p;
-        if (p.begin("cfg", false)) {
-          p.putString("OTA_VER", newVersion);
-          p.end();
-        }
-      }
+      // Nothing is recorded about the version here. The manifest's claim used
+      // to be written to NVS and then reported back as this device's identity,
+      // which let a unit end up "up-to-date" with an image it never actually
+      // ran (and let a config restore set the version). Identity now comes
+      // from the image itself: after the reboot, FW_VERSION of the new build
+      // is what the device is, and bootinfo logs the version it replaced.
+      logPrintf("OTA Pull: manifest claimed v%s - the rebooted image reports its own build version\n",
+                newVersion);
       // The display task animates the bar to 100% and calls ESP.restart().
       // Fall back to rebooting here so a freshly-flashed image always boots,
       // even if the UI thread is wedged after the update.
@@ -861,6 +870,10 @@ void webServerTask(void *pvParameters) {
     // Runtime-only field (read by the WebUI, ignored by processConfig on POST):
     // the arduino-esp32 core version this firmware was built with.
     doc["core_version"] = ESP.getCoreVersion();
+    // Read-only build identity, shown next to the editable version override so
+    // the compiled-in truth is always visible in the WebUI. Not a config key:
+    // posting it back is ignored (no matching CFG_STR).
+    doc["build_version"] = FW_VERSION;
     String out;
     serializeJson(doc, out);
     logPrintf("GW: entry=%lu heap=%lu wait=%lums mem_active=%d keys=%lu over=%d out=%u\n",
@@ -1107,7 +1120,13 @@ void webServerTask(void *pvParameters) {
     JsonDocument doc;
     doc["enabled"] = OTA_PULL_ENABLED;
     doc["url"] = OTA_PULL_URL;
-    doc["current_version"] = OTA_CURRENT_VERSION;
+    doc["current_version"] = effectiveVersion();
+    // Always-visible build truth next to the reported version, so an override
+    // (or a mismatch) is obvious from the WebUI and the phone app. Additive:
+    // existing consumers keep reading current_version.
+    doc["build_version"] = FW_VERSION;
+    if (VERSION_OVERRIDE[0]) doc["version_override"] = VERSION_OVERRIDE;
+    doc["previous_version"] = bootinfo_previous_version();
     if (otaStatusMutex) xSemaphoreTake(otaStatusMutex, portMAX_DELAY);
     doc["status"] = otaPullStatus;
     doc["status_updated"] = otaPullStatusUpdated;

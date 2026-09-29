@@ -1269,7 +1269,7 @@ const DEFAULTS = {
     TZ_DST_ENABLED: true,
     OTA_PULL_ENABLED: false,
     OTA_PULL_URL: "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
-    OTA_CURRENT_VERSION: "1.2.6",
+    VERSION_OVERRIDE: "",
     touchTable: [950, 840, 750, 670, 600, 530, 460, 400]
 };
 
@@ -1491,7 +1491,9 @@ const configMap = [
     </div>` },
             { id: "OTA_PULL_ENABLED", label: "Enable Automatic OTA Pull" },
             { id: "OTA_PULL_URL", label: "Firmware Manifest URL" },
-            { id: "OTA_CURRENT_VERSION", label: "Current Firmware Version" },
+            { id: "VERSION_OVERRIDE", label: "Version Label (override)" },
+            { type: "note", label: 'Empty = the device reports the version built into the firmware. Type a version here only to label the unit or to test an update pull against a chosen version; the firmware file itself is never affected, and an update check never changes this field.' },
+            { type: "status", id: "build_version", label: "Firmware Build (compiled in)" },
             { type: "status", id: "core_version", label: "ESP Core FW" }
         ]
     },

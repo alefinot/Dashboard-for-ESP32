@@ -338,7 +338,7 @@ The management portal features a modern grouped card-based layout:
 | :--- | :---: | :--- | :--- | :--- |
 | `/` | `GET` | Serves pre-gzipped single-page Web UI | None | `text/html` |
 | `/debug` | `GET` | Dump first bytes of the pre-gzipped UI buffer (build sanity check) | None | `text/plain` |
-| `/api/config` | `GET` | Exports complete NVS configuration | None | `application/json` |
+| `/api/config` | `GET` | Exports complete NVS configuration plus read-only `build_version` | None | `application/json` |
 | `/api/config` | `POST` | Updates NVS parameters and applies changes | Config JSON object | `application/json` |
 | `/api/time` | `POST` | Syncs system clock from browser | `?epoch=1700000000` | `text/plain` |
 | `/api/odo` | `GET` | Reads odometer distance in km | None | `application/json` |
@@ -351,7 +351,7 @@ The management portal features a modern grouped card-based layout:
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `text/plain` |
 | `/api/ota` | `POST` | Over-The-Air firmware binary upload | Binary `.bin` payload | `multipart/form-data` |
 | `/api/ota/pull` | `POST` | Triggers cloud OTA pull (checks `OTA_PULL_URL`) | None | `text/plain` |
-| `/api/ota/check` | `GET` | Reports cloud OTA pull state (enabled, URL, version, status) | None | `application/json` |
+| `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled`, `url`, `current_version`, `build_version`, `version_override`, `previous_version`, `status`) | None | `application/json` |
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
 | `/api/perf` | `GET` | Live telemetry (CPU, Heap, FPS, WiFi, partitions) | None | `application/json` |
 | `/api/health` | `GET` | Quick heap / mem-saver / uptime health probe | None | `application/json` |
@@ -420,7 +420,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
 - `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull (checks once per boot while enabled).
 - `OTA_PULL_URL` (default=""): HTTPS URL of the target firmware binary.
-- `OTA_CURRENT_VERSION` (default="1.3.8"): Version string compared against the cloud manifest.
+- `VERSION_OVERRIDE` (default=""): Optional version **label**. When set, the unit reports this string instead of its compiled-in build version (`FW_VERSION` in `src/config.cpp`) — for display and as the reference version of the cloud OTA check, which is how you test an update pull against an arbitrary version. It never changes the firmware image, and nothing fetched from the network ever writes it (the previous behaviour of storing the manifest's version is why a unit could report a version it never ran). The real build version is always exposed read-only as `build_version` (`GET /api/config`) and shown in the WebUI (System → Firmware Update). NVS key `VER_OVR`.
 
 #### Ambient Light (Auto-Brightness)
 - `LIGHT_SENSOR_DARK_VAL`: Dark-reference ambient light value (calibrated via `/api/ambient/cal-dark`).
