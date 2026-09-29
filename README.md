@@ -536,7 +536,7 @@ manifest from `OTA_PULL_URL`, then downloads and flashes the image it points at:
 
 ```json
 { "version": "1.3.9",
-  "firmware_url": "https://github.com/alefinot/Dashboard-for-ESP32/releases/download/V1.3.9/firmware.bin" }
+  "firmware_url": "https://github.com/alefinot/Dashboard-for-ESP32/releases/download/v1.3.9/firmware.bin" }
 ```
 
 `OTA_PULL_URL` may also point straight at the GitHub API
@@ -574,7 +574,8 @@ python scripts/ota_sign.py verify 1.3.9 .pio/build/esp32dev/firmware.bin
 `sign` writes `firmware.bin.sig` next to the binary — a DER ECDSA P-256 signature
 over `sha256(firmware.bin) || 0x0A || version`. Upload it as a **sibling release
 asset**; a release without the `.sig` will not install on any device. The signed
-version is the plain number (`1.3.9`), while the release *tag* is `V1.3.9`.
+version is the plain number (`1.3.9`) — the release tag is `v1.3.9`, and a `v`
+prefix in a manifest version is stripped before the version compare.
 
 Keep `keys/ota_sign_key.pem` backed up offline and private: lose it and no future
 signed release can be built; leak it and anyone can ship firmware to every device.
