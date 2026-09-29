@@ -314,7 +314,7 @@ When `ENABLE_POWER_SENSE` is enabled and `POWER_SENSE_PIN` (GPIO4) drops LOW:
 Dashboard++ embeds a single-page management portal directly into flash memory (`index_html`).
 
 ### WiFi Network Connectivity
-- **SoftAP Mode:** Emits AP SSID `Dashboard_Config` (Default IP: `192.168.4.1`).
+- **SoftAP Mode:** Emits AP SSID `Dashboard_Config` (Default IP: `192.168.4.1`). Always up alongside the client connection (`WIFI_AP_STA`), secured by `AP_PASSWORD` (empty or 8–63 characters).
 - **Multi-SSID Client Mode:** Can store up to 4 fallback WiFi network profiles (`WIFI_SSID_1` through `WIFI_SSID_4`). Automatically attempts connection on boot.
 
 ### Web UI Features
@@ -415,7 +415,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `WEATHER_LOCALE` (default="en"): ISO locale code for weather-condition naming.
 
 #### WiFi & Cloud OTA
-- `AP_PASSWORD` (default="12345678"): Password of the `Dashboard_Config` SoftAP (the configuration portal). Set in the WebUI (System & General → Wifi → Device Config AP).
+- `AP_PASSWORD` (default="12345678"): Password of the `Dashboard_Config` SoftAP (the configuration portal). Set in the WebUI (System & General → Wifi → Device Config AP). Must be **empty** (open network, not recommended) or **8–63 characters**: the Wi-Fi stack rejects 1–7 character passphrases, so a shorter value is refused at load/save time and the shipped default is restored instead (logged as `Config: AP_PASSWORD too short`). The WebUI warns while the default password is still in use.
 - `WIFI_RETRY_MODE` (default=1): Search policy — `0` = one cycle, `1` = fixed-time (`WIFI_RETRY_SECONDS`), `2` = search forever. Same policy governs reconnects after a lost link.
 - `WIFI_RETRY_SECONDS` (default=300): Elapsed-search budget for policy `1` (seconds).
 - `OTA_PULL_ENABLED` (default=false): Toggle automatic cloud pull (checks once per boot while enabled).

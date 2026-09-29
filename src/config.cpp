@@ -236,6 +236,10 @@ char WIFI_SSID_3[64] = "";
 char WIFI_PASSWORD_3[64] = "";
 char WIFI_SSID_4[64] = "";
 char WIFI_PASSWORD_4[64] = "";
+// Shipped hotspot passphrase. Also the fallback used whenever a stored
+// AP_PASSWORD is unusable (see sanitizeStringParams() below), so it is named
+// once instead of being repeated as a literal in three places.
+const char AP_PASSWORD_DEFAULT[] = "12345678";
 char AP_PASSWORD[64] = "12345678";
 int WIFI_TX_POWER_DBM = 20;
 int WIFI_RETRY_MODE = 1;
@@ -526,7 +530,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_STR(WIFI_SSID_2, "WIFI_S2", "");
   CFG_STR(WIFI_SSID_3, "WIFI_S3", "");
   CFG_STR(WIFI_SSID_4, "WIFI_S4", "");
-  CFG_STR(AP_PASSWORD, "AP_PWD", "12345678");
+  CFG_STR(AP_PASSWORD, "AP_PWD", AP_PASSWORD_DEFAULT);
   CFG_INT(WIFI_TX_POWER_DBM, "WIFI_TXP", 20);
   CFG_INT(WIFI_RETRY_MODE, "WIFI_RETRY_M", 1);
   CFG_INT(WIFI_RETRY_SECONDS, "WIFI_RETRY_S", 60);
@@ -580,6 +584,25 @@ void processConfig(int mode, JsonDocument *doc) {
     if (WIFI_RETRY_MODE > 2) WIFI_RETRY_MODE = 2;
     if (WIFI_RETRY_SECONDS < 1) WIFI_RETRY_SECONDS = 1;
     if (WIFI_RETRY_SECONDS > 86400) WIFI_RETRY_SECONDS = 86400;
+
+    // The Dashboard_Config hotspot is started on every boot, and the Wi-Fi
+    // stack refuses a 1-7 character passphrase outright (framework-
+    // arduinoespressif32 3.3.12, libraries/WiFi/src/AP.cpp: "passphrase too
+    // short!" -> softAP() returns false). A short password would therefore
+    // kill the only way back into a misconfigured unit, with nothing but a
+    // Serial log line to show for it. Empty means an open network, which is
+    // allowed but warned about in the WebUI. Reject 1-7 characters on both
+    // load and save, fall back to the shipped default, and say why.
+    size_t apPwdLen = strlen(AP_PASSWORD);
+    if (apPwdLen > 0 && apPwdLen < 8) {
+      logPrintf("Config: AP_PASSWORD too short (%d chars) - using default\n",
+                (int)apPwdLen);
+      strncpy(AP_PASSWORD, AP_PASSWORD_DEFAULT, sizeof(AP_PASSWORD) - 1);
+      AP_PASSWORD[sizeof(AP_PASSWORD) - 1] = 0;
+      // Mode 2 already wrote the rejected value to NVS through CFG_STR,
+      // so overwrite it here rather than re-sanitizing on every boot.
+      if (mode == 2) pref.putString("AP_PWD", AP_PASSWORD);
+    }
   }
 
   if (mode == 0) {

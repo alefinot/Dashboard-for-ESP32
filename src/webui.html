@@ -1466,6 +1466,7 @@ const configMap = [
             { id: "WIFI_RETRY_SECONDS", label: "Search Timeout", unit: "seconds", advanced: true },
             { type: "heading", label: "Device Config AP (Dashboard_Config)" },
             { id: "AP_PASSWORD", label: "AP Password" },
+            { type: "note", label: '<span id="ap-pwd-rule">8-63 characters, or empty for an open network. A 1-7 character password is rejected by the Wi-Fi stack, which stops the config hotspot from starting at all.</span> <span id="ap-pwd-warn" style="display:none;color:var(--accent-rose);font-weight:700;">Still using the shipped default password - anyone within range of the hotspot can reconfigure this dashboard.</span>' },
             { type: "heading", label: "Primary Network" },
             { id: "WIFI_SSID", label: "Network Name (SSID)" },
             { id: "WIFI_PASSWORD", label: "Password" },
@@ -1970,6 +1971,7 @@ function renderForm(d) {
     protectSliders();
     updateCpuMode();
     bindPowerSense();
+    bindApPasswordWarn();
     // Advanced Mode: reflect the ADV_MODE config on the header toggle and
     // show/hide the advanced rows.
     advModeOn = !!d.ADV_MODE;
@@ -2039,6 +2041,18 @@ function bindPowerSense() {
             });
         }
     });
+}
+
+// Live nag while the config hotspot still runs on the shipped default
+// passphrase: the hotspot is the only way into a misconfigured unit, so an
+// unchanged password is worth pointing at without blocking the page.
+function bindApPasswordWarn() {
+    const field = document.getElementById('AP_PASSWORD');
+    const warn = document.getElementById('ap-pwd-warn');
+    if (!field || !warn) return;
+    const update = () => { warn.style.display = (field.value === '12345678') ? '' : 'none'; };
+    field.addEventListener('input', update);
+    update();
 }
 
 let rangeScrollLockTimer = null;

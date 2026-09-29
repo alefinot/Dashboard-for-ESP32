@@ -743,9 +743,14 @@ void webServerTask(void *pvParameters) {
   if (txPower < -1) txPower = -1;
   if (txPower > 20) txPower = 20;
   WiFi.setTxPower((wifi_power_t)txPower);
-  WiFi.softAP("Dashboard_Config", AP_PASSWORD);
-  logPrintf("AP: Dashboard_Config\n");
-  logPrintf("AP IP: %s\n", WiFi.softAPIP().toString().c_str());
+  // softAP() returns false when the passphrase is rejected (1-7 characters),
+  // which would otherwise leave the config portal unreachable in silence.
+  if (!WiFi.softAP("Dashboard_Config", AP_PASSWORD)) {
+    logPrintf("AP: Dashboard_Config FAILED TO START - AP_PASSWORD must be empty or 8-63 chars\n");
+  } else {
+    logPrintf("AP: Dashboard_Config\n");
+    logPrintf("AP IP: %s\n", WiFi.softAPIP().toString().c_str());
+  }
 
   delay(100);
 
