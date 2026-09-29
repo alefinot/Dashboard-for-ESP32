@@ -2078,10 +2078,11 @@ void checkNightMode(const SensorSnapshot &snap) {
     if (shouldBeNightMode != isNightModeActive || firstCheck) {
       isNightModeActive = shouldBeNightMode;
       firstCheck = false;
-      int level = isNightModeActive
-                      ? (NIGHT_BACKLIGHT * 255) / 100
-                      : (BACKLIGHT_BRIGHTNESS * 255) / 100;
-      ledcWrite(BL_DISPLAY, level);
+      // One writer for the backlight (issue #20): applyBacklight() owns the
+      // percent->duty conversion and the 0..100 limit, and it keeps
+      // currentBrightnessTarget aligned so the sleep/wake fades ramp from the
+      // level night mode actually left the panel at.
+      applyBacklight(isNightModeActive ? NIGHT_BACKLIGHT : BACKLIGHT_BRIGHTNESS);
     }
   }
 }

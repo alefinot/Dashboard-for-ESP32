@@ -397,7 +397,7 @@ Bands are also checked offline by `python scripts/verify_config_ranges.py`: ever
 
 #### Display & Visual Design
 - `DISPLAY_ROTATION` (default=3): Screen rotation (0, 1, 2, 3).
-- `BACKLIGHT_BRIGHTNESS` (default=100): Backlight duty cycle (0–100%).
+- `BACKLIGHT_BRIGHTNESS` (default=100): Backlight duty cycle (**0–100%**, clamped on load/save). The percent is turned into the 8-bit LEDC duty in one place (`backlightDuty()` / `applyBacklight()` in `src/main.cpp`), so no path — WebUI slider, night mode, boot splash, sleep/wake fade or auto-brightness — can put an out-of-range duty on the panel (issue #20).
 - `NIGHT_BACKLIGHT` (default=29): Night-mode backlight duty cycle (0–100%), applied while night mode is active.
 - `ENABLE_ANTIALIASING` (default=true): Anti-aliased line rendering toggle.
 - `AA_SHARPNESS` (default=1.0): Anti-aliasing gamma correction factor.

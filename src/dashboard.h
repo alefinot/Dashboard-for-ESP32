@@ -279,6 +279,13 @@ extern float filteredAmbientValue;
 extern int FADE_DURATION_MS;
 extern int currentBrightnessTarget;
 
+// Backlight plumbing (issue #20): the LEDC channel is 8-bit while every caller
+// thinks in percent, so the conversion and the write both live in one place.
+// backlightDuty() is the only percent->duty maths, applyBacklight() the only
+// direct writer.
+int backlightDuty(int percent);
+void applyBacklight(int percent);
+
 extern int REFRESH_SPEED_MS;
 extern int REFRESH_BAT_MS;
 extern int REFRESH_INST_MS;

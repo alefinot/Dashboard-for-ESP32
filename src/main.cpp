@@ -26,6 +26,30 @@ bool pendingInvertDisplay = false;
 int pendingBacklightValue = -1;
 int currentBrightnessTarget = 0;
 
+// The backlight LEDC channel is 8-bit (ledcAttach(BL_DISPLAY, 1000, 8)) while
+// every caller works in percent. Before this, percent->duty was open-coded in
+// four places and nothing limited it: a BACKLIGHT_BRIGHTNESS outside 0..100
+// (an old NVS write, or a POST that bypassed validation) reached ledcWrite
+// directly - a negative value wrapped to a huge duty and left the panel dark at
+// boot with no explanation (issue #20). One conversion, one writer.
+int backlightDuty(int percent) {
+  if (percent < 0 || percent > 100) {
+    logPrintf("Backlight: %d%% outside [0..100], clamped\n", percent);
+    percent = constrain(percent, 0, 100);
+  }
+  return (percent * 255) / 100;
+}
+
+// The only place that drives the backlight channel directly. Also keeps
+// currentBrightnessTarget in step, so the sleep/wake and splash fades ramp to
+// the level the panel is actually at. Callers that fade gradually (splash,
+// auto-brightness) set the target through backlightDuty() and write themselves.
+void applyBacklight(int percent) {
+  int duty = backlightDuty(percent);
+  currentBrightnessTarget = duty;
+  ledcWrite(BL_DISPLAY, duty);
+}
+
 // Config-save handoff (issue #10): the web task parses and writes the config,
 // the display loop applies the panel-bus and CPU-frequency changes at a frame
 // gap, and no frame is painted while the parameter group is being rewritten.
@@ -209,14 +233,16 @@ void setup() {
       t = constrain(t, 0.0f, 1.0f);
       int pct = AUTO_BRIGHT_DARK + (int)((AUTO_BRIGHT_LIGHT - AUTO_BRIGHT_DARK) * t);
       pct = constrain(pct, 0, 100);
-      currentBrightnessTarget = (pct * 255) / 100;
+      currentBrightnessTarget = backlightDuty(pct);
     } else {
-      currentBrightnessTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+      currentBrightnessTarget = backlightDuty(BACKLIGHT_BRIGHTNESS);
     }
   } else {
-    currentBrightnessTarget = (BACKLIGHT_BRIGHTNESS * 255) / 100;
+    currentBrightnessTarget = backlightDuty(BACKLIGHT_BRIGHTNESS);
   }
-  if (currentBrightnessTarget > 255) currentBrightnessTarget = 255;
+  // currentBrightnessTarget is always 0..255 now, so a 0 setting is simply a
+  // dark panel: the fade loop below still runs its single step instead of
+  // looking like a dead display.
 
   drawSplashBase();
   logPrintf("drawSplashBase done\n");
@@ -330,8 +356,7 @@ void loop() {
     pendingInvertDisplay = false;
   }
   if (pendingBacklightValue >= 0) {
-    currentBrightnessTarget = (pendingBacklightValue * 255) / 100;
-    ledcWrite(BL_DISPLAY, currentBrightnessTarget);
+    applyBacklight(pendingBacklightValue);
     pendingBacklightValue = -1;
   }
 
@@ -349,7 +374,7 @@ void loop() {
         t = constrain(t, 0.0f, 1.0f);
         int pct = AUTO_BRIGHT_DARK + (int)((AUTO_BRIGHT_LIGHT - AUTO_BRIGHT_DARK) * t);
         pct = constrain(pct, 0, 100);
-        autoBrightTarget = (pct * 255) / 100;
+        autoBrightTarget = backlightDuty(pct);
         if (autoBrightPwmF < 0.0f) autoBrightPwmF = (float)autoBrightTarget;
       }
     }
@@ -359,7 +384,10 @@ void loop() {
       autoBrightPwmF += ((float)autoBrightTarget - autoBrightPwmF) * alpha;
       if (abs(autoBrightTarget - (int)autoBrightPwmF) <= 1)
         autoBrightPwmF = (float)autoBrightTarget;
-      ledcWrite(BL_DISPLAY, (int)autoBrightPwmF);
+      // autoBrightPwmF is a smoothed *duty* (not a percent), so it cannot go
+      // through applyBacklight(); the constrain keeps it inside the 8-bit range
+      // the channel was configured with (issue #20).
+      ledcWrite(BL_DISPLAY, constrain((int)autoBrightPwmF, 0, 255));
     }
   }
 
