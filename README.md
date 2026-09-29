@@ -92,8 +92,19 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 > [!NOTE]
 > The **weather fetch task** (Core 0, spawned by `startWeatherFetch()` on Core 1) polls the Open-Meteo
 > API on a configurable interval (`WEATHER_REFRESH_MIN`) and stores the result in a dedicated
-> `g_weatherData` struct. A 30 s hung-fetch guard kills stuck tasks; a config save triggers an
+> `g_weatherData` struct. A 30 s guard asks a stuck fetch to abort (the fetch polls
+> `weatherAbort` at its checkpoints and HTTP calls carry 8 s connect/read timeouts) so it unwinds
+> and deletes itself rather than being killed with `vTaskDelete()`; while an aborted fetch is still
+> alive, `startWeatherFetch()` refuses to stack a second one. A config save triggers an
 > instant refetch with a 2 s retry backoff.
+
+> [!NOTE]
+> Every FreeRTOS task is started through `startTask()` in `src/main.cpp`, which checks the
+> `xTaskCreatePinnedToCore()` return value, retries once on half the requested stack (a reduced
+> stack usually fits and beats a missing subsystem) and, if that fails too, records the task in a
+> `failedTasksMask` and logs it with the free heap. A task that cannot start is therefore named in
+> the boot log instead of silently missing — the failure that used to show up only as a frozen
+> heartbeat, no Web UI or dead sensors.
 
 ---
 

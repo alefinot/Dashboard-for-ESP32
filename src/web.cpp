@@ -82,6 +82,15 @@ static volatile bool otaPullDownloading = false;
 // ----------------------------------------------------------------------------
 static volatile bool weatherTaskRunning = false;  // guarded by weatherFetchMutex
 static unsigned long weatherTaskStartedMs = 0;
+// Issue #23: a fetch that sticks is asked to stop, never killed. vTaskDelete() on
+// a task blocked inside HTTPClient/mbedTLS never unwinds: the task stack, the
+// HTTPClient, the TLS client and ~34 KB of mbedTLS buffers leak, and two or three
+// hangs are enough to push the unit into memory-saver/SAFE MODE. weatherAbort is
+// polled by the fetch at its own checkpoints so it returns through its normal
+// destructors and deletes itself; weatherAbandoned stops a second fetch piling up
+// behind a task that ignores the request.
+static volatile bool weatherAbort = false;
+static bool weatherAbandoned = false;  // guarded by weatherFetchMutex
 // Set when a config save changes the weather location/city/interval so the
 // fetch loop re-queries immediately instead of waiting for the next interval.
 static volatile bool weatherRefreshRequested = false;
@@ -89,7 +98,7 @@ static volatile bool weatherRefreshRequested = false;
 // Reverse-geocode a coordinate into a short display name (city/locality/region).
 // Free keyless BigDataCloud lookup; returns true and fills `out` on success.
 static bool reverseGeocode(double lat, double lon, String &out) {
-  if (WiFi.status() != WL_CONNECTED) return false;
+  if (WiFi.status() != WL_CONNECTED || weatherAbort) return false;
   char url[192];
   if (WEATHER_LOCALE[0] != 0) {
     snprintf(url, sizeof(url),
@@ -103,6 +112,10 @@ static bool reverseGeocode(double lat, double lon, String &out) {
 
   HTTPClient http;
   if (!http.begin(url)) return false;
+  // Bounded on purpose: the library defaults leave a black-hole host sitting in
+  // connect/read long enough to trip the 30 s fetch guard in the web loop.
+  http.setConnectTimeout(8000);
+  http.setTimeout(8000);
   int httpCode = http.GET();
   if (httpCode != HTTP_CODE_OK) {
     logPrintf("Weather: geocode HTTP error %d\n", httpCode);
@@ -143,6 +156,12 @@ void updateWeather() {
   if (WiFi.status() != WL_CONNECTED) {
     return;
   }
+  // Aborted before it even started (issue #23): the web loop already gave up on
+  // an earlier fetch, so return through the normal path and let the task exit.
+  if (weatherAbort) {
+    logPrintf("Weather: aborted before fetch\n");
+    return;
+  }
   HTTPClient http;
   
   // Read the GPS position from the published snapshot, NOT from
@@ -157,7 +176,7 @@ void updateWeather() {
   // City name follows the coordinates: only reverse-geocode a live GPS fix,
   // otherwise fall back to the saved WEATHER_CITY derived from WEATHER_LAT/LON.
   String resolvedCity;
-  if (gpsFix) reverseGeocode(lat, lon, resolvedCity);
+  if (gpsFix && !weatherAbort) reverseGeocode(lat, lon, resolvedCity);
   
   char url[256];
   snprintf(url, sizeof(url),
@@ -174,7 +193,7 @@ void updateWeather() {
     otaMemReleaseRequested = true;
     otaMemReleased = false;
     unsigned long t0 = millis();
-    while (!otaMemReleased && (millis() - t0) < 3000)
+    while (!otaMemReleased && (millis() - t0) < 3000 && !weatherAbort)
       vTaskDelay(pdMS_TO_TICKS(1));
     otaMemReleaseRequested = false;
     logPrintf("Weather: UI mem released for TLS heap=%lu max=%lu\n",
@@ -182,9 +201,18 @@ void updateWeather() {
               (unsigned long)ESP.getMaxAllocHeap());
   }
   http.begin(url);
+  http.setConnectTimeout(8000);
+  http.setTimeout(8000);
   int httpCode = http.GET();
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
+    if (weatherAbort) {
+      // Abandoned while the body was still arriving: drop the result instead of
+      // publishing weather nobody asked for any more.
+      logPrintf("Weather: aborted while reading, result dropped\n");
+      http.end();
+      return;
+    }
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload);
     if (!error) {
@@ -254,6 +282,7 @@ void weatherFetchTask(void *pvParameters) {
   if (weatherTaskHandle == xTaskGetCurrentTaskHandle()) {
     weatherTaskRunning = false;
     weatherTaskHandle = NULL;
+    weatherAbandoned = false;  // this fetch is done, abandon-request cleared with it
   }
   xSemaphoreGive(weatherFetchMutex);
   vTaskDelete(NULL);
@@ -262,11 +291,22 @@ void weatherFetchTask(void *pvParameters) {
 bool startWeatherFetch() {
   xSemaphoreTake(weatherFetchMutex, portMAX_DELAY);
   if (weatherTaskRunning) {
+    // Issue #23 fallback: a fetch that was told to abort and has not come back
+    // yet still owns the slot. Starting a second one would stack another
+    // HTTPClient + TLS context on top of the stuck one, so refuse; leaking at
+    // most one stuck task beats leaking N.
+    if (weatherAbandoned) {
+      logPrintf("Weather: previous fetch still stuck after abort request - skipping\n");
+      xSemaphoreGive(weatherFetchMutex);
+      return false;
+    }
     xSemaphoreGive(weatherFetchMutex);
     return true;
   }
   weatherTaskRunning = true;
   weatherTaskStartedMs = millis();
+  weatherAbort = false;
+  weatherAbandoned = false;
   BaseType_t res = xTaskCreatePinnedToCore(weatherFetchTask, "WeatherFetchTask",
                                            8192, NULL, 1, &weatherTaskHandle, 0);
   if (res != pdPASS) {
@@ -1802,14 +1842,18 @@ void webServerTask(void *pvParameters) {
       // Hung-fetch guard: if the HTTP request ever sticks longer than 30s,
       // abandon the task so the interval and future refreshes can retry
       // instead of the weather widget dying permanently.
+      // Hung-fetch guard (issue #23): ask the fetch to stop instead of killing
+      // it. vTaskDelete() on a task blocked in HTTPClient/mbedTLS leaks the task
+      // stack plus the HTTP/TLS contexts and is how a flaky weather host pushed
+      // the unit into SAFE MODE. The HTTP timeouts inside updateWeather() are 8 s,
+      // so this request is normally answered within one checkpoint; if it is not,
+      // the slot stays occupied and startWeatherFetch() refuses to stack another.
       xSemaphoreTake(weatherFetchMutex, portMAX_DELAY);
-      if (weatherTaskRunning && millis() - weatherTaskStartedMs > 30000) {
-        logPrintf("Weather: fetch task hung >30s, terminating task\n");
-        if (weatherTaskHandle != NULL) {
-          vTaskDelete(weatherTaskHandle);
-        }
-        weatherTaskRunning = false;
-        weatherTaskHandle = NULL;
+      if (weatherTaskRunning && !weatherAbandoned &&
+          millis() - weatherTaskStartedMs > 30000) {
+        logPrintf("Weather: fetch task stuck >30s, requesting abort (task not deleted)\n");
+        weatherAbort = true;
+        weatherAbandoned = true;
       }
       xSemaphoreGive(weatherFetchMutex);
       if (lastWeatherCheck == 0) {
@@ -1818,7 +1862,7 @@ void webServerTask(void *pvParameters) {
       unsigned long weatherIntervalMs = (unsigned long)WEATHER_REFRESH_MIN * 60000UL;
       // SAFE MODE: don't start new weather fetches (the TLS handshake needs
       // ~34KB — exactly the heap that's short). In-flight fetches finish
-      // normally (30s hang guard still applies).
+      // normally (the 30 s abort request still applies to them).
       if (!safeModeActive && millis() - lastWeatherCheck >= weatherIntervalMs) {
         lastWeatherCheck = millis();
         startWeatherFetch();
