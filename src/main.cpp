@@ -106,6 +106,34 @@ TaskHandle_t sensorTaskHandle = NULL;
 TaskHandle_t gpsTaskHandle = NULL;
 TaskHandle_t webTaskHandle = NULL;
 
+// Issue #25: xTaskCreatePinnedToCore returns errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY
+// when the heap is tight, and that result used to be thrown away. A task that never
+// started was invisible - you only noticed later as a frozen heartbeat, no Web UI or
+// dead sensors. Now every start is checked, retried once on half the requested stack
+// (a reduced stack is usually enough and beats a missing subsystem), and recorded in
+// failedTasksMask so the boot log names exactly what is missing.
+static uint8_t failedTasksMask = 0; // bit0 sensor, bit1 gps, bit2 web, bits3-4 probes
+
+static bool startTask(const char *name, TaskFunction_t fn, uint32_t stackBytes,
+                      UBaseType_t prio, BaseType_t core, void *param,
+                      TaskHandle_t *outHandle, uint8_t failBit) {
+  if (xTaskCreatePinnedToCore(fn, name, stackBytes, param, prio, outHandle,
+                             core) == pdPASS)
+    return true;
+  logPrintf("Task %s: no room for a %lu B stack (free heap %lu) - retrying at %lu B\n",
+            name, (unsigned long)stackBytes, (unsigned long)ESP.getFreeHeap(),
+            (unsigned long)(stackBytes / 2));
+  if (xTaskCreatePinnedToCore(fn, name, stackBytes / 2, param, prio, outHandle,
+                             core) == pdPASS) {
+    logPrintf("Task %s started on the reduced stack\n", name);
+    return true;
+  }
+  failedTasksMask |= (1u << failBit);
+  logPrintf("Task %s FAILED to start (free heap %lu) - that subsystem is offline this session\n",
+            name, (unsigned long)ESP.getFreeHeap());
+  return false;
+}
+
 void setup() {
   setCpuFrequencyMhz(240);
   Serial.setTxBufferSize(256);
@@ -322,14 +350,14 @@ void setup() {
 // sensorTask (core 1, prio 2 > loopTask prio 1) owns only the short I2C/ADC
 // reads + snapshot: a few ms per 20ms tick, preempting the display briefly
 // then sleeping, so rendering keeps its ~62.5fps while values stay live.
-  xTaskCreatePinnedToCore(sensorTask, "SensorTaskCore1", 4096, NULL, 2,
-                           &sensorTaskHandle, 1);
-  xTaskCreatePinnedToCore(gpsTask, "GpsTaskCore0", 4096, NULL, 2, &gpsTaskHandle,
-                           0);
-  xTaskCreatePinnedToCore(webServerTask, "WebTaskCore0", 6144, NULL, 1,
-                           &webTaskHandle, 0);
-  xTaskCreatePinnedToCore(cpuProbeTask, "CPUProbe0", 2048, (void *)0, 1, NULL, 0);
-  xTaskCreatePinnedToCore(cpuProbeTask, "CPUProbe1", 2048, (void *)1, 1, NULL, 1);
+  startTask("SensorTaskCore1", sensorTask, 4096, 2, 1, NULL, &sensorTaskHandle, 0);
+  startTask("GpsTaskCore0", gpsTask, 4096, 2, 0, NULL, &gpsTaskHandle, 1);
+  startTask("WebTaskCore0", webServerTask, 6144, 1, 0, NULL, &webTaskHandle, 2);
+  startTask("CPUProbe0", cpuProbeTask, 2048, 1, 0, (void *)0, NULL, 3);
+  startTask("CPUProbe1", cpuProbeTask, 2048, 1, 1, (void *)1, NULL, 4);
+  if (failedTasksMask)
+    logPrintf("Boot finished with failed tasks (mask 0x%02X) - check the lines above\n",
+              failedTasksMask);
 
   logPrintf("Setup done\n");
 }
