@@ -16,6 +16,23 @@ static inline int clampCells(int n, int lo = 1) {
   return n;
 }
 
+// Cap a value to the widest number its configured integer digits can print, so
+// a right-aligned readout never formats a string wider than the cell array that
+// holds it (issue #7). With decimals the ceiling leaves half a unit of headroom
+// for "%.*f" rounding, without them it is the all-nines value.
+static inline float clampToCells(float v, int intDigits, int decDigits) {
+  float hi = powf(10.0f, (float)intDigits) - (decDigits > 0 ? 0.5f : 1.0f);
+  return (v > hi) ? hi : v;
+}
+
+// Leading characters to drop when a formatted string is still wider than its
+// cells. Used as the loop start so the right-align maths "(count - len) + i"
+// can never go below 0: the readout shows its low-order digits instead of
+// reading cellR[-1] (issue #7, second line of defence).
+static inline int cellSkip(int count, int len) {
+  return (len > count) ? (len - count) : 0;
+}
+
 static constexpr unsigned long STARTUP_RAMP_DURATION_MS = 3000;
 
 // Frame-budget gate for updateBigDisplay(). A 60 FPS slot is 16.6ms, but the
@@ -583,6 +600,14 @@ void updateBigDisplay(const SensorSnapshot &snap) {
 
   int currentSpeed = (UNITS_IMPERIAL ? (int)(kmhToMph(displaySnap.currentSpeed) + 0.5f)
                                      : (int)displaySnap.currentSpeed);
+  // Cap to the configured digit count: 100 km/h with SPEED_DIGITS=2 formats 3
+  // chars for 2 cells, and the right-align index goes negative (issue #7).
+  // A negative speed would put '-' through the digit tables, so floor at 0.
+  if (currentSpeed < 0) currentSpeed = 0;
+  else {
+    int spdHi = (int)powf(10.0f, (float)clampCells(SPEED_DIGITS)) - 1;
+    if (currentSpeed > spdHi) currentSpeed = spdHi;
+  }
   static unsigned long lastSpeedUpdate = 0;
   if (SHOW_ELEMENT_SPEED && ((currentSpeed != lastSpeed &&
       (REFRESH_SPEED_MS == 0 || now - lastSpeedUpdate >= (unsigned long)REFRESH_SPEED_MS)) || forceDraw)) {
@@ -616,7 +641,7 @@ void updateBigDisplay(const SensorSnapshot &snap) {
         }
       }
       sp.setTextColor(TFT_WHITE);
-      for (int i = 0; i < len; i++) {
+      for (int i = cellSkip(spdCount, len); i < len; i++) {
         int d = speedStr[i] - '0';
         int cellIdx = (spdCount - len) + i;
         int cx = spdCellR[cellIdx] + 4 - digitXOff[d] - digitWidth[d] + digitRightOff[d];
@@ -674,7 +699,7 @@ if (!vlw120Ready) {
             display.setTextColor(TFT_WHITE);
           else
             display.setTextColor(TFT_WHITE, TFT_BLACK);
-          for (int i = 0; i < len; i++) {
+          for (int i = cellSkip(spdCount, len); i < len; i++) {
             int d = speedStr[i] - '0';
             int cellIdx = (spdCount - len) + i;
             int cellRight = boxLeft + spdCellR[cellIdx];
@@ -957,7 +982,9 @@ if (!vlw120Ready) {
       lastTmrShownAt = tNow;
     }
   }
-  float displayTmr = tmrShown;
+  // Format-only cap: a timer value wider than TMR_INT_DIGITS would index
+  // tmrCells[] below zero (issue #7).
+  float displayTmr = clampToCells(tmrShown, TMR_INT_DIGITS, TMR_DEC_DIGITS);
   TimerState displayAccelState = displaySnap.accelState;
   static int w_sat_max = 0, w_bat_max = 0, w_badge_max = 0, w_tmr_max = 0;
   static uint16_t h_sat_max = 0, h_bat_max = 0, h_tmr_max = 0,
@@ -1164,7 +1191,7 @@ if (!vlw120Ready) {
       display.setTextColor(timerColor);
     else
       display.setTextColor(timerColor, TFT_BLACK);
-    for (int i = 0; i < len; i++) {
+    for (int i = cellSkip(tmrCellsCount, len); i < len; i++) {
       char c = tmrStr[i];
       int cellIdx = (tmrCellsCount - len) + i;
       int cellRight = tmrX + tmrCells[cellIdx];
@@ -1196,7 +1223,10 @@ if (!vlw120Ready) {
     measureDs15Cells(batCells, batCellW, batCellsCount, BAT_INT_DIGITS);
   }
   char batStr[12];
-  snprintf(batStr, sizeof(batStr), "%.*f", BAT_DEC_DIGITS, displayBat);
+  // Format-only cap: displayBat itself must keep its real value for the colour
+  // and icon thresholds below (issue #7).
+  snprintf(batStr, sizeof(batStr), "%.*f", BAT_DEC_DIGITS,
+           clampToCells(displayBat, BAT_INT_DIGITS, BAT_DEC_DIGITS));
   static char lastBatStr[12] = "";
   static unsigned long lastBatUpdate = 0;
   if (SHOW_ELEMENT_BAT && (forceDraw || (IN_BAND_BUDGET &&
@@ -1237,7 +1267,7 @@ if (!vlw120Ready) {
       display.setTextColor(batColor);
     else
       display.setTextColor(batColor, TFT_BLACK);
-    for (int i = 0; i < len; i++) {
+    for (int i = cellSkip(batCellsCount, len); i < len; i++) {
       char c = batStr[i];
       int cellIdx = (batCellsCount - len) + i;
       int cellRight = (batX + 14) + batCells[cellIdx];
@@ -1263,14 +1293,11 @@ if (!vlw120Ready) {
 
   // --- Instant KM/L ---
   float displayInstKml = displaySnap.instantKml;
-  if (UNITS_IMPERIAL) {
-    displayInstKml = kmlToMpg(displaySnap.instantKml);
-    // Imperial economy can exceed the INST_INT_DIGITS cells for high km/L
-    // values (e.g. 45 km/L = 105.8 MPG). Clamp so the formatted string never
-    // overflows its cell count. Metric path is unchanged.
-    float instMax = powf(10.0f, (float)INST_INT_DIGITS) - (INST_DEC_DIGITS > 0 ? 0.5f : 1.0f);
-    if (displayInstKml > instMax) displayInstKml = instMax;
-  }
+  if (UNITS_IMPERIAL) displayInstKml = kmlToMpg(displaySnap.instantKml);
+  // Clamp in both unit modes: imperial economy can exceed the cells (45 km/L =
+  // 105.8 MPG) and so can a metric value with few INST_INT_DIGITS - either
+  // formats wider than instCells[] and drives the index negative (#7).
+  displayInstKml = clampToCells(displayInstKml, INST_INT_DIGITS, INST_DEC_DIGITS);
   static float lastDispInstKml = -1.0f;
   static unsigned long lastInstUpdate = 0;
   bool instChanged = fabsf(displayInstKml - lastDispInstKml) >= 0.1f;
@@ -1346,7 +1373,7 @@ if (!vlw120Ready) {
       display.setTextColor(TFT_CYAN);
     else
       display.setTextColor(TFT_CYAN, TFT_BLACK);
-    for (int i = 0; i < instLen; i++) {
+    for (int i = cellSkip(instCellsCount, instLen); i < instLen; i++) {
       char c = instStr[i];
       int cellIdx = (instCellsCount - instLen) + i;
       int cellRight = instNumAreaX + instCells[cellIdx];
@@ -1392,11 +1419,9 @@ if (!vlw120Ready) {
 
   // --- Average KM/L ---
   float displayAvgKml = displaySnap.averageKml;
-  if (UNITS_IMPERIAL) {
-    displayAvgKml = kmlToMpg(displaySnap.averageKml);
-    float avgMax = powf(10.0f, (float)AVG_INT_DIGITS) - (AVG_DEC_DIGITS > 0 ? 0.5f : 1.0f);
-    if (displayAvgKml > avgMax) displayAvgKml = avgMax;
-  }
+  if (UNITS_IMPERIAL) displayAvgKml = kmlToMpg(displaySnap.averageKml);
+  // Clamp in both unit modes so the string never outgrows avgCells[] (#7).
+  displayAvgKml = clampToCells(displayAvgKml, AVG_INT_DIGITS, AVG_DEC_DIGITS);
   static float lastDispAvgKml = -1.0f;
   bool avgChanged = fabsf(displayAvgKml - lastDispAvgKml) >= 0.1f;
   if (SHOW_ELEMENT_AVG_KML && (forceDraw || (IN_BAND_BUDGET &&
@@ -1467,7 +1492,7 @@ if (!vlw120Ready) {
       display.setTextColor(TFT_YELLOW);
     else
       display.setTextColor(TFT_YELLOW, TFT_BLACK);
-    for (int i = 0; i < avgLen; i++) {
+    for (int i = cellSkip(avgCellsCount, avgLen); i < avgLen; i++) {
       char c = avgStr[i];
       int cellIdx = (avgCellsCount - avgLen) + i;
       int cellRight = avgNumAreaX + avgCells[cellIdx];
@@ -1513,6 +1538,7 @@ if (!vlw120Ready) {
   // --- Average Speed (3 int digits, no decimal) ---
   float displayAvgSpd = displaySnap.averageSpeed;
   if (UNITS_IMPERIAL) displayAvgSpd = kmhToMph(displaySnap.averageSpeed);
+  displayAvgSpd = clampToCells(displayAvgSpd, AVG_SPEED_INT_DIGITS, AVG_SPEED_DEC_DIGITS);
   static float lastDispAvgSpd = -1.0f;
   bool avgSpdChanged = fabsf(displayAvgSpd - lastDispAvgSpd) >= 1.0f;
   if (SHOW_ELEMENT_AVG_SPEED && (forceDraw || (IN_BAND_BUDGET &&
@@ -1567,7 +1593,8 @@ if (!vlw120Ready) {
       // cell) is painted first, then the value digit transparently on top, so
       // the dim ghost stays visible around the digit and no intermediate
       // all-ghosts frame exists.
-      int leadingGap = avgSpdCellsCount - avgSpdLen;
+      int spdOfs = cellSkip(avgSpdCellsCount, avgSpdLen);  // dropped leading chars
+      int leadingGap = avgSpdCellsCount - (avgSpdLen - spdOfs);
       for (int ci = 0; ci < avgSpdCellsCount; ci++) {
         char gc = (AVG_SPEED_DEC_DIGITS > 0 && ci == AVG_SPEED_INT_DIGITS) ? '.' : '8';
         int cellRight = avgSpdNumAreaX + avgSpdCells[ci];
@@ -1581,7 +1608,7 @@ if (!vlw120Ready) {
         display.setCursor(cx, avgSpdY);
         display.print(gc);
         if (ci >= leadingGap) {
-          char c = avgSpdStr[ci - leadingGap];
+          char c = avgSpdStr[spdOfs + ci - leadingGap];
           int cx2;
           if (c == '.') {
             cx2 = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -1600,7 +1627,7 @@ if (!vlw120Ready) {
       display.fillRect(avgSpdNumAreaX - 2, avgSpdY - clearAvgSpdH + 4,
                        avgSpdCellW + 4, clearAvgSpdH, TFT_BLACK);
       display.setTextColor(TFT_YELLOW, TFT_BLACK);
-      for (int i = 0; i < avgSpdLen; i++) {
+      for (int i = cellSkip(avgSpdCellsCount, avgSpdLen); i < avgSpdLen; i++) {
         char c = avgSpdStr[i];
         int cellIdx = (avgSpdCellsCount - avgSpdLen) + i;
         int cellRight = avgSpdNumAreaX + avgSpdCells[cellIdx];
@@ -1647,9 +1674,7 @@ if (!vlw120Ready) {
   float displayMaxSpd = displaySnap.maxSpeed;
   if (UNITS_IMPERIAL) displayMaxSpd = kmhToMph(displaySnap.maxSpeed);
   // Clamp so a converted value can never overflow the fixed cell count.
-  float maxSpdMax = powf(10.0f, (float)MAX_SPEED_INT_DIGITS) -
-                     (MAX_SPEED_DEC_DIGITS > 0 ? 0.5f : 1.0f);
-  if (displayMaxSpd > maxSpdMax) displayMaxSpd = maxSpdMax;
+  displayMaxSpd = clampToCells(displayMaxSpd, MAX_SPEED_INT_DIGITS, MAX_SPEED_DEC_DIGITS);
   static float lastDispMaxSpd = -1.0f;
   bool maxSpdChanged = fabsf(displayMaxSpd - lastDispMaxSpd) >= 1.0f;
   // ds15_fontH is normally set by the Instant KM/L block below; if that element
@@ -1711,7 +1736,8 @@ if (!vlw120Ready) {
     int maxSpdLen = strlen(maxSpdStr);
     if (SHOW_GHOST_DIGITS) {
       // Single merged pass per cell: ghost '8' (solid black) then value on top.
-      int leadingGap = maxSpdCellsCount - maxSpdLen;
+      int spdOfs = cellSkip(maxSpdCellsCount, maxSpdLen);  // dropped leading chars
+      int leadingGap = maxSpdCellsCount - (maxSpdLen - spdOfs);
       for (int ci = 0; ci < maxSpdCellsCount; ci++) {
         char gc = (MAX_SPEED_DEC_DIGITS > 0 && ci == MAX_SPEED_INT_DIGITS) ? '.' : '8';
         int cellRight = maxSpdNumAreaX + maxSpdCells[ci];
@@ -1725,7 +1751,7 @@ if (!vlw120Ready) {
         display.setCursor(cx, maxSpdY);
         display.print(gc);
         if (ci >= leadingGap) {
-          char c = maxSpdStr[ci - leadingGap];
+          char c = maxSpdStr[spdOfs + ci - leadingGap];
           int cx2;
           if (c == '.') {
             cx2 = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
@@ -1744,7 +1770,7 @@ if (!vlw120Ready) {
       display.fillRect(maxSpdNumAreaX - 2, maxSpdY - clearMaxSpdH + 4,
                        maxSpdCellW + 4, clearMaxSpdH, TFT_BLACK);
       display.setTextColor(TFT_MAGENTA, TFT_BLACK);
-      for (int i = 0; i < maxSpdLen; i++) {
+      for (int i = cellSkip(maxSpdCellsCount, maxSpdLen); i < maxSpdLen; i++) {
         char c = maxSpdStr[i];
         int cellIdx = (maxSpdCellsCount - maxSpdLen) + i;
         int cellRight = maxSpdNumAreaX + maxSpdCells[cellIdx];
@@ -1790,6 +1816,7 @@ if (!vlw120Ready) {
   // --- Fuel Liters (4 fixed cells: tens, ones, dot, tenths) ---
   float displayFuelLtrs = displaySnap.fuelLiters;
   if (UNITS_IMPERIAL) displayFuelLtrs = litersToGal(displaySnap.fuelLiters);
+  displayFuelLtrs = clampToCells(displayFuelLtrs, FUEL_INT_DIGITS, FUEL_DEC_DIGITS);
   static float lastDispFuelLtrs = -1.0f;
   static unsigned long lastFuelUpdate = 0;
   if (SHOW_ELEMENT_FUEL_LTRS && (forceDraw || (IN_BAND_BUDGET &&
@@ -1852,7 +1879,7 @@ if (!vlw120Ready) {
       display.setTextColor(TFT_CYAN);
     else
       display.setTextColor(TFT_CYAN, TFT_BLACK);
-    for (int i = 0; i < fuelLen; i++) {
+    for (int i = cellSkip(fuelCellsCount, fuelLen); i < fuelLen; i++) {
       char c = fuelStr[i];
       int cellIdx = (fuelCellsCount - fuelLen) + i;
       int cellRight = fuelNumAreaX + fuelCells[cellIdx];
@@ -1939,6 +1966,13 @@ if (!vlw120Ready) {
 
   double displayOdo = (UNITS_IMPERIAL ? kmToMi(displaySnap.totalDistanceKm)
                                        : displaySnap.totalDistanceKm);
+  // Cap to ODO_INT_DIGITS cells: 100000.0 km formats 8 chars for the 7 cells of
+  // the shipped config and indexes odoCells[] below zero (issue #7). Display
+  // only - the stored odometer keeps its full value.
+  {
+    double odoHi = pow(10.0, (double)clampCells(ODO_INT_DIGITS)) - (ODO_DEC_DIGITS > 0 ? 0.5 : 1.0);
+    if (displayOdo > odoHi) displayOdo = odoHi;
+  }
   if (SHOW_ELEMENT_ODO && (forceDraw || (fabs(displayOdo - lastDispOdo) >= 0.1 ||
       weatherPaintedFrame))) {
     lastDispOdo = displayOdo;
@@ -1998,7 +2032,7 @@ if (!vlw120Ready) {
       display.setTextColor(TFT_WHITE);
     else
       display.setTextColor(TFT_WHITE, TFT_BLACK);
-    for (int i = 0; i < len; i++) {
+    for (int i = cellSkip(odoCellsCount, len); i < len; i++) {
       char c = odoNumStr[i];
       int cellIdx = (odoCellsCount - len) + i;
       int cellRight = odoCellX + odoCells[cellIdx];
