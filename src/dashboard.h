@@ -377,17 +377,31 @@ extern Preferences preferences;
 // races can silently lose an NVS write.
 extern SemaphoreHandle_t prefsMux;
 
-// Latest GPS fix published by gpsTask after each NMEA commit. TinyGPS++
+// Latest GPS state published by gpsTask after each NMEA commit. TinyGPS++
 // location accessors are single-consumer (lat()/lng() clear the one-shot
 // "updated" flag that isUpdated() reports) and their doubles must not be
 // read cross-task: the weather fetch used to steal the odometer's pending
 // fix, and unsynchronized 64-bit reads can tear mid-write. Every consumer
-// outside gpsTask must use gpsFixSnapshot() instead of gps.location.*().
+// outside gpsTask must use gpsFixSnapshot() (fix only) or gpsSnapshotCopy()
+// (fix + satellites/speed/HDOP/altitude) instead of touching gps.* (issue #9).
 struct GpsFixSnapshot {
   double lat = 0.0;
   double lon = 0.0;
   unsigned long seq = 0; // incremented once per published fix
   bool valid = false;    // location validity at publish time
+  // Everything else gpsTask parses, published on the same tick (issue #9).
+  // TinyGPS++ value()/kmph()/meters()/hdop() are NOT const - each call clears
+  // the one-shot "updated" flag - so no other core may touch those objects:
+  // a core-1 reader used to consume the flag gpsTask still needed and race the
+  // commit (satellite flicker, speed-source flapping, torn 64-bit doubles).
+  int satellites = 0;
+  float speedKmh = 0.0f;
+  bool speedValid = false;
+  float hdop = 0.0f;      // decimal HDOP, as TinyGPS++ returns it
+  bool hdopValid = false;
+  float altitudeM = 0.0f; // metres MSL
+  bool altValid = false;
+  bool published = false; // true after the first gpsTask publish
 };
 extern GpsFixSnapshot g_gpsFix;
 extern SemaphoreHandle_t gpsFixMux;
@@ -395,6 +409,9 @@ extern SemaphoreHandle_t gpsFixMux;
 // Thread-safe copy of the latest published fix. Returns false (leaving the
 // arguments untouched) while no fix has been published yet.
 bool gpsFixSnapshot(double &lat, double &lon);
+// Thread-safe copy of the whole GPS snapshot (fix + satellites/speed/hdop/
+// altitude). The only supported way to read GPS state outside gpsTask.
+bool gpsSnapshotCopy(GpsFixSnapshot &out);
 extern WebServer server;
 
 extern bool forceFullRedraw;
@@ -557,7 +574,7 @@ float getHallSpeed();
 void updateFilteredSpeed();
 int computeSpeedSourceMode(float hallSpeed, float gpsSpeed, int sats,
                            bool isGpsValid);
-void updateSpeedSourceMode();
+void updateSpeedSourceMode(const GpsFixSnapshot &fix);
 inline float getFilteredSpeed() { return currentCachedSpeed; }
 
 void configureGNSS();

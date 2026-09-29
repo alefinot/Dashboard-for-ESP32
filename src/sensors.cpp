@@ -487,6 +487,17 @@ bool gpsFixSnapshot(double &lat, double &lon) {
     xSemaphoreGive(gpsFixMux);
   return ok;
 }
+
+bool gpsSnapshotCopy(GpsFixSnapshot &out) {
+  bool ok;
+  if (gpsFixMux)
+    xSemaphoreTake(gpsFixMux, portMAX_DELAY);
+  out = g_gpsFix;
+  ok = g_gpsFix.published;
+  if (gpsFixMux)
+    xSemaphoreGive(gpsFixMux);
+  return ok;
+}
 volatile unsigned long g_sensorLastTickMs = 0;
 
 // ----------------------------------------------------------------------------
@@ -734,13 +745,14 @@ int computeSpeedSourceMode(float hallSpeed, float gpsSpeed, int sats,
 // the raw speed selection in updateFilteredSpeed) only follow the candidate
 // once it has held for SPEED_SOURCE_HOLD_MS, so borderline readings settle
 // on one source instead of flickering.
-void updateSpeedSourceMode() {
+void updateSpeedSourceMode(const GpsFixSnapshot &fix) {
   static int pendingMode = -1;
   static unsigned long pendingSince = 0;
   float hallSpeed = getHallSpeed();
-  float gpsSpeed = gps.speed.isValid() ? (float)gps.speed.kmph() : 0.0f;
-  int sats = gps.satellites.value();
-  bool isGpsValid = gps.speed.isValid() && (sats >= MIN_SATELLITES);
+  // Snapshot values only (issue #9): the TinyGPS++ objects belong to gpsTask.
+  float gpsSpeed = fix.speedValid ? fix.speedKmh : 0.0f;
+  int sats = fix.satellites;
+  bool isGpsValid = fix.speedValid && (sats >= MIN_SATELLITES);
   int candidate = computeSpeedSourceMode(hallSpeed, gpsSpeed, sats,
                                          isGpsValid);
   if (candidate == heldSpeedSourceMode) {
@@ -1130,7 +1142,7 @@ void updateGPSOdometer() {
     fixLon = g_gpsFix.lon;
   }
   bool isGpsValid =
-      (g_gpsFix.valid && gps.satellites.value() >= MIN_SATELLITES);
+      (g_gpsFix.valid && g_gpsFix.satellites >= MIN_SATELLITES);
   if (gpsFixMux)
     xSemaphoreGive(gpsFixMux);
   // In demo mode the odometer math still runs, but the simulated distance is
@@ -1638,19 +1650,40 @@ void gpsTask(void *pvParameters) {
                   (unsigned long)((gpsRxBytes - gpsBytesStart) ? gpsEncUsTotal / (gpsRxBytes - gpsBytesStart) : 0),
                   gpsSlowestByteUs);
     }
-    // Publish this tick's fix to the shared snapshot exactly once, as the
-    // only consumer of the TinyGPS++ location accessors in the firmware.
-    // Everything else (odometer, weather, telemetry, logs) reads g_gpsFix.
-    if (gps.location.isUpdated()) {
-      double pubLat = gps.location.lat();
-      double pubLon = gps.location.lng();
+    // Publish this tick's GPS state to the shared snapshot exactly once, as the
+    // only consumer of the TinyGPS++ accessors in the firmware. Everything else
+    // (odometer, speed-source selection, sensorTask, telemetry, logs) reads the
+    // copy from gpsSnapshotCopy()/gpsFixSnapshot(): value()/kmph()/meters()/
+    // hdop() clear the one-shot "updated" flag and the doubles must never be
+    // read across cores (issue #9). Each accessor is touched at most once here.
+    {
+      bool fixUpdated = gps.location.isUpdated();
+      double pubLat = fixUpdated ? gps.location.lat() : 0.0;
+      double pubLon = fixUpdated ? gps.location.lng() : 0.0;
       bool pubValid = gps.location.isValid();
+      bool spdValid = gps.speed.isValid();
+      double pubSpeed = spdValid ? gps.speed.kmph() : 0.0;
+      int pubSats = (int)gps.satellites.value();
+      bool hdopValid = gps.hdop.isValid();
+      double pubHdop = hdopValid ? gps.hdop.hdop() : 0.0;
+      bool altValid = gps.altitude.isValid();
+      double pubAlt = altValid ? gps.altitude.meters() : 0.0;
       if (gpsFixMux)
         xSemaphoreTake(gpsFixMux, portMAX_DELAY);
-      g_gpsFix.lat = pubLat;
-      g_gpsFix.lon = pubLon;
-      g_gpsFix.valid = pubValid;
-      g_gpsFix.seq++;
+      if (fixUpdated) {
+        g_gpsFix.lat = pubLat;
+        g_gpsFix.lon = pubLon;
+        g_gpsFix.valid = pubValid;
+        g_gpsFix.seq++;
+      }
+      g_gpsFix.satellites = pubSats;
+      g_gpsFix.speedValid = spdValid;
+      g_gpsFix.speedKmh = (float)pubSpeed;
+      g_gpsFix.hdopValid = hdopValid;
+      g_gpsFix.hdop = (float)pubHdop;
+      g_gpsFix.altValid = altValid;
+      g_gpsFix.altitudeM = (float)pubAlt;
+      g_gpsFix.published = true;
       if (gpsFixMux)
         xSemaphoreGive(gpsFixMux);
     }
@@ -1810,13 +1843,18 @@ void sensorTask(void *pvParameters) {
       updateAverageSpeed();
     }
 
+    // One GPS snapshot per sensor tick: everything derived from GNSS below reads
+    // this copy, never the TinyGPS++ objects (issue #9).
+    GpsFixSnapshot fix;
+    gpsSnapshotCopy(fix);
+
     if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
       g_sensorData.currentSpeed = currentCachedSpeed;
       g_sensorData.fuelLiters = fuelLiters;
       g_sensorData.fuelPercentage = fuelPercentage;
       g_sensorData.batteryVoltage = batteryVoltage;
       g_sensorData.engineTemperature = engineTemperature;
-      g_sensorData.satellites = gps.satellites.value();
+      g_sensorData.satellites = fix.satellites;
       // Demo mode: the odometer math has accumulated simulated distance into
       // demoOdoKm (NVS untouched) - surface it as a display-only total.
       g_sensorData.totalDistanceKm =
@@ -1839,8 +1877,8 @@ void sensorTask(void *pvParameters) {
       }
 
       g_sensorData.isGpsSpeedValid =
-          gps.speed.isValid() && (g_sensorData.satellites >= MIN_SATELLITES);
-      updateSpeedSourceMode();
+          fix.speedValid && (fix.satellites >= MIN_SATELLITES);
+      updateSpeedSourceMode(fix);
       g_sensorData.speedSourceMode = heldSpeedSourceMode;
       xSemaphoreGive(g_stateMutex);
     } else {

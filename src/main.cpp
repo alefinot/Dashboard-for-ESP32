@@ -596,11 +596,14 @@ void loop() {
     const char *speedSrc =
         (snap.speedSourceMode == 1) ? "GPS" :
         (snap.speedSourceMode == 2) ? "G+H" : "HALL";
-    double valLat = 0.0, valLon = 0.0;
-    gpsFixSnapshot(valLat, valLon);
-    float gpsSpeed = gps.speed.isValid() ? gps.speed.kmph() : 0.0f;
-    float hdop = gps.hdop.isValid() ? gps.hdop.hdop() : 0.0f;
-    float altitude = gps.altitude.isValid() ? gps.altitude.meters() : 0.0f;
+    // Snapshot reads only: the TinyGPS++ objects are owned by gpsTask on core 0
+    // and their accessors are single-consumer (issue #9).
+    GpsFixSnapshot fix;
+    gpsSnapshotCopy(fix);
+    double valLat = fix.lat, valLon = fix.lon;
+    float gpsSpeed = fix.speedValid ? fix.speedKmh : 0.0f;
+    float hdop = fix.hdopValid ? fix.hdop : 0.0f;
+    float altitude = fix.altValid ? fix.altitudeM : 0.0f;
 
     logPrintf("[RAW] hallInt=%.1fms hallCnt=%lu fuelADC=%d fuelFlt=%.1f "
               "lightADC=%d batADC=%d tempADC=%d\n",
