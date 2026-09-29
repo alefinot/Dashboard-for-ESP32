@@ -1622,54 +1622,54 @@ const configMap = [
             { type: "card_header", label: "Speed & Odometer" },
             { type: "section_header", label: "Acceleration Timer" },
             { id: "SHOW_ELEMENT_TMR", label: "Visible" },
-            { id: "TMR_INT_DIGITS", label: "Integer Digits" },
-            { id: "TMR_DEC_DIGITS", label: "Decimal Digits" },
+            { id: "TMR_INT_DIGITS", label: "Integer Digits", min: 1, max: 14 },
+            { id: "TMR_DEC_DIGITS", label: "Decimal Digits", min: 0, max: 4 },
             { type: 'xy', idX: "OFFSET_BIG_TMR_X", idY: "OFFSET_BIG_TMR_Y", label: "Position" },
             { type: "section_header", label: "Speed Source Icon" },
             { id: "SHOW_ELEMENT_SPEED_SOURCE", label: "Visible" },
             { type: 'xy', idX: "OFFSET_HALL_ICON_X", idY: "OFFSET_HALL_ICON_Y", label: "Position" },
             { type: "section_header", label: "Main Speed Number" },
             { id: "SHOW_ELEMENT_SPEED", label: "Visible" },
-            { id: "SPEED_DIGITS", label: "Digits" },
+            { id: "SPEED_DIGITS", label: "Digits", min: 1, max: 4 },
             { type: 'xy', idX: "OFFSET_BIG_SPEED_NUM_X", idY: "OFFSET_BIG_SPEED_NUM_Y", label: "Position" },
             { type: "section_header", label: "Speed Unit" },
             { id: "SHOW_ELEMENT_SPEED_UNIT", label: "Visible" },
             { type: 'xy', idX: "OFFSET_BIG_SPEED_UNIT_X", idY: "OFFSET_BIG_SPEED_UNIT_Y", label: "Position" },
             { type: "section_header", label: "Average Speed" },
             { id: "SHOW_ELEMENT_AVG_SPEED", label: "Visible" },
-            { id: "AVG_SPEED_INT_DIGITS", label: "Integer Digits" },
-            { id: "AVG_SPEED_DEC_DIGITS", label: "Decimal Digits" },
+            { id: "AVG_SPEED_INT_DIGITS", label: "Integer Digits", min: 1, max: 14 },
+            { id: "AVG_SPEED_DEC_DIGITS", label: "Decimal Digits", min: 0, max: 4 },
             { type: 'xy', idX: "OFFSET_AVG_SPEED_X", idY: "OFFSET_AVG_SPEED_Y", label: "Position" },
             { type: "section_header", label: "Max Speed" },
             { id: "SHOW_ELEMENT_MAX_SPEED", label: "Visible" },
-            { id: "MAX_SPEED_INT_DIGITS", label: "Integer Digits" },
-            { id: "MAX_SPEED_DEC_DIGITS", label: "Decimal Digits" },
+            { id: "MAX_SPEED_INT_DIGITS", label: "Integer Digits", min: 1, max: 14 },
+            { id: "MAX_SPEED_DEC_DIGITS", label: "Decimal Digits", min: 0, max: 4 },
             { type: 'xy', idX: "OFFSET_MAX_SPEED_X", idY: "OFFSET_MAX_SPEED_Y", label: "Position" },
             { type: "section_header", label: "Odometer" },
             { id: "SHOW_ELEMENT_ODO", label: "Visible" },
-            { id: "ODO_INT_DIGITS", label: "Integer Digits" },
-            { id: "ODO_DEC_DIGITS", label: "Decimal Digits" },
+            { id: "ODO_INT_DIGITS", label: "Integer Digits", min: 1, max: 14 },
+            { id: "ODO_DEC_DIGITS", label: "Decimal Digits", min: 0, max: 4 },
             { type: 'xy', idX: "OFFSET_BIG_ODO_X", idY: "OFFSET_BIG_ODO_Y", label: "Position" },
             { type: "card_header", label: "Fuel & Battery" },
             { type: "section_header", label: "Average KML" },
             { id: "SHOW_ELEMENT_AVG_KML", label: "Visible" },
-            { id: "AVG_INT_DIGITS", label: "Integer Digits" },
-            { id: "AVG_DEC_DIGITS", label: "Decimal Digits" },
+            { id: "AVG_INT_DIGITS", label: "Integer Digits", min: 1, max: 14 },
+            { id: "AVG_DEC_DIGITS", label: "Decimal Digits", min: 0, max: 4 },
             { type: 'xy', idX: "OFFSET_AVG_KML_X", idY: "OFFSET_AVG_KML_Y", label: "Position" },
             { type: "section_header", label: "Instant KML" },
             { id: "SHOW_ELEMENT_INST_KML", label: "Visible" },
-            { id: "INST_INT_DIGITS", label: "Integer Digits" },
-            { id: "INST_DEC_DIGITS", label: "Decimal Digits" },
+            { id: "INST_INT_DIGITS", label: "Integer Digits", min: 1, max: 14 },
+            { id: "INST_DEC_DIGITS", label: "Decimal Digits", min: 0, max: 4 },
             { type: 'xy', idX: "OFFSET_INST_KML_X", idY: "OFFSET_INST_KML_Y", label: "Position" },
             { type: "section_header", label: "Fuel LTRS" },
             { id: "SHOW_ELEMENT_FUEL_LTRS", label: "Visible" },
-            { id: "FUEL_INT_DIGITS", label: "Integer Digits" },
-            { id: "FUEL_DEC_DIGITS", label: "Decimal Digits" },
+            { id: "FUEL_INT_DIGITS", label: "Integer Digits", min: 1, max: 14 },
+            { id: "FUEL_DEC_DIGITS", label: "Decimal Digits", min: 0, max: 4 },
             { type: 'xy', idX: "OFFSET_FUEL_LTRS_X", idY: "OFFSET_FUEL_LTRS_Y", label: "Position" },
             { type: "section_header", label: "Battery" },
             { id: "SHOW_ELEMENT_BAT", label: "Visible" },
-            { id: "BAT_INT_DIGITS", label: "Integer Digits" },
-            { id: "BAT_DEC_DIGITS", label: "Decimal Digits" },
+            { id: "BAT_INT_DIGITS", label: "Integer Digits", min: 1, max: 14 },
+            { id: "BAT_DEC_DIGITS", label: "Decimal Digits", min: 0, max: 4 },
             { type: 'xy', idX: "OFFSET_BIG_BAT_X", idY: "OFFSET_BIG_BAT_Y", label: "Position" },
             { type: "card_header", label: "Clock & Date" },
             { type: "section_header", label: "Clock" },
@@ -1681,7 +1681,7 @@ const configMap = [
             { type: "card_header", label: "WiFi & Satellites" },
             { type: "section_header", label: "Satellites" },
             { id: "SHOW_ELEMENT_SAT", label: "Visible" },
-            { id: "SAT_DIGITS", label: "Digits" },
+            { id: "SAT_DIGITS", label: "Digits", min: 1, max: 3 },
             { type: 'xy', idX: "OFFSET_BIG_SAT_X", idY: "OFFSET_BIG_SAT_Y", label: "Position" },
             { type: "section_header", label: "WiFi Icon" },
             { id: "SHOW_ELEMENT_WIFI", label: "Visible" },
@@ -1927,19 +1927,25 @@ function renderForm(d) {
                     let isPwd = /^WIFI_PASSWORD(_\d+)?$/.test(item.id);
                     let skipReset = isPwd;
                     let inputType = isPwd ? 'password' : (typeof val === 'number' ? 'number' : 'text');
+                    // Range hints for the numeric fields (issue #6): the firmware clamps
+                    // every digit-count param on load, the WebUI just shows the limits so
+                    // a value that would be corrected is visible before saving.
+                    let rangeAttr = (typeof item.min === 'number' || typeof item.max === 'number')
+                        ? ` min="${typeof item.min === 'number' ? item.min : ''}" max="${typeof item.max === 'number' ? item.max : ''}" step="1"`
+                        : '';
 
                     if (inCardSubCard) {
                         if (isBool) {
                             groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
                         } else {
-                            groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any">${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div>`;
+                            groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}"${rangeAttr}>${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div>`;
                         }
                     } else {
                         closeSubCard();
                         if (isBool) {
                             groupHtml += `<div class="card checkbox-card"${advAttr}><label>${trUnitTokens(item.label)}</label><div style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
                         } else {
-                            groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}" step="any">${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div></div>`;
+                            groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}"${rangeAttr}>${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div></div>`;
                         }
                     }
                 }

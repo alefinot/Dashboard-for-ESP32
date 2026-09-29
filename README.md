@@ -430,7 +430,7 @@ Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, seri
 - `LIGHT_SENSOR_BRIGHT_VAL`: Bright-reference ambient light value (calibrated via `/api/ambient/cal-bright`).
 
 #### Digit Boundaries (Configurable 7-Segment Formatting)
-- `SPEED_DIGITS`, `SAT_DIGITS`, `TMR_INT_DIGITS`, `TMR_DEC_DIGITS`, `BAT_INT_DIGITS`, `BAT_DEC_DIGITS`, `INST_INT_DIGITS`, `INST_DEC_DIGITS`, `AVG_INT_DIGITS`, `AVG_DEC_DIGITS`, `AVG_SPEED_INT_DIGITS`, `AVG_SPEED_DEC_DIGITS`, `MAX_SPEED_INT_DIGITS`, `MAX_SPEED_DEC_DIGITS`, `FUEL_INT_DIGITS`, `FUEL_DEC_DIGITS`, `ODO_INT_DIGITS`, `ODO_DEC_DIGITS`: Configurable integer and decimal digit limits for all UI numerical readouts.
+- `SPEED_DIGITS`, `SAT_DIGITS`, `TMR_INT_DIGITS`, `TMR_DEC_DIGITS`, `BAT_INT_DIGITS`, `BAT_DEC_DIGITS`, `INST_INT_DIGITS`, `INST_DEC_DIGITS`, `AVG_INT_DIGITS`, `AVG_DEC_DIGITS`, `AVG_SPEED_INT_DIGITS`, `AVG_SPEED_DEC_DIGITS`, `MAX_SPEED_INT_DIGITS`, `MAX_SPEED_DEC_DIGITS`, `FUEL_INT_DIGITS`, `FUEL_DEC_DIGITS`, `ODO_INT_DIGITS`, `ODO_DEC_DIGITS`: Configurable integer and decimal digit limits for all UI numerical readouts. These values size fixed 16-slot cell arrays in the display renderer, so they are range-checked on every load and save (issue #6): integer counts `1..14` (1-4 for `SPEED_DIGITS`, 1-3 for `SAT_DIGITS`), decimal counts `0..4`, and per readout `int + dec + 1 <= 16` (+1 is the decimal-point slot). Out-of-range values are clamped on load (boot, `POST /api/config`, config restore) and logged; the renderer keeps a hard bounds guard as a second line of defence.
 
 #### UI Layout Offset Coordinates
 - `BIG_CENTER_X`, `BIG_CENTER_Y`: Screen anchor origin point.

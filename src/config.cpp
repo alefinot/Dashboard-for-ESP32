@@ -387,6 +387,93 @@ void applyColors() {
   ghost_color = hexToRGB565(GHOST_COLOR_STR);
 }
 
+// ----------------------------------------------------------------------------
+// Digit-count validation (issue #6 - memory corruption)
+// ----------------------------------------------------------------------------
+// The *_DIGITS params size the loops that fill the fixed UI_MAX_CELLS-slot cell
+// arrays in ui.cpp and the batPat/tmrPat pattern buffers on the display task's
+// stack. They used to be read back from NVS, from POST /api/config and from a
+// config backup with no range check at all: {"ODO_INT_DIGITS":50} made
+// measureDs15Cells() write 52 ints into an int[16] - .bss overwrite, then a
+// crash in the display task.
+//
+// Two layers, both live:
+//  1. every digit param is clamped to its own sane range (a count that large
+//     could not be laid out on a 480x320 panel anyway);
+//  2. the shared budget int + dec + 1 <= UI_MAX_CELLS (+1 is the decimal point
+//     slot) is enforced per readout, trimming the decimals first and then the
+//     integers, so no combination of two individually-valid values can size a
+//     fill loop past its array.
+// ui.cpp keeps its own hard guard (clampCells()/measureDs15Cells()) as a second
+// line of defence for any count that reaches the display unclamped.
+// Clamping is RAM-only - no extra NVS writes: an out-of-range stored value is
+// re-clamped on every load, and the next save stores the clamped one.
+void sanitizeDigitCounts() {
+  struct Range {
+    const char *name;
+    int *var;
+    int lo, hi;
+  };
+  static const Range ranges[] = {
+      {"SPEED_DIGITS", &SPEED_DIGITS, 1, 4},
+      {"SAT_DIGITS", &SAT_DIGITS, 1, 3},
+      {"TMR_INT_DIGITS", &TMR_INT_DIGITS, 1, UI_MAX_CELLS - 2},
+      {"TMR_DEC_DIGITS", &TMR_DEC_DIGITS, 0, 4},
+      {"BAT_INT_DIGITS", &BAT_INT_DIGITS, 1, UI_MAX_CELLS - 2},
+      {"BAT_DEC_DIGITS", &BAT_DEC_DIGITS, 0, 4},
+      {"INST_INT_DIGITS", &INST_INT_DIGITS, 1, UI_MAX_CELLS - 2},
+      {"INST_DEC_DIGITS", &INST_DEC_DIGITS, 0, 4},
+      {"AVG_INT_DIGITS", &AVG_INT_DIGITS, 1, UI_MAX_CELLS - 2},
+      {"AVG_DEC_DIGITS", &AVG_DEC_DIGITS, 0, 4},
+      {"AVG_SPEED_INT_DIGITS", &AVG_SPEED_INT_DIGITS, 1, UI_MAX_CELLS - 2},
+      {"AVG_SPEED_DEC_DIGITS", &AVG_SPEED_DEC_DIGITS, 0, 4},
+      {"MAX_SPEED_INT_DIGITS", &MAX_SPEED_INT_DIGITS, 1, UI_MAX_CELLS - 2},
+      {"MAX_SPEED_DEC_DIGITS", &MAX_SPEED_DEC_DIGITS, 0, 4},
+      {"FUEL_INT_DIGITS", &FUEL_INT_DIGITS, 1, UI_MAX_CELLS - 2},
+      {"FUEL_DEC_DIGITS", &FUEL_DEC_DIGITS, 0, 4},
+      {"ODO_INT_DIGITS", &ODO_INT_DIGITS, 1, UI_MAX_CELLS - 2},
+      {"ODO_DEC_DIGITS", &ODO_DEC_DIGITS, 0, 4},
+  };
+  for (const Range &r : ranges) {
+    int c = constrain(*r.var, r.lo, r.hi);
+    if (c != *r.var) {
+      logPrintf("Config: %s=%d out of range [%d..%d], clamped to %d\n", r.name,
+                *r.var, r.lo, r.hi, c);
+      *r.var = c;
+    }
+  }
+
+  struct Group {
+    const char *name;
+    int *i;
+    int *d;
+  };
+  static const Group groups[] = {
+      {"TMR", &TMR_INT_DIGITS, &TMR_DEC_DIGITS},
+      {"BAT", &BAT_INT_DIGITS, &BAT_DEC_DIGITS},
+      {"INST", &INST_INT_DIGITS, &INST_DEC_DIGITS},
+      {"AVG", &AVG_INT_DIGITS, &AVG_DEC_DIGITS},
+      {"AVG_SPEED", &AVG_SPEED_INT_DIGITS, &AVG_SPEED_DEC_DIGITS},
+      {"MAX_SPEED", &MAX_SPEED_INT_DIGITS, &MAX_SPEED_DEC_DIGITS},
+      {"FUEL", &FUEL_INT_DIGITS, &FUEL_DEC_DIGITS},
+      {"ODO", &ODO_INT_DIGITS, &ODO_DEC_DIGITS},
+  };
+  for (const Group &g : groups) {
+    if (*g.i + *g.d + 1 <= UI_MAX_CELLS) continue;
+    int oi = *g.i, od = *g.d;
+    while (*g.i + *g.d + 1 > UI_MAX_CELLS) {
+      if (*g.d > 0)
+        (*g.d)--;
+      else if (*g.i > 1)
+        (*g.i)--;
+      else
+        break;  // unreachable: the clamps above guarantee int >= 1, dec >= 0
+    }
+    logPrintf("Config: %s digits %d+%d exceed %d cells, using %d+%d\n", g.name,
+              oi, od, UI_MAX_CELLS, *g.i, *g.d);
+  }
+}
+
 void processConfig(int mode, JsonDocument *doc) {
   Preferences pref;
   if (mode == 0 || mode == 2)
@@ -625,6 +712,7 @@ void processConfig(int mode, JsonDocument *doc) {
   }
 
   if (mode == 0 || mode == 2) {
+    sanitizeDigitCounts();
     if (FUEL_TOUCH_POINTS < 2) FUEL_TOUCH_POINTS = 2;
     if (FUEL_TOUCH_POINTS > MAX_TOUCH_POINTS) FUEL_TOUCH_POINTS = MAX_TOUCH_POINTS;
     if (WEATHER_REFRESH_MIN < 1) WEATHER_REFRESH_MIN = 1;

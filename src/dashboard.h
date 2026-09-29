@@ -277,6 +277,14 @@ extern int REFRESH_INST_MS;
 extern int REFRESH_MAX_SPEED_MS;
 extern int REFRESH_FUEL_MS;
 
+// Every numeric readout on the big display is drawn into a static cell array of
+// this many glyph slots in ui.cpp (spdCellR, tmrCells, batCells, instCells,
+// avgCells, avgSpdCells, maxSpdCells, fuelCells, odoCells). The *_DIGITS params
+// below size the loops that fill those arrays, so they are validated against
+// this constant in processConfig() (issue #6). Kept in the header so the config
+// validator and the renderer cannot drift apart.
+constexpr int UI_MAX_CELLS = 16;
+
 extern int SPEED_DIGITS;
 extern int SAT_DIGITS;
 extern int TMR_INT_DIGITS;

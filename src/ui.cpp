@@ -3,7 +3,18 @@
 #include "Conthrax_SemiBold4pt7b.h"
 #include "Conthrax_SemiBold_16px_vlw.h"
 
-#define MAX_CELLS 16
+#define MAX_CELLS UI_MAX_CELLS
+
+// Hard bounds guard for config-derived cell counts (issue #6, second line of
+// defence). processConfig()/sanitizeDigitCounts() already clamp every *_DIGITS
+// param, but a cell array is exactly MAX_CELLS long, so the display must never
+// size a fill loop past it even if a count arrives unclamped. The floor of 1
+// also keeps the "measure once" latches (which test a 0 count) working.
+static inline int clampCells(int n, int lo = 1) {
+  if (n < lo) return lo;
+  if (n > MAX_CELLS) return MAX_CELLS;
+  return n;
+}
 
 static constexpr unsigned long STARTUP_RAMP_DURATION_MS = 3000;
 
@@ -46,9 +57,10 @@ static int digitWidth[10] = {0}, digitXOff[10] = {0}, digitRightOff[10] = {0};
 static int spdCellR[MAX_CELLS] = {0};
 
 static void ensureSpeedMetrics() {
-  if (spdMetricsReady && spdCountCached == SPEED_DIGITS) return;
+  int want = clampCells(SPEED_DIGITS);
+  if (spdMetricsReady && spdCountCached == want) return;
   spdMetricsReady = true;
-  spdCountCached = SPEED_DIGITS;
+  spdCountCached = want;
   // The 120px VLW gets parsed on the display here, once per boot (cheap when
   // the font cache survives). The sprite build below parses it a second time
   // into the sprite's own glyph tables.
@@ -184,6 +196,9 @@ void processMemSaverRelease() {
 
 static void measureDs15Cells(int *cells, int &totalW, int count, int decimalPos) {
   constexpr int G = 1;
+  // Second line of defence against a config value that reached us unclamped:
+  // cells[] is always MAX_CELLS long (issue #6).
+  count = clampCells(count);
   int16_t bx1, by1;
   uint16_t bw, bh;
   int cumX = 0;
@@ -960,9 +975,9 @@ if (!vlw120Ready) {
     w_sat_max = ((bw + 8) > 16) ? (bw + 8) : 16;
     h_sat_max = 16 + 2 + bh + 2;
 
-    int batCells = BAT_INT_DIGITS + 1 + BAT_DEC_DIGITS;
+    int batCells = clampCells(BAT_INT_DIGITS + 1 + BAT_DEC_DIGITS);
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
-    char batPat[16];
+    char batPat[MAX_CELLS + 1];
     for (int i = 0; i < batCells; i++) batPat[i] = (i == BAT_INT_DIGITS) ? '.' : '8';
     batPat[batCells] = 0;
     display.getTextBounds(batPat, 0, 0, &bx1, &by1, &bw, &bh);
@@ -983,8 +998,8 @@ if (!vlw120Ready) {
     h_badge_max = iconSize + 2 + bh1 + 2;
     display.loadVLWFont("/Fonts/DS-DIGIT_28px.vlw");
 
-    int tmrCells = TMR_INT_DIGITS + 1 + TMR_DEC_DIGITS;
-    char tmrPat[16];
+    int tmrCells = clampCells(TMR_INT_DIGITS + 1 + TMR_DEC_DIGITS);
+    char tmrPat[MAX_CELLS + 1];
     for (int i = 0; i < tmrCells; i++) tmrPat[i] = (i == TMR_INT_DIGITS) ? '.' : '8';
     tmrPat[tmrCells] = 0;
     display.getTextBounds(tmrPat, 0, 0, &bx1, &by1, &bw, &bh);
@@ -1109,7 +1124,7 @@ if (!vlw120Ready) {
   static int tmrCellW = 0, tmrCellsCount = 0;
   if (layoutReset) tmrCellsCount = 0;
   if (tmrCellsCount == 0) {
-    tmrCellsCount = TMR_INT_DIGITS + 1 + TMR_DEC_DIGITS;
+    tmrCellsCount = clampCells(TMR_INT_DIGITS + 1 + TMR_DEC_DIGITS);
     measureDs15Cells(tmrCells, tmrCellW, tmrCellsCount, TMR_INT_DIGITS);
   }
   char tmrStr[12];
@@ -1177,7 +1192,7 @@ if (!vlw120Ready) {
   static int batCellW = 0, batCellsCount = 0;
   if (layoutReset) batCellsCount = 0;
   if (batCellsCount == 0) {
-    batCellsCount = BAT_INT_DIGITS + 1 + BAT_DEC_DIGITS;
+    batCellsCount = clampCells(BAT_INT_DIGITS + 1 + BAT_DEC_DIGITS);
     measureDs15Cells(batCells, batCellW, batCellsCount, BAT_INT_DIGITS);
   }
   char batStr[12];
@@ -1289,7 +1304,7 @@ if (!vlw120Ready) {
     static int instCells[MAX_CELLS] = {0};
     static int instCellW = 0, instCellsCount = 0;
     if (instCellsCount == 0) {
-      instCellsCount = INST_INT_DIGITS + 1 + INST_DEC_DIGITS;
+      instCellsCount = clampCells(INST_INT_DIGITS + 1 + INST_DEC_DIGITS);
       measureDs15Cells(instCells, instCellW, instCellsCount, INST_INT_DIGITS);
     }
 
@@ -1410,7 +1425,7 @@ if (!vlw120Ready) {
     static int avgCells[MAX_CELLS] = {0};
     static int avgCellW = 0, avgCellsCount = 0;
     if (avgCellsCount == 0) {
-      avgCellsCount = AVG_INT_DIGITS + 1 + AVG_DEC_DIGITS;
+      avgCellsCount = clampCells(AVG_INT_DIGITS + 1 + AVG_DEC_DIGITS);
       measureDs15Cells(avgCells, avgCellW, avgCellsCount, AVG_INT_DIGITS);
     }
 
@@ -1525,7 +1540,7 @@ if (!vlw120Ready) {
     static int avgSpdCells[MAX_CELLS] = {0};
     static int avgSpdCellW = 0, avgSpdCellsCount = 0;
     if (avgSpdCellsCount == 0) {
-      avgSpdCellsCount = AVG_SPEED_INT_DIGITS + (AVG_SPEED_DEC_DIGITS > 0 ? 1 + AVG_SPEED_DEC_DIGITS : 0);
+      avgSpdCellsCount = clampCells(AVG_SPEED_INT_DIGITS + (AVG_SPEED_DEC_DIGITS > 0 ? 1 + AVG_SPEED_DEC_DIGITS : 0));
       measureDs15Cells(avgSpdCells, avgSpdCellW, avgSpdCellsCount, AVG_SPEED_DEC_DIGITS > 0 ? AVG_SPEED_INT_DIGITS : -1);
     }
 
@@ -1672,7 +1687,7 @@ if (!vlw120Ready) {
     static int maxSpdCells[MAX_CELLS] = {0};
     static int maxSpdCellW = 0, maxSpdCellsCount = 0;
     if (maxSpdCellsCount == 0) {
-      maxSpdCellsCount = MAX_SPEED_INT_DIGITS + (MAX_SPEED_DEC_DIGITS > 0 ? 1 + MAX_SPEED_DEC_DIGITS : 0);
+      maxSpdCellsCount = clampCells(MAX_SPEED_INT_DIGITS + (MAX_SPEED_DEC_DIGITS > 0 ? 1 + MAX_SPEED_DEC_DIGITS : 0));
       measureDs15Cells(maxSpdCells, maxSpdCellW, maxSpdCellsCount, MAX_SPEED_DEC_DIGITS > 0 ? MAX_SPEED_INT_DIGITS : -1);
     }
 
@@ -1799,7 +1814,7 @@ if (!vlw120Ready) {
     static int fuelCells[MAX_CELLS] = {0};
     static int fuelCellW = 0, fuelCellsCount = 0;
     if (fuelCellsCount == 0) {
-      fuelCellsCount = FUEL_INT_DIGITS + 1 + FUEL_DEC_DIGITS;
+      fuelCellsCount = clampCells(FUEL_INT_DIGITS + 1 + FUEL_DEC_DIGITS);
       measureDs15Cells(fuelCells, fuelCellW, fuelCellsCount, FUEL_INT_DIGITS);
     }
 
@@ -1946,7 +1961,7 @@ if (!vlw120Ready) {
     static int odoCells[MAX_CELLS] = {0};
     static int odoCellW = 0, odoCellsCount = 0;
     if (odoCellsCount == 0) {
-      odoCellsCount = ODO_INT_DIGITS + 1 + ODO_DEC_DIGITS;
+      odoCellsCount = clampCells(ODO_INT_DIGITS + 1 + ODO_DEC_DIGITS);
       measureDs15Cells(odoCells, odoCellW, odoCellsCount, ODO_INT_DIGITS);
     }
     int odoUnitGap = 1;
