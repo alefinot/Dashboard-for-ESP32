@@ -212,6 +212,9 @@ void setup() {
                   FALLING);
   initFuelSensor();
   pinMode(LIGHT_SENSOR_PIN, INPUT);
+  // Physical trip-reset button to GND (issue #17); the internal pull-up keeps
+  // the line high when nothing is pressed.
+  pinMode(TRIP_RESET_PIN, INPUT_PULLUP);
 
   logPrintf("display.init() start\n");
   bool initOk = display.init();

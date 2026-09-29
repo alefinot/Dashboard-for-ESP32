@@ -358,6 +358,15 @@ void updateBigDisplay(const SensorSnapshot &snap) {
   lastUnitsMode = unitsMode;
   unitsInit = true;
 
+  // Trip-reset confirmation (issue #17): when the button, the Web UI or a
+  // factory reset zeroes the trip, repaint the whole panel in one frame so the
+  // trip widgets snap to 0 instead of easing down over several refreshes.
+  static unsigned long lastTripResetNotice = 0;
+  if (tripResetNoticeMs != lastTripResetNotice) {
+    lastTripResetNotice = tripResetNoticeMs;
+    forceFullRedraw = true;
+  }
+
   bool forceDraw =
       firstRun || forceFullRedraw;
   bool layoutReset = forceFullRedraw;

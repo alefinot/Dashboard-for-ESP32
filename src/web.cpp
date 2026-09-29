@@ -1214,6 +1214,15 @@ void webServerTask(void *pvParameters) {
     }
   });
 
+  // Trip reset (issue #17): the same zeroing the physical button on GPIO25
+  // performs. The handler only raises the flag - the sensor task owns the trip
+  // state, so it applies the reset on its next tick and the web task never
+  // touches trip counters cross-core.
+  server.on("/api/trip/reset", HTTP_POST, []() {
+    pendingTripReset = true;
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+  });
+
   server.on("/api/reboot", HTTP_POST, []() {
     server.send(200, "application/json", "{\"status\":\"ok\"}");
     pendingReboot = true;

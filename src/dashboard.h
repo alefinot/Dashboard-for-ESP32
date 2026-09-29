@@ -100,6 +100,17 @@ constexpr int HALL_SENSOR_PIN = 33;
 #define BATTERY_SENSE_PIN 35
 #define TEMP_SENSE_PIN 36
 #define LIGHT_SENSOR_PIN 34
+// Physical trip-reset button (issue #17): a momentary push button from GPIO25 to
+// GND, using the internal ~45k pull-up - no external parts needed. GPIO25 became
+// free when the GNSS UART moved to 16/17, and it is not a strapping pin; GPIO0,
+// GPIO2, GPIO5 (already CS_DISPLAY), MTDI/GPIO12 and MTDO/GPIO15 are, so a button
+// to GND on those can hold the chip in the wrong boot mode. GPIO26 is left free
+// as the spare for a second button.
+#define TRIP_RESET_PIN 25
+// Contact bounce window before a press or release is believed.
+#define TRIP_RESET_DEBOUNCE_MS 50
+// How long the on-screen trip-reset confirmation stays up.
+#define TRIP_RESET_NOTICE_MS 3000
 
 // ----------------------------------------------------------------------------
 // Alignment constants
@@ -120,7 +131,8 @@ extern char DASHBOARD_SIGNATURE[96];
 extern int TEMP_BAR_MIN;
 extern int TEMP_BAR_MAX;
 extern int TEMP_WARN_RED;
-extern int TEMP_WARN_YEL;
+extern int TEMP_WARN_YEL;
+
 extern int FUEL_WARN_RED;
 extern int FUEL_WARN_YEL;
 
@@ -145,7 +157,7 @@ extern int BIG_CENTER_Y;
 
 extern float WHEEL_CIRCUMFERENCE_MM;
 extern float FUEL_FILTER_ALPHA;
-extern float REFUEL_RESET_LITERS;
+extern int TRIP_RESET_HOLD_MS;  // hold time for the physical trip-reset button
 
 extern float BATTERY_SCALE;
 extern float BATTERY_OFFSET;
@@ -502,6 +514,11 @@ extern double tripDistanceKm;
 extern float tripStartFuelLiters;
 extern float tripFuelConsumedLiters;
 extern unsigned long movingTimeMs;
+// Set by resetTripStats(); the display shows a short confirmation while it is
+// younger than TRIP_RESET_NOTICE_MS.
+extern volatile unsigned long tripResetNoticeMs;
+// Set by the Web UI reset endpoint, consumed by the sensor task.
+extern volatile bool pendingTripReset;
 extern float instantKml;
 extern float averageKml;
 extern float averageSpeed;
@@ -598,6 +615,10 @@ void processLightSensor();
 void updateGPSOdometer();
 void processFuelConsumption();
 void updateAverageSpeed();
+// The single trip-reset entry point (button, Web UI, factory reset) and the
+// debounced button scan that runs in the sensor task.
+void resetTripStats(const char *reason);
+void processTripResetButton();
 void updateAccelTimer();
 void initFuelSensor();
 void processFuelSensor();

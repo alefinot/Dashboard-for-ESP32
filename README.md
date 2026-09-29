@@ -128,6 +128,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **GPIO17** | `GNSS_UART2_TX_PIN` | GPS Serial TX (UART2) | Output | Connected to the GNSS module RX pin; configured but idle - no UBX command is ever sent |
 | **GPIO18** | `cfg.pin_sclk` | SPI Clock | Output | Hardcoded in `gfx.cpp` (SPI3_HOST), 60 MHz default |
 | **GPIO23** | `cfg.pin_mosi` | SPI Master Out | Output | Hardcoded in `gfx.cpp`, LCD data/command stream |
+| **GPIO25** | `TRIP_RESET_PIN` | Trip Reset Button | Input (Pullup) | Momentary push button to GND; hold `TRIP_RESET_HOLD_MS` to zero the trip stats (issue #17). Internal ~45 kΩ pull-up, no external parts |
 | **GPIO27** | `SPI_DC` | Data / Command | Output | High = Data, Low = Command for ILI9488 controller |
 | **GPIO32** | `FUEL_TOUCH_PIN` | Fuel ADC | Input | Dedicated ADC1 Channel 4 pin for fuel level reading (resistive sender; capacitive touch removed in v1.3.6) |
 | **GPIO33** | `HALL_SENSOR_PIN` | Hall Interrupt | Input (Pullup) | Falling-edge hardware interrupt for wheel magnet pulses |
@@ -139,7 +140,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 > GPIO32 is dedicated to the fuel ADC input to avoid pin-sharing conflicts with the GPIO33 Hall interrupt hardware line.
 
 > [!NOTE]
-> This matrix matches the code (`src/dashboard.h` pin defines and the hardcoded display SPI pins in `src/gfx.cpp`), which is the source of truth. The GNSS serial pair moved from GPIO25/26 to **GPIO16/17** during the pin-swap test and stayed there. The display SPI bus has no MISO line (`cfg.pin_miso = -1`), and GPIO21/22 (former compass I²C) are unused.
+> This matrix matches the code (`src/dashboard.h` pin defines and the hardcoded display SPI pins in `src/gfx.cpp`), which is the source of truth. The GNSS serial pair moved from GPIO25/26 to **GPIO16/17** during the pin-swap test and stayed there, which is what freed **GPIO25** for the trip-reset button; **GPIO26** stays free as the spare for a second button. Strapping pins (`GPIO0`, `GPIO2`, `GPIO5` = `CS_DISPLAY`, MTDI/`GPIO12`, MTDO/`GPIO15`) are deliberately not used for buttons — a button to GND can hold them the wrong way during reset and block boot. The display SPI bus has no MISO line (`cfg.pin_miso = -1`), and GPIO21/22 (former compass I²C) are unused.
 
 ---
 
@@ -245,7 +246,7 @@ The **Sensors Tuning** WebUI card calibrates the two analog sensors against a re
 ### 5. Fuel Economy & Performance Drag Timer
 
 #### Instantaneous & Trip Fuel Economy
-- **Trip Average (KM/L):** $KM/L_{\text{avg}} = \frac{D_{\text{trip}}}{C_{\text{consumed}}}$, auto-resets when refuel is detected ($C_{\text{consumed}} < -0.5\text{ L}$).
+- **Trip Average (KM/L):** $KM/L_{\text{avg}} = \frac{D_{\text{trip}}}{C_{\text{consumed}}}$. The trip is zeroed only by an explicit trip reset — the physical button on GPIO25, `POST /api/trip/reset`, or a factory reset — never by a detected refuel (issue #17). A fuel-level rise still re-anchors the consumption baseline so the average stays sane, but it leaves the trip distance and the averages alone.
 - **Instantaneous (KM/L):** Calculated across a 3-second sliding window:
   $$KM/L_{\text{inst}} = 0.4 \cdot \left(\frac{\Delta D_{3\text{s}}}{\Delta C_{3\text{s}}}\right) + 0.6 \cdot KM/L_{\text{inst, prev}}$$
 - **Trip Average Speed (KM/H):** $V_{\text{avg}} = \frac{D_{\text{trip}}}{t_{\text{elapsed}}}$, displayed in the bottom row alongside fuel economy readouts.
@@ -349,6 +350,7 @@ The management portal features a modern grouped card-based layout:
 | `/api/time` | `POST` | Syncs system clock from browser | `?epoch=1700000000` | `text/plain` |
 | `/api/odo` | `GET` | Reads odometer distance in km | None | `application/json` |
 | `/api/odo` | `POST` | Sets odometer distance | `{"km": 123.45}` | `application/json` |
+| `/api/trip/reset` | `POST` | Zeros the trip stats (same reset as the GPIO25 button); the odometer and session max speed are untouched | None | `application/json` |
 | `/api/reboot` | `POST` | Triggers graceful device restart | None | `text/plain` |
 | `/api/sleep` | `POST` | Triggers immediate deep sleep | None | `text/plain` |
 | `/api/reset` | `POST` | Performs factory reset (clears NVS) | None | `text/plain` |
@@ -412,6 +414,7 @@ Bands are also checked offline by `python scripts/verify_config_ranges.py`: ever
 - `WHEEL_CIRCUMFERENCE_MM` (default=1650.0): Tire rolling circumference in millimeters.
 - `FUEL_FILTER_ALPHA` (default=0.08): EMA filter coefficient for raw fuel readings.
 - `FUEL_TOUCH_POINTS` (default=8): Number of valid entries in the calibration touch table.
+- `TRIP_RESET_HOLD_MS` (default=1500): How long the physical trip-reset button on GPIO25 must be held to zero the trip stats (200–10000 ms). Shorter holds are ignored so a knock on the dash cannot wipe a trip. Refuelling no longer resets anything by itself (issue #17).
 - `BATTERY_SCALE` (default=5.7): Battery divider ratio `(R1+R2)/R2`. Leave at `5.7` for the stock wiring; set to `4.7` for a 4.7 kΩ / 1 kΩ divider.
 - `BATTERY_OFFSET` (default=0.2): Fixed voltage offset added to the divided battery reading.
 - `NTC_R_BALANCE` (default=10000.0): Balance resistor value in ohms for NTC divider.

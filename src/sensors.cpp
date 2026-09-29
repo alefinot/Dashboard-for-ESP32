@@ -412,6 +412,45 @@ float averageSpeed = 0.0f;
 float maxSpeed = 0.0f;
 unsigned long movingTimeMs = 0;
 
+// Trip-scoped sample markers. They used to be function-local statics, which is
+// how issue #17 survived: nothing could re-seed them on a reset, so the first
+// tick after a partial reset billed the whole gap and the trip averages were
+// divided by session-long moving time.
+static unsigned long lastMovingTimeCheck = 0;
+static unsigned long lastInstSampleTime = 0;
+static double lastInstDistKm = 0.0;
+static float lastInstFuelLiters = 0.0f;
+
+// Set by resetTripStats() so the display can confirm the reset for a moment.
+volatile unsigned long tripResetNoticeMs = 0;
+// Set by the Web UI handler (web task) and consumed in the sensor task, which
+// owns the trip state - same safe-point handoff as the config apply (#10).
+volatile bool pendingTripReset = false;
+
+// The one trip reset (issue #17). Everything the old refuel detector used to
+// zero, plus the markers and averages that depend on them, goes back to zero
+// here - reached from the physical button (GPIO25), the Web UI, or a factory
+// reset. The odometer and the session peak speed (maxSpeed) deliberately stay
+// where they are.
+void resetTripStats(const char *reason) {
+  tripDistanceKm = 0.0;
+  tripFuelConsumedLiters = 0.0f;
+  tripStartFuelLiters = -1.0f;  // re-arms from the next fuel reading
+  movingTimeMs = 0;
+  // Re-seed rather than zero: a 0 marker makes the next tick bill every ms
+  // since boot as if the vehicle had been moving that whole time.
+  unsigned long nowMs = millis();
+  lastMovingTimeCheck = nowMs;
+  lastInstSampleTime = nowMs;
+  lastInstDistKm = tripDistanceKm;
+  lastInstFuelLiters = fuelLiters;
+  averageKml = 0.0f;
+  instantKml = 0.0f;
+  averageSpeed = 0.0f;
+  tripResetNoticeMs = nowMs;
+  logPrintf("Trip stats reset (%s)\n", reason);
+}
+
 void setOdometerKm(double km) {
   if (km < 0.0) km = 0.0;
   totalDistanceKm = km;
@@ -1239,16 +1278,15 @@ void processFuelConsumption() {
     float consumed = tripStartFuelLiters - fuelLiters;
     if (consumed > 0.0f)
       tripFuelConsumedLiters = consumed;
-    // A fuel-level rise beyond the user-set threshold (REFUEL_RESET_LITERS,
-    // webui "Refuel Reset Threshold") counts as a refuel: reset the trip
-    // consumption instead of subtracting the rising level. The trip distance
-    // resets with it, so the post-refuel average km/L is not diluted against
-    // the pre-refuel trip distance.
-    else if (consumed < -REFUEL_RESET_LITERS) {
+    // A fuel-level rise means a refuel (or sender noise). Automatic trip
+    // resetting is deliberately gone (issue #17): the only reset paths are the
+    // physical button, the Web UI and a factory reset, because a noisy sender
+    // must never be able to wipe a trip on its own. The anchor is still kept
+    // current - without that, "consumed" would sit negative until the tank fell
+    // back below the old level and the trip average would read absurdly low.
+    // Nothing else about the trip is touched.
+    else if (consumed < 0.0f)
       tripStartFuelLiters = fuelLiters;
-      tripFuelConsumedLiters = 0.0f;
-      tripDistanceKm = 0.0;
-    }
   }
   // Consumption is computed internally as L/100km (the physically natural
   // unit, fuel per distance) and converted to km/L for display:
@@ -1265,9 +1303,6 @@ void processFuelConsumption() {
   averageKml = !hasTripData ? 0.0f
                             : ((avgL100 > 1.001f) ? (100.0f / avgL100) : 99.9f);
 
-  static unsigned long lastInstSampleTime = 0;
-  static double lastInstDistKm = 0.0;
-  static float lastInstFuelLiters = 0.0f;
   if (millis() - lastInstSampleTime >= 3000) {
     lastInstSampleTime = millis();
     double dDist = tripDistanceKm - lastInstDistKm;
@@ -1290,7 +1325,6 @@ void processFuelConsumption() {
 // Average speed (moving time)
 // ----------------------------------------------------------------------------
 void updateAverageSpeed() {
-  static unsigned long lastMovingTimeCheck = 0;
   unsigned long nowMs = millis();
   if (getFilteredSpeed() > 0.0f) {
     if (lastMovingTimeCheck != 0)
@@ -1782,6 +1816,48 @@ void gpsTask(void *pvParameters) {
 // snapshot, finishing in a few ms per 20ms tick, so it can never hold the
 // display hostage like the old GPS drain did.
 // ----------------------------------------------------------------------------
+// Physical trip-reset button (issue #17, GPIO25 to GND with the internal
+// pull-up). Polled here instead of on an interrupt: the sensor task already
+// ticks every 20 ms, a mechanical contact needs debouncing anyway, and an ISR
+// would have to touch trip state that belongs to this core (rule 11 - keep the
+// ISRs light). The press has to be held TRIP_RESET_HOLD_MS so knocking the dash
+// cannot wipe a trip, and it re-arms only after the button is released.
+void processTripResetButton() {
+  // Web UI / remote reset request: applied here, on the core that owns the
+  // trip state, never from the web task itself.
+  if (pendingTripReset) {
+    pendingTripReset = false;
+    resetTripStats("webui");
+  }
+
+  static unsigned long lastChangeMs = 0;
+  static unsigned long holdStartMs = 0;
+  static bool lastRaw = true;  // pull-up: unpressed reads HIGH
+  static bool pressed = false;
+  static bool armed = true;
+
+  unsigned long nowMs = millis();
+  bool raw = (digitalRead(TRIP_RESET_PIN) == LOW);
+  if (raw != lastRaw) {
+    lastRaw = raw;
+    lastChangeMs = nowMs;
+  } else if (pressed != lastRaw &&
+             nowMs - lastChangeMs >= TRIP_RESET_DEBOUNCE_MS) {
+    // The raw line has been steady for the debounce window - believe it.
+    pressed = lastRaw;
+    holdStartMs = pressed ? nowMs : 0;  // start the hold on a confirmed press
+    if (!pressed)
+      armed = true;  // re-arm only after the button is released
+  }
+
+  if (pressed && armed && holdStartMs != 0 &&
+      nowMs - holdStartMs >= (unsigned long)TRIP_RESET_HOLD_MS) {
+    armed = false;
+    holdStartMs = 0;
+    resetTripStats("button");
+  }
+}
+
 void sensorTask(void *pvParameters) {
   for (;;) {
     if (ENABLE_DEMO_MODE)
@@ -1803,6 +1879,7 @@ void sensorTask(void *pvParameters) {
       sensorStageDiag("temp", tStage);
     }
     updateAccelTimer();
+    processTripResetButton();
 
     static unsigned long lastSlowRead = 0;
     static unsigned long lastVerySlowRead = 0;

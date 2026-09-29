@@ -1129,7 +1129,7 @@ const DEFAULTS = {
     SHOW_GHOST_DIGITS: true,
     WHEEL_CIRCUMFERENCE_MM: 1650.0,
     FUEL_FILTER_ALPHA: 0.08,
-    REFUEL_RESET_LITERS: 2,
+    TRIP_RESET_HOLD_MS: 1500,
     FUEL_TOUCH_POINTS: 8,
     NTC_R_BALANCE: 10000.0,
     NTC_BETA: 3950.0,
@@ -1314,7 +1314,7 @@ const FIRMWARE_LIMITS = {
     FUEL_WARN_YEL: [0, 100],
     WHEEL_CIRCUMFERENCE_MM: [50, 10000],
     FUEL_FILTER_ALPHA: [0.001, 1],
-    REFUEL_RESET_LITERS: [0.1, 100],
+    TRIP_RESET_HOLD_MS: [200, 10000],
     FUEL_TOUCH_POINTS: [2, 20],
     BATTERY_SCALE: [0.01, 1000],
     BATTERY_OFFSET: [-50, 50],
@@ -1436,8 +1436,7 @@ const UNIT_FIELD_TYPES = {
     GPS_START_KMH: 'speed',
     MAX_SPEED_DELTA_KMH: 'speed',
     GPS_MIN_DEV_KMH: 'speed',
-    WHEEL_CIRCUMFERENCE_MM: 'length',
-    REFUEL_RESET_LITERS: 'volume'
+    WHEEL_CIRCUMFERENCE_MM: 'length'
 };
 
 function displayFromMetric(key, val) {
@@ -1506,6 +1505,14 @@ const configMap = [
             { id: "ENABLE_POWER_SENSE", label: "Enable Power Sensing" },
             { id: "SHOW_ELEMENT_BOUNDS", label: "Show UI Element Bounds (Debug)" },
             { id: "UNITS_IMPERIAL", label: "Use Imperial Units" },
+            { type: "card_header", label: "Trip Reset", content: `
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;line-height:1.5;">
+            A momentary button wired to <strong style="color:var(--text-main);">GPIO25</strong> and GND resets the trip: trip distance, trip fuel, average speed and average consumption. Hold it for the time set below so a knock on the dash cannot wipe a trip. The odometer and the session max speed are never reset. Refuelling no longer resets anything by itself - press the button (or use the button on the right) after a fill-up.
+        </div>
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:4px;">
+            <button onclick="resetTripStats()" class="btn-secondary" style="font-size:11px;padding:5px 10px;white-space:nowrap;">Reset Trip Stats Now</button>
+        </div>` },
+            { id: "TRIP_RESET_HOLD_MS", label: "Button Hold Time", type: "number", unit: "ms" },
             { type: "card_header", label: "CPU", advanced: true },
             { 
                 id: "MANUAL_CPU_FREQ", 
@@ -1667,7 +1674,6 @@ const configMap = [
         title: "Sensors Tuning", icon: iconSVG.sensors,
         items: [
             { type: "touch-table", label: "Fuel Sensor", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable", liveId: "fuel-reading", rows: [
-                { id: "REFUEL_RESET_LITERS", label: "Refuel Reset Threshold", unit: "L" },
                 { id: "FUEL_FILTER_ALPHA", label: "Smoothing Factor" }
             ] },
             { type: "card_header", label: "Engine Temperature", content: `
@@ -2906,6 +2912,24 @@ function pollSerial() {
         el.insertAdjacentHTML('beforeend', html);
         if (atBottom) el.scrollTop = el.scrollHeight;
     }).catch(() => {});
+}
+
+function resetTripStats() {
+    confirmDialog("Reset the trip stats? Trip distance, trip fuel and the averages go back to zero. The odometer is not touched.", function() {
+        let msgBox = document.getElementById('msg');
+        msgBox.className = ''; msgBox.innerText = "Resetting trip stats...";
+        fetch('/api/trip/reset', {method:'POST'}).then(r => r.json()).then(r => {
+            if (r && r.status === 'ok') {
+                msgBox.className = 'msg-success';
+                msgBox.innerText = "Trip stats reset. The panel repaints with the trip at zero.";
+            } else {
+                msgBox.className = 'msg-error';
+                msgBox.innerText = "The device did not reset the trip stats.";
+            }
+        }).catch(() => {
+            msgBox.className = 'msg-error'; msgBox.innerText = "Failed to reset trip stats.";
+        });
+    });
 }
 
 function factoryReset() {
