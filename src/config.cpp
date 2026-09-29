@@ -573,6 +573,39 @@ static void snapToNearest(const char *name, int *v, const int *options,
   *v = best;
 }
 
+// The fuel calibration table is read as a monotonic ramp: the gauge walk in
+// sensors.cpp takes its direction from the two ends and then assumes every
+// interior point follows it. A point out of order leaves a gap that matches no
+// segment and the needle stops moving (issue #19). Repair the table wherever it
+// enters the device - sorted in the direction its own ends already imply, so a
+// half-typed calibration file degrades to a usable ramp instead of a dead gauge.
+// Returns the number of points that were out of order (0 = table untouched).
+static int repairFuelTable(const char *when) {
+  const int n = constrain(FUEL_TOUCH_POINTS, 2, MAX_TOUCH_POINTS);
+  const bool descending = (touchTable[0] >= touchTable[n - 1]);
+  int outOfOrder = 0;
+  for (int i = 0; i + 1 < n; i++) {
+    bool ok = descending ? (touchTable[i] >= touchTable[i + 1])
+                         : (touchTable[i] <= touchTable[i + 1]);
+    if (!ok) outOfOrder++;
+  }
+  if (outOfOrder == 0) return 0;
+  // Insertion sort: at most MAX_TOUCH_POINTS entries, no heap (rule 14).
+  for (int i = 1; i < n; i++) {
+    int v = touchTable[i];
+    int j = i - 1;
+    while (j >= 0 && (descending ? (touchTable[j] < v) : (touchTable[j] > v))) {
+      touchTable[j + 1] = touchTable[j];
+      j--;
+    }
+    touchTable[j + 1] = v;
+  }
+  logPrintf("Config: %d fuel-table point(s) out of order (%s), sorted %s - "
+            "recalibrate if the gauge looks wrong\n",
+            outOfOrder, when, descending ? "descending" : "ascending");
+  return outOfOrder;
+}
+
 void sanitizeConfigPairs() {
   // Bar ranges: min must stay below max.
   if (TEMP_BAR_MIN >= TEMP_BAR_MAX) {
@@ -935,6 +968,20 @@ void processConfig(int mode, JsonDocument *doc) {
     for (int i = written; i < FUEL_TOUCH_POINTS; i++) {
       snprintf(key, sizeof(key), "TCH_%d", i);
       pref.putInt(key, touchTable[i]);
+    }
+  }
+
+  // A table that is not monotonic in one direction leaves gaps the gauge walk
+  // cannot match (issue #19): repair it before it reaches NVS, so a broken
+  // upload or an old NVS ramp is fixed once and stays fixed across reboots.
+  if (mode == 0 || mode == 2) {
+    if (repairFuelTable(mode == 0 ? "loaded from NVS at boot"
+                                  : "uploaded through the Web UI")) {
+      char key[8];
+      for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
+        snprintf(key, sizeof(key), "TCH_%d", i);
+        pref.putInt(key, touchTable[i]);
+      }
     }
   }
 

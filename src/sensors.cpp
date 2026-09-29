@@ -989,60 +989,64 @@ void processFuelSensor() {
   filteredReading = ((float)instantReading * FUEL_FILTER_ALPHA) +
                     (filteredReading * (1.0f - FUEL_FILTER_ALPHA));
 
-  // Determine whether calibration table is descending (capacitive) or ascending (resistive)
-  bool isDescending = (touchTable[0] >= touchTable[FUEL_TOUCH_POINTS - 1]);
-
-  if (isDescending) {
-    if (filteredReading >= touchTable[0]) {
-      fuelLiters = 0.0f;
-      fuelPercentage = 0;
-      return;
-    }
-    if (filteredReading <= touchTable[FUEL_TOUCH_POINTS - 1]) {
-      fuelLiters = (float)(FUEL_TOUCH_POINTS - 1);
-      fuelPercentage = 100;
-      return;
-    }
-    for (int i = 0; i < FUEL_TOUCH_POINTS - 1; i++) {
-      if (filteredReading <= touchTable[i] &&
-          filteredReading >= touchTable[i + 1]) {
-        float span = (float)(touchTable[i + 1] - touchTable[i]);
-        if (span != 0.0f) {
-          fuelLiters = (float)i + ((filteredReading - touchTable[i]) / span);
-        } else {
-          fuelLiters = (float)i;
-        }
-        fuelPercentage = constrain(
-            (int)((fuelLiters / (float)(FUEL_TOUCH_POINTS - 1)) * 100.0f), 0, 100);
-        return;
-      }
-    }
-  } else {
-    if (filteredReading <= touchTable[0]) {
-      fuelLiters = 0.0f;
-      fuelPercentage = 0;
-      return;
-    }
-    if (filteredReading >= touchTable[FUEL_TOUCH_POINTS - 1]) {
-      fuelLiters = (float)(FUEL_TOUCH_POINTS - 1);
-      fuelPercentage = 100;
-      return;
-    }
-    for (int i = 0; i < FUEL_TOUCH_POINTS - 1; i++) {
-      if (filteredReading >= touchTable[i] &&
-          filteredReading <= touchTable[i + 1]) {
-        float span = (float)(touchTable[i + 1] - touchTable[i]);
-        if (span != 0.0f) {
-          fuelLiters = (float)i + ((filteredReading - touchTable[i]) / span);
-        } else {
-          fuelLiters = (float)i;
-        }
-        fuelPercentage = constrain(
-            (int)((fuelLiters / (float)(FUEL_TOUCH_POINTS - 1)) * 100.0f), 0, 100);
-        return;
-      }
-    }
+  // The table maps a raw reading to a position in the tank: index 0 is empty,
+  // index FUEL_TOUCH_POINTS-1 is full, and the direction comes from its two ends
+  // (a capacitive pad reads high when dry, a resistive sender reads low when
+  // empty). Issue #19: the old walk decided the direction from the ends but then
+  // assumed every interior point followed it. One point out of order left a gap
+  // that matched no segment, the function returned without touching
+  // fuelLiters/fuelPercentage, and the gauge kept its previous value - frozen,
+  // with nothing in the log to explain it. config.cpp now repairs the table on
+  // load and save; this is the second layer: a reading between the two ends
+  // always lands somewhere.
+  const int points = FUEL_TOUCH_POINTS;
+  if (points < 2) {
+    fuelLiters = 0.0f;
+    fuelPercentage = 0;
+    return;
   }
+  const int first = touchTable[0];
+  const int last = touchTable[points - 1];
+  const bool descending = (first >= last);
+  const float reading = filteredReading;
+
+  if (descending ? (reading >= (float)first) : (reading <= (float)first)) {
+    fuelLiters = 0.0f;
+    fuelPercentage = 0;
+    return;
+  }
+  if (descending ? (reading <= (float)last) : (reading >= (float)last)) {
+    fuelLiters = (float)(points - 1);
+    fuelPercentage = 100;
+    return;
+  }
+
+  for (int i = 0; i < points - 1; i++) {
+    const float lo = (float)min(touchTable[i], touchTable[i + 1]);
+    const float hi = (float)max(touchTable[i], touchTable[i + 1]);
+    if (reading < lo || reading > hi) continue;
+    float span = (float)(touchTable[i + 1] - touchTable[i]);
+    fuelLiters = (span != 0.0f)
+                     ? (float)i + ((reading - (float)touchTable[i]) / span)
+                     : (float)i;
+    fuelPercentage = constrain(
+        (int)((fuelLiters / (float)(points - 1)) * 100.0f), 0, 100);
+    return;
+  }
+
+  // Still nothing: the interior points are not monotonic (a table that predates
+  // the repair path). Park on the nearer end and say so - a rough gauge that
+  // moves beats a precise one that is frozen, and the log names the cause.
+  static unsigned long lastNoSegmentMs = 0;
+  if (millis() - lastNoSegmentMs > 5000) {
+    lastNoSegmentMs = millis();
+    logPrintf("Fuel table: reading %.0f matches no segment (table is not "
+              "monotonic), clamped to the nearer end\n", reading);
+  }
+  bool nearerEmpty =
+      fabsf(reading - (float)first) <= fabsf(reading - (float)last);
+  fuelLiters = nearerEmpty ? 0.0f : (float)(points - 1);
+  fuelPercentage = nearerEmpty ? 0 : 100;
 }
 
 // ----------------------------------------------------------------------------
