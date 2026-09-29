@@ -1417,8 +1417,8 @@ static void ubxNavPvtToNmea() {
   uint16_t year = (uint16_t)(ubxPld[4] | (ubxPld[5] << 8));
   uint8_t mon = ubxPld[6], day = ubxPld[7];
   uint8_t hr = ubxPld[8], mn = ubxPld[9], sc = ubxPld[10];
-  uint8_t valid = ubxPld[11];
   uint8_t fixType = ubxPld[20];
+  uint8_t fixFlags = ubxPld[21];   // NAV-PVT "flags": bit0 gnssFixOk
   uint8_t numSV = ubxPld[23];
   double lat = (double)ubxI32(28) / 1e7;
   double lon = (double)ubxI32(24) / 1e7;
@@ -1426,7 +1426,12 @@ static void ubxNavPvtToNmea() {
   double knots = (double)ubxI32(60) / 1000.0 * 1.943844; // gSpeed mm/s -> knots
   double course = (double)ubxI32(64) / 1e5;      // headMot 1e-5 deg
   double hdop = (double)ubxU16(76) / 100.0;      // pDOP
-  bool hasFix = (fixType >= 2) && (valid & 0x02);
+  // Fix validity: NAV-PVT "valid" (offset 11) is a TIME validity field - bit0
+  // validDate, bit1 validTime, bit2 fullyResolved (there is no fix bit there),
+  // so testing it hid a real fix whenever UTC time was not resolved (issue #12).
+  // The fix indicator is "flags" bit0 (gnssFixOk) plus fixType, and fixType 5
+  // means time-only fix (no position), so only 2/3/4 count as a position fix.
+  bool hasFix = (fixType >= 2 && fixType <= 4) && (fixFlags & 0x01);
 
   ubxFramesParsed++;
   ubxLastFixType = fixType;
