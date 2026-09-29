@@ -403,6 +403,9 @@ Bands are also checked offline by `python scripts/verify_config_ranges.py`: ever
 - `AA_SHARPNESS` (default=1.0): Anti-aliasing gamma correction factor.
 - `GHOST_COLOR_STR` (default="#212021"): Hex color code for inactive 7-segment digit background.
 - `COLOR_TEMP_NORM`, `COLOR_TEMP_WARN`, `COLOR_TEMP_CRIT`: Hex color strings for engine temperature gradient bar.
+- `TEMP_BAR_MIN` / `TEMP_BAR_MAX` (default=10 / 110): the two ends of the engine-temp sidebar bar in °C.
+- `TEMP_WARN_YEL` (default=45): °C where the bar leaves plain `COLOR_TEMP_NORM` and starts fading toward `COLOR_TEMP_WARN`.
+- `TEMP_WARN_RED` (default=90): °C where that fade reaches amber and the amber→`COLOR_TEMP_CRIT` fade begins; full red at `TEMP_BAR_MAX`. Always kept at or above `TEMP_WARN_YEL`. The ramp is **light blue → amber → red**: a third marker (`TEMP_WARN_GRN`) existed in the code but was never stored in NVS, never in a backup and never in the Web UI, so it has been removed (issue #29).
 - `COLOR_FUEL_NORM`, `COLOR_FUEL_WARN`, `COLOR_FUEL_CRIT`: Hex color strings for fuel status bar.
 
 #### Sensors & Vehicle Calibration

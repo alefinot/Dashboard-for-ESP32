@@ -14,7 +14,6 @@ int TEMP_BAR_MIN = 10;
 int TEMP_BAR_MAX = 110;
 int TEMP_WARN_RED = 90;
 int TEMP_WARN_YEL = 45;
-int TEMP_WARN_GRN = 50;
 int FUEL_WARN_RED = 20;
 int FUEL_WARN_YEL = 45;
 

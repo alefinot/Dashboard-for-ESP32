@@ -120,8 +120,7 @@ extern char DASHBOARD_SIGNATURE[96];
 extern int TEMP_BAR_MIN;
 extern int TEMP_BAR_MAX;
 extern int TEMP_WARN_RED;
-extern int TEMP_WARN_YEL;
-extern int TEMP_WARN_GRN;
+extern int TEMP_WARN_YEL;
 extern int FUEL_WARN_RED;
 extern int FUEL_WARN_YEL;
 
