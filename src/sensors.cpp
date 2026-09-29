@@ -1253,12 +1253,17 @@ void processFuelConsumption() {
   // Consumption is computed internally as L/100km (the physically natural
   // unit, fuel per distance) and converted to km/L for display:
   // km/L = 100 / (L/100km). The 99.9 km/L display cap corresponds to
-  // 1.001 L/100km.
-  float avgL100 =
-      (tripDistanceKm > 0.05 && tripFuelConsumedLiters > 0.01f)
-          ? (float)((tripFuelConsumedLiters / tripDistanceKm) * 100.0)
-          : 0.0f;
-  averageKml = (avgL100 > 1.001f) ? (100.0f / avgL100) : 99.9f;
+  // 1.001 L/100km. Issue #16: that cap used to be the fallback for "no data"
+  // too, so a parked dashboard advertised 99.9 km/L - the best possible number -
+  // instead of nothing. The cap is now reachable only through a real
+  // computation; a trip with no distance or no fuel reads 0.
+  const bool hasTripData =
+      (tripDistanceKm > 0.05 && tripFuelConsumedLiters > 0.01f);
+  float avgL100 = hasTripData
+                      ? (float)((tripFuelConsumedLiters / tripDistanceKm) * 100.0)
+                      : 0.0f;
+  averageKml = !hasTripData ? 0.0f
+                            : ((avgL100 > 1.001f) ? (100.0f / avgL100) : 99.9f);
 
   static unsigned long lastInstSampleTime = 0;
   static double lastInstDistKm = 0.0;
@@ -1270,7 +1275,9 @@ void processFuelConsumption() {
     lastInstDistKm = tripDistanceKm;
     lastInstFuelLiters = fuelLiters;
     if (getFilteredSpeed() > 0.0f && dDist > 0.005 && dFuel > 0.001f) {
-      // Same L/100km intermediate as the average above, then km/L.
+      // Same L/100km intermediate as the average above, then km/L. The 99.9
+      // cap again means "measured, and better than 1.001 L/100km", never
+      // "nothing measured yet" (issue #16).
       float instL100 = (float)((dFuel / dDist) * 100.0);
       float rawInst = (instL100 > 1.001f) ? (100.0f / instL100) : 99.9f;
       instantKml = (rawInst * 0.4f) + (instantKml * 0.6f);
