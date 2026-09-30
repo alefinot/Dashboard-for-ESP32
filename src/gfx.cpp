@@ -819,6 +819,13 @@ void showUpdatingScreen() {
 }
 
 void updateOTAProgress(int progress, int total) {
+  // The OTA-pull caller only runs with a known Content-Length, but the
+  // ArduinoOTA progress callback hands whatever Update reports: a total of 0
+  // made this an integer divide-by-zero, which is a hardware exception on the
+  // ESP32 - the board reset in the middle of an update instead of showing a
+  // progress bar (issue #38). Unknown size: leave the bar where it is.
+  if (total <= 0) return;
+  if (progress < 0) progress = 0;
   int targetW = (260L * progress) / total;
   // Cap the streaming bar just below full so the display can never restart
   // the board on its own: fillW >= 258 (the reboot point in loop()) is only
