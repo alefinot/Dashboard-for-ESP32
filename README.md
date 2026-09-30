@@ -454,6 +454,12 @@ Bands are also checked offline by `python scripts/verify_config_ranges.py`: ever
 - `WEATHER_REFRESH_MIN` (default=15): Refresh interval in minutes.
 - `WEATHER_LOCALE` (default="en"): ISO locale code for weather-condition naming.
 
+#### Time, Date & Daylight Saving
+- `NTP_ENABLED` (default=true): Sync the system clock from NTP once the WiFi station is up.
+- `NTP_SERVER` (default="pool.ntp.org"): NTP host used for that sync.
+- `TZ_OFFSET_HOURS` (default=1): Zone offset in whole hours — **the standard (winter) offset**, range −14…14. With DST on, this is the offset the clock uses outside the DST period; the rule below adds the extra hour. New York is `-5`, Paris is `+1`, Athens is `+2`.
+- `TZ_DST_ENABLED` (default=true): Master switch for daylight saving. When off the clock keeps `TZ_OFFSET_HOURS` all year.
+- `TZ_DST_RULE` (default=1): Which calendar `TZ_DST_ENABLED` applies (issue #22). `0` = none, `1` = **EU/EEA** (last Sunday of March and October, both at 01:00 UTC), `2` = **US/Canada** (second Sunday of March, first Sunday of November, both at 02:00 local wall clock — converted to UTC through `TZ_OFFSET_HOURS`, so a GMT−6 zone springs forward at 08:00 UTC and a GMT−5 zone at 07:00 UTC). The rules are integer arithmetic on the UTC date (no zone database); `scripts/verify_dst_rules.py` checks them against the published 2024–2026 transition instants. Before this parameter the DST half was hard-wired to the EU calendar, so a US zone was wrong for roughly three weeks a year.
 #### WiFi & Cloud OTA
 - `AP_PASSWORD` (default="12345678"): Password of the `Dashboard_Config` SoftAP (the configuration portal). Set in the WebUI (System & General → Wifi → Device Config AP). Must be **empty** (open network, not recommended) or **8–63 characters**: the Wi-Fi stack rejects 1–7 character passphrases, so a shorter value is refused at load/save time and the shipped default is restored instead (logged as `Config: AP_PASSWORD too short`). The WebUI warns while the default password is still in use.
 - `WIFI_RETRY_MODE` (default=1): Search policy — `0` = one cycle, `1` = fixed-time (`WIFI_RETRY_SECONDS`), `2` = search forever. Same policy governs reconnects after a lost link.

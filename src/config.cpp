@@ -250,6 +250,9 @@ bool NTP_ENABLED = true;
 char NTP_SERVER[64] = "pool.ntp.org";
 int TZ_OFFSET_HOURS = 1;
 bool TZ_DST_ENABLED = true;
+// Which calendar TZ_DST_ENABLED applies: 0 none, 1 EU/EEA, 2 US/Canada.
+// Default 1 keeps the behaviour of every unit shipped before #22.
+int TZ_DST_RULE = TZ_DST_RULE_EU;
 
 bool OTA_PULL_ENABLED = false;
 char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
@@ -873,6 +876,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_STR(NTP_SERVER, "NTP_SRV", "pool.ntp.org");
   CFG_INT(TZ_OFFSET_HOURS, "TZ_OFFSET", 1, -14, 14);
   CFG_BOOL(TZ_DST_ENABLED, "TZ_DST", true);
+  CFG_INT(TZ_DST_RULE, "TZ_RULE", 1, 0, 2);  // 1 = TZ_DST_RULE_EU
 
   CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
   CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
@@ -1182,6 +1186,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "NTP_SERVER": "pool.ntp.org",
   "TZ_OFFSET_HOURS": 1,
   "TZ_DST_ENABLED": true,
+  "TZ_DST_RULE": 1,
   "OTA_PULL_ENABLED": false,
   "OTA_PULL_URL": "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
   "VERSION_OVERRIDE": "",

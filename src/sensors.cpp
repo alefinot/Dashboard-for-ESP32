@@ -1736,12 +1736,14 @@ bool systemTimeToLocal(int &hour, int &minute, int &day, int &month,
   // loop), and gmtime() writes a shared static tm buffer.
   struct tm tmUtc = {0};
   if (!gmtime_r(&tv.tv_sec, &tmUtc)) return false;
+  // TZ_OFFSET_HOURS is the zone's STANDARD (winter) offset; the selected rule
+  // (TZ_DST_RULE) supplies the extra daylight-saving hour. Before #22 the DST
+  // half was hard-wired to the European calendar, so a US zone could not get
+  // correct time at all: the offsets switch on different Sundays.
   int dst = 0;
-  if (TZ_DST_ENABLED) {
-    int euroOff = getEuropeanOffset(tmUtc.tm_year + 1900, tmUtc.tm_mon + 1,
-                                    tmUtc.tm_mday, tmUtc.tm_hour);
-    dst = euroOff - 1;
-  }
+  if (TZ_DST_ENABLED && TZ_DST_RULE != TZ_DST_RULE_NONE)
+    dst = getDstOffset(tmUtc.tm_year + 1900, tmUtc.tm_mon + 1, tmUtc.tm_mday,
+                       tmUtc.tm_hour, TZ_OFFSET_HOURS);
   time_t local = tv.tv_sec + ((TZ_OFFSET_HOURS + dst) * 3600);
   struct tm tmLocal = {0};
   if (!gmtime_r(&local, &tmLocal)) return false;

@@ -1269,6 +1269,7 @@ const DEFAULTS = {
     NTP_SERVER: "pool.ntp.org",
     TZ_OFFSET_HOURS: 1,
     TZ_DST_ENABLED: true,
+    TZ_DST_RULE: 1,
     OTA_PULL_ENABLED: false,
     OTA_PULL_URL: "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
     VERSION_OVERRIDE: "",
@@ -1422,6 +1423,7 @@ const FIRMWARE_LIMITS = {
     WIFI_RETRY_MODE: [0, 2],
     WIFI_RETRY_SECONDS: [1, 86400],
     TZ_OFFSET_HOURS: [-14, 14],
+    TZ_DST_RULE: [0, 2],
 };
 // END FIRMWARE_LIMITS
 
@@ -1535,10 +1537,20 @@ const configMap = [
             { type: "card_header", label: "Time Settings" },
             { id: "NTP_ENABLED", label: "Enable NTP Time Sync" },
             { id: "NTP_SERVER", label: "NTP Server" },
-            { id: "TZ_DST_ENABLED", label: "Enable Automatic DST (European rules)" },
+            { id: "TZ_DST_ENABLED", label: "Enable Automatic DST" },
+            {
+                id: "TZ_DST_RULE",
+                label: "DST Rule",
+                type: "select",
+                options: [
+                    { value: 0, label: "None (fixed offset all year)" },
+                    { value: 1, label: "EU / EEA \u2014 last Sunday of Mar & Oct, 01:00 UTC" },
+                    { value: 2, label: "US / Canada \u2014 2nd Sun Mar, 1st Sun Nov, 02:00 local" }
+                ]
+            },
             {
                 id: "TZ_OFFSET_HOURS",
-                label: "Time Zone",
+                label: "Time Zone (standard / winter offset)",
                 type: "select",
                 options: [
                     { value: -12, label: "(GMT-12:00) Baker Island" },

@@ -415,27 +415,79 @@ int getDayOfWeek(int y, int m, int d) {
   return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
 }
 
-int getEuropeanOffset(int year, int month, int day, int hour) {
+// ----------------------------------------------------------------------------
+// Daylight-saving rules (issue #22)
+//
+// All rules take the UTC date/time plus the zone's STANDARD (winter) offset
+// from TZ_OFFSET_HOURS and return the extra hours to add: 0 = standard time,
+// 1 = daylight time. They are pure integer arithmetic on a handful of fields,
+// so they run on either core with no allocation and no tz database.
+//
+// TZ_OFFSET_HOURS is deliberately the standard offset, not the summer one: the
+// US rule needs to know when "02:00 local" is in UTC, and that question only
+// has one answer if the base offset is the standard one.
+// ----------------------------------------------------------------------------
+int getEuropeanDst(int year, int month, int day, int hourUtc, int baseOff) {
+  (void)baseOff;  // every EU/EEA zone jumps at the same instant: 01:00 UTC
   if (month < 3 || month > 10)
-    return 1;
+    return 0;
   if (month > 3 && month < 10)
-    return 2;
+    return 1;
   int lastSunday = 31 - getDayOfWeek(year, month, 31);
   if (month == 3) {
     if (day > lastSunday)
-      return 2;
-    if (day < lastSunday)
       return 1;
-    return (hour >= 1) ? 2 : 1;
+    if (day < lastSunday)
+      return 0;
+    return (hourUtc >= 1) ? 1 : 0;
   }
   if (month == 10) {
     if (day > lastSunday)
-      return 1;
+      return 0;
     if (day < lastSunday)
-      return 2;
-    return (hour >= 1) ? 1 : 2;
+      return 1;
+    return (hourUtc >= 1) ? 0 : 1;
   }
-  return 1;
+  return 0;
+}
+
+// US / Canada: DST starts on the second Sunday of March and ends on the first
+// Sunday of November, both at 02:00 local wall clock. In UTC that is
+// 02:00 - baseOff on the way in (07:00 UTC for GMT-5) and 01:00 - baseOff on
+// the way out, because at the fall-back instant the clock still reads daylight
+// time (02:00 daylight = 01:00 standard).
+int getUSDst(int year, int month, int day, int hourUtc, int baseOff) {
+  if (month < 3 || month > 11)
+    return 0;
+  if (month > 3 && month < 11)
+    return 1;
+  if (month == 3) {
+    int firstSunday = 1 + (7 - getDayOfWeek(year, 3, 1)) % 7;
+    int secondSunday = firstSunday + 7;
+    if (day > secondSunday)
+      return 1;
+    if (day < secondSunday)
+      return 0;
+    return (hourUtc >= 2 - baseOff) ? 1 : 0;
+  }
+  int firstSunday = 1 + (7 - getDayOfWeek(year, 11, 1)) % 7;
+  if (day > firstSunday)
+    return 0;
+  if (day < firstSunday)
+    return 1;
+  return (hourUtc >= 1 - baseOff) ? 0 : 1;
+}
+
+// The rule the user picked (TZ_DST_RULE) applied to a UTC date.
+int getDstOffset(int year, int month, int day, int hourUtc, int baseOff) {
+  switch (TZ_DST_RULE) {
+    case TZ_DST_RULE_EU:
+      return getEuropeanDst(year, month, day, hourUtc, baseOff);
+    case TZ_DST_RULE_US:
+      return getUSDst(year, month, day, hourUtc, baseOff);
+    default:
+      return 0;
+  }
 }
 
 void drawCalendarIcon(int x, int y, uint16_t color) {

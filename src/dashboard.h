@@ -366,6 +366,7 @@ extern bool NTP_ENABLED;
 extern char NTP_SERVER[64];
 extern int TZ_OFFSET_HOURS;
 extern bool TZ_DST_ENABLED;
+extern int TZ_DST_RULE;  // which rule TZ_DST_ENABLED applies: see TZ_DST_RULE_*
 
 extern bool OTA_PULL_ENABLED;
 extern char OTA_PULL_URL[192];
@@ -576,7 +577,14 @@ void fillAARoundRect(T &disp, int x, int y, int w, int h, int r, uint16_t color,
 
 void drawBatteryIcon(int x, int y, float voltage, uint16_t color);
 int getDayOfWeek(int y, int m, int d);
-int getEuropeanOffset(int year, int month, int day, int hour);
+// Daylight-saving rules (issue #22): UTC date + the zone's standard offset in,
+// extra hours out (0 = standard, 1 = daylight). See src/gfx.cpp.
+#define TZ_DST_RULE_NONE 0
+#define TZ_DST_RULE_EU 1
+#define TZ_DST_RULE_US 2
+int getEuropeanDst(int year, int month, int day, int hourUtc, int baseOff);
+int getUSDst(int year, int month, int day, int hourUtc, int baseOff);
+int getDstOffset(int year, int month, int day, int hourUtc, int baseOff);
 void drawCalendarIcon(int x, int y, uint16_t color);
 void drawClockIcon(int x, int y, uint16_t color);
 void drawStopwatchIcon(int x, int y, uint16_t color);
