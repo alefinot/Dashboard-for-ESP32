@@ -117,7 +117,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **Display Backlight** | LED Backlight (`BL_DISPLAY`, GPIO12) | LEDC PWM — pin-based `ledcAttach(BL_DISPLAY, 1000, 8)` | 1 kHz hardware PWM, 8-bit resolution (256 brightness levels), logarithmic fading; the LEDC channel is assigned by the arduino-esp32 3.x wrapper |
 | **GNSS Module** | BZGNSS P25 Pro (u-blox M10) | UART2 (RX=GPIO16, TX=GPIO17) | 115200 baud (configurable), UBX NAV-PVT / NMEA 0183 stream (module is preconfigured — the firmware is receive-only), 10 Hz update rate, multi-constellation (GPS/GLONASS/BDS/Galileo), UTC epoch time synchronization |
 | **Wheel Speed Sensor** | Hall Effect Interrupt | GPIO33 (Input Pullup) | Any-edge ISR stamps the edges; interval/filter logic runs on the sensor task, microsecond timing |
-| **Fuel Level Sensor** | Resistive Sender (capacitive touch removed in v1.3.6) | GPIO32 (ADC1_CH4) | Analog 0–3.3V, 20-point calibration table, EMA smoothing filter |
+| **Fuel Level Sensor** | Marine Resistive Sender (capacitive touch removed in v1.3.6) | GPIO32 (ADC1_CH4) | Voltage divider behind an excitation resistor, ohm-domain calibration table (up to 20 points), oversampling + EMA smoothing, open/short detection |
 | **Engine Temp Sensor** | NTC Thermistor (10k/100k) | GPIO36 (ADC1_CH0) | Analog 0–3.3V, Steinhart-Hart equation, voltage divider balance |
 | **Battery Voltage** | Voltage Divider (5.7:1) | GPIO35 (ADC1_CH7) | Analog 0–3.3V, range 0–18.8V DC, sampled every 500 ms |
 | **Power / Ignition** | Ignition Key Sense Line | GPIO4 | High=Ignition ON, Low=Power Lost → Animated Deep Sleep |
@@ -141,7 +141,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **GPIO23** | `cfg.pin_mosi` | SPI Master Out | Output | Hardcoded in `gfx.cpp`, LCD data/command stream |
 | **GPIO25** | `TRIP_RESET_PIN` | Trip Reset Button | Input (Pullup) | Momentary push button to GND; hold `TRIP_RESET_HOLD_MS` to zero the trip stats (issue #17). Internal ~45 kΩ pull-up, no external parts |
 | **GPIO27** | `SPI_DC` | Data / Command | Output | High = Data, Low = Command for ILI9488 controller |
-| **GPIO32** | `FUEL_TOUCH_PIN` | Fuel ADC | Input | Dedicated ADC1 Channel 4 pin for fuel level reading (resistive sender; capacitive touch removed in v1.3.6) |
+| **GPIO32** | `FUEL_TOUCH_PIN` | Fuel sender input | Input | Dedicated ADC1 Channel 4 pin: 3V3 → `FUEL_EXC_RES_OHM` → GPIO32 → sender → tank ground (capacitive touch removed in v1.3.6) |
 | **GPIO33** | `HALL_SENSOR_PIN` | Hall Interrupt | Input (Pullup) | Any-edge (`CHANGE`) hardware interrupt: the ISR timestamps both transitions, the filter chain validates them on the sensor task |
 | **GPIO34** | `LIGHT_SENSOR_PIN` | Ambient Light | Input (No Pull) | LDR ambient light sensor for auto-brightness (calibrated via `/api/ambient/cal-dark` / `cal-bright`) |
 | **GPIO35** | `BATTERY_SENSE_PIN` | Battery ADC | Input (No Pull) | Connected to 5.7:1 precision resistor divider node |
@@ -219,20 +219,71 @@ Legacy compiled-in GFX font bitmaps (`Conthrax_SemiBold4pt7b`, `Conthrax_SemiBol
 
 ---
 
-### 3. Piecewise Linear Fuel Calibration & Filtering
+### 3. Marine Resistive Fuel Sender: Divider, Ohm-Domain Table & Filtering
 
-Fuel tank geometries are non-linear. Dashboard++ converts raw ADC inputs into precise volume measurements using an Exponential Moving Average (EMA) and a configurable 20-point touch table.
+Fuel level is read from a standard marine resistive sender wired as a voltage
+divider on `FUEL_TOUCH_PIN` (GPIO32). The capacitive pad this input used to carry
+is gone; the pin is now a plain ADC input (issue #18):
 
-#### Exponential Moving Average (EMA)
-Raw ADC readings $S_t$ from `FUEL_TOUCH_PIN` (GPIO32) are filtered to prevent fuel sloshing fluctuations:
-$$\bar{S}_t = (\alpha \cdot S_t) + ((1 - \alpha) \cdot \bar{S}_{t-1})$$
-where $\alpha =$ `FUEL_FILTER_ALPHA` (default=0.08).
+```
+3V3 ─── FUEL_EXC_RES_OHM ─── GPIO32 (ADC1_CH4) ─── sender ─── tank ground
+```
 
-#### Piecewise Linear Interpolation
-Given $N$ touch table points $T[0 \dots N-1]$ mapped to liter indices $0 \dots N-1$:
-Find segment $i$ such that $T[i] \ge \bar{S}_t \ge T[i+1]$:
-$$L_{\text{fuel}} = i + \left(\frac{\bar{S}_t - T[i]}{T[i+1] - T[i]}\right)$$
+#### From ADC code to ohms
+`FUEL_OVERSAMPLE` conversions are averaged into a raw code $\bar{S}$ (software
+oversampling — the core exposes no hardware averaging for this pin), turned into
+a voltage with `FUEL_ADC_VREF`, and the sender resistance is recovered from the
+divider:
+
+$$V = V_{\text{ref}} \cdot \frac{R_{\text{sender}}}{R_{\text{sender}} + R_{\text{exc}}} \qquad\Rightarrow\qquad R_{\text{sender}} = R_{\text{exc}} \cdot \frac{V}{V_{\text{ref}} - V}$$
+
+The calibration table (`fuelCalOhms`) stores **ohms, not ADC codes**. That is
+what makes any sender standard work on the same firmware — SAE **10–180 Ω**
+(low = empty), European/VDO **240–33 Ω** (high = empty), GM **0–90 Ω** — and it
+means a captured table still means the same thing after the excitation resistor
+(or the sender) is swapped. `FUEL_OHM_EMPTY` / `FUEL_OHM_FULL` describe the
+sender: they size the exciter, define the fault band, and pre-fill the table
+ramp; they do not replace the table.
+
+#### EMA + piecewise interpolation
+Smoothing stays in the ADC-code domain (linear, and the same domain the table was
+captured against), then the ohm value walks the table:
+$$\bar{S}_t = (\alpha \cdot S_t) + ((1 - \alpha) \cdot \bar{S}_{t-1}) \qquad \alpha = \texttt{FUEL\_FILTER\_ALPHA}\ (default{=}0.08)$$
+Given $N$ table points $T[0 \dots N-1]$ mapped to tank slots $0 \dots N-1$, find
+segment $i$ containing $R_{\text{sender}}$:
+$$L_{\text{fuel}} = i + \left(\frac{R_{\text{sender}} - T[i]}{T[i+1] - T[i]}\right)$$
 $$\text{FuelPercentage} = \text{constrain}\left(\left\lfloor \frac{L_{\text{fuel}}}{N - 1} \times 100 \right\rfloor, 0, 100\right)$$
+
+The traversal direction is taken from the table's two ends, so a rising (SAE) and
+a falling (European) sender are both handled without a mode switch.
+
+#### Sender fault detection
+The failure that makes a self-built sender useless is an open line that still
+looks like a plausible reading, so the input is classified every sample and shown
+in the Web UI instead of being turned into a tank level:
+
+| Condition | Reported as |
+| :--- | :--- |
+| `FUEL_INPUT_ENABLED` off | **no input** — gauge pinned at 0, a floating pin never invents a level |
+| pin within 0.5 % of the rail, or $R > 3 \times$ the entered full/empty maximum | **open circuit** — sender unplugged, wire broken, arm off the pivot |
+| $R$ below `min(EMPTY, FULL)` by more than `max(5 Ω, 25 %)` | **shorted input** — signal wire on ground |
+
+Demo mode drives the same pipeline: the simulated level is converted back through
+the calibration table into a divider code and read forward again, so the table,
+divider math and fault band are exercised with no hardware fitted (rule 20).
+
+#### Excitation resistor sizing
+$R_{\text{exc}}$ is a trade: the geometric mean of the sender range spreads the
+span over the most volts, but pushes more current through the sender element. The
+Web UI suggests the best E12 value for the entered range under a **15 mA** sender
+current budget and keeps the top of the span below 2.6 V, because a reading
+pinned near the rail is indistinguishable from an open circuit. For the shipped
+10–180 Ω default that suggestion is 220 Ω — the same value the firmware ships
+with — giving a 1.34 V span at 14.3 mA.
+
+Check the whole chain on a host with `python scripts/verify_fuel_ohms.py`
+(divider round-trip, both conventions, resolution per tank slot, demo round-trip,
+fault band, exciter suggestion).
 
 ---
 
@@ -370,6 +421,8 @@ The management portal features a modern grouped card-based layout:
 | `/api/sleep` | `POST` | Triggers immediate deep sleep | None | `text/plain` |
 | `/api/reset` | `POST` | Performs factory reset (clears NVS) | None | `text/plain` |
 | `/api/ambient` | `GET` | Reads raw ambient light sensor value | None | `application/json` |
+| `/api/sensors` | `GET` | Reads calibrated battery voltage (`v`) and coolant temperature (`t`) | None | `application/json` |
+| `/api/fuel` | `GET` | Reads the fuel input: `raw` averaged ADC code, `liters`, `pct`, `ohm` sender resistance, `st` input state (0 = disabled, 1 = ok, 2 = open circuit, 3 = shorted) | None | `application/json` |
 | `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `text/plain` |
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `text/plain` |
 | `/api/ota` | `POST` | Over-The-Air firmware binary upload | Binary `.bin` payload | `multipart/form-data` |
@@ -393,7 +446,7 @@ Every numeric parameter carries an explicit **known-good band** in its `CFG_INT`
 - **Non-finite floats** (`nan`, `inf`) fall back to the parameter's default rather than poisoning a calculation.
 - **Cross-field rules** are repaired after the per-field clamps, in one place (`sanitizeConfigPairs()`): `TEMP_BAR_MIN < TEMP_BAR_MAX`, `TEMP_WARN_YEL <= TEMP_WARN_RED`, `FUEL_WARN_RED <= FUEL_WARN_YEL` (fuel is mirrored — it turns red *below* its marker), `LIGHT_SENSOR_DARK_VAL < LIGHT_SENSOR_BRIGHT_VAL`, `MIN_SATELLITES <= OPTIMAL_SATELLITES`, `CPU_THROTTLE_TEMP_WARN <= CPU_THROTTLE_TEMP_CRIT`.
 - **Enumerated parameters** are snapped to the nearest legal step: `GPS_BAUD` to a standard u-blox rate (1200…921600), `MANUAL_CPU_FREQ` to 80 / 160 / 240 MHz. `DISPLAY_ROTATION` is masked to 0–3, `WHEEL_CIRCUMFERENCE_MM` has always been floored at 1 (it is a divisor).
-- **Fuel calibration table** (`touchTable`) cells are clamped to the raw ADC range 0–4095 on load and on restore. The table is also required to be **monotonic in one direction** (the direction its first and last entries already imply): out-of-order points are sorted by `repairFuelTable()` on boot load and on save, written back to NVS, and named in the log, because a gap in the ramp would otherwise freeze the needle (issue #19). The gauge walk in `src/sensors.cpp` carries a second layer — a reading that matches no segment parks on the nearer end and logs once every 5 s instead of leaving the last value in place.
+- **Fuel calibration table** (`fuelCalOhms`) cells are clamped to the sender band 0–100000 Ω on load and on restore. The table is in **ohms** since issue #18 (it used to be raw ADC codes under the name `touchTable`); old `touchTable` values in a backup are ignored rather than re-injected as ohms. The table is also required to be **monotonic in one direction** (the direction its first and last entries already imply): out-of-order points are sorted by `repairFuelTable()` on boot load and on save, written back to NVS, and named in the log, because a gap in the ramp would otherwise freeze the needle (issue #19). The gauge walk in `src/sensors.cpp` carries a second layer — a reading that matches no segment parks on the nearer end and logs once every 5 s instead of leaving the last value in place.
 - The **WebUI mirrors the same bands** so a bad entry is caught before it is posted: numeric inputs get `min`/`max` from a `FIRMWARE_LIMITS` table generated out of `config.cpp` (`python scripts/make_webui_limits.py` regenerates it after any band change), an out-of-range entry is corrected in the box and listed in the save message, and an emptied numeric box falls back to its default instead of posting a blank (which the device used to read as `0`).
 
 Bands are also checked offline by `python scripts/verify_config_ranges.py`: every numeric parameter must have a band, no shipped default may fall outside its own band, and the cross-field rules must hold for the factory values.
@@ -428,8 +481,13 @@ Bands are also checked offline by `python scripts/verify_config_ranges.py`: ever
 
 #### Sensors & Vehicle Calibration
 - `WHEEL_CIRCUMFERENCE_MM` (default=1650.0): Tire rolling circumference in millimeters.
-- `FUEL_FILTER_ALPHA` (default=0.08): EMA filter coefficient for raw fuel readings.
-- `FUEL_TOUCH_POINTS` (default=8): Number of valid entries in the calibration touch table.
+- `FUEL_FILTER_ALPHA` (default=0.08): EMA filter coefficient applied to the raw fuel ADC code.
+- `FUEL_INPUT_ENABLED` (default=false): Turns the resistive fuel sender input on. Leave it off until a sender is actually wired to GPIO32 — with no sender the pin floats and the gauge reports "no input" and stays at 0 (issue #18).
+- `FUEL_OHM_EMPTY` / `FUEL_OHM_FULL` (defaults=10.0 / 180.0): Sender resistance at empty and full, in ohms. Any standard works — 10–180 Ω (SAE), 240–33 Ω (European/VDO), 0–90 Ω (GM). Used to size the excitation resistor, define the fault band and pre-fill the calibration ramp.
+- `FUEL_EXC_RES_OHM` (default=220): Resistor from 3V3 to GPIO32 that the sender forms a divider against. The Web UI suggests the best E12 value for the entered range (15 mA sender current budget, top of span below 2.6 V).
+- `FUEL_ADC_VREF` (default=3.30): ADC reference / actual rail voltage in volts, used to turn the code into a divider voltage. Measuring the real 3V3 rail and entering it here removes a rail-error term (the calibration table cancels it at the points that were captured).
+- `FUEL_OVERSAMPLE` (default=16): ADC conversions averaged into one sample (1–64). The ESP32 converter only delivers ~9–10 usable bits; oversampling is what buys the resolution back for a sender whose useful span can be a few hundred codes.
+- `FUEL_TOUCH_POINTS` (default=8): Number of valid entries in the fuel calibration table (`fuelCalOhms`): index 0 = empty, index `N-1` = full, so the number of tank slots is one per litre for the shipped 1 L-per-step default. Changing this regenerates the table as a linear ramp between `FUEL_OHM_EMPTY` and `FUEL_OHM_FULL`.
 - `TRIP_RESET_HOLD_MS` (default=1500): How long the physical trip-reset button on GPIO25 must be held to zero the trip stats (200–10000 ms). Shorter holds are ignored so a knock on the dash cannot wipe a trip. Refuelling no longer resets anything by itself (issue #17).
 - `BATTERY_SCALE` (default=5.7): Battery divider ratio `(R1+R2)/R2`. Leave at `5.7` for the stock wiring; set to `4.7` for a 4.7 kΩ / 1 kΩ divider.
 - `BATTERY_OFFSET` (default=0.2): Fixed voltage offset added to the divided battery reading.

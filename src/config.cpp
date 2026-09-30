@@ -275,9 +275,30 @@ const char FW_VERSION[] = "1.3.9";
 char VERSION_OVERRIDE[32] = "";
 
 int FUEL_TOUCH_POINTS = 8;
-int touchTable[MAX_TOUCH_POINTS] = {950, 840, 750, 670, 600, 530, 460, 400,
-                                     350, 310, 275, 245, 220, 195, 170, 145,
-                                     120, 95, 70, 45};
+
+// Fuel calibration table, one entry per level slot: index 0 = empty, index
+// FUEL_TOUCH_POINTS-1 = full. The unit is **ohms**, the quantity a marine
+// resistive sender actually produces (issue #18) - it used to be raw ADC counts
+// from the removed capacitive pad. Keeping the table in the sender's own domain
+// is what makes any ohm range work: the excitation resistor only decides how the
+// ADC sees the sender, never what a calibration point means.
+// Default = linear 10..180 ohm ramp (the common US marine sender); points past
+// index 7 continue the ramp for a taller tank. Recalibrate against the real tank
+// with the Web UI capture flow.
+float fuelCalOhms[MAX_TOUCH_POINTS] = {
+    10.0f,   34.3f,  58.6f,  82.9f,  107.1f, 131.4f, 155.7f, 180.0f,
+    204.3f,  228.6f, 252.9f, 277.1f, 301.4f, 325.7f, 350.0f, 374.3f,
+    398.6f,  422.9f, 447.1f, 471.4f};
+
+// Resistive fuel sender wiring (issue #18): 3V3 - FUEL_EXC_RES_OHM - GPIO32 -
+// sender - GND. The pin voltage gives the sender resistance, so the sender range
+// is user-entered and nothing is hard-wired to a particular standard.
+bool FUEL_INPUT_ENABLED = false;  // pin is floating until the sender is fitted
+int FUEL_EXC_RES_OHM = 220;
+float FUEL_ADC_VREF = 3.30f;
+float FUEL_OHM_EMPTY = 10.0f;
+float FUEL_OHM_FULL = 180.0f;
+int FUEL_OVERSAMPLE = 16;
 
 // ----------------------------------------------------------------------------
 // NVS config macros
@@ -587,28 +608,43 @@ static void snapToNearest(const char *name, int *v, const int *options,
 // Returns the number of points that were out of order (0 = table untouched).
 static int repairFuelTable(const char *when) {
   const int n = constrain(FUEL_TOUCH_POINTS, 2, MAX_TOUCH_POINTS);
-  const bool descending = (touchTable[0] >= touchTable[n - 1]);
+  const bool descending = (fuelCalOhms[0] >= fuelCalOhms[n - 1]);
   int outOfOrder = 0;
   for (int i = 0; i + 1 < n; i++) {
-    bool ok = descending ? (touchTable[i] >= touchTable[i + 1])
-                         : (touchTable[i] <= touchTable[i + 1]);
+    bool ok = descending ? (fuelCalOhms[i] >= fuelCalOhms[i + 1])
+                         : (fuelCalOhms[i] <= fuelCalOhms[i + 1]);
     if (!ok) outOfOrder++;
   }
   if (outOfOrder == 0) return 0;
   // Insertion sort: at most MAX_TOUCH_POINTS entries, no heap (rule 14).
   for (int i = 1; i < n; i++) {
-    int v = touchTable[i];
+    float v = fuelCalOhms[i];
     int j = i - 1;
-    while (j >= 0 && (descending ? (touchTable[j] < v) : (touchTable[j] > v))) {
-      touchTable[j + 1] = touchTable[j];
+    while (j >= 0 &&
+           (descending ? (fuelCalOhms[j] < v) : (fuelCalOhms[j] > v))) {
+      fuelCalOhms[j + 1] = fuelCalOhms[j];
       j--;
     }
-    touchTable[j + 1] = v;
+    fuelCalOhms[j + 1] = v;
   }
   logPrintf("Config: %d fuel-table point(s) out of order (%s), sorted %s - "
             "recalibrate if the gauge looks wrong\n",
             outOfOrder, when, descending ? "descending" : "ascending");
   return outOfOrder;
+}
+
+// Rebuild the table as a straight empty->full ramp in the ohm domain. Used when
+// the point count changes (the stored ramp no longer has the right number of
+// slots, and slots past the old end would otherwise sit at an unrelated value)
+// and by the Web UI "fill from empty/full ohms" action.
+static void fillFuelTableFromOhms(const char *why) {
+  const int n = constrain(FUEL_TOUCH_POINTS, 2, MAX_TOUCH_POINTS);
+  float e = FUEL_OHM_EMPTY, f = FUEL_OHM_FULL;
+  if (!(fabsf(f - e) > 0.5f)) f = e + 170.0f;  // degenerate range guard
+  for (int i = 0; i < n; i++)
+    fuelCalOhms[i] = e + (f - e) * (float)i / (float)(n - 1);
+  logPrintf("Fuel: %d-point table rebuilt as a linear ramp (%s, %.1f..%.1f "
+            "ohm) - recalibrate against the tank for accuracy\n", n, why, e, f);
 }
 
 void sanitizeConfigPairs() {
@@ -676,6 +712,9 @@ void sanitizeConfigPairs() {
 
 void processConfig(int mode, JsonDocument *doc) {
   Preferences pref;
+  // Issue #18: a point-count change invalidates the stored ramp, and the new
+  // count is only known after the CFG_* block below has run.
+  const int prevFuelPoints = FUEL_TOUCH_POINTS;
   if (mode == 0 || mode == 2)
     pref.begin("cfg", false);
 
@@ -719,6 +758,12 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_FLT(FUEL_FILTER_ALPHA, "FUEL_FILT", 0.08f, 0.001f, 1.0f);
   CFG_INT(TRIP_RESET_HOLD_MS, "TRP_RST_H", 1500, 200, 10000);
   CFG_INT(FUEL_TOUCH_POINTS, "FTL_PTS", 8, 2, 20);
+  CFG_BOOL(FUEL_INPUT_ENABLED, "FUEL_EN", false);
+  CFG_INT(FUEL_EXC_RES_OHM, "FUEL_EXR", 220, 10, 100000);
+  CFG_FLT(FUEL_ADC_VREF, "FUEL_VRF", 3.30f, 2.5f, 4.2f);
+  CFG_FLT(FUEL_OHM_EMPTY, "FUEL_OE", 10.0f, 0.0f, 100000.0f);
+  CFG_FLT(FUEL_OHM_FULL, "FUEL_OF", 180.0f, 0.0f, 100000.0f);
+  CFG_INT(FUEL_OVERSAMPLE, "FUEL_OSM", 16, 1, 64);
   CFG_FLT(BATTERY_SCALE, "BAT_SCALE", 5.7f, 0.01f, 1000.0f);
   CFG_FLT(BATTERY_OFFSET, "BAT_OFFS", 0.2f, -50.0f, 50.0f);
   CFG_FLT(NTC_R_BALANCE, "NTC_BAL", 10000.0f, 100.0f, 10000000.0f);
@@ -942,30 +987,39 @@ void processConfig(int mode, JsonDocument *doc) {
     }
   }
 
+  // The fuel table moved to the ohm domain with issue #18 and got fresh NVS keys
+  // (FCO_n). The legacy capacitive-era keys (TCH_n, raw ADC counts) are simply
+  // never read again - CFG_VER is deliberately NOT bumped for it, because that
+  // would wipe every other user setting on existing units. An old backup file
+  // cannot re-inject ADC counts either: it carries "touchTable", which this code
+  // ignores.
   if (mode == 0) {
     char key[8];
     for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
-      snprintf(key, sizeof(key), "TCH_%d", i);
-      touchTable[i] = constrain(pref.getInt(key, touchTable[i]), 0, 4095);
+      snprintf(key, sizeof(key), "FCO_%d", i);
+      float v = pref.getFloat(key, fuelCalOhms[i]);
+      fuelCalOhms[i] = constrain(v, 0.0f, 100000.0f);
     }
   } else if (mode == 1) {
-    JsonArray arr = (*doc)["touchTable"].to<JsonArray>();
+    JsonArray arr = (*doc)["fuelCalOhms"].to<JsonArray>();
     for (int i = 0; i < FUEL_TOUCH_POINTS; i++)
-      arr.add(touchTable[i]);
+      arr.add(roundf(fuelCalOhms[i] * 10.0f) / 10.0f);
   } else if (mode == 2) {
     char key[8];
     int written = 0;
-    if (!(*doc)["touchTable"].isNull()) {
-      JsonArray arr = (*doc)["touchTable"].as<JsonArray>();
+    if (!(*doc)["fuelCalOhms"].isNull()) {
+      JsonArray arr = (*doc)["fuelCalOhms"].as<JsonArray>();
       written = (int)arr.size();
       if (written > FUEL_TOUCH_POINTS) written = FUEL_TOUCH_POINTS;
       for (int i = 0; i < written; i++) {
-        // Calibration points are raw 12-bit ADC counts: a value outside
-        // 0..4095 can never be sampled and would silently kill the segment it
-        // belongs to (issue #21).
-        touchTable[i] = constrain((*doc)["touchTable"][i].as<int>(), 0, 4095);
-        snprintf(key, sizeof(key), "TCH_%d", i);
-        pref.putInt(key, touchTable[i]);
+        // Calibration points are sender resistances: a negative or absurd value
+        // can never be measured and would silently kill the segment it belongs
+        // to (issue #21).
+        float v = (*doc)["fuelCalOhms"][i].as<float>();
+        if (!(v >= 0.0f)) v = 0.0f;  // also catches NaN
+        fuelCalOhms[i] = constrain(v, 0.0f, 100000.0f);
+        snprintf(key, sizeof(key), "FCO_%d", i);
+        pref.putFloat(key, fuelCalOhms[i]);
       }
     }
     // Points beyond the uploaded array (or a missing array) keep their
@@ -973,8 +1027,22 @@ void processConfig(int mode, JsonDocument *doc) {
     // array length never leaves missing keys (a missing key loads as 0
     // and breaks the fuel gauge).
     for (int i = written; i < FUEL_TOUCH_POINTS; i++) {
-      snprintf(key, sizeof(key), "TCH_%d", i);
-      pref.putInt(key, touchTable[i]);
+      snprintf(key, sizeof(key), "FCO_%d", i);
+      pref.putFloat(key, fuelCalOhms[i]);
+    }
+  }
+
+  // Changing the point count invalidates the stored ramp (the extra slots hold
+  // values from a different tank height), so rebuild it from the entered
+  // empty/full ohms instead of letting a stale or zero slot define full. Only on
+  // a save: at boot the NVS count and the NVS ramp were written together, so
+  // regenerating there would wipe a calibration the user already did.
+  if (mode == 2 && FUEL_TOUCH_POINTS != prevFuelPoints) {
+    fillFuelTableFromOhms("point count changed");
+    char key[8];
+    for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
+      snprintf(key, sizeof(key), "FCO_%d", i);
+      pref.putFloat(key, fuelCalOhms[i]);
     }
   }
 
@@ -986,8 +1054,8 @@ void processConfig(int mode, JsonDocument *doc) {
                                   : "uploaded through the Web UI")) {
       char key[8];
       for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
-        snprintf(key, sizeof(key), "TCH_%d", i);
-        pref.putInt(key, touchTable[i]);
+        snprintf(key, sizeof(key), "FCO_%d", i);
+        pref.putFloat(key, fuelCalOhms[i]);
       }
     }
   }
@@ -1038,6 +1106,12 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "FUEL_FILTER_ALPHA": 0.08,
   "TRIP_RESET_HOLD_MS": 1500,
   "FUEL_TOUCH_POINTS": 8,
+  "FUEL_INPUT_ENABLED": false,
+  "FUEL_EXC_RES_OHM": 220,
+  "FUEL_ADC_VREF": 3.3,
+  "FUEL_OHM_EMPTY": 10.0,
+  "FUEL_OHM_FULL": 180.0,
+  "FUEL_OVERSAMPLE": 16,
   "BATTERY_SCALE": 5.7,
   "BATTERY_OFFSET": 0.2,
   "NTC_R_BALANCE": 10000,
@@ -1190,15 +1264,15 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "OTA_PULL_ENABLED": false,
   "OTA_PULL_URL": "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
   "VERSION_OVERRIDE": "",
-  "touchTable": [
-    950,
-    840,
-    750,
-    670,
-    600,
-    530,
-    460,
-    400
+  "fuelCalOhms": [
+    10.0,
+    34.3,
+    58.6,
+    82.9,
+    107.1,
+    131.4,
+    155.7,
+    180.0
   ]
 })";
 
@@ -1215,12 +1289,12 @@ void seedNVSWithFactoryDefaults() {
   Preferences pref;
   pref.begin("cfg", false);
   pref.putInt("CFG_VER", 5);
-  // Seed every touch-table key so FUEL_TOUCH_POINTS can be raised above 8
+  // Seed every calibration key so FUEL_TOUCH_POINTS can be raised above 8
   // without missing NVS entries (a missing key loads as 0).
   char key[8];
   for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
-    snprintf(key, sizeof(key), "TCH_%d", i);
-    pref.putInt(key, touchTable[i]);
+    snprintf(key, sizeof(key), "FCO_%d", i);
+    pref.putFloat(key, fuelCalOhms[i]);
   }
   pref.end();
   logPrintf("Config v5: NVS seeded with factory defaults (dashboard_backup.json)\n");

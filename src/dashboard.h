@@ -379,11 +379,30 @@ const char *effectiveVersion();
 int versionCmp(const char *a, const char *b);
 
 // ----------------------------------------------------------------------------
-// Fuel touch table
+// Fuel sender calibration table (issue #18 - marine resistive sender)
 // ----------------------------------------------------------------------------
 constexpr int MAX_TOUCH_POINTS = 20;
 extern int FUEL_TOUCH_POINTS;
-extern int touchTable[MAX_TOUCH_POINTS];
+// One sender resistance per tank slot: index 0 = empty, index
+// FUEL_TOUCH_POINTS-1 = full. Ohms, not ADC counts, so the same table means the
+// same thing for a 10..180 ohm SAE sender and a 240..33 ohm European one.
+extern float fuelCalOhms[MAX_TOUCH_POINTS];
+
+// Resistive sender input (3V3 - FUEL_EXC_RES_OHM - GPIO32 - sender - GND).
+extern bool FUEL_INPUT_ENABLED;   // false until the sender is actually wired
+extern int FUEL_EXC_RES_OHM;      // excitation resistor
+extern float FUEL_ADC_VREF;       // ADC reference / actual rail voltage
+extern float FUEL_OHM_EMPTY;      // sender resistance when the tank is empty
+extern float FUEL_OHM_FULL;       // sender resistance when the tank is full
+extern int FUEL_OVERSAMPLE;       // ADC conversions averaged per sample
+
+// Live sender state, read by the Web UI through /api/fuel.
+#define FUEL_INPUT_OFF 0    // input disabled: nothing wired, gauge shows 0
+#define FUEL_INPUT_OK 1     // reading inside the expected band
+#define FUEL_INPUT_OPEN 2   // pin at the rail: unplugged sender / broken wire
+#define FUEL_INPUT_SHORT 3  // pin at ground while the range says otherwise
+extern float fuelMeasuredOhms;
+extern uint8_t fuelInputState;
 
 // ----------------------------------------------------------------------------
 // Logging ring buffer

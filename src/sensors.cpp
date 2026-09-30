@@ -45,18 +45,21 @@ static float demoSimSpeedKmph(unsigned long t) {
   return (v < 0.0f) ? 0.0f : v;
 }
 
-// Inverse of the fuel touch-table: map a desired fuel level (liters) back to
-// the raw ADC reading processFuelSensor() would have to see to compute it.
-static int demoAdcForFuelLiters(float liters) {
-  int n = FUEL_TOUCH_POINTS;
-  if (n < 2) return touchTable[0];
-  float l = constrain(liters, 0.0f, (float)(n - 1));
+// Inverse of the fuel sender chain: the raw ADC count processFuelSensor() would
+// have to see for a desired level (issue #18). The level goes back through the
+// same ohm table the real sender is read against, so demo mode exercises the
+// production path instead of bypassing it. The excitation resistor cancels out of
+// the code (code = 4095 x R / (R + R_exc)), so the simulation follows whatever
+// ohm range and tank table is configured.
+static int demoCodeForFuelLevel(float level) {
+  int n = constrain(FUEL_TOUCH_POINTS, 2, MAX_TOUCH_POINTS);
+  float l = constrain(level, 0.0f, (float)(n - 1));
   int i = (int)l;
   if (i >= n - 1) i = n - 2;
   float frac = l - (float)i;
-  float reading = (float)touchTable[i] +
-                  frac * (float)(touchTable[i + 1] - touchTable[i]);
-  return (int)(reading + 0.5f);
+  float ohms = fuelCalOhms[i] + frac * (fuelCalOhms[i + 1] - fuelCalOhms[i]);
+  float rexc = (float)constrain(FUEL_EXC_RES_OHM, 1, 1000000);
+  return constrain((int)(4095.0f * ohms / (ohms + rexc) + 0.5f), 0, 4095);
 }
 
 // Inverse of the NTC divider math: the raw ADC count that processTemperature-
@@ -340,6 +343,10 @@ float currentAverageFps = 0.0f;
 unsigned long lastDisplayUpdate = 0;
 float filteredReading = 950.0f;
 int rawFuelADC = 0;
+// Live sender domain values (issue #18): what the divider math derived from the
+// smoothed code, and whether the input looks wired at all. Read by /api/fuel.
+float fuelMeasuredOhms = 0.0f;
+uint8_t fuelInputState = FUEL_INPUT_OFF;
 int rawBatteryADC = 0;
 int rawTempADC = 0;
 int rawLightADC = 0;
@@ -1145,20 +1152,95 @@ void processLightSensor() {
     filteredAmbientValue = ((float)raw * alpha) + (filteredAmbientValue * (1.0f - alpha));
 }
 
+
+// Sender resistance behind the divider 3V3 - R_exc - GPIO32 - sender - GND:
+// V(pin) = Vref x R / (R + R_exc), so R = R_exc x V / (Vref - V). Vref is a
+// parameter because the 3V3 rail is not exactly 3.30 V, and the calibration
+// table is captured through this same conversion, so a rail error cancels at the
+// points the user calibrated.
+static float fuelOhmsFromCode(int code) {
+  float vref = FUEL_ADC_VREF;
+  float rexc = (float)constrain(FUEL_EXC_RES_OHM, 1, 1000000);
+  float v = (float)code * vref / 4095.0f;
+  float headroom = vref - v;
+  if (headroom <= 0.001f) return 1e9f;  // pin sitting at the rail: wire/open tank
+  return rexc * v / headroom;
+}
+
+// Average FUEL_OVERSAMPLE conversions. The ESP32 ADC is noisy and its raw code
+// is only ~9-10 usable bits; oversampling is what buys the resolution back for a
+// sender whose useful span can be a few hundred codes. No allocation, and this
+// runs once per REFRESH_FUEL_MS, not per frame (rule 14).
+static int readFuelAdcAvg() {
+  const int n = constrain(FUEL_OVERSAMPLE, 1, 64);
+  long sum = 0;
+  for (int i = 0; i < n; i++) {
+    sum += analogRead(FUEL_TOUCH_PIN);
+    if (n > 1) delayMicroseconds(20);  // let the sample-and-hold settle
+  }
+  return (int)(sum / n);
+}
+
+// Prime the fuel pipeline at boot.
 void initFuelSensor() {
   if (ENABLE_DEMO_MODE) {
-    filteredReading = (float)demoAdcForFuelLiters(5.5f);
+    filteredReading = (float)demoCodeForFuelLevel(5.5f);
     rawFuelADC = (int)filteredReading;
+    fuelMeasuredOhms = fuelOhmsFromCode(rawFuelADC);
+    fuelInputState = FUEL_INPUT_OK;
     return;
   }
 
-  // Capacitive fuel touch sensor removed: the legacy touch_pad driver cannot
-  // coexist with the new-generation driver the arduino-esp32 3.x core uses
-  // (IDF 5.x aborts when both are active). The fuel gauge is being replaced by
-  // a resistive sensor; until it is wired, prime the filter at a neutral 0 so
-  // the table interpolation and gauge pipeline keep running.
+  // The capacitive pad is gone (its touch_pad driver cannot coexist with the
+  // driver the arduino-esp32 3.x core now uses). The replacement is a marine
+  // resistive sender on GPIO32 behind an excitation resistor, read as a voltage
+  // divider (issue #18). Until the user says a sender is wired
+  // (FUEL_INPUT_ENABLED) the pin is floating, and a floating pin must never
+  // invent a tank level: the gauge sits at empty and reports "no input".
   rawFuelADC = 0;
   filteredReading = 0.0f;
+  fuelMeasuredOhms = 0.0f;
+  fuelInputState = FUEL_INPUT_ENABLED ? FUEL_INPUT_OK : FUEL_INPUT_OFF;
+}
+
+// Map a measured resistance to a fractional tank level through the calibration
+// table: index 0 = empty, index n-1 = full, direction taken from the two ends so
+// both SAE conventions work (10..180 ohm rises with the tank, the European
+// 240..33 ohm sender falls with it).
+// Issue #19: the old walk assumed every interior point followed the end-to-end
+// direction. One point out of order left a gap that matched no segment, the
+// function returned without touching fuelLiters/fuelPercentage, and the gauge
+// kept its previous value - frozen, with nothing in the log to explain it.
+// config.cpp repairs the table wherever it enters the device; this is the second
+// layer: a reading between the two ends always lands somewhere.
+static float fuelLevelFromOhms(float ohms) {
+  const int n = constrain(FUEL_TOUCH_POINTS, 2, MAX_TOUCH_POINTS);
+  const float first = fuelCalOhms[0];
+  const float last = fuelCalOhms[n - 1];
+  const bool descending = (first >= last);
+
+  if (descending ? (ohms >= first) : (ohms <= first)) return 0.0f;
+  if (descending ? (ohms <= last) : (ohms >= last)) return (float)(n - 1);
+
+  for (int i = 0; i + 1 < n; i++) {
+    const float lo = fminf(fuelCalOhms[i], fuelCalOhms[i + 1]);
+    const float hi = fmaxf(fuelCalOhms[i], fuelCalOhms[i + 1]);
+    if (ohms < lo || ohms > hi) continue;
+    const float span = fuelCalOhms[i + 1] - fuelCalOhms[i];
+    return (span != 0.0f) ? (float)i + (ohms - fuelCalOhms[i]) / span
+                          : (float)i;
+  }
+
+  // Still nothing: the interior points are not monotonic. Park on the nearer end
+  // and say so - a rough gauge that moves beats a precise one that is frozen.
+  static unsigned long lastNoSegmentMs = 0;
+  if (millis() - lastNoSegmentMs > 5000) {
+    lastNoSegmentMs = millis();
+    logPrintf("Fuel table: %.1f ohm matches no segment (table is not monotonic),"
+              " clamped to the nearer end\n", ohms);
+  }
+  bool nearerEmpty = fabsf(ohms - first) <= fabsf(ohms - last);
+  return nearerEmpty ? 0.0f : (float)(n - 1);
 }
 
 void processFuelSensor() {
@@ -1167,8 +1249,9 @@ void processFuelSensor() {
     // Simulated fuel: burns in proportion to the distance driven (~6 L per
     // 100 km, so the km/L and average consumption calculations downstream
     // produce realistic numbers), refills slowly while parked, and carries a
-    // tiny slosh so the gauge is not dead-still. The touch-table interpolation
-    // + EMA below convert the raw ADC back to liters/percent.
+    // tiny slosh so the gauge is not dead-still. The simulated level is turned
+    // into an ADC code and then read back through the real sender pipeline, so
+    // demo mode tests the calibration table and the divider math too (rule 20).
     unsigned long t = millis();
     static float demoFuelLevel = 5.5f;
     static unsigned long lastFuelSimMs = 0;
@@ -1177,79 +1260,67 @@ void processFuelSensor() {
     lastFuelSimMs = t;
     float vNow = demoSimSpeedKmph(t);
     if (vNow > 0.5f)
-      demoFuelLevel -= (vNow * dtS / 3600.0f) * 0.06f; // burn while driving
+      demoFuelLevel -= (vNow * dtS / 3600.0f) * 0.06f;  // burn while driving
     else
-      demoFuelLevel += 0.05f * dtS; // refuel while parked
+      demoFuelLevel += 0.05f * dtS;  // refuel while parked
     demoFuelLevel = constrain(demoFuelLevel, 0.3f, 5.5f);
     instantReading =
-        demoAdcForFuelLiters(demoFuelLevel + 0.03f * sinf((float)t / 5000.0f));
+        demoCodeForFuelLevel(demoFuelLevel + 0.03f * sinf((float)t / 5000.0f));
+    fuelInputState = FUEL_INPUT_OK;
+  } else if (!FUEL_INPUT_ENABLED) {
+    // No sender wired: report "no input" and keep the gauge at 0 rather than
+    // letting a floating ADC pin decide the tank level (issue #18).
+    fuelInputState = FUEL_INPUT_OFF;
+    fuelMeasuredOhms = 0.0f;
+    rawFuelADC = 0;
+    filteredReading = 0.0f;
+    fuelLiters = 0.0f;
+    fuelPercentage = 0;
+    return;
   } else {
-    // Capacitive touch sensor removed (see initFuelSensor). The resistive fuel
-    // sensor will feed this value once wired; until then, 0 → gauge empty.
-    instantReading = 0;
+    instantReading = readFuelAdcAvg();
+
+    // Sender fault detection - the failure mode that made the old self-built
+    // sender unusable was an open line that looked like a plausible reading.
+    const float vref = FUEL_ADC_VREF;
+    const float lohm = fminf(FUEL_OHM_EMPTY, FUEL_OHM_FULL);
+    const float hohm = fmaxf(FUEL_OHM_EMPTY, FUEL_OHM_FULL);
+    const float v = (float)instantReading * vref / 4095.0f;
+    const float ohms = fuelOhmsFromCode(instantReading);
+    uint8_t state = FUEL_INPUT_OK;
+    if (v >= vref * 0.995f)
+      state = FUEL_INPUT_OPEN;  // pin at the rail: sender unplugged / wire broken
+    else if (ohms < lohm - fmaxf(5.0f, lohm * 0.25f))
+      state = FUEL_INPUT_SHORT;  // well below the entered range: signal on ground
+    else if (ohms > hohm * 3.0f)
+      state = FUEL_INPUT_OPEN;   // far above the entered range
+    if (state != fuelInputState) {
+      static unsigned long lastFaultMs = 0;
+      if (millis() - lastFaultMs > 5000) {
+        lastFaultMs = millis();
+        if (state == FUEL_INPUT_OPEN)
+          logPrintf("Fuel sender: open circuit (%d codes, %.0f ohm) - check the "
+                    "plug and the excitation resistor\n", instantReading, ohms);
+        else if (state == FUEL_INPUT_SHORT)
+          logPrintf("Fuel sender: shorted input (%d codes) - signal wire on "
+                    "ground?\n", instantReading);
+      }
+      fuelInputState = state;
+    }
   }
+
   rawFuelADC = instantReading;
+  // Smoothing stays in the ADC-code domain (linear, cheap, and the same value the
+  // table was captured against); FUEL_OVERSAMPLE has already removed most of the
+  // converter noise before this runs.
   filteredReading = ((float)instantReading * FUEL_FILTER_ALPHA) +
                     (filteredReading * (1.0f - FUEL_FILTER_ALPHA));
 
-  // The table maps a raw reading to a position in the tank: index 0 is empty,
-  // index FUEL_TOUCH_POINTS-1 is full, and the direction comes from its two ends
-  // (a capacitive pad reads high when dry, a resistive sender reads low when
-  // empty). Issue #19: the old walk decided the direction from the ends but then
-  // assumed every interior point followed it. One point out of order left a gap
-  // that matched no segment, the function returned without touching
-  // fuelLiters/fuelPercentage, and the gauge kept its previous value - frozen,
-  // with nothing in the log to explain it. config.cpp now repairs the table on
-  // load and save; this is the second layer: a reading between the two ends
-  // always lands somewhere.
-  const int points = FUEL_TOUCH_POINTS;
-  if (points < 2) {
-    fuelLiters = 0.0f;
-    fuelPercentage = 0;
-    return;
-  }
-  const int first = touchTable[0];
-  const int last = touchTable[points - 1];
-  const bool descending = (first >= last);
-  const float reading = filteredReading;
-
-  if (descending ? (reading >= (float)first) : (reading <= (float)first)) {
-    fuelLiters = 0.0f;
-    fuelPercentage = 0;
-    return;
-  }
-  if (descending ? (reading <= (float)last) : (reading >= (float)last)) {
-    fuelLiters = (float)(points - 1);
-    fuelPercentage = 100;
-    return;
-  }
-
-  for (int i = 0; i < points - 1; i++) {
-    const float lo = (float)min(touchTable[i], touchTable[i + 1]);
-    const float hi = (float)max(touchTable[i], touchTable[i + 1]);
-    if (reading < lo || reading > hi) continue;
-    float span = (float)(touchTable[i + 1] - touchTable[i]);
-    fuelLiters = (span != 0.0f)
-                     ? (float)i + ((reading - (float)touchTable[i]) / span)
-                     : (float)i;
-    fuelPercentage = constrain(
-        (int)((fuelLiters / (float)(points - 1)) * 100.0f), 0, 100);
-    return;
-  }
-
-  // Still nothing: the interior points are not monotonic (a table that predates
-  // the repair path). Park on the nearer end and say so - a rough gauge that
-  // moves beats a precise one that is frozen, and the log names the cause.
-  static unsigned long lastNoSegmentMs = 0;
-  if (millis() - lastNoSegmentMs > 5000) {
-    lastNoSegmentMs = millis();
-    logPrintf("Fuel table: reading %.0f matches no segment (table is not "
-              "monotonic), clamped to the nearer end\n", reading);
-  }
-  bool nearerEmpty =
-      fabsf(reading - (float)first) <= fabsf(reading - (float)last);
-  fuelLiters = nearerEmpty ? 0.0f : (float)(points - 1);
-  fuelPercentage = nearerEmpty ? 0 : 100;
+  const int points = constrain(FUEL_TOUCH_POINTS, 2, MAX_TOUCH_POINTS);
+  fuelMeasuredOhms = fuelOhmsFromCode((int)(filteredReading + 0.5f));
+  fuelLiters = fuelLevelFromOhms(fuelMeasuredOhms);
+  fuelPercentage = constrain((int)((fuelLiters / (float)(points - 1)) * 100.0f),
+                             0, 100);
 }
 
 // ----------------------------------------------------------------------------

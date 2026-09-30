@@ -1132,6 +1132,12 @@ const DEFAULTS = {
     FUEL_FILTER_ALPHA: 0.08,
     TRIP_RESET_HOLD_MS: 1500,
     FUEL_TOUCH_POINTS: 8,
+    FUEL_INPUT_ENABLED: false,
+    FUEL_EXC_RES_OHM: 220,
+    FUEL_ADC_VREF: 3.3,
+    FUEL_OHM_EMPTY: 10.0,
+    FUEL_OHM_FULL: 180.0,
+    FUEL_OVERSAMPLE: 16,
     NTC_R_BALANCE: 10000.0,
     NTC_BETA: 3950.0,
     GPS_BAUD: 115200,
@@ -1273,7 +1279,7 @@ const DEFAULTS = {
     OTA_PULL_ENABLED: false,
     OTA_PULL_URL: "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
     VERSION_OVERRIDE: "",
-    touchTable: [950, 840, 750, 670, 600, 530, 460, 400]
+    fuelCalOhms: [10.0, 34.3, 58.6, 82.9, 107.1, 131.4, 155.7, 180.0]
 };
 
 const resetSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
@@ -1319,6 +1325,11 @@ const FIRMWARE_LIMITS = {
     FUEL_FILTER_ALPHA: [0.001, 1],
     TRIP_RESET_HOLD_MS: [200, 10000],
     FUEL_TOUCH_POINTS: [2, 20],
+    FUEL_EXC_RES_OHM: [10, 100000],
+    FUEL_ADC_VREF: [2.5, 4.2],
+    FUEL_OHM_EMPTY: [0, 100000],
+    FUEL_OHM_FULL: [0, 100000],
+    FUEL_OVERSAMPLE: [1, 64],
     BATTERY_SCALE: [0.01, 1000],
     BATTERY_OFFSET: [-50, 50],
     NTC_R_BALANCE: [100, 10000000],
@@ -1689,7 +1700,15 @@ const configMap = [
     {
         title: "Sensors Tuning", icon: iconSVG.sensors,
         items: [
-            { type: "touch-table", label: "Fuel Sensor", pointCount: "FUEL_TOUCH_POINTS", arrayId: "touchTable", liveId: "fuel-reading", rows: [
+            { type: "card_header", label: "Resistive Fuel Sender (GPIO32)" },
+            { id: "FUEL_INPUT_ENABLED", label: "Sender connected - read the fuel level" },
+            { id: "FUEL_OHM_EMPTY", label: "Sender resistance when EMPTY (ohm)" },
+            { id: "FUEL_OHM_FULL", label: "Sender resistance when FULL (ohm)" },
+            { id: "FUEL_EXC_RES_OHM", label: "Excitation resistor from 3V3 (ohm)" },
+            { id: "FUEL_ADC_VREF", label: "ADC reference / rail voltage (V)" },
+            { id: "FUEL_OVERSAMPLE", label: "ADC samples averaged per reading" },
+            { type: "note", label: '<span id="fuel-exciter-hint">Wiring: 3V3 - excitation resistor - GPIO32 - sender - tank ground. The dashboard recovers the sender resistance from that divider, so any sender standard works: 10-180 ohm (SAE), 240-33 ohm (European/VDO, high = empty), 0-90 ohm (GM).</span>' },
+            { type: "touch-table", label: "Fuel Tank Calibration", pointCount: "FUEL_TOUCH_POINTS", arrayId: "fuelCalOhms", liveId: "fuel-reading", rows: [
                 { id: "FUEL_FILTER_ALPHA", label: "Smoothing Factor" }
             ] },
             { type: "card_header", label: "Engine Temperature", content: `
@@ -2035,22 +2054,29 @@ function renderForm(d) {
             } else if (iType === 'touch-table') {
                 closeSubCard();
                 hasItems = true;
-                let tableArr = d[item.arrayId] || [950, 840, 750, 670, 600, 530, 460, 400];
-                let liveLine = item.liveId ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px 0;"><span style="font-size:12px;color:var(--text-muted);">Current sensor value (raw ADC): <strong id="${item.liveId}" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span></div>` : '';
+                let tableArr = d[item.arrayId] || DEFAULTS.fuelCalOhms;
+                let liveLine = item.liveId ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px 0;"><span style="font-size:12px;color:var(--text-muted);">Live sender reading: <strong id="${item.liveId}" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> ohm <span id="fuel-state" style="color:var(--text-dim);"></span></span></div>` : '';
                 let tableHtml = `
                 <div class="card" style="grid-column:1/-1;">
                     <h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">${item.label}</h4>${liveLine}
-                    <label style="font-size:11px;">Number of points (tank capacity + 1):</label>
+                    <label style="font-size:11px;">Calibration points (tank slots = litres + 1):</label>
                     <div style="display:flex; align-items:center; gap:8px; margin:6px 0 10px 0;">
                         <input type="number" id="${item.pointCount}" value="${tableArr.length}" min="2" max="20" style="width:70px;">${resetBtn(item.pointCount)}
                         <button onclick="save();setTimeout(() => location.reload(), 500)" class="btn-secondary" style="padding:5px 10px; font-size:11px;">↻ Refresh Table</button>
+                        <button onclick="fillFuelTable()" class="btn-secondary" style="padding:5px 10px; font-size:11px;">⤓ Fill from empty/full ohm</button>
                     </div>
                     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:6px 12px; align-items:center;">`;
                 
                 tableArr.forEach((val, idx) => {
-                    tableHtml += `<div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:'JetBrains Mono',monospace;">#${idx}</span><input type="number" id="TT_${idx}" value="${val}" min="0" max="4095" step="1" style="width:100%;">${resetBtn('TT_' + idx)}</div>`;
+                    tableHtml += `<div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:'JetBrains Mono',monospace;">#${idx}</span><input type="number" id="TT_${idx}" value="${val}" min="0" max="100000" step="0.1" style="width:100%;">${resetBtn('TT_' + idx)}</div>`;
                 });
-                tableHtml += `</div>`;
+                tableHtml += `</div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--text-muted);">
+                        <span>Store the live reading in slot</span>
+                        <input type="number" id="TT_slot" value="0" min="0" max="19" style="width:56px;">
+                        <button onclick="captureFuelSlot()" class="btn-secondary" style="padding:5px 10px; font-size:11px;">⊕ Capture</button>
+                        <span>#0 = empty tank, #${tableArr.length - 1} = full. Drive the tank through its levels and capture each one, then Save.</span>
+                    </div>`;
                 if (item.rows) {
                     item.rows.forEach(row => {
                         if (d.hasOwnProperty(row.id)) {
@@ -2143,6 +2169,7 @@ function renderForm(d) {
     updateCpuMode();
     bindPowerSense();
     bindApPasswordWarn();
+    bindFuelSender();
     // Advanced Mode: reflect the ADV_MODE config on the header toggle and
     // show/hide the advanced rows.
     advModeOn = !!d.ADV_MODE;
@@ -2511,8 +2538,8 @@ function collectConfig() {
         if (el.id.endsWith('_slider') || el.type === 'file') return;
         if (el.id.startsWith('TT_')) {
             let idx = parseInt(el.id.substring(3), 10);
-            if (!out['touchTable']) out['touchTable'] = [];
-            out['touchTable'][idx] = parseFloat(el.value) || 0;
+            if (!out['fuelCalOhms']) out['fuelCalOhms'] = [];
+            out['fuelCalOhms'][idx] = parseFloat(el.value) || 0;
         } else if (el.type === 'checkbox') out[el.id] = el.checked;
         else if (el.type === 'number' || el.tagName.toLowerCase() === 'select') {
             let val = parseFloat(el.value);
@@ -2557,7 +2584,7 @@ function collectConfig() {
 let lastTableFix = null;
 
 function repairFuelTableForm(out) {
-    let t = out['touchTable'];
+    let t = out['fuelCalOhms'];
     if (!Array.isArray(t) || t.length < 2) return null;
     let desc = t[0] >= t[t.length - 1];
     let broken = 0;
@@ -2664,7 +2691,7 @@ function applyDefault(keyString) {
         key = key.trim();
         if (key.startsWith('TT_')) {
             let idx = parseInt(key.substring(3), 10);
-            let def = (DEFAULTS.touchTable && DEFAULTS.touchTable[idx] !== undefined) ? DEFAULTS.touchTable[idx] : 0;
+            let def = (DEFAULTS.fuelCalOhms && DEFAULTS.fuelCalOhms[idx] !== undefined) ? DEFAULTS.fuelCalOhms[idx] : 0;
             let el = document.getElementById(key);
             if (el) { el.value = def; el.dispatchEvent(new Event('input', {bubbles: true})); }
             return;
@@ -2825,11 +2852,107 @@ function pollOdo() {
     }).catch(() => {});
 }
 
+// Fuel sender helpers (issue #18). The calibration table lives in ohms - the
+// quantity the sender actually produces - so the empty/full values define a
+// usable ramp for any sender standard, and "Capture" stores what the wiring
+// really reads instead of a guess.
+let lastFuelOhms = null;
+let lastFuelState = null;
+
+const FUEL_E12 = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100, 120, 150,
+                  180, 220, 270, 330, 390, 470, 560, 680, 820, 1000, 1200, 1500,
+                  1800, 2200, 2700, 3300, 3900, 4700, 5600, 6800, 8200, 10000];
+const FUEL_SENDER_MAX_MA = 15;  // sender element current budget
+
+function fuelDividerInfo(rexc) {
+    const e = parseFloat(document.getElementById('FUEL_OHM_EMPTY')?.value);
+    const f = parseFloat(document.getElementById('FUEL_OHM_FULL')?.value);
+    const vref = parseFloat(document.getElementById('FUEL_ADC_VREF')?.value) || 3.3;
+    if (isNaN(e) || isNaN(f) || rexc <= 0) return null;
+    const lo = Math.min(e, f), hi = Math.max(e, f);
+    const vLo = vref * lo / (lo + rexc), vHi = vref * hi / (hi + rexc);
+    return {
+        spanV: Math.abs(vHi - vLo),
+        topV: Math.max(vLo, vHi),
+        ma: vref * 1000 / (rexc + lo)
+    };
+}
+
+// Pick the E12 excitation resistor that spreads the sender range over the most
+// volts while keeping the sender current under FUEL_SENDER_MAX_MA and the pin
+// away from the rail (the top of the span stays measurable, and a reading pinned
+// to the rail is indistinguishable from a broken wire).
+function fuelSuggestExciter() {
+    let best = null;
+    for (const r of FUEL_E12) {
+        const info = fuelDividerInfo(r);
+        if (!info) return null;
+        if (info.ma > FUEL_SENDER_MAX_MA) continue;
+        if (info.topV > 2.6) continue;
+        if (!best || info.spanV > best.info.spanV) best = { r: r, info: info };
+    }
+    return best;
+}
+
+function fuelExciterHint() {
+    const el = document.getElementById('fuel-exciter-hint');
+    if (!el) return;
+    const chosen = parseFloat(document.getElementById('FUEL_EXC_RES_OHM')?.value);
+    const sug = fuelSuggestExciter();
+    if (!sug) { el.textContent = 'Enter the empty and full sender resistances to size the excitation resistor.'; return; }
+    const ci = fuelDividerInfo(chosen);
+    const fmt = (x) => `${Math.round(x.spanV * 1000)} mV span, ${x.ma.toFixed(1)} mA`;
+    let txt = `Suggested excitation: ${sug.r} ohm (${fmt(sug.info)}). `;
+    if (ci)
+        txt += `Chosen ${chosen} ohm: ${fmt(ci)}` +
+               (ci.spanV < 0.4 ? ' - that is a narrow span, the gauge will be coarse' : '') +
+               (ci.topV > 3.0 ? ' - the top of the range sits at the rail and looks like an open circuit' : '') + '.';
+    el.textContent = txt;
+}
+
+function bindFuelSender() {
+    ['FUEL_EXC_RES_OHM', 'FUEL_OHM_EMPTY', 'FUEL_OHM_FULL', 'FUEL_ADC_VREF'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', fuelExciterHint);
+    });
+    fuelExciterHint();
+}
+
+function fillFuelTable() {
+    const pcEl = document.getElementById('FUEL_TOUCH_POINTS');
+    const n = parseInt(pcEl ? pcEl.value : 0, 10);
+    const e = parseFloat(document.getElementById('FUEL_OHM_EMPTY')?.value);
+    const f = parseFloat(document.getElementById('FUEL_OHM_FULL')?.value);
+    if (!n || n < 2) { alert('Enter the number of calibration points first.'); return; }
+    if (isNaN(e) || isNaN(f) || Math.abs(f - e) < 0.5) { alert('Enter empty and full ohms first - they must differ.'); return; }
+    for (let i = 0; i < n; i++) {
+        const el = document.getElementById('TT_' + i);
+        if (el) { el.value = (e + (f - e) * i / (n - 1)).toFixed(1); el.dispatchEvent(new Event('input', {bubbles: true})); }
+    }
+}
+
+function captureFuelSlot() {
+    const idx = parseInt(document.getElementById('TT_slot')?.value, 10);
+    if (isNaN(idx)) return;
+    if (lastFuelOhms == null) { alert('Waiting for a live sender reading - is the sender enabled?'); return; }
+    const el = document.getElementById('TT_' + idx);
+    if (!el) { alert('Slot #' + idx + ' is not in the table.'); return; }
+    el.value = lastFuelOhms.toFixed(1);
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+}
+
 function pollFuel() {
     if (tabHidden) return;
     fetch('/api/fuel').then(r => r.json()).then(d => {
         let el = document.getElementById('fuel-reading');
-        if (el) el.textContent = d.raw;
+        if (el) el.textContent = (d.ohm === undefined ? d.raw : d.ohm);
+        lastFuelOhms = (typeof d.ohm === 'number') ? d.ohm : null;
+        lastFuelState = d.st;
+        const st = document.getElementById('fuel-state');
+        if (st) st.textContent = ({0: '(input disabled - enable the sender above)',
+                                   1: '',
+                                   2: '(open circuit - sender unplugged or wire broken)',
+                                   3: '(shorted input - signal wire on ground?)'}[d.st] || '');
     }).catch(() => {});
 }
 

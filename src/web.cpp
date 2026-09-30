@@ -1221,6 +1221,11 @@ void webServerTask(void *pvParameters) {
     server.send(200, "application/json", out);
   });
 
+  // Fuel readout. "raw" is the averaged ADC code on GPIO32, "ohm" the sender
+  // resistance derived from it (issue #18) and "st" the input state
+  // (0 = input disabled, 1 = ok, 2 = open circuit, 3 = shorted) - what the Web UI
+  // fuel card shows while calibrating, so a broken wire never looks like a
+  // plausible tank level.
   server.on("/api/fuel", HTTP_GET, []() {
     char buf[96];
     float liters = 0.0f;
@@ -1230,7 +1235,10 @@ void webServerTask(void *pvParameters) {
       pct = g_sensorData.fuelPercentage;
       xSemaphoreGive(g_stateMutex);
     }
-    snprintf(buf, sizeof(buf), "{\"raw\":%d,\"liters\":%.1f,\"pct\":%d}", rawFuelADC, liters, pct);
+    float ohm = fuelMeasuredOhms > 9999.9f ? 9999.9f : fuelMeasuredOhms;
+    snprintf(buf, sizeof(buf),
+             "{\"raw\":%d,\"liters\":%.1f,\"pct\":%d,\"ohm\":%.1f,\"st\":%d}",
+             rawFuelADC, liters, pct, ohm, (int)fuelInputState);
     server.send(200, "application/json", buf);
   });
 
