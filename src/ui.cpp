@@ -73,6 +73,18 @@ static int16_t refY1 = 0;
 static int digitWidth[10] = {0}, digitXOff[10] = {0}, digitRightOff[10] = {0};
 static int spdCellR[MAX_CELLS] = {0};
 
+// Every digit renderer indexes its per-glyph metric tables (digitWidth[10],
+// ds15_digitXOff[10], ...) with the character minus '0'. Those tables are 10
+// entries long and the index is never checked: the values fed to them are all
+// non-negative today, so the bug is latent, but a '-', a '?' or one formatting
+// change would read outside the table and draw a glyph built from whatever
+// sits next to it (issue #31). digitIndex() is the single gate: 0..9 for a
+// digit, -1 for anything else, and the callers then leave the cell exactly as
+// the ghost/erase pass already painted it.
+static inline int digitIndex(char c) {
+  return (c >= '0' && c <= '9') ? (c - '0') : -1;
+}
+
 static void ensureSpeedMetrics() {
   int want = clampCells(SPEED_DIGITS);
   if (spdMetricsReady && spdCountCached == want) return;
@@ -263,8 +275,8 @@ static void drawDsDigitPair(LGFX_ST7789_4 &g, const char *str, int baseX, int y)
       g.setCursor(ex, y);
       g.print('8');
     }
-    if (c == '-') continue;  // blank placeholder: keep the ghost '8' visible
-    int d = c - '0';
+    int d = digitIndex(c);
+    if (d < 0) continue;  // '-' (or anything else): keep the ghost '8' visible
     int cx = slotRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
     if (SHOW_GHOST_DIGITS)
       g.setTextColor(TFT_WHITE);
@@ -660,7 +672,8 @@ void updateBigDisplay(const SensorSnapshot &snap) {
       }
       sp.setTextColor(TFT_WHITE);
       for (int i = cellSkip(spdCount, len); i < len; i++) {
-        int d = speedStr[i] - '0';
+        int d = digitIndex(speedStr[i]);
+        if (d < 0) continue;  // never index the metric tables out of range
         int cellIdx = (spdCount - len) + i;
         int cx = spdCellR[cellIdx] + 4 - digitXOff[d] - digitWidth[d] + digitRightOff[d];
         sp.setCursor(cx, 2 - refY1);
@@ -718,7 +731,8 @@ if (!vlw120Ready) {
           else
             display.setTextColor(TFT_WHITE, TFT_BLACK);
           for (int i = cellSkip(spdCount, len); i < len; i++) {
-            int d = speedStr[i] - '0';
+            int d = digitIndex(speedStr[i]);
+            if (d < 0) continue;  // never index the metric tables out of range
             int cellIdx = (spdCount - len) + i;
             int cellRight = boxLeft + spdCellR[cellIdx];
             int cx = cellRight - 2 - digitXOff[d] - digitWidth[d] + digitRightOff[d];
@@ -1220,7 +1234,8 @@ if (!vlw120Ready) {
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
       } else {
-        int d = c - '0';
+        int d = digitIndex(c);
+        if (d < 0) continue;  // non-digit: leave the cell as the ghost painted it
         cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
       }
       display.setCursor(cx, tmrY - ds15_refY1);
@@ -1296,7 +1311,8 @@ if (!vlw120Ready) {
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
       } else {
-        int d = c - '0';
+        int d = digitIndex(c);
+        if (d < 0) continue;  // non-digit: leave the cell as the ghost painted it
         cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
       }
       display.setCursor(cx, batY);
@@ -1402,7 +1418,8 @@ if (!vlw120Ready) {
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
       } else {
-        int d = c - '0';
+        int d = digitIndex(c);
+        if (d < 0) continue;  // non-digit: leave the cell as the ghost painted it
         cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
       }
       display.setCursor(cx, instY);
@@ -1521,7 +1538,8 @@ if (!vlw120Ready) {
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
       } else {
-        int d = c - '0';
+        int d = digitIndex(c);
+        if (d < 0) continue;  // non-digit: leave the cell as the ghost painted it
         cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
       }
       display.setCursor(cx, avgY);
@@ -1634,7 +1652,8 @@ if (!vlw120Ready) {
           if (c == '.') {
             cx2 = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
           } else {
-            int d = c - '0';
+            int d = digitIndex(c);
+            if (d < 0) continue;  // non-digit: the ghost '8' stays
             cx2 = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
           }
           display.setTextColor(TFT_YELLOW);
@@ -1656,7 +1675,8 @@ if (!vlw120Ready) {
         if (c == '.') {
           cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
         } else {
-          int d = c - '0';
+          int d = digitIndex(c);
+          if (d < 0) continue;  // non-digit: leave the cell as the erase painted it
           cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
         }
         display.setCursor(cx, avgSpdY);
@@ -1777,7 +1797,8 @@ if (!vlw120Ready) {
           if (c == '.') {
             cx2 = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
           } else {
-            int d = c - '0';
+            int d = digitIndex(c);
+            if (d < 0) continue;  // non-digit: the ghost '8' stays
             cx2 = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
           }
           display.setTextColor(TFT_MAGENTA);
@@ -1799,7 +1820,8 @@ if (!vlw120Ready) {
         if (c == '.') {
           cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
         } else {
-          int d = c - '0';
+          int d = digitIndex(c);
+          if (d < 0) continue;  // non-digit: leave the cell as the erase painted it
           cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
         }
         display.setCursor(cx, maxSpdY);
@@ -1911,7 +1933,8 @@ if (!vlw120Ready) {
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
       } else {
-        int d = c - '0';
+        int d = digitIndex(c);
+        if (d < 0) continue;  // non-digit: leave the cell as the ghost painted it
         cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
       }
       display.setCursor(cx, fuelY);
@@ -2064,7 +2087,8 @@ if (!vlw120Ready) {
       if (c == '.') {
         cx = cellRight - 2 - ds15_dotXOff - ds15_dotWidth;
       } else {
-        int d = c - '0';
+        int d = digitIndex(c);
+        if (d < 0) continue;  // non-digit: leave the cell as the ghost painted it
         cx = cellRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
       }
       display.setCursor(cx, odoY);
