@@ -164,11 +164,14 @@ void setup() {
   // one-shot fixes (80 MHz SPI, dynamic CPU off, 60 FPS) are all covered by
   // the factory values, so the old migration chain is no longer needed.
   {
-    Preferences pref;
-    pref.begin("cfg", false);
-    int cfgVer = pref.getInt("CFG_VER", -1);
-    pref.end();
-    if (cfgVer < 5)
+    NvsSession session("cfg", false);
+    int cfgVer = -1;
+    if (session.opened()) cfgVer = session.nvs.getInt("CFG_VER", -1);
+    // If NVS could not be opened, seeding would overwrite a configured unit
+    // with factory defaults - the opposite of a recovery. Skip instead.
+    if (!session.opened())
+      logPrintf("Config: NVS unreadable at boot - factory seeding skipped\n");
+    else if (cfgVer < 5)
       seedNVSWithFactoryDefaults();
   }
   recalculateDerivedParams();
@@ -191,14 +194,26 @@ void setup() {
   }
   {
     unsigned long resetDeadline = millis() + 2000;
-    char bootInput[256];
-    int bootInputLen = 0;
-    bootInput[0] = 0;
+    // Rolling window, not an accumulating capture (issue #39): the boot banner,
+    // log echo and any line-noise can pour well over 256 characters into UART0
+    // inside this 2 s window, and a capture buffer that hits its limit stops
+    // accepting input - so a later "RESET" could never match. Only the most
+    // recent characters can answer the question "did RESET just arrive?", and
+    // 32 bytes costs nothing.
+    char bootWindow[32];
+    int bootWindowLen = 0;
+    bootWindow[0] = 0;
     while (millis() < resetDeadline) {
-      while (Serial.available() && bootInputLen < (int)sizeof(bootInput) - 1) {
-        bootInput[bootInputLen++] = (char)Serial.read();
-        bootInput[bootInputLen] = 0;
-        if (strstr(bootInput, "RESET")) {
+      while (Serial.available()) {
+        char c = (char)Serial.read();
+        if (bootWindowLen < (int)sizeof(bootWindow) - 1) {
+          bootWindow[bootWindowLen++] = c;
+        } else {
+          memmove(bootWindow, bootWindow + 1, (size_t)bootWindowLen);
+          bootWindow[bootWindowLen - 1] = c;
+        }
+        bootWindow[bootWindowLen] = 0;
+        if (strstr(bootWindow, "RESET")) {
           logPrintf("Serial factory reset command received\n");
           factoryResetConfig();
           logPrintf("Factory reset done, rebooting\n");

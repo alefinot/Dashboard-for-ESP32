@@ -45,21 +45,30 @@ void factoryResetConfig() {
       "WIFI_PWD",  "WIFI_P1", "WIFI_P2", "WIFI_P3", "WIFI_P4",
       "WIFI_TXP"};
   const int wifiKeyCount = sizeof(wifiKeys) / sizeof(wifiKeys[0]);
-  Preferences pref;
-  pref.begin("cfg", false);
-  String saved[11];
-  for (int i = 0; i < wifiKeyCount && i < 11; i++)
-    saved[i] = pref.getString(wifiKeys[i], "");
-  pref.clear();
-  for (int i = 0; i < wifiKeyCount && i < 11; i++) {
-    if (saved[i].length() > 0)
-      pref.putString(wifiKeys[i], saved[i].c_str());
+  // Locked session, and every write checked: a factory reset that silently
+  // failed to put the WiFi credentials back would leave the unit unreachable
+  // with no explanation (issue #32).
+  NvsSession session("cfg", false);
+  int restoreFailures = 0;
+  if (session.opened()) {
+    String saved[11];
+    for (int i = 0; i < wifiKeyCount && i < 11; i++)
+      saved[i] = session.nvs.getString(wifiKeys[i], "");
+    nvsWriteFailed("cfg clear", session.nvs.clear());
+    for (int i = 0; i < wifiKeyCount && i < 11; i++) {
+      if (saved[i].length() > 0 &&
+          nvsWriteFailed(wifiKeys[i], session.nvs.putString(wifiKeys[i], saved[i].c_str())))
+        restoreFailures++;
+    }
   }
-  pref.end();
-  pref.begin("dashboard", false);
-  pref.clear();
-  pref.end();
-  logPrintf("Factory reset done (WiFi credentials preserved)\n");
+  {
+    NvsSession dash("dashboard", false);
+    if (dash.opened()) nvsWriteFailed("dashboard clear", dash.nvs.clear());
+  }
+  if (restoreFailures)
+    logPrintf("Factory reset done, but %d WiFi credential(s) could not be rewritten\n", restoreFailures);
+  else
+    logPrintf("Factory reset done (WiFi credentials preserved)\n");
 }
 
 volatile bool otaUpdateSuccess = false;
@@ -1202,14 +1211,27 @@ void webServerTask(void *pvParameters) {
     }
     JsonDocument doc;
     deserializeJson(doc, server.arg("plain"));
-    if (doc["timestamp"].is<long>()) {
-      long epoch = doc["timestamp"];
-      struct timeval tv;
-      tv.tv_sec = epoch;
-      tv.tv_usec = 0;
-      settimeofday(&tv, NULL);
-      logPrintf("RTC sync: %ld\n", epoch);
+    // Same plausible window the GPS apply path uses (2020-01-01 .. 2100-01-01).
+    // An unvalidated value put the clock in 1970 or 2106, which broke the date
+    // display and the night-mode window, and made systemTimeToLocal() bail out
+    // on its own epoch guard - so the clock read as dead rather than wrong
+    // (issue #40).
+    if (!doc["timestamp"].is<long long>()) {
+      server.send(400, "application/json", "{\"status\":\"bad timestamp\"}");
+      return;
     }
+    long long epoch = doc["timestamp"].as<long long>();
+    if (epoch <= 1577836800LL || epoch >= 4102444800LL) {
+      logPrintf("RTC sync rejected: %lld outside 2020..2100\n", epoch);
+      server.send(400, "application/json",
+                  "{\"status\":\"timestamp out of range (2020..2100)\"}");
+      return;
+    }
+    struct timeval tv;
+    tv.tv_sec = (time_t)epoch;
+    tv.tv_usec = 0;
+    settimeofday(&tv, NULL);
+    logPrintf("RTC sync: %lld\n", epoch);
     server.send(200, "application/json", "{\"status\":\"ok\"}");
   });
 
@@ -1312,19 +1334,27 @@ void webServerTask(void *pvParameters) {
 
   server.on("/api/ambient/cal-dark", HTTP_POST, []() {
     LIGHT_SENSOR_DARK_VAL = ambientLightValue;
-    { Preferences p; p.begin("cfg", false);
-      p.putInt("LIGHT_DARK", LIGHT_SENSOR_DARK_VAL); p.end(); }
-    char buf[48];
-    snprintf(buf, sizeof(buf), "{\"status\":\"ok\",\"value\":%d}", LIGHT_SENSOR_DARK_VAL);
+    bool saved = false;
+    { NvsSession s("cfg", false);
+      if (s.opened())
+        saved = !nvsWriteFailed("LIGHT_DARK", s.nvs.putInt("LIGHT_DARK", LIGHT_SENSOR_DARK_VAL)); }
+    char buf[64];
+    // The calibration is live in RAM either way; say when it did not reach NVS
+    // so the Web UI can warn instead of letting the user assume it persisted.
+    snprintf(buf, sizeof(buf), "{\"status\":\"%s\",\"value\":%d}",
+             saved ? "ok" : "saved-ram-only", LIGHT_SENSOR_DARK_VAL);
     server.send(200, "application/json", buf);
   });
 
   server.on("/api/ambient/cal-bright", HTTP_POST, []() {
     LIGHT_SENSOR_BRIGHT_VAL = ambientLightValue;
-    { Preferences p; p.begin("cfg", false);
-      p.putInt("LIGHT_BRIGHT", LIGHT_SENSOR_BRIGHT_VAL); p.end(); }
-    char buf[48];
-    snprintf(buf, sizeof(buf), "{\"status\":\"ok\",\"value\":%d}", LIGHT_SENSOR_BRIGHT_VAL);
+    bool saved = false;
+    { NvsSession s("cfg", false);
+      if (s.opened())
+        saved = !nvsWriteFailed("LIGHT_BRIGHT", s.nvs.putInt("LIGHT_BRIGHT", LIGHT_SENSOR_BRIGHT_VAL)); }
+    char buf[64];
+    snprintf(buf, sizeof(buf), "{\"status\":\"%s\",\"value\":%d}",
+             saved ? "ok" : "saved-ram-only", LIGHT_SENSOR_BRIGHT_VAL);
     server.send(200, "application/json", buf);
   });
 
@@ -1618,6 +1648,8 @@ void webServerTask(void *pvParameters) {
             (unsigned long)ESP.getMaxAllocHeap());
 
   unsigned long webStartMs = millis();
+  // NTP settle window: 0 = not waiting (see the check inside the loop).
+  static unsigned long ntpWaitStart = 0;
 
   for (;;) {
     // OTA-pull state guard: a pull task that died without cleanup (or was
@@ -1649,6 +1681,27 @@ void webServerTask(void *pvParameters) {
       otaPullDownloading = false;
       pullStartedAt = 0;
       forceFullRedraw = true;
+    }
+
+    // NTP settle check (issue #43): configTime() starts lwIP's SNTP client, and
+    // the clock jumps forward whenever the reply lands. Polling one `time()`
+    // per iteration keeps the same 5 s window and the same two log lines the
+    // blocking version printed, without ever holding the server off for a reply
+    // that arrives on its own.
+    if (ntpWaitStart) {
+      time_t ntpNow = 0;
+      struct tm ntpTm = {0};
+      time(&ntpNow);
+      localtime_r(&ntpNow, &ntpTm);
+      if (ntpTm.tm_year >= (2024 - 1900)) {
+        logPrintf("NTP time sync OK: %04d-%02d-%02d %02d:%02d:%02d\n",
+                  ntpTm.tm_year + 1900, ntpTm.tm_mon + 1, ntpTm.tm_mday,
+                  ntpTm.tm_hour, ntpTm.tm_min, ntpTm.tm_sec);
+        ntpWaitStart = 0;
+      } else if (millis() - ntpWaitStart >= 5000UL) {
+        logPrintf("NTP time sync failed after 5 s - clock left as-is (GPS fix or /api/time can still set it)\n");
+        ntpWaitStart = 0;
+      }
     }
 
     // Heartbeat is this loop's own responsibility (webLoopCount). It is bumped
@@ -1802,23 +1855,12 @@ void webServerTask(void *pvParameters) {
       if (!staHasConnectedBefore && NTP_ENABLED) {
         logPrintf("Syncing time via NTP: %s\n", NTP_SERVER);
         configTime(0, 0, NTP_SERVER);
-        time_t now = 0;
-        struct tm timeinfo = {0};
-        int retry = 0;
-        while (timeinfo.tm_year < (2024 - 1900) && retry < 10) {
-          delay(500);
-          time(&now);
-          localtime_r(&now, &timeinfo);
-          retry++;
-        }
-        if (retry < 10) {
-          logPrintf("NTP time sync OK: %04d-%02d-%02d %02d:%02d:%02d\n",
-                    timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
-                    timeinfo.tm_mday, timeinfo.tm_hour,
-                    timeinfo.tm_min, timeinfo.tm_sec);
-        } else {
-          logPrintf("NTP time sync failed after %d retries\n", retry);
-        }
+        // Arm the wait only; the settle check runs once per loop iteration
+        // below. The old `while (...) delay(500)` retry ran here, inside the
+        // web task, so handleClient() was stalled for up to 5 s after every
+        // Wi-Fi join and the config page/API were unreachable while it spun
+        // (issue #43).
+        ntpWaitStart = millis();
       }
       staHasConnectedBefore = true;
     }

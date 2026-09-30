@@ -359,6 +359,10 @@ static uint32_t clampCfgUnsigned(const char *name, long long v, long long lo,
   return (uint32_t)v;
 }
 
+// Writes that failed are counted so a save can say so out loud instead of
+// looking like it worked (issue #32).
+static uint8_t cfgNvsWriteErrors = 0;
+
 #define CFG_INT(var, nvsKey, defVal, lo, hi)                                   \
   if (mode == 0) {                                                             \
     var = pref.getInt(nvsKey, defVal);                                         \
@@ -368,7 +372,7 @@ static uint32_t clampCfgUnsigned(const char *name, long long v, long long lo,
   } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
     var = (*doc)[#var].as<int>();                                              \
     clampCfgInt(#var, &var, lo, hi);                                           \
-    pref.putInt(nvsKey, var);                                                  \
+    if (nvsWriteFailed(nvsKey, pref.putInt(nvsKey, var))) cfgNvsWriteErrors++;  \
   }
 
 #define CFG_UINT(var, nvsKey, defVal, lo, hi)                                   \
@@ -378,7 +382,7 @@ static uint32_t clampCfgUnsigned(const char *name, long long v, long long lo,
     (*doc)[#var] = var;                                                        \
   } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
     var = clampCfgUnsigned(#var, (*doc)[#var].as<long long>(), lo, hi);         \
-    pref.putInt(nvsKey, (int)var);                                             \
+    if (nvsWriteFailed(nvsKey, pref.putInt(nvsKey, (int)var))) cfgNvsWriteErrors++; \
   }
 
 #define CFG_FLT(var, nvsKey, defVal, lo, hi)                                   \
@@ -390,7 +394,7 @@ static uint32_t clampCfgUnsigned(const char *name, long long v, long long lo,
   } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
     var = (*doc)[#var].as<float>();                                            \
     clampCfgFloat(#var, &var, lo, hi, (float)defVal);                          \
-    pref.putFloat(nvsKey, var);                                                \
+    if (nvsWriteFailed(nvsKey, pref.putFloat(nvsKey, var))) cfgNvsWriteErrors++; \
   }
 
 // String config values live in fixed char[] buffers (no String objects, no
@@ -413,7 +417,7 @@ static uint32_t clampCfgUnsigned(const char *name, long long v, long long lo,
     (*doc)[#var] = var;                                                        \
   } else if (mode == 2 && (*doc)[#var].is<const char *>()) {                   \
     snprintf(var, sizeof(var), "%s", (*doc)[#var].as<const char *>());         \
-    pref.putString(nvsKey, var);                                               \
+    if (nvsWriteFailed(nvsKey, pref.putString(nvsKey, var))) cfgNvsWriteErrors++; \
   }
 
 #define CFG_BOOL(var, nvsKey, defVal)                                          \
@@ -423,7 +427,7 @@ static uint32_t clampCfgUnsigned(const char *name, long long v, long long lo,
     (*doc)[#var] = var;                                                        \
   } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
     var = (*doc)[#var].as<bool>();                                             \
-    pref.putBool(nvsKey, var);                                                 \
+    if (nvsWriteFailed(nvsKey, pref.putBool(nvsKey, var))) cfgNvsWriteErrors++; \
   }
 
 // The version this unit reports: the user override when one is set, otherwise
@@ -711,12 +715,16 @@ void sanitizeConfigPairs() {
 }
 
 void processConfig(int mode, JsonDocument *doc) {
-  Preferences pref;
+  // The "cfg" namespace is opened by the boot load, by the Web UI save (web
+  // task) and by the GNSS baud autodetect (sensor task). Every NVS session now
+  // holds prefsMux for its whole begin()/end() pair, so a save can no longer
+  // interleave with another task's open and lose writes (issue #32).
+  NvsSession session("cfg", false, (mode == 0 || mode == 2));
+  Preferences &pref = session.nvs;
+  if (mode == 2) cfgNvsWriteErrors = 0;
   // Issue #18: a point-count change invalidates the stored ramp, and the new
   // count is only known after the CFG_* block below has run.
   const int prevFuelPoints = FUEL_TOUCH_POINTS;
-  if (mode == 0 || mode == 2)
-    pref.begin("cfg", false);
 
   CFG_INT(DISPLAY_ROTATION, "DISP_ROT", 1, 0, 3);
   CFG_BOOL(UNITS_IMPERIAL, "UNITS_IMP", false);
@@ -1028,7 +1036,8 @@ void processConfig(int mode, JsonDocument *doc) {
     // and breaks the fuel gauge).
     for (int i = written; i < FUEL_TOUCH_POINTS; i++) {
       snprintf(key, sizeof(key), "FCO_%d", i);
-      pref.putFloat(key, fuelCalOhms[i]);
+      if (nvsWriteFailed(key, pref.putFloat(key, fuelCalOhms[i])))
+        cfgNvsWriteErrors++;
     }
   }
 
@@ -1042,7 +1051,8 @@ void processConfig(int mode, JsonDocument *doc) {
     char key[8];
     for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
       snprintf(key, sizeof(key), "FCO_%d", i);
-      pref.putFloat(key, fuelCalOhms[i]);
+      if (nvsWriteFailed(key, pref.putFloat(key, fuelCalOhms[i])))
+        cfgNvsWriteErrors++;
     }
   }
 
@@ -1055,13 +1065,17 @@ void processConfig(int mode, JsonDocument *doc) {
       char key[8];
       for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
         snprintf(key, sizeof(key), "FCO_%d", i);
-        pref.putFloat(key, fuelCalOhms[i]);
+        if (nvsWriteFailed(key, pref.putFloat(key, fuelCalOhms[i])))
+          cfgNvsWriteErrors++;
       }
     }
   }
 
-  if (mode == 0 || mode == 2)
-    pref.end();
+  // The namespace itself closes when `session` goes out of scope (and takes
+  // prefsMux with it).
+  if (mode == 2 && cfgNvsWriteErrors)
+    logPrintf("Config save: %d parameter(s) failed to reach NVS - see the NVS lines above; they will revert on reboot\n",
+              cfgNvsWriteErrors);
   applyColors();
 }
 
@@ -1286,18 +1300,22 @@ void seedNVSWithFactoryDefaults() {
     return;
   }
   processConfig(2, &doc);
-  Preferences pref;
-  pref.begin("cfg", false);
-  pref.putInt("CFG_VER", 5);
-  // Seed every calibration key so FUEL_TOUCH_POINTS can be raised above 8
-  // without missing NVS entries (a missing key loads as 0).
-  char key[8];
-  for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
-    snprintf(key, sizeof(key), "FCO_%d", i);
-    pref.putFloat(key, fuelCalOhms[i]);
+  NvsSession session("cfg", false);
+  if (session.opened()) {
+    session.nvs.putInt("CFG_VER", 5);
+    // Seed every calibration key so FUEL_TOUCH_POINTS can be raised above 8
+    // without missing NVS entries (a missing key loads as 0).
+    char key[8];
+    for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
+      snprintf(key, sizeof(key), "FCO_%d", i);
+      if (nvsWriteFailed(key, session.nvs.putFloat(key, fuelCalOhms[i])))
+        cfgNvsWriteErrors++;
+    }
   }
-  pref.end();
-  logPrintf("Config v5: NVS seeded with factory defaults (dashboard_backup.json)\n");
+  if (cfgNvsWriteErrors)
+    logPrintf("Config v5 seed: %d write(s) failed - see the NVS lines above\n", cfgNvsWriteErrors);
+  else
+    logPrintf("Config v5: NVS seeded with factory defaults (dashboard_backup.json)\n");
 }
 
 void recalculateDerivedParams() {

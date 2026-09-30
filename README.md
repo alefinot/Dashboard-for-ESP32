@@ -128,7 +128,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 
 | ESP32 Pin | Function Name | Peripheral Type | Signal Direction | Hardware Configuration & Notes |
 | :---: | :--- | :--- | :---: | :--- |
-| **GPIO0** | BOOT | Factory Reset | Input (Pullup) | `pinMode(0, INPUT_PULLUP)`; hold BOOT for 8 s within the first 30 s after boot to wipe the config |
+| **GPIO0** | BOOT | Factory Reset | Input (Pullup) | `pinMode(0, INPUT_PULLUP)`; hold BOOT for 8 s within the first 30 s after boot to wipe the config — the reliable path. The serial fallback (send `RESET` within the first 2 s of boot) is matched against a rolling 32-character window, so boot-log echo can no longer fill the capture and hide the command (issue #39) |
 | **GPIO1** | Console TX | Debug Console | Output | `Serial.setPins(1, 3)` pins the console explicitly (arduino-esp32 3.x moved the UART1 default to GPIO26/27) |
 | **GPIO3** | Console RX | Debug Console | Input | Same `Serial.setPins(1, 3)` call |
 | **GPIO4** | `POWER_SENSE_PIN` | Power Sense | Input (No Pull) | Ignition sense line; triggers EXT0 RTC wake up from deep sleep |
@@ -191,6 +191,15 @@ To protect the ESP32 NVS Flash memory from wear, distance accumulation runs cont
 $$\Delta D_{\text{ram}} \ge 1.0\text{ km} \implies \text{Preferences.putDouble("odo", } D_{\text{total}}\text{)}$$
 
 **Sharing the odometer across cores.** The odometer is a 64-bit `double`, and a 64-bit load/store on ESP32 is two 32-bit bus cycles: a read that lands between the two halves of a write returns a mixture of two different distances. The totals therefore live file-local in `src/sensors.cpp` and every other task reaches them through the locked accessors `odoGet()`, `odoSet()`, `odoAdd()` (read-modify-write in one critical section), `odoLastSaved()` and `odoMarkSaved()`, guarded by a dedicated spinlock (`odoMux`) — deliberately *not* `g_stateMutex`, so the display never waits behind sensor or NVS work and the critical sections stay a few instructions long. The accessors never write flash; the 1 km wear discipline above is unchanged.
+
+#### UBX Frame Parser (receive-only)
+
+The module streams UBX and NMEA on the same UART, so `src/sensors.cpp` runs a byte-at-a-time state machine (`ubxParseByte`) alongside TinyGPS++: it locks onto `0xB5 0x62`, reads class/id/length, seeds both Fletcher-8 accumulators by stepping through each header byte individually, and hands a checksum-valid NAV-PVT to the NMEA side. It never transmits anything (see the receive-only rule).
+
+- **Length is honoured, including zero.** A zero-length payload goes straight to the checksum states — entering the payload state with `len = 0` used to consume `CK_A`/`CK_B` as payload, corrupt the accumulators and raise a spurious `CKFAIL`, leaving the parser to resync by luck on the next `0xB5` (issue #33).
+- **Oversize frames are dropped at the header** (`len > 92`) rather than overflowing the payload buffer, and a bad checksum drops exactly one frame before resyncing.
+- **Counters, not silence:** `ubxSyncSeen`, `ubxCkFail`, `ubxOversize` are reported in the GPS debug telemetry so a framing problem is visible instead of looking like lost satellites.
+- **Checked offline:** `python scripts/verify_ubx_parser.py` runs a host replica of the state machine against hand-built frames — NAV-PVT (92 B), ACK (10 B), zero-length, poisoned checksum, garbage/false-sync, oversize, back-to-back frames — and asserts that the old zero-length path still fails, so the regression cannot come back unnoticed.
 
 ---
 
@@ -413,7 +422,7 @@ The management portal features a modern grouped card-based layout:
 | `/debug` | `GET` | Dump first bytes of the pre-gzipped UI buffer (build sanity check) | None | `text/plain` |
 | `/api/config` | `GET` | Exports complete NVS configuration plus read-only `build_version` | None | `application/json` |
 | `/api/config` | `POST` | Updates NVS parameters and applies changes | Config JSON object | `application/json` |
-| `/api/time` | `POST` | Syncs system clock from browser | `?epoch=1700000000` | `text/plain` |
+| `/api/time` | `POST` | Syncs system clock from browser | JSON body `{"timestamp":1700000000}` (integer epoch s; must fall in 2020–2100) | `application/json` (`{"status":"ok"}` / `400` with reason when out of range) |
 | `/api/odo` | `GET` | Reads odometer distance in km | None | `application/json` |
 | `/api/odo` | `POST` | Sets odometer distance | `{"km": 123.45}` | `application/json` |
 | `/api/trip/reset` | `POST` | Zeros the trip stats (same reset as the GPIO25 button); the odometer and session max speed are untouched | None | `application/json` |
@@ -423,15 +432,15 @@ The management portal features a modern grouped card-based layout:
 | `/api/ambient` | `GET` | Reads raw ambient light sensor value | None | `application/json` |
 | `/api/sensors` | `GET` | Reads calibrated battery voltage (`v`) and coolant temperature (`t`) | None | `application/json` |
 | `/api/fuel` | `GET` | Reads the fuel input: `raw` averaged ADC code, `liters`, `pct`, `ohm` sender resistance, `st` input state (0 = disabled, 1 = ok, 2 = open circuit, 3 = shorted) | None | `application/json` |
-| `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `text/plain` |
-| `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `text/plain` |
+| `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `application/json` (`{"status":"ok"\|"saved-ram-only","value":N}` — `saved-ram-only` means the value is applied but the NVS write failed) |
+| `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `application/json` (same shape as `cal-dark`) |
 | `/api/ota` | `POST` | Over-The-Air firmware binary upload | Binary `.bin` payload | `multipart/form-data` |
 | `/api/ota/pull` | `POST` | Triggers cloud OTA pull (checks `OTA_PULL_URL`) | None | `text/plain` |
 | `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled`, `url`, `current_version`, `build_version`, `version_override`, `previous_version`, `status`) | None | `application/json` |
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
 | `/api/perf` | `GET` | Live telemetry (CPU, Heap, task stack headroom, FPS, WiFi, partitions) | None | `application/json` |
 | `/api/health` | `GET` | Quick heap / mem-saver / uptime health probe | None | `application/json` |
-| `/api/boot` | `GET` | Boot/reboot forensics (reset reason, storm, last-reboot tag, heap watermark) | None | `application/json` |
+| `/api/boot` | `GET` | Boot/reboot forensics (reset reason, storm, last-reboot tag, heap watermark). `reset_reason` covers the whole core enum — `POWERON`, `EXT`, `SW (clean restart)`, `PANIC (crash/abort)`, `INT_WDT`, `TASK_WDT`, `WDT (other)`, `DEEP_SLEEP_WAKE`, `BROWNOUT`, `SDIO`, `USB`, `JTAG`, `EFUSE_ERR`, `PWR_GLITCH`, `CPU_LOCKUP`, `UNKNOWN`; anything unmapped prints `RST_<n>` (issue #42) | None | `application/json` |
 
 ---
 
@@ -450,6 +459,15 @@ Every numeric parameter carries an explicit **known-good band** in its `CFG_INT`
 - The **WebUI mirrors the same bands** so a bad entry is caught before it is posted: numeric inputs get `min`/`max` from a `FIRMWARE_LIMITS` table generated out of `config.cpp` (`python scripts/make_webui_limits.py` regenerates it after any band change), an out-of-range entry is corrected in the box and listed in the save message, and an emptied numeric box falls back to its default instead of posting a blank (which the device used to read as `0`).
 
 Bands are also checked offline by `python scripts/verify_config_ranges.py`: every numeric parameter must have a band, no shipped default may fall outside its own band, and the cross-field rules must hold for the factory values.
+
+### NVS Access, Locking & Write Errors (issue #32)
+
+ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely — what is *not* protected is the session. Two tasks opening and closing the same namespace independently can still collide: one task's `end()` closes the handle the other is still using, which comes back as `ESP_ERR_NVS_*` from `putInt()`/`putString()` and shows up as a setting that quietly reverted after a reboot. The old code took `prefsMux` at some call sites and not at others, so the protection depended on which file the code happened to live in.
+
+- Every namespace open now goes through **`NvsSession`** (`src/dashboard.h`): an RAII wrapper that holds `prefsMux` for the whole `begin()`/`end()` pair, logs when a namespace cannot be opened, and closes on scope exit so an early return cannot leak the handle. It skips the lock while `prefsMux` is still `NULL` (early boot, single-threaded). The long-lived `preferences` object for the `dashboard` namespace keeps its explicit `prefsMux` pairs.
+- **Write results are checked.** `nvsWriteFailed(key, esp_err_t)` logs the failing key with `esp_err_to_name()`; the `CFG_*` save macros count the failures and a save ends with `Config save: N parameter(s) failed to reach NVS … they will revert on reboot` instead of pretending nothing happened. The same check covers the fuel-table writes, the factory-reset credential restore, the bootinfo writes and the ambient calibrations.
+- **A failed read is not a default.** Where an unreadable NVS would previously have produced "no value" and triggered a factory seed, the seed is now skipped with a log line — a flash that cannot be read must never be answered by overwriting it.
+- `prefsMux` is a plain (non-recursive) mutex: nothing inside a locked NVS region may open NVS itself.
 
 ### Key Configuration Categories
 
@@ -513,7 +531,7 @@ Bands are also checked offline by `python scripts/verify_config_ranges.py`: ever
 - `WEATHER_LOCALE` (default="en"): ISO locale code for weather-condition naming.
 
 #### Time, Date & Daylight Saving
-- `NTP_ENABLED` (default=true): Sync the system clock from NTP once the WiFi station is up.
+- `NTP_ENABLED` (default=true): Sync the system clock from NTP once the WiFi station is up. `configTime()` is armed and then polled **once per web-loop iteration** over a 5 s window — the old `delay(500)` retry loop ran inside the web task and left the config page and API unreachable for up to 5 s after every Wi-Fi join (issue #43). A missed sync is logged; a GPS fix or `POST /api/time` can still set the clock.
 - `NTP_SERVER` (default="pool.ntp.org"): NTP host used for that sync.
 - `TZ_OFFSET_HOURS` (default=1): Zone offset in whole hours — **the standard (winter) offset**, range −14…14. With DST on, this is the offset the clock uses outside the DST period; the rule below adds the extra hour. New York is `-5`, Paris is `+1`, Athens is `+2`.
 - `TZ_DST_ENABLED` (default=true): Master switch for daylight saving. When off the clock keeps `TZ_OFFSET_HOURS` all year.

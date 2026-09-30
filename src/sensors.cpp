@@ -319,10 +319,11 @@ void configureGNSS() {
     logPrintf("GNSS: module detected at %lu baud (%s) - updating GPS_BAUD\n",
               detectedBaud, ubxSeen ? "UBX" : "NMEA");
     GPS_BAUD = (int)detectedBaud;
-    Preferences pref;
-    pref.begin("cfg", false);
-    pref.putInt("GPS_BAUD", GPS_BAUD);
-    pref.end();
+    // Runs on the sensor task while the web task may be saving the same
+    // namespace - both hold prefsMux for the whole session now (issue #32).
+    NvsSession session("cfg", false);
+    if (session.opened())
+      nvsWriteFailed("GPS_BAUD", session.nvs.putInt("GPS_BAUD", GPS_BAUD));
   }
 
   logPrintf("GNSS: %s mode @ %d baud (UBX NAV-PVT parsed, NMEA synthesized)\n",
@@ -1769,7 +1770,13 @@ static void ubxParseByte(uint8_t b) {
       ck += b; ubxCkB += ck; // b = lenH
       ubxCkA = ck;
     }
-    ubxSt = 6;
+    // A zero-length payload (legal in UBX - e.g. some MON/CFG polling frames)
+    // must go straight to the checksum states. Entering the payload state with
+    // ubxNeed == 0 consumed CK_A/CK_B as payload bytes, folded them into the
+    // accumulators and then failed the CK_A test, so the parser only resynced
+    // by luck on the next 0xB5 and the CKFAIL counter climbed while debugging
+    // the UBX paths (issue #33).
+    ubxSt = (ubxNeed == 0) ? 7 : 6;
     break;
   case 6:
     ubxPld[ubxIdx++] = b;

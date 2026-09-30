@@ -23,39 +23,60 @@ static uint32_t s_lastMinHeap = 0;
 static char s_resetReason[24] = "?";
 static char s_prevVersion[32] = "";
 
-static const char *resetReasonStr(esp_reset_reason_t r) {
+// Every value in this core's esp_reset_reason_t (esp_system.h). The old subset
+// fell through to "UNKNOWN" for exactly the reasons that matter in crash triage
+// - power glitch, CPU lock-up, the other-watchdog case - so /api/boot and the
+// bootinfo JSON mislabelled them (issue #42). An unmapped value prints its
+// number instead, so a future core that adds a reason stays distinguishable.
+static void resetReasonStr(esp_reset_reason_t r, char *out, size_t outLen) {
+  const char *s = NULL;
   switch (r) {
-    case ESP_RST_POWERON:   return "POWERON";
-    case ESP_RST_EXT:       return "EXT";
-    case ESP_RST_SW:        return "SW (clean restart)";
-    case ESP_RST_PANIC:     return "PANIC (crash/abort)";
-    case ESP_RST_INT_WDT:  return "INT_WDT";
-    case ESP_RST_TASK_WDT: return "TASK_WDT";
-    case ESP_RST_WDT:       return "WDT";
-    case ESP_RST_DEEPSLEEP: return "DEEP_SLEEP_WAKE";
-    case ESP_RST_BROWNOUT:  return "BROWNOUT";
-    case ESP_RST_SDIO:      return "SDIO";
-    default:                 return "UNKNOWN";
+    case ESP_RST_UNKNOWN:    s = "UNKNOWN"; break;
+    case ESP_RST_POWERON:    s = "POWERON"; break;
+    case ESP_RST_EXT:        s = "EXT"; break;
+    case ESP_RST_SW:         s = "SW (clean restart)"; break;
+    case ESP_RST_PANIC:      s = "PANIC (crash/abort)"; break;
+    case ESP_RST_INT_WDT:    s = "INT_WDT"; break;
+    case ESP_RST_TASK_WDT:   s = "TASK_WDT"; break;
+    case ESP_RST_WDT:        s = "WDT (other)"; break;
+    case ESP_RST_DEEPSLEEP:  s = "DEEP_SLEEP_WAKE"; break;
+    case ESP_RST_BROWNOUT:   s = "BROWNOUT"; break;
+    case ESP_RST_SDIO:       s = "SDIO"; break;
+    case ESP_RST_USB:        s = "USB"; break;
+    case ESP_RST_JTAG:       s = "JTAG"; break;
+    case ESP_RST_EFUSE:      s = "EFUSE_ERR"; break;
+    case ESP_RST_PWR_GLITCH: s = "PWR_GLITCH"; break;
+    case ESP_RST_CPU_LOCKUP: s = "CPU_LOCKUP"; break;
+    default: break;
   }
+  if (s)
+    snprintf(out, outLen, "%s", s);
+  else
+    snprintf(out, outLen, "RST_%d", (int)r);
 }
 
 void bootinfo_init() {
   esp_reset_reason_t rr = esp_reset_reason();
-  strncpy(s_resetReason, resetReasonStr(rr), sizeof(s_resetReason) - 1);
-  s_resetReason[sizeof(s_resetReason) - 1] = 0;
+  resetReasonStr(rr, s_resetReason, sizeof(s_resetReason));
 
-  // Last clean-reboot tag (written by bootinfo_tag_reboot before the reboot).
+  // Last clean-reboot tag (written by bootinfo_tag_reboot before the reboot)
+  // and the firmware identity history. One read-only session for both reads
+  // instead of two back-to-back opens, and every open goes through NvsSession
+  // so the locking pattern is the same as everywhere else (issue #32).
   {
     char tag[48] = "";
-    Preferences pref;
-    pref.begin("bootinfo", true);  // read-only
-    pref.getString("rebootTag", tag, sizeof(tag));
-    s_lastRebootHeap = pref.getUInt("rebootHeap", 0);
-    s_lastMinHeap = pref.getUInt("minHeap", 0);
-    pref.end();
+    char ran[32] = "";
+    NvsSession session("bootinfo", true);  // read-only
+    if (session.opened()) {
+      session.nvs.getString("rebootTag", tag, sizeof(tag));
+      s_lastRebootHeap = session.nvs.getUInt("rebootHeap", 0);
+      s_lastMinHeap = session.nvs.getUInt("minHeap", 0);
+      session.nvs.getString("ranVer", ran, sizeof(ran));
+      session.nvs.getString("prevVer", s_prevVersion, sizeof(s_prevVersion));
+    }
+    s_prevVersion[sizeof(s_prevVersion) - 1] = 0;
     strncpy(s_lastRebootTag, tag, sizeof(s_lastRebootTag) - 1);
     s_lastRebootTag[sizeof(s_lastRebootTag) - 1] = 0;
-  }
 
   // Firmware identity bookkeeping. "ranVer" is the build version recorded at
   // the previous boot, so a difference means different firmware is running -
@@ -64,23 +85,14 @@ void bootinfo_init() {
   // manifest, so the history cannot be rewritten by whatever the device was
   // told to believe. One NVS write, and only when the version actually
   // changes.
-  {
-    char ran[32] = "";
-    Preferences vpref;
-    vpref.begin("bootinfo", true);  // read-only
-    vpref.getString("ranVer", ran, sizeof(ran));
-    vpref.getString("prevVer", s_prevVersion, sizeof(s_prevVersion));
-    vpref.end();
-    s_prevVersion[sizeof(s_prevVersion) - 1] = 0;
-
     if (strcmp(ran, FW_VERSION) != 0) {
       strncpy(s_prevVersion, ran, sizeof(s_prevVersion) - 1);
       s_prevVersion[sizeof(s_prevVersion) - 1] = 0;
-      Preferences vw;
-      vw.begin("bootinfo", false);
-      vw.putString("ranVer", FW_VERSION);
-      vw.putString("prevVer", s_prevVersion);
-      vw.end();
+      NvsSession write("bootinfo", false);
+      if (write.opened()) {
+        nvsWriteFailed("ranVer", write.nvs.putString("ranVer", FW_VERSION));
+        nvsWriteFailed("prevVer", write.nvs.putString("prevVer", s_prevVersion));
+      }
       logPrintf("BOOTINFO: firmware v%s running (previous: %s)\n", FW_VERSION,
                 s_prevVersion[0] ? s_prevVersion : "unknown");
     }
@@ -109,12 +121,17 @@ void bootinfo_init() {
 void bootinfo_tag_reboot(const char *why) {
   char w[48];
   snprintf(w, sizeof(w), "%s", (why && why[0]) ? why : "?");
-  Preferences pref;
-  pref.begin("bootinfo", false);
-  pref.putString("rebootTag", w);
-  pref.putUInt("rebootHeap", (uint32_t)ESP.getFreeHeap());
-  pref.putUInt("minHeap", (uint32_t)ESP.getMinFreeHeap());
-  pref.end();
+  // This is the last thing written before the reboot - if it does not stick,
+  // the next boot can only report "no tag", which is exactly the case that
+  // looks like a crash. So the result is checked and reported (issue #32).
+  NvsSession session("bootinfo", false);
+  if (!session.opened()) {
+    logPrintf("BOOTINFO: cannot open NVS for the reboot tag ('%s' not recorded)\n", w);
+    return;
+  }
+  nvsWriteFailed("rebootTag", session.nvs.putString("rebootTag", w));
+  nvsWriteFailed("rebootHeap", session.nvs.putUInt("rebootHeap", (uint32_t)ESP.getFreeHeap()));
+  nvsWriteFailed("minHeap", session.nvs.putUInt("minHeap", (uint32_t)ESP.getMinFreeHeap()));
 }
 
 bool bootinfo_storm_active() { return s_stormActive; }

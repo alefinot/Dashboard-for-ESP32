@@ -425,6 +425,62 @@ extern Preferences preferences;
 // races can silently lose an NVS write.
 extern SemaphoreHandle_t prefsMux;
 
+// ----------------------------------------------------------------------------
+// NVS access serialisation (issue #32)
+//
+// ESP-IDF's NVS layer has internal locking, so a torn write is unlikely. What
+// is not protected is the *session*: task A's end() can close the handle task B
+// is still using on the same namespace, which surfaces as an ESP_ERR_NVS_* from
+// putInt()/putString() - and here as a setting that quietly reverted at the next
+// boot. Some call sites wrapped their open in prefsMux, most did not, so the
+// protection depended on which file the code lived in. NvsSession makes the
+// locked pattern the default: it holds prefsMux for the whole begin()/end()
+// pair (skipped while prefsMux is still NULL, i.e. during early boot) and
+// closes on scope exit, so an early return cannot leak the handle.
+//
+// Nothing inside a locked region may call anything that opens NVS itself -
+// prefsMux is a plain mutex, not recursive.
+// ----------------------------------------------------------------------------
+class NvsSession {
+ public:
+  // open=false takes the lock but leaves the namespace closed, for the call
+  // sites that only open it on some code paths.
+  NvsSession(const char *ns, bool readOnly, bool open = true) {
+    if (prefsMux) {
+      _locked = xSemaphoreTake(prefsMux, pdMS_TO_TICKS(3000)) == pdTRUE;
+      if (!_locked)
+        logPrintf("NVS: prefsMux wait timed out for '%s' - proceeding unlocked\n", ns);
+    }
+    if (open) begin(ns, readOnly);
+  }
+  ~NvsSession() {
+    if (_opened) nvs.end();
+    if (_locked) xSemaphoreGive(prefsMux);
+  }
+  bool begin(const char *ns, bool readOnly) {
+    _opened = nvs.begin(ns, readOnly);
+    if (!_opened)
+      logPrintf("NVS: cannot open namespace '%s' - this access is skipped\n", ns);
+    return _opened;
+  }
+  bool opened() const { return _opened; }
+  Preferences nvs;
+
+ private:
+  bool _opened = false;
+  bool _locked = false;
+};
+
+// putInt()/putString()/... return an esp_err_t that used to be discarded: the
+// RAM copy changed, NVS did not, and the setting came back at the next reboot
+// with no trace of why (issue #32).
+inline bool nvsWriteFailed(const char *key, esp_err_t e) {
+  if (e == ESP_OK) return false;
+  logPrintf("NVS: write of %s failed (%s) - value is live now, a reboot restores the old one\n",
+            key, esp_err_to_name(e));
+  return true;
+}
+
 // Latest GPS state published by gpsTask after each NMEA commit. TinyGPS++
 // location accessors are single-consumer (lat()/lng() clear the one-shot
 // "updated" flag that isUpdated() reports) and their doubles must not be

@@ -2776,7 +2776,11 @@ function syncTime() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({timestamp: epoch})
     }).then(r => r.json()).then(d => {
-        msgBox.className = 'msg-success'; msgBox.innerText = "Time synced successfully!";
+        if (d.status === 'ok') {
+            msgBox.className = 'msg-success'; msgBox.innerText = "Time synced successfully!";
+        } else {
+            msgBox.className = 'msg-error'; msgBox.innerText = "Firmware rejected the timestamp: " + (d.status || 'unknown');
+        }
     }).catch(() => {
         msgBox.className = 'msg-error'; msgBox.innerText = "Failed to sync time.";
     });
@@ -2821,7 +2825,11 @@ function calibrateDark() {
         let el = document.getElementById('LIGHT_SENSOR_DARK_VAL');
         if (el) el.value = d.value;
         let msg = document.getElementById('msg');
-        msg.className = 'msg-success'; msg.innerText = 'Dark calibration saved: ' + d.value;
+        if (d.status === 'ok') {
+            msg.className = 'msg-success'; msg.innerText = 'Dark calibration saved: ' + d.value;
+        } else {
+            msg.className = 'msg-error'; msg.innerText = 'Dark calibration applied (' + d.value + ') but the firmware could not write it to NVS - it may revert after a reboot';
+        }
         setTimeout(() => save(), 100);
     }).catch(() => {});
 }
@@ -2831,7 +2839,11 @@ function calibrateBright() {
         let el = document.getElementById('LIGHT_SENSOR_BRIGHT_VAL');
         if (el) el.value = d.value;
         let msg = document.getElementById('msg');
-        msg.className = 'msg-success'; msg.innerText = 'Bright calibration saved: ' + d.value;
+        if (d.status === 'ok') {
+            msg.className = 'msg-success'; msg.innerText = 'Bright calibration saved: ' + d.value;
+        } else {
+            msg.className = 'msg-error'; msg.innerText = 'Bright calibration applied (' + d.value + ') but the firmware could not write it to NVS - it may revert after a reboot';
+        }
         setTimeout(() => save(), 100);
     }).catch(() => {});
 }
