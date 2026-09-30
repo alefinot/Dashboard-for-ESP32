@@ -134,8 +134,20 @@ static bool startTask(const char *name, TaskFunction_t fn, uint32_t stackBytes,
   return false;
 }
 
+// setCpuFrequencyMhz() returns false when the switch is refused (unsupported
+// value, PLL/APB conflict). The config layer already snaps MANUAL_CPU_FREQ to
+// 80/160/240 (issue #21), but the call can still fail - and logging the new
+// frequency without checking the result is how "it says 240MHz but runs at 80"
+// bug reports start (issue #34).
+static bool applyCpuFreq(int mhz, const char *why) {
+  if (setCpuFrequencyMhz(mhz)) return true;
+  logPrintf("CPU: refused to switch to %dMHz (%s) - still running at %dMHz\n",
+            mhz, why, (int)getCpuFrequencyMhz());
+  return false;
+}
+
 void setup() {
-  setCpuFrequencyMhz(240);
+  applyCpuFreq(240, "boot");
   Serial.setTxBufferSize(256);
   // arduino-esp32 3.x moved the UART1 console default to GPIO26/27 - pin it
   // explicitly to GPIO1/3 (the device's console wiring) to keep 2.x behavior.
@@ -202,7 +214,7 @@ void setup() {
   display.applyBusConfig();
 
   if (!ENABLE_DYNAMIC_CPU) {
-    setCpuFrequencyMhz(MANUAL_CPU_FREQ);
+    applyCpuFreq(MANUAL_CPU_FREQ, "manual mode");
   }
 
   logPrintf("Starting Dashboard++\n");
@@ -380,8 +392,8 @@ static void processConfigApply() {
     pendingCpuReeval = false;
     uint32_t freq = ENABLE_DYNAMIC_CPU ? 240 : MANUAL_CPU_FREQ;
     if (getCpuFrequencyMhz() != freq) {
-      setCpuFrequencyMhz(freq);
-      logPrintf("CPU: %dMHz (config change)\n", (int)freq);
+      if (applyCpuFreq((int)freq, "config change"))
+        logPrintf("CPU: %dMHz (config change)\n", (int)freq);
     }
   }
 }
@@ -556,8 +568,9 @@ void loop() {
     lastSensorTickSeen = g_sensorLastTickMs;
   }
 
-  if (DISPLAY_REFRESH_MS == 0 ||
-      (now - lastDisplayUpdate >= DISPLAY_REFRESH_MS)) {
+  // DISPLAY_REFRESH_MS can never be 0: TARGET_FPS is band-checked to 5..120
+  // (issue #36), so the old "unlimited" special case was dead code.
+  if (now - lastDisplayUpdate >= DISPLAY_REFRESH_MS) {
     unsigned long frameStartMs = millis();
     static unsigned long lastFrameTime = 0;
     static float filteredFrameTimeMs = 16.6f;
@@ -583,11 +596,9 @@ void loop() {
         fpsSum += fpsHistory[i];
       currentAverageFps = fpsSum / (float)fpsHistoryCount;
     }
-    if (DISPLAY_REFRESH_MS > 0) {
-      lastDisplayUpdate += DISPLAY_REFRESH_MS;
-      if (now - lastDisplayUpdate > DISPLAY_REFRESH_MS)
-        lastDisplayUpdate = now;
-    } else {
+    lastDisplayUpdate += DISPLAY_REFRESH_MS;
+    if (now - lastDisplayUpdate > DISPLAY_REFRESH_MS)
+      lastDisplayUpdate = now; else {
       lastDisplayUpdate = now;
     }
 
@@ -767,8 +778,8 @@ void loop() {
       targetFreq = MANUAL_CPU_FREQ;
     }
     if (getCpuFrequencyMhz() != targetFreq) {
-      setCpuFrequencyMhz(targetFreq);
-      logPrintf("CPU: %dMHz (%.1f FPS, %.1fC)\n", targetFreq, currentAverageFps, cpuTemp);
+      if (applyCpuFreq(targetFreq, "dynamic scaling"))
+        logPrintf("CPU: %dMHz (%.1f FPS, %.1fC)\n", targetFreq, currentAverageFps, cpuTemp);
     }
   }
   // BOOT-hold factory reset: hold GPIO0 (BOOT) for 8s within the first 30s

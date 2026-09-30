@@ -725,7 +725,7 @@ void processConfig(int mode, JsonDocument *doc) {
            SPI_SPEED_MAX_HZ);
   CFG_INT(DISPLAY_WIDTH, "DISP_W", 480, 16, 2048);
   CFG_INT(DISPLAY_HEIGHT, "DISP_H", 320, 16, 2048);
-  CFG_INT(TARGET_FPS, "TGT_FPS", 60, 1, 120);
+  CFG_INT(TARGET_FPS, "TGT_FPS", 60, 5, 120);
   CFG_INT(BACKLIGHT_BRIGHTNESS, "BL_BRIGHT", 100, 0, 100);
   CFG_BOOL(ENABLE_AUTO_BRIGHTNESS, "EN_AUTO_BL", true);
   CFG_INT(LIGHT_SENSOR_DARK_VAL, "LIGHT_DARK", 432, 0, 4095);
@@ -1301,9 +1301,11 @@ void seedNVSWithFactoryDefaults() {
 }
 
 void recalculateDerivedParams() {
-  unsigned long frameBudget = (TARGET_FPS > 0) ? (1000U / (unsigned long)TARGET_FPS) : 33U;
-  if (frameBudget < 2) frameBudget = 2;
-  DISPLAY_REFRESH_MS = frameBudget;
+  // TARGET_FPS is band-checked to 5..120 (issue #36), so the frame budget is
+  // always 8..200 ms: the old "0 means unlimited" branch and the <2 ms clamp
+  // could never be reached, and a 2 ms budget would only saturate the display
+  // core.
+  DISPLAY_REFRESH_MS = 1000U / (unsigned long)TARGET_FPS;
   WHEEL_SPEED_FACTOR = WHEEL_CIRCUMFERENCE_MM * 3600.0f;
   WHEEL_DIST_PER_PULSE_KM = (double)WHEEL_CIRCUMFERENCE_MM / 1000000.0;
   NTC_INV_ROOM_KELVIN = 1.0f / (25.0f + 273.15f);

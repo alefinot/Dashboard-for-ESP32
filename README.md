@@ -454,10 +454,10 @@ Bands are also checked offline by `python scripts/verify_config_ranges.py`: ever
 ### Key Configuration Categories
 
 #### System & Performance
-- `TARGET_FPS` (default=60): Desired display refresh rate (up to ~500 FPS supported, hardware-limited).
+- `TARGET_FPS` (default=60): Desired display refresh rate, **5–120 FPS** (band-checked on load and in the Web UI). It sets the derived `DISPLAY_REFRESH_MS` frame budget (120 → 8 ms, 60 → 16 ms, 5 → 200 ms); values above what the SPI panel can carry simply drop the FPS counter rather than saturating the display core (issue #36).
 - `SPI_BUS_SPEED` (default=60000000): SPI bus frequency in Hz. Accepted range **1000000–80000000** (1–80 MHz; WebUI shows MHz). Out-of-range values are clamped on load/save — a `0` or a negative (wrapped) value would otherwise feed LovyanGFX a degenerate clock divider and blank the panel. The read clock is derived as `SPI_BUS_SPEED × 8/5`, computed in 64-bit and clamped to the same band.
 - `ENABLE_DYNAMIC_CPU` (default=false): Toggles automatic CPU frequency scaling (hysteresis-based).
-- `MANUAL_CPU_FREQ` (default=240): Fixed CPU clock frequency (80, 160, or 240 MHz).
+- `MANUAL_CPU_FREQ` (default=240): Fixed CPU clock frequency (80, 160, or 240 MHz) used when `ENABLE_DYNAMIC_CPU` is off. The value is snapped to the nearest legal step, and every `setCpuFrequencyMhz()` call now checks its result — a refused switch logs `CPU: refused to switch to …MHz` instead of claiming a frequency the chip never switched to (issue #34).
 - `ENABLE_CPU_THROTTLE` (default=true): Enables thermal frequency capping.
 - `CPU_THROTTLE_TEMP_WARN` (default=60): Warning temperature threshold in °C.
 - `CPU_THROTTLE_TEMP_CRIT` (default=70): Critical temperature threshold in °C.

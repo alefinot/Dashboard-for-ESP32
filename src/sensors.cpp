@@ -1815,7 +1815,11 @@ bool systemTimeToLocal(int &hour, int &minute, int &day, int &month,
   if (TZ_DST_ENABLED && TZ_DST_RULE != TZ_DST_RULE_NONE)
     dst = getDstOffset(tmUtc.tm_year + 1900, tmUtc.tm_mon + 1, tmUtc.tm_mday,
                        tmUtc.tm_hour, TZ_OFFSET_HOURS);
-  time_t local = tv.tv_sec + ((TZ_OFFSET_HOURS + dst) * 3600);
+  // Multiply in time_t, not int: the shift is added to an epoch second, and an
+  // int product would overflow long before the value is used (issue #35). The
+  // param itself is band-checked to -14..14 (issue #21), so a sane zone can
+  // never reach that boundary.
+  time_t local = tv.tv_sec + ((time_t)(TZ_OFFSET_HOURS + dst) * 3600);
   struct tm tmLocal = {0};
   if (!gmtime_r(&local, &tmLocal)) return false;
   hour = tmLocal.tm_hour;
