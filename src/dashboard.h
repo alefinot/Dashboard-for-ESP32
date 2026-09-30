@@ -481,15 +481,49 @@ class NvsSession {
   bool _locked = false;
 };
 
-// putInt()/putString()/... return an esp_err_t that used to be discarded: the
-// RAM copy changed, NVS did not, and the setting came back at the next reboot
-// with no trace of why (issue #32).
-inline bool nvsWriteFailed(const char *key, esp_err_t e) {
-  if (e == ESP_OK) return false;
-  logPrintf("NVS: write of %s failed (%s) - value is live now, a reboot restores the old one\n",
-            key, esp_err_to_name(e));
+// NVS write results have to be checked: the RAM copy changes, NVS does not, and
+// the setting comes back at the next reboot with no trace of why (issue #32).
+//
+// The core does NOT return an esp_err_t here. In arduino-esp32 3.3.12
+// (libraries/Preferences/src/Preferences.cpp) every put*() returns size_t: 0 on
+// failure (nvs_set_* or nvs_commit failed) and 1 for the numeric types,
+// strlen(value) for a string, on success. The issue #32 wrapper took an
+// esp_err_t and compared it against ESP_OK, which inverted every result: a real
+// write failure (0) was reported as success - silent config loss - while every
+// successful write logged as a failure whose "error name" was really the length
+// of the value (a 12-character SSID printed "failed (0xc)"). clear()/remove()
+// do return bool, so they get their own overload; a bare esp_err_t argument is
+// now ambiguous at compile time, which is exactly the mistake being prevented.
+// The esp_err itself is still visible: the core's own log_e("nvs_set_str fail:
+// ...") prints it above these lines at the default CORE_DEBUG_LEVEL.
+inline bool nvsWriteFailed(const char *key, size_t written) {
+  if (written) return false;
+  logPrintf("NVS: write of %s FAILED - value is live now, a reboot restores the old one\n", key);
   return true;
 }
+inline bool nvsWriteFailed(const char *key, bool ok) {
+  if (ok) return false;
+  logPrintf("NVS: write of %s FAILED - value is live now, a reboot restores the old one\n", key);
+  return true;
+}
+
+// A string write is the one case the core's count cannot answer on its own:
+// putString() returns strlen(value), so a successful write of an empty value
+// (a cleared SSID, an unused URL) also reads 0. Empty values are therefore not
+// called failures here - the core's own log_e still prints a real one.
+inline bool nvsStringWriteFailed(const char *key, const char *value, size_t written) {
+  if (written || (value && value[0] == 0)) return false;
+  return nvsWriteFailed(key, written);
+}
+
+// Count of NVS writes that failed during the most recent processConfig(2) save
+// (and the boot seed). Reported to the Web UI so a save that never reached flash
+// cannot be shown as "saved successfully".
+extern uint16_t cfgNvsWriteErrors;
+
+// Logs what the WiFi credentials NVS actually handed back at boot: SSIDs and
+// whether each password slot is filled - never the passwords themselves.
+void logStoredWifiProfiles();
 
 // Latest GPS state published by gpsTask after each NMEA commit. TinyGPS++
 // location accessors are single-consumer (lat()/lng() clear the one-shot

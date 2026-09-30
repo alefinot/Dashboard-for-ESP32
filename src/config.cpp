@@ -363,7 +363,7 @@ static uint32_t clampCfgUnsigned(const char *name, long long v, long long lo,
 
 // Writes that failed are counted so a save can say so out loud instead of
 // looking like it worked (issue #32).
-static uint8_t cfgNvsWriteErrors = 0;
+uint16_t cfgNvsWriteErrors = 0;
 
 #define CFG_INT(var, nvsKey, defVal, lo, hi)                                   \
   if (mode == 0) {                                                             \
@@ -419,7 +419,7 @@ static uint8_t cfgNvsWriteErrors = 0;
     (*doc)[#var] = var;                                                        \
   } else if (mode == 2 && (*doc)[#var].is<const char *>()) {                   \
     snprintf(var, sizeof(var), "%s", (*doc)[#var].as<const char *>());         \
-    if (nvsWriteFailed(nvsKey, pref.putString(nvsKey, var))) cfgNvsWriteErrors++; \
+    if (nvsStringWriteFailed(nvsKey, var, pref.putString(nvsKey, var))) cfgNvsWriteErrors++; \
   }
 
 #define CFG_BOOL(var, nvsKey, defVal)                                          \
@@ -979,7 +979,10 @@ void processConfig(int mode, JsonDocument *doc) {
         if (v && strlen(v) > 0) {
           strncpy(pwds[i], v, 63);
           pwds[i][63] = 0;
-          pref.putString(nvs[i], pwds[i]);
+          // Checked like every other write: a password that never reached flash
+          // used to be invisible, and the network then fails to join after a
+          // reboot with nothing in the log to point at it.
+          if (nvsWriteFailed(nvs[i], pref.putString(nvs[i], pwds[i]))) cfgNvsWriteErrors++;
         }
       }
     }
@@ -1009,7 +1012,8 @@ void processConfig(int mode, JsonDocument *doc) {
       AP_PASSWORD[sizeof(AP_PASSWORD) - 1] = 0;
       // Mode 2 already wrote the rejected value to NVS through CFG_STR,
       // so overwrite it here rather than re-sanitizing on every boot.
-      if (mode == 2) pref.putString("AP_PWD", AP_PASSWORD);
+      if (mode == 2 && nvsWriteFailed("AP_PWD", pref.putString("AP_PWD", AP_PASSWORD)))
+        cfgNvsWriteErrors++;
     }
   }
 
@@ -1103,6 +1107,14 @@ void processConfig(int mode, JsonDocument *doc) {
 // The reference backup export of the standard configuration. Seeded into NVS
 // on first boot (and once for units still on the pre-factory-defaults
 // config), so every unit starts from exactly these values.
+// WiFi credentials are deliberately absent from this list: a factory-default
+// seed must not strand a unit without a network - the same reason
+// factoryResetConfig() puts the SSID/password keys back after wiping NVS, and
+// the reason the password keys were already left out. Listing the SSIDs as
+// empty strings meant every boot that found CFG_VER < 5 cleared all five SSIDs
+// in RAM and NVS, and because the CFG_VER stamp was never verified (see
+// seedNVSWithFactoryDefaults) a lost stamp repeated that wipe on every boot:
+// passwords survived, SSIDs did not.
 const char FACTORY_DEFAULT_JSON[] = R"({
   "DISPLAY_ROTATION": 1,
   "UNITS_IMPERIAL": false,
@@ -1280,11 +1292,6 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "FUEL_DEC_DIGITS": 1,
   "ODO_INT_DIGITS": 5,
   "ODO_DEC_DIGITS": 1,
-  "WIFI_SSID": "",
-  "WIFI_SSID_1": "",
-  "WIFI_SSID_2": "",
-  "WIFI_SSID_3": "",
-  "WIFI_SSID_4": "",
   "WIFI_TX_POWER_DBM": 20,
   "WIFI_RETRY_MODE": 2,
   "WIFI_RETRY_SECONDS": 60,
@@ -1320,7 +1327,11 @@ void seedNVSWithFactoryDefaults() {
   processConfig(2, &doc);
   NvsSession session("cfg", false);
   if (session.opened()) {
-    session.nvs.putInt("CFG_VER", 5);
+    // The stamp is what keeps this a one-shot. A lost stamp used to re-seed the
+    // whole config on every boot; the WiFi credentials are no longer part of the
+    // seed, but a repeated seed would still undo every other setting.
+    if (nvsWriteFailed("CFG_VER", session.nvs.putInt("CFG_VER", 5)))
+      logPrintf("Config: CFG_VER not stored - the factory seed will run again at next boot\n");
     // Seed every calibration key so FUEL_TOUCH_POINTS can be raised above 8
     // without missing NVS entries (a missing key loads as 0).
     char key[8];
@@ -1334,6 +1345,26 @@ void seedNVSWithFactoryDefaults() {
     logPrintf("Config v5 seed: %d write(s) failed - see the NVS lines above\n", cfgNvsWriteErrors);
   else
     logPrintf("Config v5: NVS seeded with factory defaults (dashboard_backup.json)\n");
+}
+
+// Boot-time answer to "did the network credentials actually get stored?": the
+// SSIDs as NVS handed them back, plus whether each password slot is filled. The
+// passwords themselves are never logged.
+void logStoredWifiProfiles() {
+  const char *ssids[5] = {WIFI_SSID, WIFI_SSID_1, WIFI_SSID_2, WIFI_SSID_3, WIFI_SSID_4};
+  const char *pwds[5] = {WIFI_PASSWORD, WIFI_PASSWORD_1, WIFI_PASSWORD_2,
+                         WIFI_PASSWORD_3, WIFI_PASSWORD_4};
+  char line[192];
+  int n = 0;
+  line[0] = 0;
+  for (int i = 0; i < 5; i++) {
+    int written = snprintf(line + n, sizeof(line) - n, " [%d]=%s%s", i,
+                           ssids[i][0] ? ssids[i] : "(no SSID)",
+                           pwds[i][0] ? "/pw set" : "/pw empty");
+    if (written < 0 || (size_t)written >= sizeof(line) - n) break;
+    n += written;
+  }
+  logPrintf("WiFi credentials from NVS:%s\n", line);
 }
 
 void recalculateDerivedParams() {

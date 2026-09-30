@@ -2672,6 +2672,13 @@ function save() {
                 msgBox.className = 'msg-warning';
                 msgBox.innerText += ` Fuel calibration table: ${lastTableFix.count} point(s) were out of order, sorted ${lastTableFix.dir}.`;
             }
+            if (r.nvsErrors) {
+                // The device accepted the values but could not write them all to
+                // flash - they are live until the next reboot and then revert.
+                // Say so instead of painting a green "saved" over lost settings.
+                msgBox.className = 'msg-error';
+                msgBox.innerText += ' WARNING: ' + r.nvsErrors + ' value(s) could not be written to storage - they work now, but a reboot will restore the old ones. The device log names the failing keys.';
+            }
         } else {
             msgBox.className = 'msg-error';
             msgBox.innerText = 'The device rejected the settings: ' + (r && r.error ? r.error : 'unknown error') + '. Nothing was saved.';

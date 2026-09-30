@@ -1099,11 +1099,21 @@ void webServerTask(void *pvParameters) {
   WifiNetwork wifiNets[MAX_WIFI_NETS];
   int wifiNetCount = 0;
 
-  wifiNets[wifiNetCount++] = {WIFI_SSID, WIFI_PASSWORD};
-  if (WIFI_SSID_1[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_1, WIFI_PASSWORD_1};
-  if (WIFI_SSID_2[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_2, WIFI_PASSWORD_2};
-  if (WIFI_SSID_3[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_3, WIFI_PASSWORD_3};
-  if (WIFI_SSID_4[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_4, WIFI_PASSWORD_4};
+  // Built at the start of every search cycle rather than once at task start: a
+  // network added in the Web UI after boot used to stay invisible to the search
+  // until the next reboot, which reads as "it never connects to the backups".
+  // Entries are pointers into the config globals, so editing an existing slot
+  // was already picked up - the count was the stale half. Only called at cycle
+  // boundaries, where staNetIdx restarts at 0, so indices never shift mid-cycle.
+  auto buildWifiList = [&]() {
+    wifiNetCount = 0;
+    wifiNets[wifiNetCount++] = {WIFI_SSID, WIFI_PASSWORD};
+    if (WIFI_SSID_1[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_1, WIFI_PASSWORD_1};
+    if (WIFI_SSID_2[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_2, WIFI_PASSWORD_2};
+    if (WIFI_SSID_3[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_3, WIFI_PASSWORD_3};
+    if (WIFI_SSID_4[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_4, WIFI_PASSWORD_4};
+  };
+  buildWifiList();
 
   WiFi.setHostname("dashboard-pp");
   bool staConnected = false;
@@ -1267,7 +1277,17 @@ void webServerTask(void *pvParameters) {
     }
     // CPU frequency: applied by the display loop on the core that draws
     // (processConfigApply), so the clock never changes under an SPI transfer.
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
+    // A save whose NVS writes never reached flash used to answer "ok" anyway.
+    // The failing-write count rides along in the response so the Web UI can say
+    // the settings are live but not stored, instead of a green "saved" banner
+    // over values a reboot will undo.
+    char saveResp[64];
+    if (cfgNvsWriteErrors)
+      snprintf(saveResp, sizeof(saveResp), "{\"status\":\"ok\",\"nvsErrors\":%u}",
+               (unsigned)cfgNvsWriteErrors);
+    else
+      snprintf(saveResp, sizeof(saveResp), "{\"status\":\"ok\"}");
+    server.send(200, "application/json", saveResp);
     forceFullRedraw = true;
     pendingInvertDisplay = true;
     if (!ENABLE_AUTO_BRIGHTNESS)
@@ -1819,6 +1839,7 @@ void webServerTask(void *pvParameters) {
     //   1 = keep cycling until WIFI_RETRY_SECONDS have elapsed
     //   2 = keep searching forever (default)
     if (staPhase == STA_INIT) {
+      buildWifiList();
       int configuredNets = 0;
       for (int i = 0; i < wifiNetCount; i++) {
         if (strlen(wifiNets[i].ssid) > 0) configuredNets++;
@@ -1849,6 +1870,7 @@ void webServerTask(void *pvParameters) {
         // freshly-assigned IP (otherwise dashboard-pp.local keeps advertising
         // the stale address). NTP stays one-shot via staHasConnectedBefore.
         staFinalized = false;
+        buildWifiList();  // a network may have been added while the link was up
         staPhase = STA_BACKOFF;
         staDeadline = millis() + 500;
       }
@@ -1885,6 +1907,7 @@ void webServerTask(void *pvParameters) {
             logPrintf("WiFi cycle failed, searching again\n");
             staNetIdx = 0;
             staRefusals = 0;
+            buildWifiList();  // pick up networks saved since the last cycle
             staPhase = STA_BACKOFF;
             staDeadline = millis() + 2000;
           }
