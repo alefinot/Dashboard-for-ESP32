@@ -1,4 +1,5 @@
 #include "dashboard.h"
+#include <nvs.h>  // nvs_get_stats: the partition's entry budget, for failed writes
 
 // ----------------------------------------------------------------------------
 // Configuration variables (defined here, declared extern elsewhere)
@@ -364,6 +365,44 @@ static uint32_t clampCfgUnsigned(const char *name, long long v, long long lo,
 // Writes that failed are counted so a save can say so out loud instead of
 // looking like it worked (issue #32).
 uint16_t cfgNvsWriteErrors = 0;
+char cfgNvsFailedKeys[72];
+static bool cfgSaveActive = false;
+
+// Which keys failed, so a save can name them instead of only counting them.
+// Recorded only while processConfig(2) is open: a write from another task (the
+// odometer, the reboot tag) must not end up blamed on the user's save. The list
+// is fixed-size (RAM rules) and tail-truncated when it overflows.
+void cfgNoteFailedKey(const char *key) {
+  if (!cfgSaveActive) return;
+  size_t used = strlen(cfgNvsFailedKeys);
+  size_t need = strlen(key) + (used ? 2 : 1);
+  if (used + need > sizeof(cfgNvsFailedKeys)) {
+    if (sizeof(cfgNvsFailedKeys) - used >= 6) strcat(cfgNvsFailedKeys, ",...");
+    return;
+  }
+  if (used) strcat(cfgNvsFailedKeys, ",");
+  strcat(cfgNvsFailedKeys, key);
+}
+
+// The entry budget of the NVS partition. A failing write on a unit that still
+// has hundreds of available entries points at page fragmentation (a string
+// needs one page with room for the whole value), not at a full partition.
+size_t nvsStatsUsed = 0, nvsStatsAvailable = 0, nvsStatsTotal = 0;
+
+void logNvsStats() {
+  nvs_stats_t st;
+  if (nvs_get_stats("nvs", &st) == ESP_OK) {
+    nvsStatsUsed = st.used_entries;
+    nvsStatsAvailable = st.available_entries;
+    nvsStatsTotal = st.total_entries;
+    logPrintf("NVS 'nvs': %u entries used, %u available, %u free, %u total, %u namespace(s)\n",
+              (unsigned)st.used_entries, (unsigned)st.available_entries,
+              (unsigned)st.free_entries, (unsigned)st.total_entries,
+              (unsigned)st.namespace_count);
+  } else {
+    logPrintf("NVS: nvs_get_stats failed\n");
+  }
+}
 
 #define CFG_INT(var, nvsKey, defVal, lo, hi)                                   \
   if (mode == 0) {                                                             \
@@ -723,7 +762,11 @@ void processConfig(int mode, JsonDocument *doc) {
   // interleave with another task's open and lose writes (issue #32).
   NvsSession session("cfg", false, (mode == 0 || mode == 2));
   Preferences &pref = session.nvs;
-  if (mode == 2) cfgNvsWriteErrors = 0;
+  if (mode == 2) {
+    cfgNvsWriteErrors = 0;
+    cfgNvsFailedKeys[0] = 0;
+    cfgSaveActive = true;
+  }
   // Issue #18: a point-count change invalidates the stored ramp, and the new
   // count is only known after the CFG_* block below has run.
   const int prevFuelPoints = FUEL_TOUCH_POINTS;
@@ -1095,9 +1138,12 @@ void processConfig(int mode, JsonDocument *doc) {
 
   // The namespace itself closes when `session` goes out of scope (and takes
   // prefsMux with it).
-  if (mode == 2 && cfgNvsWriteErrors)
-    logPrintf("Config save: %d parameter(s) failed to reach NVS - see the NVS lines above; they will revert on reboot\n",
-              cfgNvsWriteErrors);
+  if (mode == 2 && cfgNvsWriteErrors) {
+    logPrintf("Config save: %d parameter(s) failed to reach NVS (%s); they will revert on reboot\n",
+              cfgNvsWriteErrors, cfgNvsFailedKeys[0] ? cfgNvsFailedKeys : "names not recorded");
+    logNvsStats();
+  }
+  cfgSaveActive = false;
   applyColors();
 }
 
@@ -1365,6 +1411,7 @@ void logStoredWifiProfiles() {
     n += written;
   }
   logPrintf("WiFi credentials from NVS:%s\n", line);
+  logNvsStats();
 }
 
 void recalculateDerivedParams() {

@@ -481,6 +481,28 @@ class NvsSession {
   bool _locked = false;
 };
 
+// Count of NVS writes that failed during the most recent processConfig(2) save
+// (and the boot seed). Reported to the Web UI so a save that never reached flash
+// cannot be shown as "saved successfully".
+extern uint16_t cfgNvsWriteErrors;
+
+// Which keys failed, comma-separated (fixed buffer, no heap - see the RAM rules
+// in AGENTS.md). A count alone told the user something was lost but not what;
+// the names are what separate "the partition is full" from "this one key is
+// broken". Truncated with ",..." when they do not fit.
+extern char cfgNvsFailedKeys[72];
+void cfgNoteFailedKey(const char *key);  // records only while a config save is open
+
+// Last NVS partition entry budget read by logNvsStats() (0 = never read). The
+// save response reports `available` so a full partition is visible from the
+// browser; on a fragmented-but-not-full partition it still looks roomy, which is
+// itself the answer.
+extern size_t nvsStatsUsed, nvsStatsAvailable, nvsStatsTotal;
+
+// Logs the NVS partition's entry budget (used / available / total). Free space
+// is the first thing to rule out when writes start failing.
+void logNvsStats();
+
 // NVS write results have to be checked: the RAM copy changes, NVS does not, and
 // the setting comes back at the next reboot with no trace of why (issue #32).
 //
@@ -499,11 +521,13 @@ class NvsSession {
 inline bool nvsWriteFailed(const char *key, size_t written) {
   if (written) return false;
   logPrintf("NVS: write of %s FAILED - value is live now, a reboot restores the old one\n", key);
+  cfgNoteFailedKey(key);
   return true;
 }
 inline bool nvsWriteFailed(const char *key, bool ok) {
   if (ok) return false;
   logPrintf("NVS: write of %s FAILED - value is live now, a reboot restores the old one\n", key);
+  cfgNoteFailedKey(key);
   return true;
 }
 
@@ -516,10 +540,7 @@ inline bool nvsStringWriteFailed(const char *key, const char *value, size_t writ
   return nvsWriteFailed(key, written);
 }
 
-// Count of NVS writes that failed during the most recent processConfig(2) save
-// (and the boot seed). Reported to the Web UI so a save that never reached flash
-// cannot be shown as "saved successfully".
-extern uint16_t cfgNvsWriteErrors;
+
 
 // Logs what the WiFi credentials NVS actually handed back at boot: SSIDs and
 // whether each password slot is filled - never the passwords themselves.

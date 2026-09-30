@@ -2675,9 +2675,13 @@ function save() {
             if (r.nvsErrors) {
                 // The device accepted the values but could not write them all to
                 // flash - they are live until the next reboot and then revert.
-                // Say so instead of painting a green "saved" over lost settings.
+                // Say so, name the keys, and show the storage budget instead of
+                // painting a green "saved" over lost settings.
                 msgBox.className = 'msg-error';
-                msgBox.innerText += ' WARNING: ' + r.nvsErrors + ' value(s) could not be written to storage - they work now, but a reboot will restore the old ones. The device log names the failing keys.';
+                msgBox.innerText += ' WARNING: ' + r.nvsErrors + ' value(s) failed to save'
+                    + (r.nvsFailedKeys ? ' [' + r.nvsFailedKeys + ']' : '')
+                    + (typeof r.nvsAvailable === 'number' ? ' - NVS has ' + r.nvsAvailable + ' free entries' : '')
+                    + '. They work now, but a reboot restores the old ones. The device log names the cause.';
             }
         } else {
             msgBox.className = 'msg-error';

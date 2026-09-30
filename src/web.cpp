@@ -1281,10 +1281,11 @@ void webServerTask(void *pvParameters) {
     // The failing-write count rides along in the response so the Web UI can say
     // the settings are live but not stored, instead of a green "saved" banner
     // over values a reboot will undo.
-    char saveResp[64];
+    char saveResp[192];
     if (cfgNvsWriteErrors)
-      snprintf(saveResp, sizeof(saveResp), "{\"status\":\"ok\",\"nvsErrors\":%u}",
-               (unsigned)cfgNvsWriteErrors);
+      snprintf(saveResp, sizeof(saveResp),
+               "{\"status\":\"ok\",\"nvsErrors\":%u,\"nvsFailedKeys\":\"%s\",\"nvsAvailable\":%u}",
+               (unsigned)cfgNvsWriteErrors, cfgNvsFailedKeys, (unsigned)nvsStatsAvailable);
     else
       snprintf(saveResp, sizeof(saveResp), "{\"status\":\"ok\"}");
     server.send(200, "application/json", saveResp);
