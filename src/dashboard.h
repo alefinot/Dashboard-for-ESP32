@@ -66,6 +66,8 @@ public:
 
   void applyBusConfig();
   void loadVLWFont(const char *path);
+  // Advance-based bounds: *x1 is always 0, *y1 = -baseline, *w = textWidth,
+  // *h = font height. See the definition in gfx.cpp before using x1 (issue #44).
   void getTextBounds(const char *string, int16_t x, int16_t y, int16_t *x1,
                      int16_t *y1, uint16_t *w, uint16_t *h);
   void getTextBounds(const String &str, int16_t x, int16_t y, int16_t *x1,

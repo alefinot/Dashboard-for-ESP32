@@ -89,6 +89,11 @@ static void ensureSpeedMetrics() {
   int want = clampCells(SPEED_DIGITS);
   if (spdMetricsReady && spdCountCached == want) return;
   spdMetricsReady = true;
+  // sx1 from getTextBounds() is the left edge of the drawn glyph. This build
+  // reports 0 by contract - bounds are advance-based (issue #44) - so
+  // digitXOff[] and the cell terms settle on advance-only placement. They are
+  // kept because that is exactly where a real per-glyph offset would flow
+  // through; today they are a documented zero, not a live correction.
   spdCountCached = want;
   // The 120px VLW gets parsed on the display here, once per boot (cheap when
   // the font cache survives). The sprite build below parses it a second time
@@ -276,7 +281,7 @@ static void drawDsDigitPair(LGFX_ST7789_4 &g, const char *str, int baseX, int y)
       g.print('8');
     }
     int d = digitIndex(c);
-    if (d < 0) continue;  // '-' (or anything else): keep the ghost '8' visible
+    if (d < 0) continue;  // '-' is the blank placeholder; anything else is junk
     int cx = slotRight - 2 - ds15_digitXOff[d] - ds15_digitWidth[d];
     if (SHOW_GHOST_DIGITS)
       g.setTextColor(TFT_WHITE);
@@ -1125,13 +1130,29 @@ if (!vlw120Ready) {
       (displaySat != lastSat || forceDrawSat)))) {
     lastSat = displaySat;
     componentUpdated = true;
+    // SAT_DIGITS is this readout's width, like every other *_DIGITS parameter
+    // (issue #41): the value is capped to what that many digits can print - the
+    // same issue #7 discipline every other readout uses - and the erase box is
+    // sized from it. Until now the number was formatted at whatever width it
+    // happened to need and the box was hardcoded to two digits ("44"), so the
+    // WebUI control changed nothing.
+    int satDigits = SAT_DIGITS;
+    if (satDigits < 1) satDigits = 1;
+    if (satDigits > 3) satDigits = 3;  // CFG_INT band is 1..3; defensive
+    int satCeil = 1;
+    for (int i = 0; i < satDigits; i++) satCeil *= 10;
+    int satVal = displaySat > satCeil - 1 ? satCeil - 1 : displaySat;
+    if (satVal < 0) satVal = 0;
     char satStr[8];
-    snprintf(satStr, sizeof(satStr), "%d", displaySat);
+    snprintf(satStr, sizeof(satStr), "%d", satVal);
+    char satWidest[4] = {0};  // '8' x satDigits: the widest value it can print
+    for (int i = 0; i < satDigits; i++) satWidest[i] = '8';
     int16_t bx1_s, by1_s;
     uint16_t bw1_s, bh1_s;
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
     display.getTextBounds(satStr, 0, 0, &bx1_s, &by1_s, &bw1_s, &bh1_s);
     int iconX = satX + (w_sat_max - 16) / 2;
+    // bx1_s is a documented zero (issue #44), kept as the compensation slot.
     int drawX = satX + (w_sat_max - bw1_s) / 2 - bx1_s;
     int drawY = satY + 19 - by1_s;
     if (forceDraw || satIconRedraw) {
@@ -1143,12 +1164,12 @@ if (!vlw120Ready) {
       satIconX = satX;
       satIconY = satY;
     } else {
-      // Value change only: clear a box that covers the widest possible 1-2
-      // digit value ("44", 20px advance) plus 2px padding. by1_s is negative
-      // (-baseline), so the text cell starts at drawY + by1_s; anchoring the
-      // box there (instead of below the glyphs) prevents a narrower value from
-      // leaving residue from a wider one. The icon is left alone.
-      int satBoxW = display.textWidth("44") + 2;  // 20 + 2 = 22
+      // Value change only: clear a box covering the widest value this readout
+      // can show (satWidest) plus 2px padding. by1_s is negative (-baseline),
+      // so the text cell starts at drawY + by1_s; anchoring the box there
+      // (instead of below the glyphs) prevents a narrower value from leaving
+      // residue from a wider one. The icon is left alone.
+      int satBoxW = display.textWidth(satWidest) + 2;
       display.fillRect(satX + (w_sat_max - satBoxW) / 2,
                         drawY + by1_s - 1,
                         satBoxW, bh1_s + 2, TFT_BLACK);

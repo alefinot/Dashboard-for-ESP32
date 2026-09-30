@@ -115,10 +115,20 @@ void LGFX_ST7789_4::loadVLWFont(const char *path) {
   }
 }
 
+// Advance-based text bounds (issue #44). This is the layout box the string will
+// occupy when printed at the cursor: *w is the advance width (textWidth), *h the
+// font line height, *y1 = -baseline (so callers can anchor by baseline) and *x1
+// is ALWAYS 0 by contract - per-glyph ink bearings are deliberately not
+// computed. Every layout path in ui.cpp/gfx.cpp (7-seg digit cells, badges, the
+// centred splash/weather/signature strings) places text on advances, and the
+// `- x1` terms in those expressions are the documented hook where a real left
+// bearing would flow through, not a live correction. Do not read x1 as a
+// measured bearing; if ink bounds are ever needed, add a separate helper rather
+// than changing these semantics.
 void LGFX_ST7789_4::getTextBounds(const char *string, int16_t x, int16_t y,
                                 int16_t *x1, int16_t *y1, uint16_t *w,
                                 uint16_t *h) {
-  *x1 = 0;
+  *x1 = 0;  // documented-zero: advance-based bounds, see above
   *y1 = -_font_metrics.baseline;
   *w = textWidth(string);
   *h = fontHeight();
@@ -598,6 +608,8 @@ void drawBadge(const char *text, int offsetX, int offsetY, uint16_t color, int f
   drawAARoundRect(display, x, y, badgeW, badgeH, 4, color);
   drawDebugBox(display, x - 3, y - 3, badgeW + 6, badgeH + 6);
   display.setTextColor(color);
+  // tx1/ty1 come from advance-based bounds (issue #44): tx1 is 0 by contract,
+  // ty1 is -baseline and is what actually centres the text vertically.
   display.setCursor(x + (badgeW - w) / 2 - tx1, y + (badgeH - h) / 2 - ty1 + 1);
   display.print(text);
 }
