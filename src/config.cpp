@@ -243,7 +243,9 @@ char WIFI_PASSWORD_4[64] = "";
 const char AP_PASSWORD_DEFAULT[] = "12345678";
 char AP_PASSWORD[64] = "12345678";
 int WIFI_TX_POWER_DBM = 20;
-int WIFI_RETRY_MODE = 1;
+// 2 = search forever: a dashboard drives in and out of range all day, so an
+// expired search window only guarantees it sits offline until the next reboot.
+int WIFI_RETRY_MODE = 2;
 int WIFI_RETRY_SECONDS = 60;
 
 bool NTP_ENABLED = true;
@@ -923,8 +925,24 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_STR(WIFI_SSID_4, "WIFI_S4", "");
   CFG_STR(AP_PASSWORD, "AP_PWD", AP_PASSWORD_DEFAULT);
   CFG_INT(WIFI_TX_POWER_DBM, "WIFI_TXP", 20, -1, 20);
-  CFG_INT(WIFI_RETRY_MODE, "WIFI_RETRY_M", 1, 0, 2);
+  CFG_INT(WIFI_RETRY_MODE, "WIFI_RETRY_M", 2, 0, 2);
   CFG_INT(WIFI_RETRY_SECONDS, "WIFI_RETRY_S", 60, 1, 86400);
+  // One-time migration for the policy default above. Shipped units stored
+  // WIFI_RETRY_M=1 ("search for a fixed time"), which stopped looking for any
+  // network 60 s after boot - the reason a dashboard stayed offline after its
+  // router rebooted. Only the untouched old default is moved, once, and a
+  // deliberate "Stop after one cycle" / "Search for a fixed time" chosen later
+  // in the WebUI is kept.
+  if (mode == 0 && pref.getInt("WIFI_MIG", 0) == 0) {
+    if (WIFI_RETRY_MODE == 1) {
+      WIFI_RETRY_MODE = 2;
+      if (nvsWriteFailed("WIFI_RETRY_M", pref.putInt("WIFI_RETRY_M", 2)))
+        cfgNvsWriteErrors++;
+      logPrintf("Config: WIFI_RETRY_MODE moved 1 -> 2 (search forever)\n");
+    }
+    if (nvsWriteFailed("WIFI_MIG", pref.putInt("WIFI_MIG", 1)))
+      cfgNvsWriteErrors++;
+  }
   CFG_BOOL(NTP_ENABLED, "NTP_EN", true);
   CFG_STR(NTP_SERVER, "NTP_SRV", "pool.ntp.org");
   CFG_INT(TZ_OFFSET_HOURS, "TZ_OFFSET", 1, -14, 14);
@@ -1268,7 +1286,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "WIFI_SSID_3": "",
   "WIFI_SSID_4": "",
   "WIFI_TX_POWER_DBM": 20,
-  "WIFI_RETRY_MODE": 1,
+  "WIFI_RETRY_MODE": 2,
   "WIFI_RETRY_SECONDS": 60,
   "NTP_ENABLED": true,
   "NTP_SERVER": "pool.ntp.org",

@@ -472,7 +472,7 @@ void loop() {
   static unsigned long lastDiagHeartbeat = 0;
   if (now - lastDiagHeartbeat >= 10000) {
     lastDiagHeartbeat = now;
-    logPrintf("HB: up=%lus fps=%.1f freq=%uMHz tgtFps=%d heap=%lu min=%lu maxAlloc=%lu sp=%d fallback=%d otaReq=%d memAct=%d wifi=%d rssi=%d apClients=%u temp=%.1f maxFrame=%lums over24=%lu sMaxGap=%lums\n",
+    logPrintf("HB: up=%lus fps=%.1f freq=%uMHz tgtFps=%d heap=%lu min=%lu maxAlloc=%lu sp=%d fallback=%d otaReq=%d memAct=%d wifi=%d rssi=%d sta=%d/%d/%u apClients=%u temp=%.1f maxFrame=%lums over24=%lu sMaxGap=%lums\n",
               millis() / 1000UL, (double)currentMeasuredFps,
               (unsigned)getCpuFrequencyMhz(), TARGET_FPS,
               (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
@@ -480,6 +480,7 @@ void loop() {
               (int)isSpeedFallback(),
               (int)otaMemReleaseRequested, (int)memSaverActive,
               (int)WiFi.status(), (int)WiFi.RSSI(),
+              (int)staDbgPhase, staDbgNetIdx, (unsigned)staDbgReason,
               (unsigned)WiFi.softAPgetStationNum(), (double)temperatureRead(),
               (unsigned long)g_diagMaxFrameMs, (unsigned long)g_diagOver24Ms,
               (unsigned long)g_diagMaxSensorGapMs);

@@ -364,6 +364,14 @@ extern int WIFI_TX_POWER_DBM;
 extern int WIFI_RETRY_MODE;
 extern int WIFI_RETRY_SECONDS;
 
+// WiFi STA search diagnostics, written by the web task's search state machine
+// and read by the diagnostic heartbeat: phase (0=init 1=backoff 2=try
+// 3=attempt 4=gap 5=up 6=give-up), last STA disconnect reason, and the index of
+// the network currently being tried (0 = primary).
+extern volatile uint8_t staDbgPhase;
+extern volatile uint8_t staDbgReason;
+extern volatile int staDbgNetIdx;
+
 extern bool NTP_ENABLED;
 extern char NTP_SERVER[64];
 extern int TZ_OFFSET_HOURS;

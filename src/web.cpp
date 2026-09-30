@@ -73,6 +73,64 @@ void factoryResetConfig() {
 
 volatile bool otaUpdateSuccess = false;
 
+// ---------------------------------------------------------------------------
+// WiFi STA search: driver-side state written from the WiFi event callback (ESP
+// event-task context) and read by the search state machine in webServerTask.
+// Plain volatile scalars only - no heap, no String, nothing blocking in the
+// callback.
+//
+// Why the events are needed at all: ESP-IDF 5.5 (arduino-esp32 3.3.x) made
+// esp_wifi_set_config() fail with ESP_ERR_WIFI_STATE while a connect attempt is
+// in flight - esp_wifi.h: "ESP_ERR_WIFI_STATE: WiFi still connecting when
+// invoke esp_wifi_set_config", and espressif/esp-idf#17484 confirms the check
+// ships in every 5.x. The Arduino core also auto-reconnects on its own by
+// default (STAClass _autoReconnect = true, and WIFI_REASON_NO_AP_FOUND counts as
+// a reconnectable reason), so a failed network keeps an attempt armed forever
+// and every WiFi.begin() for the next saved network is refused: the STA config
+// never changes and the unit stays pinned to the first SSID. The search loop
+// therefore owns reconnects here and waits for the driver to report an attempt
+// over before installing the next network.
+static volatile bool staDrvAttemptOpen = false;  // driver holds/works on an attempt
+static volatile bool staLinkDropped = false;     // DISCONNECTED / LOST_IP seen while up
+static volatile uint8_t staDrvReason = 0;        // last STA_DISCONNECTED reason code
+
+// Search phase / network index mirrors for the heartbeat line, so a unit in the
+// field can be diagnosed without replaying a serial session. Phase values match
+// the StaPhase enum in webServerTask.
+volatile uint8_t staDbgPhase = 0;
+volatile uint8_t staDbgReason = 0;
+volatile int staDbgNetIdx = -1;
+
+static void wifiStaEventHandler(arduino_event_t *ev) {
+  switch (ev->event_id) {
+    case ARDUINO_EVENT_WIFI_STA_STOP:
+      staDrvAttemptOpen = false;
+      break;
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:  // associated, DHCP still pending
+      staDrvAttemptOpen = true;
+      staLinkDropped = false;
+      break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      // The attempt is over: esp_wifi_set_config() accepts a new network again.
+      staDrvAttemptOpen = false;
+      staDrvReason = ev->event_info.wifi_sta_disconnected.reason;
+      staDbgReason = staDrvReason;
+      staLinkDropped = true;
+      break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      staDrvAttemptOpen = false;
+      staLinkDropped = false;
+      break;
+    case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+      // DHCP expired on a live association: treat it as a lost link instead of
+      // keeping a dead uplink.
+      staLinkDropped = true;
+      break;
+    default:
+      break;
+  }
+}
+
 // OTA Pull state
 static bool otaPullBootCheckDone = false;  // automatic check runs once per boot
 static char otaPullStatus[96] = "idle";
@@ -1011,6 +1069,12 @@ void webServerTask(void *pvParameters) {
   otaStatusMutex = xSemaphoreCreateMutex();
   weatherFetchMutex = xSemaphoreCreateMutex();
   WiFi.mode(WIFI_AP_STA);
+  // Take the reconnect away from the WiFi core: with its default auto-reconnect
+  // a fresh attempt is always armed on the network that just failed, which is
+  // exactly the state in which IDF 5.5 refuses a new STA config. The search
+  // state machine below is the only thing that arms a connect.
+  WiFi.setAutoReconnect(false);
+  WiFi.onEvent(wifiStaEventHandler);
   int txPower = WIFI_TX_POWER_DBM;
   if (txPower < -1) txPower = -1;
   if (txPower > 20) txPower = 20;
@@ -1044,15 +1108,21 @@ void webServerTask(void *pvParameters) {
   WiFi.setHostname("dashboard-pp");
   bool staConnected = false;
   int staNetIdx = 0;
-  bool staInFlight = false;
-  bool staDone = false;
   bool staFinalized = false;
   bool staHasConnectedBefore = false;
   unsigned long staDeadline = 0;
-  unsigned long staRetryAt = 0;
+  unsigned long staAttemptStart = 0;
+  int staRefusals = 0;  // consecutive begin() refusals for the current index
   // Start of the current search episode (boot or the last link loss). Mode 1
   // (fixed search window) counts from here; reset on every re-arm.
   unsigned long staSearchStart = 0;
+  // GAP exists because of the IDF 5.5 config rule above: the machine never
+  // installs the next network until the driver has reported the previous
+  // attempt over. Values are mirrored into staDbgPhase for the heartbeat.
+  enum StaPhase : uint8_t { STA_INIT = 0, STA_BACKOFF = 1, STA_TRY = 2,
+                            STA_ATTEMPT = 3, STA_GAP = 4, STA_UP = 5,
+                            STA_GIVEUP = 6 };
+  StaPhase staPhase = STA_INIT;
 
   ArduinoOTA.onStart([]() {
     logPrintf("OTA started\n");
@@ -1738,102 +1808,156 @@ void webServerTask(void *pvParameters) {
     // flash write ends.
     else { webLoopCount++; vTaskDelay(pdMS_TO_TICKS(20)); }
 
-    // A joined uplink that drops (router reboot, range loss, DHCP expiry) is
-    // not the end of the world: re-arm the search so the saved networks are
-    // tried again under the same policy. Failed begin() attempts also move
-    // WiFi.status() away from WL_CONNECTED, but staConnected is only true
-    // after a real join, so only genuine link losses reach this path.
-    if (staConnected && WiFi.status() != WL_CONNECTED) {
-      logPrintf("STA link lost (status=%d), re-searching networks\n",
-                (int)WiFi.status());
-      staConnected = false;
-      staDone = false;
-      staInFlight = false;
-      staNetIdx = 0;
-      staSearchStart = 0;
-      staRetryAt = millis() + 500;
-      // Clear the finalize latch so the post-join block re-runs on the
-      // reconnect: re-arms the weather fetch and re-binds mDNS for the
-      // freshly-assigned IP (otherwise dashboard-pp.local keeps advertising
-      // the stale address). NTP stays one-shot via staHasConnectedBefore.
-      staFinalized = false;
-    }
-
-    // Non-blocking STA connect: try each configured network for up to 5s,
-    // while the config server keeps serving AP clients. mDNS/NTP run once
-    // after a network is joined. The search policy (WIFI_RETRY_MODE, read
-    // live from config so WebUI changes apply immediately) decides whether
-    // a failed cycle is the end of the search:
+    // ---------------------------------------------------------------------
+    // Non-blocking STA search. wifiNets[] is in priority order and index 0 is
+    // the primary network (WIFI_SSID), so every cycle - at boot and after a
+    // link loss - offers the primary first and a fallback is only ever used
+    // when the primary did not answer. The search policy (WIFI_RETRY_MODE, read
+    // live from config so WebUI changes apply immediately) decides what happens
+    // when a full cycle fails:
     //   0 = stop after one cycle through the saved networks
     //   1 = keep cycling until WIFI_RETRY_SECONDS have elapsed
-    //   2 = keep searching forever
-    // The same policy governs reconnects after a lost link.
-    if (!staDone) {
-      if (staSearchStart == 0) {
-        int configuredNets = 0;
-        for (int i = 0; i < wifiNetCount; i++) {
-          if (strlen(wifiNets[i].ssid) > 0) configuredNets++;
-        }
-        if (configuredNets == 0) {
-          // Nothing to search for: never busy-loop on empty SSID entries.
-          staDone = true;
-          logPrintf("No WiFi networks configured, using AP only\n");
-        } else {
-          staSearchStart = millis();
-        }
+    //   2 = keep searching forever (default)
+    if (staPhase == STA_INIT) {
+      int configuredNets = 0;
+      for (int i = 0; i < wifiNetCount; i++) {
+        if (strlen(wifiNets[i].ssid) > 0) configuredNets++;
       }
-    }
-    if (!staDone) {
-      if (staRetryAt && millis() < staRetryAt) {
-        // backoff between attempts
-      } else if (staNetIdx < wifiNetCount) {
-        if (!staInFlight) {
-          if (strlen(wifiNets[staNetIdx].ssid) == 0) {
-            staNetIdx++;
-          } else {
-            logPrintf("Trying WiFi[%d]: %s\n", staNetIdx, wifiNets[staNetIdx].ssid);
-            WiFi.begin(wifiNets[staNetIdx].ssid, wifiNets[staNetIdx].pass);
-            staDeadline = millis() + 5000;
-            staInFlight = true;
+      if (configuredNets == 0) {
+        // Nothing to search for: never busy-loop on empty SSID entries.
+        staPhase = STA_GIVEUP;
+        logPrintf("No WiFi networks configured, using AP only\n");
+      } else {
+        staSearchStart = millis();
+        staPhase = STA_TRY;
+      }
+    } else if (staPhase == STA_UP) {
+      // Link loss is taken from the driver's own DISCONNECTED / LOST_IP event,
+      // not from WiFi.status(): status also leaves WL_CONNECTED for failed
+      // attempts and for transient DHCP states, which used to re-arm the search
+      // on a network that was perfectly fine.
+      if (staLinkDropped) {
+        staLinkDropped = false;
+        logPrintf("STA link lost (reason=%u), re-searching networks\n",
+                  (unsigned)staDrvReason);
+        staConnected = false;
+        staNetIdx = 0;  // the primary network gets first refusal again
+        staSearchStart = millis();
+        staRefusals = 0;
+        // Clear the finalize latch so the post-join block re-runs on the
+        // reconnect: re-arms the weather fetch and re-binds mDNS for the
+        // freshly-assigned IP (otherwise dashboard-pp.local keeps advertising
+        // the stale address). NTP stays one-shot via staHasConnectedBefore.
+        staFinalized = false;
+        staPhase = STA_BACKOFF;
+        staDeadline = millis() + 500;
+      }
+    } else if (staPhase != STA_GIVEUP) {
+      if (staPhase == STA_BACKOFF) {
+        if (millis() >= staDeadline) staPhase = STA_TRY;
+      } else if (staPhase == STA_GAP) {
+        // Wait for the driver to report the previous attempt over - only then
+        // does it accept the next network. The guard keeps a lost event from
+        // wedging the search forever.
+        if (!staDrvAttemptOpen || millis() >= staDeadline) {
+          staPhase = STA_BACKOFF;
+          staDeadline = millis() + 150;
+        }
+      } else if (staPhase == STA_TRY) {
+        if (staNetIdx >= wifiNetCount) {
+          // A full cycle through every saved network finished without a join.
+          bool giveUp = false;
+          if (WIFI_RETRY_MODE == 0) {
+            giveUp = true;
+            logPrintf("All WiFi networks failed, using AP only\n");
+          } else if (WIFI_RETRY_MODE == 1 &&
+                     millis() - staSearchStart >=
+                         (unsigned long)WIFI_RETRY_SECONDS * 1000UL) {
+            giveUp = true;
+            logPrintf("WiFi search timed out after %ds, using AP only\n",
+                      WIFI_RETRY_SECONDS);
           }
-        } else if (WiFi.status() == WL_CONNECTED) {
+          if (giveUp) {
+            staPhase = STA_GIVEUP;
+          } else {
+            // Mode 1 (still inside its window) or mode 2 (forever): run the
+            // next cycle after a short backoff so the radio is not hammered.
+            logPrintf("WiFi cycle failed, searching again\n");
+            staNetIdx = 0;
+            staRefusals = 0;
+            staPhase = STA_BACKOFF;
+            staDeadline = millis() + 2000;
+          }
+        } else if (strlen(wifiNets[staNetIdx].ssid) == 0) {
+          staNetIdx++;  // empty slot: skip it without burning a backoff
+        } else {
+          logPrintf("Trying WiFi[%d]: %s\n", staNetIdx, wifiNets[staNetIdx].ssid);
+          staDrvAttemptOpen = true;  // begin() arms it; the events clear it
+          staAttemptStart = millis();
+          wl_status_t beginRes = WiFi.begin(wifiNets[staNetIdx].ssid,
+                                            wifiNets[staNetIdx].pass);
+          if (beginRes == WL_CONNECT_FAILED) {
+            // The driver refused the config: this network was NOT tried, an
+            // attempt was still in flight (ESP_ERR_WIFI_STATE). Retrying the
+            // SAME index is deliberate - silently advancing is what used to
+            // skip the whole fallback list. The counter stops a wedged driver
+            // from blocking the search on one entry forever.
+            WiFi.disconnect(false);  // drop whatever was still connecting
+            staRefusals++;
+            logPrintf("WiFi[%d] begin() refused by the driver (x%d)\n",
+                      staNetIdx, staRefusals);
+            if (staRefusals >= 3) {
+              logPrintf("WiFi[%d] %s skipped: driver refused 3x\n", staNetIdx,
+                        wifiNets[staNetIdx].ssid);
+              staNetIdx++;
+              staRefusals = 0;
+              staPhase = STA_BACKOFF;
+              staDeadline = millis() + 3000;
+            } else {
+              staPhase = STA_GAP;
+              staDeadline = millis() + 1500;
+            }
+          } else {
+            staRefusals = 0;
+            staPhase = STA_ATTEMPT;
+            staDeadline = millis() + 5000;
+          }
+        }
+      } else if (staPhase == STA_ATTEMPT) {
+        if (WiFi.status() == WL_CONNECTED) {
           staConnected = true;
-          staDone = true;
+          staLinkDropped = false;
+          staPhase = STA_UP;
+          logPrintf("STA joined WiFi[%d]: %s\n", staNetIdx,
+                    wifiNets[staNetIdx].ssid);
           logPrintf("STA connected: %s\n", WiFi.localIP().toString().c_str());
           logPrintf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
-        } else if (millis() >= staDeadline) {
-          logPrintf("WiFi[%d] failed, trying next...\n", staNetIdx);
-          WiFi.disconnect(false);
-          staInFlight = false;
+        } else if (!staDrvAttemptOpen && millis() - staAttemptStart > 300) {
+          // The driver already ended this attempt (NO_AP_FOUND, wrong password,
+          // auth timeout...): no reason to burn the rest of the window.
+          logPrintf("WiFi[%d] %s failed (reason=%u), trying next...\n",
+                    staNetIdx, wifiNets[staNetIdx].ssid,
+                    (unsigned)staDrvReason);
           staNetIdx++;
-          staRetryAt = millis() + 200;
-        }
-      } else {
-        // A full cycle through every saved network finished without a join.
-        bool giveUp = false;
-        if (WIFI_RETRY_MODE == 0) {
-          giveUp = true;
-          logPrintf("All WiFi networks failed, using AP only\n");
-        } else if (WIFI_RETRY_MODE == 1 &&
-                   millis() - staSearchStart >=
-                       (unsigned long)WIFI_RETRY_SECONDS * 1000UL) {
-          giveUp = true;
-          logPrintf("WiFi search timed out after %ds, using AP only\n",
-                    WIFI_RETRY_SECONDS);
-        }
-        if (giveUp) {
-          staDone = true;
-        } else {
-          // Mode 1 (still inside the window) or mode 2 (forever): run the
-          // next cycle after a short backoff so the radio is not hammered.
-          logPrintf("WiFi cycle failed, retrying...\n");
-          staNetIdx = 0;
-          staRetryAt = millis() + 2000;
+          staPhase = STA_BACKOFF;
+          staDeadline = millis() + 200;
+        } else if (millis() >= staDeadline) {
+          // Still connecting when the window closed (out of range, silent
+          // DHCP): stop the attempt first, otherwise the next config change is
+          // rejected and the search pins itself to this network.
+          logPrintf("WiFi[%d] %s timed out, trying next...\n", staNetIdx,
+                    wifiNets[staNetIdx].ssid);
+          WiFi.disconnect(false);
+          staNetIdx++;
+          staPhase = STA_GAP;
+          staDeadline = millis() + 1500;
         }
       }
     }
+    staDbgPhase = (uint8_t)staPhase;
+    staDbgNetIdx = staNetIdx;
 
-    if (staDone && staConnected && !staFinalized) {
+    if (staConnected && !staFinalized) {
       staFinalized = true;
       startWeatherFetch();
       // mDNS/NTP are one-shot services: running them again on every reconnect
