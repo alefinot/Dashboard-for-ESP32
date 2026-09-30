@@ -1,5 +1,21 @@
-nvs,      data, nvs,     0x9000,  0x5000,
-otadata,  data, ota,     0xe000,  0x2000,
-app0,     app,  ota_0,   0x10000, 0x1D0000,
-app1,     app,  ota_1,   0x1E0000,0x1D0000,
-spiffs,   data, spiffs,  0x3B0000,0x50000,
+# Custom partition table, 4 MB flash.
+#
+# nvs is 80 KB (20 pages), not the 20 KB (5 pages) this project shipped with
+# until 1.4.0. NVS reclaims space a page at a time: entries stranded by a
+# rewrite are only erased when a whole page holds nothing live. With ~200 config
+# keys spread over four usable pages that never happened, stale entries piled up
+# and writes started failing on a unit that reported "saved" (the primary SSID
+# and password were the first to go - see the 1.4.0 changelog).
+#
+# The LittleFS partition gave up the space; fonts have been compiled into the
+# binary as PROGMEM since the VLW headers landed, so it only backs the
+# /api/health byte reporting.
+#
+# Changing this table needs a full re-flash (pio run -t erase, then upload): an
+# app-only OTA update replaces the firmware, never the partition table, and the
+# erase wipes NVS, so WiFi credentials have to be entered again.
+nvs,      data, nvs,     0x9000,  0x14000,
+otadata,  data, ota,     0x1D000, 0x2000,
+app0,     app,  ota_0,   0x20000, 0x1D0000,
+app1,     app,  ota_1,   0x1F0000,0x1D0000,
+spiffs,   data, spiffs,  0x3C0000,0x40000,

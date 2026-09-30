@@ -391,17 +391,62 @@ size_t nvsStatsUsed = 0, nvsStatsAvailable = 0, nvsStatsTotal = 0;
 
 void logNvsStats() {
   nvs_stats_t st;
+  const esp_partition_t *part = esp_partition_find_first(
+      ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "nvs");
   if (nvs_get_stats("nvs", &st) == ESP_OK) {
     nvsStatsUsed = st.used_entries;
     nvsStatsAvailable = st.available_entries;
     nvsStatsTotal = st.total_entries;
-    logPrintf("NVS 'nvs': %u entries used, %u available, %u free, %u total, %u namespace(s)\n",
+    // The byte size is printed too because a unit updated over OTA keeps the
+    // partition table it was flashed with: the same firmware runs against 20 KB
+    // or 80 KB of NVS depending on how that board was last flashed, and the log
+    // is the only place that difference is visible.
+    logPrintf("NVS 'nvs' %u bytes: %u entries used, %u available, %u free, %u total, %u namespace(s)\n",
+              part ? (unsigned)part->size : 0u,
               (unsigned)st.used_entries, (unsigned)st.available_entries,
               (unsigned)st.free_entries, (unsigned)st.total_entries,
               (unsigned)st.namespace_count);
   } else {
     logPrintf("NVS: nvs_get_stats failed\n");
   }
+}
+
+// A save that rewrites every parameter spends the NVS budget on churn rather
+// than on values: re-storing a string of a different length strands its old
+// items, and those are only erased when a whole page is left with nothing live.
+// On the old 5-page partition ~200 keys were spread over every page, so garbage
+// accumulated until the partition had one entry free and the next write failed -
+// silently, with the Web UI saying "saved". Reading first and writing only what
+// changed is both the space fix and the wear rule (AGENTS 12). The extra reads
+// are cheap: NVS caches pages in RAM once opened.
+static char cfgStrScratch[196];  // fixed buffer (AGENTS 14), CFG_STR only
+
+static bool cfgIntChanged(Preferences &pref, const char *key, int v) {
+  // A value no config band can reach stands in for "key not stored".
+  return pref.getInt(key, v == INT_MIN ? INT_MIN + 1 : INT_MIN) != v;
+}
+
+static bool cfgFloatChanged(Preferences &pref, const char *key, float v) {
+  // A missing key reads back NaN, which fails the comparison and gets written.
+  return !(pref.getFloat(key, NAN) == v);
+}
+
+static bool cfgBoolChanged(Preferences &pref, const char *key, bool v) {
+  return pref.getBool(key, !v) != v;
+}
+
+static bool cfgStrChanged(Preferences &pref, const char *key, const char *v) {
+  cfgStrScratch[0] = 0;
+  if (pref.getString(key, cfgStrScratch, sizeof(cfgStrScratch)) == 0)
+    return v[0] != 0;  // nothing stored, or stored empty: only a real value is worth a write
+  return strcmp(cfgStrScratch, v) != 0;
+}
+
+// Same rule for the fuel ramp, which is written by several paths per save.
+// Returns what putFloat returns (bytes written), and 1 for "nothing to do".
+static bool cfgPutFloat(Preferences &pref, const char *key, float v) {
+  if (!cfgFloatChanged(pref, key, v)) return true;
+  return pref.putFloat(key, v);
 }
 
 #define CFG_INT(var, nvsKey, defVal, lo, hi)                                   \
@@ -413,7 +458,8 @@ void logNvsStats() {
   } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
     var = (*doc)[#var].as<int>();                                              \
     clampCfgInt(#var, &var, lo, hi);                                           \
-    if (nvsWriteFailed(nvsKey, pref.putInt(nvsKey, var))) cfgNvsWriteErrors++;  \
+    if (cfgIntChanged(pref, nvsKey, var) &&                                    \
+        nvsWriteFailed(nvsKey, pref.putInt(nvsKey, var))) cfgNvsWriteErrors++;  \
   }
 
 #define CFG_UINT(var, nvsKey, defVal, lo, hi)                                   \
@@ -423,7 +469,8 @@ void logNvsStats() {
     (*doc)[#var] = var;                                                        \
   } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
     var = clampCfgUnsigned(#var, (*doc)[#var].as<long long>(), lo, hi);         \
-    if (nvsWriteFailed(nvsKey, pref.putInt(nvsKey, (int)var))) cfgNvsWriteErrors++; \
+    if (cfgIntChanged(pref, nvsKey, (int)var) &&                               \
+        nvsWriteFailed(nvsKey, pref.putInt(nvsKey, (int)var))) cfgNvsWriteErrors++; \
   }
 
 #define CFG_FLT(var, nvsKey, defVal, lo, hi)                                   \
@@ -435,7 +482,8 @@ void logNvsStats() {
   } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
     var = (*doc)[#var].as<float>();                                            \
     clampCfgFloat(#var, &var, lo, hi, (float)defVal);                          \
-    if (nvsWriteFailed(nvsKey, pref.putFloat(nvsKey, var))) cfgNvsWriteErrors++; \
+    if (cfgFloatChanged(pref, nvsKey, var) &&                                  \
+        nvsWriteFailed(nvsKey, pref.putFloat(nvsKey, var))) cfgNvsWriteErrors++; \
   }
 
 // String config values live in fixed char[] buffers (no String objects, no
@@ -458,7 +506,8 @@ void logNvsStats() {
     (*doc)[#var] = var;                                                        \
   } else if (mode == 2 && (*doc)[#var].is<const char *>()) {                   \
     snprintf(var, sizeof(var), "%s", (*doc)[#var].as<const char *>());         \
-    if (nvsStringWriteFailed(nvsKey, var, pref.putString(nvsKey, var))) cfgNvsWriteErrors++; \
+    if (cfgStrChanged(pref, nvsKey, var) &&                                    \
+        nvsStringWriteFailed(nvsKey, var, pref.putString(nvsKey, var))) cfgNvsWriteErrors++; \
   }
 
 #define CFG_BOOL(var, nvsKey, defVal)                                          \
@@ -468,7 +517,8 @@ void logNvsStats() {
     (*doc)[#var] = var;                                                        \
   } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
     var = (*doc)[#var].as<bool>();                                             \
-    if (nvsWriteFailed(nvsKey, pref.putBool(nvsKey, var))) cfgNvsWriteErrors++; \
+    if (cfgBoolChanged(pref, nvsKey, var) &&                                   \
+        nvsWriteFailed(nvsKey, pref.putBool(nvsKey, var))) cfgNvsWriteErrors++; \
   }
 
 // The version this unit reports: the user override when one is set, otherwise
@@ -1024,8 +1074,12 @@ void processConfig(int mode, JsonDocument *doc) {
           pwds[i][63] = 0;
           // Checked like every other write: a password that never reached flash
           // used to be invisible, and the network then fails to join after a
-          // reboot with nothing in the log to point at it.
-          if (nvsWriteFailed(nvs[i], pref.putString(nvs[i], pwds[i]))) cfgNvsWriteErrors++;
+          // reboot with nothing in the log to point at it. Unchanged passwords
+          // are not re-stored - they are the longest strings in the namespace
+          // and rewriting them on every save was the churn that filled it.
+          if (cfgStrChanged(pref, nvs[i], pwds[i]) &&
+              nvsWriteFailed(nvs[i], pref.putString(nvs[i], pwds[i])))
+            cfgNvsWriteErrors++;
         }
       }
     }
@@ -1092,7 +1146,8 @@ void processConfig(int mode, JsonDocument *doc) {
         if (!(v >= 0.0f)) v = 0.0f;  // also catches NaN
         fuelCalOhms[i] = constrain(v, 0.0f, 100000.0f);
         snprintf(key, sizeof(key), "FCO_%d", i);
-        pref.putFloat(key, fuelCalOhms[i]);
+        if (nvsWriteFailed(key, cfgPutFloat(pref, key, fuelCalOhms[i])))
+          cfgNvsWriteErrors++;
       }
     }
     // Points beyond the uploaded array (or a missing array) keep their
@@ -1101,7 +1156,7 @@ void processConfig(int mode, JsonDocument *doc) {
     // and breaks the fuel gauge).
     for (int i = written; i < FUEL_TOUCH_POINTS; i++) {
       snprintf(key, sizeof(key), "FCO_%d", i);
-      if (nvsWriteFailed(key, pref.putFloat(key, fuelCalOhms[i])))
+      if (nvsWriteFailed(key, cfgPutFloat(pref, key, fuelCalOhms[i])))
         cfgNvsWriteErrors++;
     }
   }
@@ -1116,7 +1171,7 @@ void processConfig(int mode, JsonDocument *doc) {
     char key[8];
     for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
       snprintf(key, sizeof(key), "FCO_%d", i);
-      if (nvsWriteFailed(key, pref.putFloat(key, fuelCalOhms[i])))
+      if (nvsWriteFailed(key, cfgPutFloat(pref, key, fuelCalOhms[i])))
         cfgNvsWriteErrors++;
     }
   }
@@ -1130,7 +1185,7 @@ void processConfig(int mode, JsonDocument *doc) {
       char key[8];
       for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
         snprintf(key, sizeof(key), "FCO_%d", i);
-        if (nvsWriteFailed(key, pref.putFloat(key, fuelCalOhms[i])))
+        if (nvsWriteFailed(key, cfgPutFloat(pref, key, fuelCalOhms[i])))
           cfgNvsWriteErrors++;
       }
     }

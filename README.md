@@ -610,8 +610,22 @@ Dashboard++ for ESP32/
 
 ### Partition Table
 The project uses a custom `partitions.csv` with:
+- An **80 KB NVS partition** (`0x14000`, 20 pages) — 4× the 20 KB shipped until 1.4.0, see the changelog entry on NVS exhaustion
 - Two OTA app slots (0x1D0000 each)
-- A 320 KB LittleFS partition (0x50000), retained only for `/api/health` byte reporting (fonts are now PROGMEM)
+- A 256 KB LittleFS partition (0x40000), retained only for `/api/health` byte reporting (fonts are now PROGMEM)
+
+Layout (4 MB flash, ends at exactly `0x400000`):
+
+| Partition | Offset | Size |
+|---|---|---|
+| `nvs` | `0x9000` | `0x14000` (80 KB) |
+| `otadata` | `0x1D000` | `0x2000` |
+| `app0` | `0x20000` | `0x1D0000` |
+| `app1` | `0x1F0000` | `0x1D0000` |
+| `spiffs` | `0x3C0000` | `0x40000` (256 KB) |
+
+> [!WARNING]
+> A partition-table change is **not** delivered by an OTA update — OTA replaces the app slot, never the table. A unit that updates over the air keeps whatever table it was last flashed with, and the boot log line `NVS 'nvs' <bytes> bytes: …` is how you tell which one it is. Moving a board onto the new table needs a wired re-flash (`pio run -t erase` then `pio run -t upload`), and **the erase wipes NVS**: WiFi credentials, odometer and calibration have to be entered again.
 
 ### Compiling & Flashing via USB
 
@@ -780,7 +794,10 @@ The issue-sweep release: 35 reported defects closed since V1.3.9, plus three use
 - **One NVS session, one lock (#32)** — an RAII `NvsSession` holds `prefsMux` across the whole `begin()/end()` pair at all 13 call sites; every failed write is counted and reported (`Config save: 3 parameter(s) failed to reach NVS … they will revert on reboot`), the ambient-calibration endpoints answer `saved-ram-only`, and a boot that cannot read NVS no longer seeds factory defaults over an unreadable namespace.
 - **That write reporting was itself inverted, and is now right** — `Preferences::put*()` returns the number of bytes written (`0` on failure, `1` for numerics, `strlen(value)` for a string), not an `esp_err_t`, and the #32 helper compared that count against `ESP_OK`. A genuine failure (0) therefore read as success — the silent loss #32 was raised to stop — while every successful write logged a bogus failure whose "error name" was the value's length (`NVS: write of WIFI_S1 failed (0xc)` for a 12-character SSID). The helper now takes the byte count (with a separate overload for the `bool`-returning `clear()`/`remove()`, plus an empty-string-aware variant so clearing an SSID is not a false alarm), failures log once with the key name, and a save answers `nvsErrors: N` / `nvsFailedKeys` / `nvsAvailable` so the Web UI names the keys that did not stick instead of showing "Configuration saved successfully".
 - **The factory-default seed no longer erases the stored SSIDs** — `FACTORY_DEFAULT_JSON` carried all five SSIDs as empty strings, so any boot that found `CFG_VER < 5` cleared every saved network name in RAM and NVS (passwords were already left out). The `CFG_VER` stamp was written unchecked, so one lost stamp repeated that wipe on every boot: credentials had to be retyped each session and looked unsaved. WiFi credentials are now excluded from the seed — matching a Factory Reset, which deliberately puts them back — and the stamp is checked and logged when it cannot be stored.
-- **The NVS budget is visible** — boot logs `NVS 'nvs': N entries used, N available, N free, N total, N namespace(s)` (and again after a save that failed), plus `WiFi credentials from NVS: [0]=Home/pw set [1]=(no SSID) …`. That log separates a full partition from a fragmented one, which need opposite fixes.
+- **The NVS budget is visible** — boot logs `NVS 'nvs' N bytes: N entries used, N available, N free, N total, N namespace(s)` (and again after a save that failed), plus `WiFi credentials from NVS: [0]=Home/pw set [1]=(no SSID) …`. That log separates a full partition from a fragmented one, which need opposite fixes.
+- **The real cause of the lost WiFi saves: the NVS partition was full** — with `nvs` at 20 KB (5 pages, one always reserved for garbage collection) a unit reported `NVS has 1 free entries`, and the two writes that could not fit were `WIFI_SSID`/`WIFI_PWD` — **slot 0, the primary network**, which is why it looked hardcoded while a secondary slot saved fine when room happened to be free. Two changes, one layout and one behavioural:
+  - **`nvs` is now 80 KB** (20 pages) in `partitions.csv`, taken from LittleFS (320 → 256 KB), which has held nothing since fonts moved into the binary. Offsets shift, so this only reaches a board through a wired re-flash — and OTA-updated boards keep the old table until they get one.
+  - **A save now writes only what changed.** Every `CFG_*` parameter, the WiFi passwords and the fuel ramp are read back first and skipped when the value already matches. The old behaviour rewrote all ~200 parameters on every autosave; re-storing a string at a different length strands its old 16-byte items, and those can only be erased once a whole page holds nothing live — with ~200 keys spread over four usable pages that never happened, so stale items grew until the partition was full. This is also the wear rule (AGENTS §12) applied to the save path rather than only the odometer.
 - **Progress bar cannot divide by zero (#38)** — a zero or negative total in `updateOTAProgress()` raised an integer-divide panic in the ArduinoOTA callback mid-update.
 - **Boot provenance complete (#42)** — every `esp_reset_reason_t` maps to a label, unmapped ones print their numeric id instead of `UNKNOWN`.
 - **`/api/time` range checked (#40)** — only 2020–2100 epochs are accepted, so a typo'd timestamp cannot poison the NTP baseline.
