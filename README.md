@@ -658,8 +658,8 @@ The cloud pull (Web UI → **System & Modes** → *Cloud OTA Pull*) reads a smal
 manifest from `OTA_PULL_URL`, then downloads and flashes the image it points at:
 
 ```json
-{ "version": "1.3.9",
-  "firmware_url": "https://github.com/alefinot/Dashboard-for-ESP32/releases/download/v1.3.9/firmware.bin" }
+{ "version": "1.4.0",
+  "firmware_url": "https://github.com/alefinot/Dashboard-for-ESP32/releases/download/v1.4.0/firmware.bin" }
 ```
 
 `OTA_PULL_URL` may also point straight at the GitHub API
@@ -690,14 +690,14 @@ regenerate with the script, never hand-edit):
 ```bash
 python scripts/ota_sign.py keygen                                  # once, on the signing machine
 python scripts/ota_sign.py pubkey                                  # refresh include/ota_pubkey.h
-python scripts/ota_sign.py sign   1.3.9 .pio/build/esp32dev/firmware.bin
-python scripts/ota_sign.py verify 1.3.9 .pio/build/esp32dev/firmware.bin
+python scripts/ota_sign.py sign   1.4.0 .pio/build/esp32dev/firmware.bin
+python scripts/ota_sign.py verify 1.4.0 .pio/build/esp32dev/firmware.bin
 ```
 
 `sign` writes `firmware.bin.sig` next to the binary — a DER ECDSA P-256 signature
 over `sha256(firmware.bin) || 0x0A || version`. Upload it as a **sibling release
 asset**; a release without the `.sig` will not install on any device. The signed
-version is the plain number (`1.3.9`) — the release tag is `v1.3.9`, and a `v`
+version is the plain number (`1.4.0`) — the release tag is `v1.4.0`, and a `v`
 prefix in a manifest version is stripped before the version compare.
 
 Keep `keys/ota_sign_key.pem` backed up offline and private: lose it and no future
@@ -729,6 +729,55 @@ In Demo Mode:
 ---
 
 ## Changelog
+
+### V1.4.0 — Input validation sweep, NVS discipline, receive-only GNSS, marine fuel sender and a trip-reset button
+
+The issue-sweep release: 35 reported defects closed since V1.3.9, plus three user-facing features. No pin changes.
+
+**New features**
+- **Marine resistive fuel sender (#18)** — the fuel input is no longer demo-only. GPIO32 (ADC1_CH4) reads a resistive tank sender through the calibration table; `FUEL_OHMS_MIN`/`FUEL_OHMS_MAX` describe the sender's empty/full resistance, the ADC is characterised once at boot (`Fuel: raw … at E/F ohms`) and refuel detection works outside simulation.
+- **Trip-reset button on GPIO25 (#17)** — debounced active-low input with internal pull-up resets trip distance, trip time, average speed and session max. The automatic refuel trip-reset is gone: a trip is reset by the button or the Web UI only.
+- **DST rule selector (#22)** — `DST_RULE` picks `EU`, `US` or `none`, so zones whose summer offset is not simply base+1 h stop drifting an hour twice a year. `TZ_OFFSET_HOURS` is documented as the winter/base offset and is now bounded (#35).
+
+**Config input validation**
+- **Every numeric parameter has a band (#21, #20, #13, #34, #35, #36)** — 131 parameters carry an accepted range checked on read, on write and after an NVS load; out-of-band input keeps the last-good value and logs it. Includes the panel SPI clock (#13 — a 0 or oversized value blanked the ILI9488), backlight clamping through one shared helper (#20), `setCpuFreqMHz()` return checking (#34), `TZ_OFFSET_HOURS` bounds that previously overflowed the local-time maths (#35), and `TARGET_FPS` bounds that also retire a dead branch (#36). `scripts/verify_config_ranges.py` fails when a parameter is missing from the table.
+- **Digit counts really are boundaries (#6, #7, #41)** — counts are clamped to the cell arrays that draw them (14 cells max), values are capped to what N integer digits can print, and an over-wide string drops leading characters instead of indexing a cell array at `-1`. `SAT_DIGITS` (1–3) is wired to the satellite readout (#41): value capped, erase box measured from the configured width.
+- **WebUI limits are generated, not hand-maintained** — `scripts/make_webui_limits.py` regenerates `FIRMWARE_LIMITS` from `config.cpp` so a web input can never accept a value the firmware misuses.
+
+**Concurrency and shared state**
+- **GPS read through a snapshot, not cross-core TinyGPS++ (#9)** — display and odometer paths read the mutex-guarded `g_gpsFix` copy; the TinyGPS++ objects belong to `gpsTask` alone. A weather fetch used to steal the odometer's pending fix mid-ride.
+- **Odometer reads locked as well as writes (#14)** — the 8-byte `totalDistanceKm` is copied under `odoMux`, so telemetry can no longer show a torn value.
+- **Weather text under `g_stateMutex` (#8)** — the display task copies the fixed-size weather fields under the lock instead of racing the fetch task (the `String` members are gone too).
+- **`POST /api/config` no longer reconfigures live from the web task (#10)** — bus and CPU changes raised by a save are applied by the display loop, which owns the panel.
+- **Task creation checked (#25)** — a `sensorTask`/`gpsTask`/`webServerTask` that cannot start is logged and retried with a smaller footprint instead of the dashboard silently showing zeros.
+- **NTP no longer blocks the web server (#43)** — the post-Wi-Fi wait that froze every endpoint for up to 5 s is now a non-blocking settle poll.
+
+**GNSS**
+- **The link is strictly receive-only** — `ubxSend()`, the recovery-command path and the boot reconfiguration are removed. Nothing is ever written to the GNSS UART; the module is left exactly as configured and the dashboard only parses what it receives (the #11/#26/#39 recovery machinery goes with it).
+- **UBX parser cannot desync (#33)** — a zero-length payload frame advanced the state machine wrongly and cost frame sync until the next NMEA line; the parser now consumes exactly one frame. `scripts/verify_ubx_parser.py` replays the 11 malformed cases, including the two that hung the parser.
+- **Fix validity read correctly (#12)** — NAV-PVT fix state comes from the fix-validity flag, not the time-validity bit.
+- **Boot RESET capture bounded (#39)** — the pre-reset serial capture buffer can no longer saturate before the command arrives.
+
+**Power and uptime**
+- **Power-sense blips don't park the GPS task (#26)** — `POWER_SENSE` LOW is debounced, and a real power loss sleeps 10 s instead of halting forever.
+- **Stacks measured and sized (#27)** — `gpsTask`'s 1 KB buffer inside its 4 KB stack plus the snapshot path came within ~100 bytes of overflow; high-water marks are reported (`TASKS: gps high-water … bytes`) and re-sized on a half stack.
+- **Overlay redraw actually gated (#15)** — the GPS debug overlay compared values that could never match and repainted every 500 ms; caching restores the intended cadence.
+
+**Sensors and rendering**
+- **Hall ISR no longer busy-waits (#30)** — the 1 ms width-qualification loop ran with interrupts disabled on the core driving the display; edges are stamped in the ISR and width-filtered on the task.
+- **Fuel gauge cannot freeze on a bad table (#19, #4)** — out-of-order (E > F) calibration rows are repaired on load, and a reading outside the table clamps instead of sticking at a stale value.
+- **No-data fuel readout (#16)** — a trip with no driving shows `0`, not the placeholder `99.9 km/L`.
+- **Temperature marker cleanup (#29)** — the green `TEMP_WARN_GRN` marker (never stored, exported or exposed) is removed; the gauge fades blue → amber → red across the two remaining thresholds.
+- **Digit renderers validate their input (#31)** — every digit loop resolves its character through `digitIndex()` before touching the 10-entry per-glyph metric tables; a non-digit skips the cell instead of reading out of bounds.
+- **Text bounds contract documented (#44)** — `getTextBounds()` is advance-based by definition (`x1` always 0, `y1 = -baseline`); the `- x1` terms in the layout code are a documented slot, not a live offset.
+
+**OTA and NVS robustness**
+- **One NVS session, one lock (#32)** — an RAII `NvsSession` holds `prefsMux` across the whole `begin()/end()` pair at all 13 call sites; every failed write is counted and reported (`Config save: 3 parameter(s) failed to reach NVS … they will revert on reboot`), the ambient-calibration endpoints answer `saved-ram-only`, and a boot that cannot read NVS no longer seeds factory defaults over an unreadable namespace.
+- **Progress bar cannot divide by zero (#38)** — a zero or negative total in `updateOTAProgress()` raised an integer-divide panic in the ArduinoOTA callback mid-update.
+- **Boot provenance complete (#42)** — every `esp_reset_reason_t` maps to a label, unmapped ones print their numeric id instead of `UNKNOWN`.
+- **`/api/time` range checked (#40)** — only 2020–2100 epochs are accepted, so a typo'd timestamp cannot poison the NTP baseline.
+
+**Size and tooling** — `RAM 22.2 %` (72,884 B of 327,680 B), `Flash 90.3 %` (1,715,375 B of the 1,900,544 B OTA slot, ~185 KB headroom). New checks: `verify_config_ranges.py`, `verify_ubx_parser.py`, `verify_fuel_ohms.py`, `verify_dst_rules.py`, and `make_webui_limits.py` for the WebUI `FIRMWARE_LIMITS` table.
 
 ### V1.3.9 — Signed OTA firmware, truthful version identity, hotspot password guard
 - **Firmware signing (cloud OTA pull)** — every pulled image is verified against an ECDSA P-256 / SHA-256 signature (`firmware.bin.sig`, a sibling release asset) before `Update.end()` marks the new slot bootable. The public key is compiled in (`include/ota_pubkey.h`, generated by `scripts/ota_sign.py`); the private key stays on the signing machine (`keys/`, gitignored). Missing signature, wrong version or a tampered binary = update refused, current firmware untouched. See *Cloud OTA Pull & Firmware Signing*.
