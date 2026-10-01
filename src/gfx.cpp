@@ -73,6 +73,7 @@ void LGFX_ST7789_4::applyBusConfig() {
 // The VLW fonts are compiled directly into Flash memory (PROGMEM) via headers in include/,
 // so they stream from Flash mapped memory and consume ZERO bytes of DRAM.
 static int g_lastVLWFont = -1;
+static float g_lastVLWScale = 1.0f;
 static bool g_vlw120Loaded = false;
 
 VFontData getVLWData120() {
@@ -87,32 +88,106 @@ void freeVLWData120() {
 
 void resetVLWFontCache() {
   g_lastVLWFont = -1;
+  g_lastVLWScale = 1.0f;
   display.unloadFont();
+}
+
+// Compiled VLW faces, in the order the loader selects them. The set mirrors the
+// headers scripts/vlw_to_header.py generates from Fonts/*.vlw (issue #37).
+enum {
+  VLW_FACE_NONE = -1,
+  VLW_FACE_DS_120 = 0,  // DS-DIGIT 120 px (speed sprite)
+  VLW_FACE_DS_28 = 1,   // DS-DIGIT 28 px (secondary digits)
+  VLW_FACE_CON_28 = 2,  // Conthrax SemiBold 28 px (headings, badges)
+  VLW_FACE_CON_16 = 3,  // Conthrax SemiBold 16 px (labels, micro text)
+};
+
+// Read the "_<N>px" size marker out of a "/Fonts/<family>_<N>px.vlw" request.
+// Returns 0 when the path carries no size, which means "give me this family at
+// its own face size".
+static int parseFontPxSize(const char *path) {
+  const char *px = strstr(path, "px.");
+  if (!px) px = strstr(path, "px");
+  if (!px) return 0;
+  const char *d = px;
+  while (d > path && d[-1] >= '0' && d[-1] <= '9') --d;
+  if (d == px) return 0;
+  int v = 0;
+  for (; d < px; ++d) v = v * 10 + (*d - '0');
+  return v;
+}
+
+// Bind a font request to a face that is actually compiled in, and report that
+// face's native size. The old loader compared fixed characters of the path
+// (path[7], path[16], path[25], path[26]), so any name it did not expect - the
+// whole "_10px" family above all - fell through to a 4 pt bitmap: text drawn so
+// small it read as missing (issue #37). A size with no compiled face is served
+// from the nearest face and drawn at a fractional text scale instead, so the
+// metrics the layout measures are the metrics it gets.
+static int pickVLWFace(const char *path, int requested, int *native) {
+  if (strstr(path, "DS-DIGIT") || strstr(path, "DS_DIGIT")) {
+    if (requested > 28) {
+      *native = 120;
+      return VLW_FACE_DS_120;
+    }
+    *native = 28;
+    return VLW_FACE_DS_28;
+  }
+  if (strstr(path, "Conthrax")) {
+    if (requested > 16) {
+      *native = 28;
+      return VLW_FACE_CON_28;
+    }
+    *native = 16;
+    return VLW_FACE_CON_16;
+  }
+  *native = 0;
+  return VLW_FACE_NONE;
 }
 
 void LGFX_ST7789_4::loadVLWFont(const char *path) {
   setTextDatum(lgfx::textdatum_t::baseline_left);
+  if (!path) path = "";
 
-  bool is120  = (path[7] == 'D' && path[16] == '1');
-  bool isDs28 = (path[7] == 'D' && path[16] == '2');
-  bool isCon28 = (path[7] == 'C' && path[25] == '2');
-  bool isCon16 = (path[7] == 'C' && path[26] == '6');
+  int requested = parseFontPxSize(path);
+  int native = 0;
+  int face = pickVLWFace(path, requested, &native);
+  float scale = (face != VLW_FACE_NONE && native > 0 && requested > 0)
+                    ? (float)requested / (float)native
+                    : 1.0f;
 
-  int cur = is120 ? 0 : isDs28 ? 1 : isCon28 ? 2 : isCon16 ? 3 : 4;
-  if (cur == g_lastVLWFont) return;
-  g_lastVLWFont = cur;
+  if (face == g_lastVLWFont && scale == g_lastVLWScale) return;
+  g_lastVLWFont = face;
+  g_lastVLWScale = scale;
 
-  if (is120) {
-    g_vlw120Loaded = loadFont(DS_DIGIT_120px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
-  } else if (isDs28) {
-    loadFont(DS_DIGIT_28px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
-  } else if (isCon28) {
-    loadFont(Conthrax_SemiBold_28px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
-  } else if (isCon16) {
-    loadFont(Conthrax_SemiBold_16px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
-  } else {
-    setFont(&Conthrax_SemiBold4pt7b);
+  switch (face) {
+    case VLW_FACE_DS_120:
+      g_vlw120Loaded = loadFont(DS_DIGIT_120px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
+      break;
+    case VLW_FACE_DS_28:
+      loadFont(DS_DIGIT_28px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
+      break;
+    case VLW_FACE_CON_28:
+      loadFont(Conthrax_SemiBold_28px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
+      break;
+    case VLW_FACE_CON_16:
+      loadFont(Conthrax_SemiBold_16px_vlw, lgfx::v1::IFont::font_type_t::ft_vlw);
+      break;
+    default: {
+      // Unknown family: last-resort bitmap face, announced once per boot rather
+      // than silently (issue #37).
+      static bool warned = false;
+      if (!warned) {
+        warned = true;
+        logPrintf("Font: no compiled face for '%s', using 4pt fallback\n", path);
+      }
+      scale = 1.0f;
+      g_lastVLWScale = 1.0f;
+      setFont(&Conthrax_SemiBold4pt7b);
+      break;
+    }
   }
+  setTextSize(scale);
 }
 
 // Advance-based text bounds (issue #44). This is the layout box the string will
@@ -402,9 +477,24 @@ template void fillAARoundRect(LGFX_ST7789_4 &, int, int, int, int, int, uint16_t
 // ----------------------------------------------------------------------------
 // Icons
 // ----------------------------------------------------------------------------
+// Battery glyph geometry lives in dashboard.h (issue #48) so the call site can
+// size the icon the same way the drawing does. The 16 px body is the part the
+// eye reads; the 2 px terminal is an overhang on top of it, so the drawn extent
+// is BATTERY_ICON_H + BATTERY_TERMINAL_H while the visual centre is the body's.
+
+// Top-left y for drawBatteryIcon() that puts the icon *body* on centerY. The
+// call site used a hand-tuned `iconCY - 9` (half of body + terminal), which put
+// the body 1 px below the axis of the digits next to it and went stale the
+// moment the glyph was resized.
+int batteryIconTop(int centerY) {
+  return centerY - BATTERY_ICON_H / 2 - BATTERY_TERMINAL_H;
+}
+
 void drawBatteryIcon(int x, int y, float voltage, uint16_t color) {
-  constexpr int iconW = 10, iconH = 16, nippleW = 4, nippleH = 2, innerX = 2,
-                innerY = nippleH + 2, innerW = iconW - 4, innerH = iconH - 4;
+  constexpr int iconW = BATTERY_ICON_W, iconH = BATTERY_ICON_H,
+                nippleW = BATTERY_TERMINAL_W, nippleH = BATTERY_TERMINAL_H,
+                innerX = 2, innerY = nippleH + 2, innerW = iconW - 4,
+                innerH = iconH - 4;
   display.fillRect(x, y, iconW, iconH + nippleH, TFT_BLACK);
   display.fillRect(x + (iconW - nippleW) / 2, y, nippleW, nippleH, color);
   display.drawRect(x, y + nippleH, iconW, iconH, color);

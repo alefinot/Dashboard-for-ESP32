@@ -35,6 +35,15 @@ static inline int cellSkip(int count, int len) {
 
 static constexpr unsigned long STARTUP_RAMP_DURATION_MS = 3000;
 
+// Weather card geometry (issue #47). It used to be "int w = 480; int h = 28;"
+// inside drawWeatherWidget() with the caller parking it at wx = 0, so the card
+// spanned the whole panel edge to edge: the 4 px rounded corners were cut off by
+// the AA round-rect and the erase pass (fillRect(lastWx-2, lastWy-2, 484, 32))
+// painted past the last usable pixel on both axes. One pair of constants now
+// drives the draw, the erase and the right-hand text anchors.
+static constexpr int WEATHER_W = 468;
+static constexpr int WEATHER_H = 28;
+
 // Frame-budget gate for updateBigDisplay(). A 60 FPS slot is 16.6ms, but the
 // speed sprite push (~18-20ms at 60MHz SPI) plus the clock (~9ms) plus the
 // odo/sidebar/middle-row redraws (~15-30ms) can land in the same frame and
@@ -890,9 +899,12 @@ if (!vlw120Ready) {
 
     int barX = SIDEBAR_LEFT_X, barY = SIDEBAR_LEFT_Y, barW = SIDEBAR_BAR_WIDTH, barH = SIDEBAR_BAR_HEIGHT;
 
-    // Three-colour ramp with two markers: light blue up to TEMP_WARN_YEL, a
-    // blue->amber fade across YEL..RED, then amber->red from RED up to the top
-    // of the bar. The old third marker (TEMP_WARN_GRN) was never stored in NVS,
+    // Three-colour ramp with two markers: plain COLOR_TEMP_NORM up to
+    // TEMP_WARN_YEL, a NORM->WARN fade across YEL..RED, then WARN->CRIT from RED
+    // up to the top of the bar. The stops are blended in RGB, so the shipped
+    // defaults are green -> yellow -> red (the fuel bar's ramp): a cyan low stop
+    // blended to amber through a muddy green that is in neither endpoint
+    // (issue #46). The old third marker (TEMP_WARN_GRN) was never stored in NVS,
     // never exported and never in the WebUI, and its branch swallowed the amber
     // band below it - it was a leftover, so it is gone (issue #29).
     uint16_t tempColor;
@@ -1345,7 +1357,7 @@ if (!vlw120Ready) {
     display.setTextColor(batColor, TFT_BLACK);
     display.print(" V");
     int iconCY = batY + ds15_refY1 + (h_bat_max / 2);
-    drawBatteryIcon(batX, iconCY - 9, displayBat, batColor);
+    drawBatteryIcon(batX, batteryIconTop(iconCY), displayBat, batColor);
     drawDebugBox(display, batX, batClearTop, w_bat_max, batClearH);
   }
 
@@ -1988,8 +2000,13 @@ if (!vlw120Ready) {
   static char lastCity[48] = "";
   static bool lastWeatherNight = false;
 
-  int wx = BIG_CENTER_X + OFFSET_WEATHER_X - 240;
-  int wy = BIG_CENTER_Y + OFFSET_WEATHER_Y - 14;
+  // The card is centred on the user offset and clamped inside the panel, so
+  // OFFSET_WEATHER_X/Y move a widget that keeps its own margins instead of
+  // sliding a panel-width rectangle off the edge (issue #47).
+  int wx = BIG_CENTER_X + OFFSET_WEATHER_X - WEATHER_W / 2;
+  int wy = BIG_CENTER_Y + OFFSET_WEATHER_Y - WEATHER_H / 2;
+  if (DISPLAY_WIDTH >= WEATHER_W) wx = constrain(wx, 0, DISPLAY_WIDTH - WEATHER_W);
+  if (DISPLAY_HEIGHT >= WEATHER_H) wy = constrain(wy, 0, DISPLAY_HEIGHT - WEATHER_H);
   bool showWeather = SHOW_ELEMENT_WEATHER;
 
   bool weatherNight = weatherIsNight(displaySnap);
@@ -1998,7 +2015,7 @@ if (!vlw120Ready) {
   const char *dispCitySrc = (g_weatherData.cityName[0] != 0) ? g_weatherData.cityName : WEATHER_CITY;
 
   if ((lastWx != wx || lastWy != wy || lastWeatherShow != showWeather || forceDraw) && lastWeatherShow) {
-    display.fillRect(lastWx - 2, lastWy - 2, 480 + 4, 28 + 4, TFT_BLACK);
+    display.fillRect(lastWx - 2, lastWy - 2, WEATHER_W + 4, WEATHER_H + 4, TFT_BLACK);
   }
 
   bool weatherChanged = (g_weatherData.temperature != lastTemp ||
@@ -2260,8 +2277,8 @@ void drawWeatherIcon(int cx, int cy, int size, int weatherCode, bool isNight) {
 }
 
 void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDraw) {
-  int w = 480;
-  int h = 28;
+  int w = WEATHER_W;
+  int h = WEATHER_H;
   
   uint16_t cardBg = display.color565(15, 15, 15);
   uint16_t borderCol = display.color565(45, 45, 45);
