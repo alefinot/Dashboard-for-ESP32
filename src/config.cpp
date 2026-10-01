@@ -243,11 +243,6 @@ char WIFI_PASSWORD_4[64] = "";
 // once instead of being repeated as a literal in three places.
 const char AP_PASSWORD_DEFAULT[] = "12345678";
 char AP_PASSWORD[64] = "12345678";
-int WIFI_TX_POWER_DBM = 20;
-// 2 = search forever: a dashboard drives in and out of range all day, so an
-// expired search window only guarantees it sits offline until the next reboot.
-int WIFI_RETRY_MODE = 2;
-int WIFI_RETRY_SECONDS = 60;
 // How long one network gets before the search gives up on it and tries the next
 // slot. A WPA2 join on a cold radio is a band scan (1-3s) plus authentication,
 // association and DHCP; the compiled-in 5s window used to cut off attempts that
@@ -1045,26 +1040,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_STR(WIFI_SSID_3, "WIFI_S3", "");
   CFG_STR(WIFI_SSID_4, "WIFI_S4", "");
   CFG_STR(AP_PASSWORD, "AP_PWD", AP_PASSWORD_DEFAULT);
-  CFG_INT(WIFI_TX_POWER_DBM, "WIFI_TXP", 20, -1, 20);
-  CFG_INT(WIFI_RETRY_MODE, "WIFI_RETRY_M", 2, 0, 2);
-  CFG_INT(WIFI_RETRY_SECONDS, "WIFI_RETRY_S", 60, 1, 86400);
   CFG_INT(WIFI_ATTEMPT_SECONDS, "WIFI_ATTEM_S", 12, 5, 60);
-  // One-time migration for the policy default above. Shipped units stored
-  // WIFI_RETRY_M=1 ("search for a fixed time"), which stopped looking for any
-  // network 60 s after boot - the reason a dashboard stayed offline after its
-  // router rebooted. Only the untouched old default is moved, once, and a
-  // deliberate "Stop after one cycle" / "Search for a fixed time" chosen later
-  // in the WebUI is kept.
-  if (mode == 0 && pref.getInt("WIFI_MIG", 0) == 0) {
-    if (WIFI_RETRY_MODE == 1) {
-      WIFI_RETRY_MODE = 2;
-      if (nvsWriteFailed("WIFI_RETRY_M", pref.putInt("WIFI_RETRY_M", 2)))
-        cfgNvsWriteErrors++;
-      logPrintf("Config: WIFI_RETRY_MODE moved 1 -> 2 (search forever)\n");
-    }
-    if (nvsWriteFailed("WIFI_MIG", pref.putInt("WIFI_MIG", 1)))
-      cfgNvsWriteErrors++;
-  }
   CFG_BOOL(NTP_ENABLED, "NTP_EN", true);
   CFG_STR(NTP_SERVER, "NTP_SRV", "pool.ntp.org");
   CFG_INT(TZ_OFFSET_HOURS, "TZ_OFFSET", 1, -14, 14);
@@ -1422,9 +1398,6 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "FUEL_DEC_DIGITS": 1,
   "ODO_INT_DIGITS": 5,
   "ODO_DEC_DIGITS": 1,
-  "WIFI_TX_POWER_DBM": 20,
-  "WIFI_RETRY_MODE": 2,
-  "WIFI_RETRY_SECONDS": 60,
   "WIFI_ATTEMPT_SECONDS": 12,
   "NTP_ENABLED": true,
   "NTP_SERVER": "pool.ntp.org",

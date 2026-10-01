@@ -360,9 +360,11 @@ extern char WIFI_PASSWORD_3[64];
 extern char WIFI_SSID_4[64];
 extern char WIFI_PASSWORD_4[64];
 extern char AP_PASSWORD[64];
-extern int WIFI_TX_POWER_DBM;
-extern int WIFI_RETRY_MODE;
-extern int WIFI_RETRY_SECONDS;
+// Per-network join window. The search policy itself is deliberately not a
+// parameter: the STA search keeps cycling through the saved networks forever
+// (a dashboard drives in and out of range all day, so an expired window only
+// guarantees it stays offline until the next reboot), and TX power is fixed at
+// the module maximum - see webServerTask() in web.cpp.
 extern int WIFI_ATTEMPT_SECONDS;
 
 // WiFi STA search diagnostics, written by the web task's search state machine

@@ -1563,10 +1563,17 @@ void webServerTask(void *pvParameters) {
   // state machine below is the only thing that arms a connect.
   WiFi.setAutoReconnect(false);
   WiFi.onEvent(wifiStaEventHandler);
-  int txPower = WIFI_TX_POWER_DBM;
-  if (txPower < -1) txPower = -1;
-  if (txPower > 20) txPower = 20;
-  WiFi.setTxPower((wifi_power_t)txPower);
+  // Fixed at the module maximum - there is no WIFI_TX_POWER_DBM any more. The
+  // value is in 0.25 dBm steps (WIFI_POWER_19_5dBm = 78 = 19.5 dBm), which is
+  // the ceiling for the classic ESP32: esp_wifi_set_max_tx_power() accepts 8-78
+  // on this chip, and the ESP32-WROOM-32 datasheet quotes 19.5 dBm typical for
+  // 802.11b (18.0 dBm for OFDM/HT20 - the PHY backs the PA off by rate on its
+  // own). The old code cast the configured dBm figure straight into the enum, so
+  // a "20 dBm" setting selected raw value 20 = WIFI_POWER_5dBm and the radio ran
+  // at 5 dBm while the log claimed 20 - a 16x power loss that also weakens probe
+  // and ACK power, i.e. the networks the unit could not see at all.
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  logPrintf("WiFi TX power: 19.5 dBm (raw 78, module maximum)\n");
   // softAP() returns false when the passphrase is rejected (1-7 characters),
   // which would otherwise leave the config portal unreachable in silence.
   if (!WiFi.softAP("Dashboard_Config", AP_PASSWORD)) {
@@ -1611,9 +1618,6 @@ void webServerTask(void *pvParameters) {
   unsigned long staDeadline = 0;
   unsigned long staAttemptStart = 0;
   int staRefusals = 0;  // consecutive begin() refusals for the current index
-  // Start of the current search episode (boot or the last link loss). Mode 1
-  // (fixed search window) counts from here; reset on every re-arm.
-  unsigned long staSearchStart = 0;
   // Start of the in-flight Wi-Fi scan, for the timeout guard below.
   unsigned long scanStartMs = 0;
   // GAP exists because of the IDF 5.5 config rule above: the machine never
@@ -2434,7 +2438,6 @@ void webServerTask(void *pvParameters) {
         staFinalized = false;
         staNetIdx = want;
         staRefusals = 0;
-        staSearchStart = millis();
         staPhase = STA_GAP;
         staDeadline = millis() + 1000;
       }
@@ -2443,14 +2446,12 @@ void webServerTask(void *pvParameters) {
 
     // ---------------------------------------------------------------------
     // Non-blocking STA search. wifiNets[] is in priority order and index 0 is
-    // the primary network (WIFI_SSID), so every cycle - at boot and after a
-    // link loss - offers the primary first and a fallback is only ever used
-    // when the primary did not answer. The search policy (WIFI_RETRY_MODE, read
-    // live from config so WebUI changes apply immediately) decides what happens
-    // when a full cycle fails:
-    //   0 = stop after one cycle through the saved networks
-    //   1 = keep cycling until WIFI_RETRY_SECONDS have elapsed
-    //   2 = keep searching forever (default)
+    // the network that connected last (see the slot rotation on a join), so every
+    // cycle - at boot and after a link loss - offers that one first and a
+    // fallback is only ever used when it did not answer. There is no search
+    // policy parameter: a full cycle that ends without a join is simply followed
+    // by the next one, forever. STA_GIVEUP is only ever reached with nothing
+    // configured to search for.
     if (staPhase == STA_INIT) {
       buildWifiList();
       int configuredNets = 0;
@@ -2462,7 +2463,6 @@ void webServerTask(void *pvParameters) {
         staPhase = STA_GIVEUP;
         logPrintf("No WiFi networks configured, using AP only\n");
       } else {
-        staSearchStart = millis();
         staPhase = STA_TRY;
       }
     } else if (staPhase == STA_UP) {
@@ -2477,7 +2477,6 @@ void webServerTask(void *pvParameters) {
         s_joinedSsid[0] = 0;
         staConnected = false;
         staNetIdx = 0;  // slot 0 is the network that worked last (see rotation)
-        staSearchStart = millis();
         staRefusals = 0;
         // Clear the finalize latch so the post-join block re-runs on the
         // reconnect: re-arms the weather fetch and re-binds mDNS for the
@@ -2507,33 +2506,17 @@ void webServerTask(void *pvParameters) {
       } else if (staPhase == STA_TRY) {
         if (staNetIdx >= wifiNetCount) {
           // A full cycle through every saved network finished without a join.
-          bool giveUp = false;
-          if (WIFI_RETRY_MODE == 0) {
-            giveUp = true;
-            logPrintf("All WiFi networks failed, using AP only\n");
-          } else if (WIFI_RETRY_MODE == 1 &&
-                     millis() - staSearchStart >=
-                         (unsigned long)WIFI_RETRY_SECONDS * 1000UL) {
-            giveUp = true;
-            logPrintf("WiFi search timed out after %ds, using AP only\n",
-                      WIFI_RETRY_SECONDS);
-          }
-          if (giveUp) {
-            staPhase = STA_GIVEUP;
-            logWifiScanSummary();
-            s_scanRequested = true;  // fresh visibility for the next episode
-          } else {
-            // Mode 1 (still inside its window) or mode 2 (forever): run the
-            // next cycle after a short backoff so the radio is not hammered.
-            logPrintf("WiFi cycle failed, searching again\n");
-            logWifiScanSummary();
-            s_scanRequested = true;  // nothing is connected: safe to look around
-            staNetIdx = 0;
-            staRefusals = 0;
-            buildWifiList();  // pick up networks saved since the last cycle
-            staPhase = STA_BACKOFF;
-            staDeadline = millis() + 2000;
-          }
+          // Search again after a short backoff so the radio is not hammered -
+          // the window never expires, and the scan summary below is what makes
+          // "out of range" distinguishable from "wrong password".
+          logPrintf("WiFi cycle failed, searching again\n");
+          logWifiScanSummary();
+          s_scanRequested = true;  // nothing is connected: safe to look around
+          staNetIdx = 0;
+          staRefusals = 0;
+          buildWifiList();  // pick up networks saved since the last cycle
+          staPhase = STA_BACKOFF;
+          staDeadline = millis() + 2000;
         } else if (strlen(wifiNets[staNetIdx].ssid) == 0) {
           staNetIdx++;  // empty slot: skip it without burning a backoff
         } else {
