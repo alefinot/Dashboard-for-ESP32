@@ -31,7 +31,7 @@ static volatile bool safeModeActive = false;
 bool isSafeModeActive() { return safeModeActive; }
 
 // Wipes the configuration NVS namespaces. Used by /api/reset and by the
-// physical recovery gesture (hold BOOT for 8 seconds after boot).
+// physical recovery gesture (hold BOOT 4 s, release, hold 4 s again).
 //
 // The WiFi join credentials (SSIDs, passwords, TX power) survive the reset:
 // the reset exists to recover from a forgotten config PIN or web lockout, and
@@ -39,6 +39,12 @@ bool isSafeModeActive() { return safeModeActive; }
 // exactly when a recovery reset is needed. The SSID/password values written
 // back are the ones loaded from NVS at boot (mode 0), never the compiled
 // defaults.
+//
+// The odometer (namespace `dashboard`, key `odo`) also survives. Recovering
+// from a forgotten PIN gives no claim on the vehicle's lifetime mileage, and
+// re-reading a trip computer's odometer by hand is not possible; the same
+// reasoning is why the credentials are kept. Boot diagnostics live in
+// `bootinfo` and are untouched either way.
 void factoryResetConfig() {
   const char *wifiKeys[] = {
       "WIFI_SSID", "WIFI_S1", "WIFI_S2", "WIFI_S3", "WIFI_S4",
@@ -61,14 +67,13 @@ void factoryResetConfig() {
         restoreFailures++;
     }
   }
-  {
-    NvsSession dash("dashboard", false);
-    if (dash.opened()) nvsWriteFailed("dashboard clear", dash.nvs.clear());
-  }
+  // `dashboard` is deliberately not cleared any more - it holds only the
+  // odometer (see the note above), so this used to cost a unit's whole mileage
+  // every time someone held BOOT a little too long.
   if (restoreFailures)
     logPrintf("Factory reset done, but %d WiFi credential(s) could not be rewritten\n", restoreFailures);
   else
-    logPrintf("Factory reset done (WiFi credentials preserved)\n");
+    logPrintf("Factory reset done (WiFi credentials and odometer preserved)\n");
 }
 
 volatile bool otaUpdateSuccess = false;

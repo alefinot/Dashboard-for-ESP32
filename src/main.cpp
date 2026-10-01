@@ -799,23 +799,70 @@ void loop() {
         logPrintf("CPU: %dMHz (%.1f FPS, %.1fC)\n", targetFreq, currentAverageFps, cpuTemp);
     }
   }
-  // BOOT-hold factory reset: hold GPIO0 (BOOT) for 8s within the first 30s
-  // after boot to wipe the config (recovery when a forgotten config PIN
-  // locks the webui, or any other config corruption).
+  // BOOT-hold factory reset (recovery when a forgotten config PIN locks the
+  // web UI): hold BOOT for 4 s, let go, hold again for 4 s, all inside the
+  // first 30 s after boot.
+  //
+  // The release in the middle is the whole point, not decoration. GPIO0 is
+  // shared with the USB-serial adapter - DTR drives it low through the
+  // auto-reset transistor - so a host that keeps DTR asserted holds GPIO0 low
+  // indefinitely. The old single 8 s hold therefore wiped the configuration on
+  // every boot with nobody touching the board (observed on this bench twice:
+  // any serial session that left DTR asserted erased the config 8 s after
+  // power-on, which is indistinguishable from lost saves unless the log is
+  // read). A stuck-low line can still pass stage 1, but it can never produce
+  // the release stage 2 requires.
+  static int bootHoldStage = 0;  // 1 first hold, 2 armed/waiting release, 3 gap, 4 second hold
   static unsigned long bootHoldStart = 0;
+  static unsigned long bootHoldDeadline = 0;
   if (millis() < 30000) {
-    if (digitalRead(0) == LOW) {
-      if (bootHoldStart == 0) bootHoldStart = millis();
-      if (bootHoldStart && millis() - bootHoldStart > 8000) {
-        logPrintf("BOOT held 8s: factory reset\n");
-        factoryResetConfig();
-        logPrintf("Factory reset done, rebooting\n");
-        delay(100);
-        bootinfo_tag_reboot("factory-reset");
-        ESP.restart();
-      }
-    } else {
-      bootHoldStart = 0;
+    bool bootLow = (digitalRead(0) == LOW);
+    switch (bootHoldStage) {
+      case 0:
+        if (bootLow) {
+          bootHoldStage = 1;
+          bootHoldStart = millis();
+        }
+        break;
+      case 1:
+        if (!bootLow) {
+          bootHoldStage = 0;
+        } else if (millis() - bootHoldStart > 4000) {
+          bootHoldStage = 2;
+          bootHoldDeadline = millis() + 6000;
+          logPrintf("BOOT held 4s: release BOOT and hold again for 4s to factory reset\n");
+        }
+        break;
+      case 2:  // armed, but the required release has not happened
+        if (!bootLow) {
+          bootHoldStage = 3;
+        } else if (millis() > bootHoldDeadline) {
+          bootHoldStage = 0;
+          logPrintf("Factory reset aborted: BOOT was never released - a host holding GPIO0 low cannot wipe the config\n");
+        }
+        break;
+      case 3:  // released, waiting for the second press
+        if (bootLow) {
+          bootHoldStage = 4;
+          bootHoldStart = millis();
+        } else if (millis() > bootHoldDeadline) {
+          bootHoldStage = 0;
+          logPrintf("Factory reset aborted: BOOT was not held again within 6s\n");
+        }
+        break;
+      case 4:
+        if (!bootLow) {
+          bootHoldStage = 0;
+          logPrintf("Factory reset aborted: second BOOT hold ended before 4s\n");
+        } else if (millis() - bootHoldStart > 4000) {
+          logPrintf("BOOT held 4s, released, held 4s: factory reset\n");
+          factoryResetConfig();
+          logPrintf("Factory reset done, rebooting\n");
+          delay(100);
+          bootinfo_tag_reboot("factory-reset");
+          ESP.restart();
+        }
+        break;
     }
   }
 
