@@ -1442,7 +1442,6 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
             <div class="perf-row"><span class="perf-label">WiFi Clients</span><span class="perf-value" id="p-wifi">0</span></div>
             <div class="perf-row"><span class="perf-label">SPI Bus</span><span class="perf-value" id="p-spi">60 MHz</span></div>
             <div class="perf-row"><span class="perf-label">Heap</span><span class="perf-value" id="p-heap">--</span></div>
-            <div class="perf-row"><span class="perf-label">Stack free</span><span class="perf-value" id="p-stacks">--</span></div>
         </div>
         <div class="perf-card" style="grid-column:1/-1;">
             <h4>CPU Performance</h4>
@@ -1521,7 +1520,7 @@ const iconSVG = {
 const DEFAULTS = {
     DISPLAY_ROTATION: 1,
     UNITS_IMPERIAL: false,
-    SPI_BUS_SPEED: 60,
+    SPI_BUS_SPEED: 60000000,
     DISPLAY_WIDTH: 480,
     DISPLAY_HEIGHT: 320,
     TARGET_FPS: 60,
@@ -1906,6 +1905,27 @@ function metricFromDisplay(key, val) {
     }
 }
 
+// Fields whose input box is shown in a different unit than the device stores
+// them (issue #57 replaces the scattered SPI_BUS_SPEED /1000000 special cases
+// with one table). DEFAULTS and FIRMWARE_LIMITS always hold the device unit;
+// the box shows value/UNIT_SCALE and the save path multiplies it back. No field
+// today needs both this scale and the imperial conversion below, and the order
+// (scale on collect, imperial on the whole payload) assumes exactly that.
+const UNIT_SCALE = {
+    SPI_BUS_SPEED: 1000000,    // Hz in NVS, MHz in the box
+    POWER_SENSE_OFF_MS: 1000   // ms in NVS, seconds in the box
+};
+
+const scaleOf = (key) => UNIT_SCALE[key] || 1;
+
+// Device value -> what the box shows: unit scale first, then the imperial
+// display conversion (which leaves non-unit fields alone).
+function boxFromDevice(key, deviceVal) {
+    if (typeof deviceVal !== 'number') return deviceVal;
+    const scaled = deviceVal / scaleOf(key);
+    return (key in UNIT_FIELD_TYPES) ? displayFromMetric(key, scaled) : scaled;
+}
+
 // Label for a unit span: swap the displayed unit name when in imperial mode.
 function unitLabel(u) {
     if (!CURRENT_UNITS_IMPERIAL) return u;
@@ -1948,7 +1968,7 @@ const configMap = [
             { id: "TARGET_FPS", label: "Target Refresh Rate", unit: "FPS" },
             { id: "ENABLE_DEMO_MODE", label: "Enable Sensor Demo Mode" },
             { id: "ENABLE_POWER_SENSE", label: "Enable Power Sensing" },
-            { id: "POWER_SENSE_OFF_MS", label: "Sleep After Power Loss", unit: "ms" },
+            { id: "POWER_SENSE_OFF_MS", label: "Sleep After Power Loss", unit: "s", step: 0.5 },
             { id: "SHOW_ELEMENT_BOUNDS", label: "Show UI Element Bounds (Debug)" },
             { id: "UNITS_IMPERIAL", label: "Use Imperial Units" },
             { type: "card_header", label: "Trip Reset", content: `
@@ -2097,7 +2117,6 @@ const configMap = [
             { type: "subtitle", label: "Brightness Control" },
             { id: "BACKLIGHT_BRIGHTNESS", label: "Backlight Brightness", type: "range", min: 0, max: 100, step: 1 },
             { id: "FADE_DURATION_MS", label: "Fade Duration", type: "range", min: 100, max: 5000, step: 100, unit: "ms" },
-            { id: "ENABLE_AUTO_BRIGHTNESS", label: "Enable Auto Brightness" },
             { type: "card_header", label: "Auto Brightness", content: `<div class="cfg-toolbar spread" style="margin-bottom:10px;">
         <span class="cfg-live">Reading: <strong id="ambient-reading">--</strong></span>
         <div class="cfg-toolbar">
@@ -2105,6 +2124,9 @@ const configMap = [
             <button onclick="calibrateBright()" class="btn-secondary btn-sm">Capture Bright</button>
         </div>
     </div>` },
+            // The switch lives inside the card it governs (issue #54), like
+            // ENABLE_NIGHT_MODE and FUEL_INPUT_ENABLED do in their cards.
+            { id: "ENABLE_AUTO_BRIGHTNESS", label: "Enable Auto Brightness" },
             { id: "LIGHT_SENSOR_DARK_VAL", label: "Dark Value (ADC)", type: "number" },
             { id: "LIGHT_SENSOR_BRIGHT_VAL", label: "Bright Value (ADC)", type: "number" },
             { id: "AUTO_BRIGHT_DARK", label: "Brightness When Dark", type: "range", min: 0, max: 100, step: 1 },
@@ -2119,12 +2141,15 @@ const configMap = [
     {
         title: "Sensors Tuning", icon: iconSVG.sensors,
         items: [
-            { type: "card_header", label: "Resistive Fuel Sender (GPIO32)" },
+            { type: "card_header", label: "Fuel level Sensor", content: `<div class="cfg-help" style="margin-bottom:8px;">Wired on GPIO32 (fixed - see the README pinout). A series resistor from 3V3 feeds the sender to ground; the ADC reads the tap.</div>` },
             { id: "FUEL_INPUT_ENABLED", label: "Sender connected - read the fuel level" },
             { id: "FUEL_OHM_EMPTY", label: "Sender resistance when EMPTY (ohm)" },
             { id: "FUEL_OHM_FULL", label: "Sender resistance when FULL (ohm)" },
             { id: "FUEL_EXC_RES_OHM", label: "Excitation resistor from 3V3 (ohm)" },
-            { id: "FUEL_ADC_VREF", label: "ADC reference / rail voltage (V)", advanced: true },
+            // FUEL_ADC_VREF has no control here (issue #55): the ESP32 runs from
+            // a 3.3 V rail, and typing a different rail voltage only corrupts the
+            // excitation suggestion. The parameter keeps its NVS key, its default
+            // and its slot in config backups.
             { id: "FUEL_OVERSAMPLE", label: "ADC samples averaged per reading", advanced: true },
             { type: "note", label: '<span id="fuel-exciter-hint" class="cfg-help"></span>' },
             { type: "touch-table", label: "Fuel Tank Calibration", pointCount: "FUEL_TOUCH_POINTS", arrayId: "fuelCalOhms", liveId: "fuel-reading", rows: [
@@ -2177,17 +2202,22 @@ const configMap = [
             { id: "GPS_BAUD", label: "GNSS Baud Rate", unit: "baud" },
             { id: "MIN_SATELLITES", label: "Minimum Satellites Required" },
             { id: "OPTIMAL_SATELLITES", label: "Optimal Satellites Count" },
-            { id: "MAX_SPEED_DELTA_KMH", label: "Max Deviation Hall vs GPS", unit: "km/h" },
-            { id: "GPS_MIN_DEV_KMH", label: "Min Deviation Hall vs GPS", unit: "km/h" },
+            // Speed and filtering settings in their own card (issue #56), in the
+            // order they are actually reasoned about: which source is trusted,
+            // how long it is held, how far hall and GPS may disagree, then the
+            // hall-side filters.
+            { type: "card_header", label: "Speedometer", content: `<div class="cfg-help" style="margin-bottom:8px;">Which sensor the speed comes from, how far the hall sensor and GPS are allowed to disagree, and how much filtering the wheel signal gets.</div>` },
             { id: "SPEED_SOURCE_MODE", label: "Speed Source", type: "select",
                 options: [
                     { value: 0, label: "Hall only" },
                     { value: 1, label: "GPS only" },
                     { value: 2, label: "Sensor Fusion (default)" }
                 ] },
+            { id: "SPEED_SOURCE_HOLD_MS", label: "Speed Source Hold Time", unit: "ms" },
+            { id: "GPS_MIN_DEV_KMH", label: "Min Deviation Hall vs GPS", unit: "km/h" },
+            { id: "MAX_SPEED_DELTA_KMH", label: "Max Deviation Hall vs GPS", unit: "km/h" },
             { id: "GPS_START_KMH", label: "GPS Start Speed", unit: "km/h" },
             { id: "GPS_STOP_SETTLE_MS", label: "GPS Stop Settle Time", unit: "ms" },
-            { id: "SPEED_SOURCE_HOLD_MS", label: "Speed Source Hold Time", unit: "ms" },
             { id: "HALL_MEDIAN_SAMPLES", label: "Hall Speed Window (samples, 1 = raw)" },
             { id: "HALL_PERIOD_GUARD", label: "Hall Period Guard (1 = off)" },
             { id: "HALL_PULSE_MIN_US", label: "Hall Min Pulse Width (10-1000)", unit: "us" },
@@ -2339,14 +2369,12 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     syncTime();
-    pollAmbient();
-    setInterval(pollAmbient, 2000);
-    pollOdo();
-    setInterval(pollOdo, 1000);
-    pollFuel();
-    setInterval(pollFuel, 1000);
-    pollSensors();
-    setInterval(pollSensors, 1000);
+    // One 1 Hz clock drives every live reader on the page (issue #52). Four
+    // independent timers on four different periods - ambient on 2 s, the rest on
+    // 1 s - made the readings advance out of step, which read as the page
+    // drifting between 1 s and 2 s updates.
+    pollAmbient(); pollOdo(); pollFuel(); pollSensors();
+    setInterval(() => { pollAmbient(); pollOdo(); pollFuel(); pollSensors(); }, 1000);
 
     fetch('/api/perf').then(r => r.json()).then(perf => {
         let ipEl = document.getElementById('ip-info');
@@ -2518,8 +2546,7 @@ function renderForm(d) {
             } else {
                 if (d.hasOwnProperty(item.id)) {
                     hasItems = true;
-                    let rawVal = (item.id === 'SPI_BUS_SPEED' && typeof d[item.id] === 'number') ? d[item.id] / 1000000 : d[item.id];
-                    let val = displayFromMetric(item.id, rawVal);
+                    let val = boxFromDevice(item.id, d[item.id]);
                     let isBool = (typeof val === 'boolean');
                     let isPwd = /^WIFI_PASSWORD(_\d+)?$/.test(item.id);
                     let skipReset = isPwd;
@@ -2530,13 +2557,11 @@ function renderForm(d) {
                     // before a corrected value is ever saved.
                     let lim = FIRMWARE_LIMITS[item.id];
                     let limLo = typeof item.min === 'number' ? item.min
-                              : (lim ? (item.id === 'SPI_BUS_SPEED' ? lim[0] / 1000000
-                                 : (item.id in UNIT_FIELD_TYPES ? displayFromMetric(item.id, lim[0]) : lim[0])) : null);
+                              : (lim ? boxFromDevice(item.id, lim[0]) : null);
                     let limHi = typeof item.max === 'number' ? item.max
-                              : (lim ? (item.id === 'SPI_BUS_SPEED' ? lim[1] / 1000000
-                                 : (item.id in UNIT_FIELD_TYPES ? displayFromMetric(item.id, lim[1]) : lim[1])) : null);
+                              : (lim ? boxFromDevice(item.id, lim[1]) : null);
                     let rangeAttr = (limLo !== null || limHi !== null)
-                        ? ` min="${limLo === null ? '' : limLo}" max="${limHi === null ? '' : limHi}" step="1"`
+                        ? ` min="${limLo === null ? '' : limLo}" max="${limHi === null ? '' : limHi}" step="${typeof item.step === 'number' ? item.step : 1}"`
                         : '';
 
                     if (inCardSubCard) {
@@ -3521,18 +3546,15 @@ function collectConfig() {
                 if (el.tagName.toLowerCase() === 'select') out[el.id] = el.value;
                 // An emptied numeric box used to post an empty string, which the
                 // device read as 0. Fall back to the default the UI already knows
-                // instead (issue #21). The value is put through the same display
-                // conversion the rest of the pipeline expects; note that
-                // DEFAULTS.SPI_BUS_SPEED is stored in MHz, like its input box.
+                // instead (issue #21). DEFAULTS holds device units, like the
+                // firmware limits, so it goes through the same box conversion as
+                // everything else.
                 else if (el.id in DEFAULTS)
-                    out[el.id] = (el.id === 'SPI_BUS_SPEED')
-                        ? DEFAULTS[el.id] * 1000000
-                        : displayFromMetric(el.id, DEFAULTS[el.id]);
+                    out[el.id] = boxFromDevice(el.id, DEFAULTS[el.id]);
                 else
                     out[el.id] = 0;
             } else {
-                if (el.id === 'SPI_BUS_SPEED') val *= 1000000;
-                out[el.id] = val;
+                out[el.id] = val * scaleOf(el.id);
             }
         } else if (el.type === 'password') {
             // Masked/bullet values mean "unchanged": keep the stored one.
@@ -3596,8 +3618,7 @@ function clampToLimits(out) {
         out[k] = v;
         let el = document.getElementById(k);
         if (el) {
-            let shown = (k === 'SPI_BUS_SPEED') ? v / 1000000
-                      : (k in UNIT_FIELD_TYPES) ? displayFromMetric(k, v) : v;
+            let shown = boxFromDevice(k, v);
             el.value = shown;
             let sl = document.getElementById(k + '_slider');
             if (sl) sl.value = shown;
@@ -3688,8 +3709,7 @@ function applyDefault(keyString) {
             return;
         }
         if (!(key in DEFAULTS)) return;
-        let def = DEFAULTS[key];
-        if (key in UNIT_FIELD_TYPES) def = displayFromMetric(key, def);
+        let def = boxFromDevice(key, DEFAULTS[key]);
         let base = document.getElementById(key);
         if (!base) return;
         if (base.type === 'checkbox') {
@@ -3861,11 +3881,14 @@ const FUEL_E12 = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100, 120, 150,
                   180, 220, 270, 330, 390, 470, 560, 680, 820, 1000, 1200, 1500,
                   1800, 2200, 2700, 3300, 3900, 4700, 5600, 6800, 8200, 10000];
 const FUEL_SENDER_MAX_MA = 15;  // sender element current budget
+// The divider hangs off the 3.3 V rail. The rail is no longer a setting the
+// operator can type (issue #55); the divider numbers are computed from this.
+const FUEL_RAIL_V = 3.3;
 
 function fuelDividerInfo(rexc) {
     const e = parseFloat(document.getElementById('FUEL_OHM_EMPTY')?.value);
     const f = parseFloat(document.getElementById('FUEL_OHM_FULL')?.value);
-    const vref = parseFloat(document.getElementById('FUEL_ADC_VREF')?.value) || 3.3;
+    const vref = FUEL_RAIL_V;
     if (isNaN(e) || isNaN(f) || rexc <= 0) return null;
     const lo = Math.min(e, f), hi = Math.max(e, f);
     const vLo = vref * lo / (lo + rexc), vHi = vref * hi / (hi + rexc);
@@ -3909,7 +3932,7 @@ function fuelExciterHint() {
 }
 
 function bindFuelSender() {
-    ['FUEL_EXC_RES_OHM', 'FUEL_OHM_EMPTY', 'FUEL_OHM_FULL', 'FUEL_ADC_VREF'].forEach(id => {
+    ['FUEL_EXC_RES_OHM', 'FUEL_OHM_EMPTY', 'FUEL_OHM_FULL'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('input', fuelExciterHint);
     });
@@ -4255,18 +4278,9 @@ function updatePerf() {
         set('p-uptime', Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m '+(s%60)+'s');
         set('p-wifi', d.wifi_clients);
         set('p-heap', (d.free_heap / 1024).toFixed(0) + 'KB free / min ' + (d.min_free_heap / 1024).toFixed(0) + 'KB' + (d.mem_saver ? ' (mem-saver ON)' : ''));
-        // FreeRTOS stack headroom per task, bytes (issue #27). Measurement only -
-        // the numbers are here so a stack change can be justified by evidence.
-        if (d.stack_free) {
-            let stackNames = { SensorTaskCore1: 'sensor c1', GpsTaskCore0: 'gps c0', WebTaskCore0: 'web c0' };
-            let stackBits = [], tight = false;
-            for (let k in d.stack_free) {
-                let v = d.stack_free[k];
-                if (v < 700) tight = true;
-                stackBits.push((stackNames[k] || k) + ' ' + (v / 1024).toFixed(1) + 'K');
-            }
-            set('p-stacks', stackBits.join(' · ') + (tight ? ' · LOW' : ''));
-        }
+        // Per-task FreeRTOS stack headroom used to be printed here (issue #27
+        // evidence). Dropped from the monitor by request (issue #53); /api/perf
+        // still reports stack_free for anyone querying the endpoint directly.
         set('p-spi', (d.spi_speed / 1e6).toFixed(0) + ' MHz');
     }).catch(() => {});
 }

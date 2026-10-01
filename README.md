@@ -245,8 +245,8 @@ is gone; the pin is now a plain ADC input (issue #18):
 #### From ADC code to ohms
 `FUEL_OVERSAMPLE` conversions are averaged into a raw code $\bar{S}$ (software
 oversampling — the core exposes no hardware averaging for this pin), turned into
-a voltage with `FUEL_ADC_VREF`, and the sender resistance is recovered from the
-divider:
+a voltage with `FUEL_ADC_VREF` (the 3.3 V rail — since issue #55 it is not a Web
+UI field any more), and the sender resistance is recovered from the divider:
 
 $$V = V_{\text{ref}} \cdot \frac{R_{\text{sender}}}{R_{\text{sender}} + R_{\text{exc}}} \qquad\Rightarrow\qquad R_{\text{sender}} = R_{\text{exc}} \cdot \frac{V}{V_{\text{ref}} - V}$$
 
@@ -315,9 +315,10 @@ where $R_{\text{room}} =$ `NTC_R25` (default=10,000 $\Omega$), $T_{\text{room}} 
 
 #### WebUI Sensor Calibration
 The **Sensors Tuning** WebUI card calibrates the two analog sensors against a reference, using the live `/api/sensors` reading (no raw-ADC conversion needed):
+- **Fuel level Sensor** — the live sender resistance (Ω) is shown next to a fault state (`open` / `shorted` / `out of range` / `no sender`). Two ways to build the table (`fuelCalOhms`): **Fill from empty/full ohm** pre-fills a linear ramp from `FUEL_OHM_EMPTY` to `FUEL_OHM_FULL` (a good start, no driving needed), or drive the tank through its levels and **Capture** the live reading into each slot — slot `0` = empty, slot `N-1` = full. Changing the point count regenerates the ramp. The card is titled without the pin number (issue #55), and the excitation-resistor suggestion is computed from the empty/full ohms on the page plus the fixed 3.3 V rail.
+- **Speedometer** — `SPEED_SOURCE_MODE`, `SPEED_SOURCE_HOLD_MS`, the two hall-vs-GPS deviation bands (`GPS_MIN_DEV_KMH`, `MAX_SPEED_DELTA_KMH`), the GPS start/stop pair (`GPS_START_KMH`, `GPS_STOP_SETTLE_MS`) and the wheel-signal filters (`HALL_MEDIAN_SAMPLES`, `HALL_PERIOD_GUARD`, `HALL_PULSE_MIN_US`), in that order (issue #56). The GNSS hardware rows (baud, satellite counts) stay in the GPS block.
 - **Engine Temperature** — the live reading is shown; type a reference temperature and press **Apply** to set `NTC_TEMP_OFFSET`. `NTC_R25`, `NTC_R_BALANCE` and `NTC_BETA` are under **Advanced**.
 - **Battery Voltage** — the live reading is shown; type a reference voltage (e.g. a multimeter) and press **Apply** to set `BATTERY_OFFSET`. `BATTERY_SCALE` (divider ratio) is under **Advanced**.
-- **Fuel sender** — the live sender resistance (Ω) is shown next to a fault state (`open` / `shorted` / `out of range` / `no sender`). Two ways to build the table (`fuelCalOhms`): **Fill from empty/full ohm** pre-fills a linear ramp from `FUEL_OHM_EMPTY` to `FUEL_OHM_FULL` (a good start, no driving needed), or drive the tank through its levels and **Capture** the live reading into each slot — slot `0` = empty, slot `N-1` = full. Changing the point count regenerates the ramp.
 - Calibrating against a live reading means no raw-ADC arithmetic in the browser: the offset is derived on the device from the value it is currently seeing.
 
 ---
@@ -494,7 +495,7 @@ ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely �
 - `CPU_THROTTLE_TEMP_CRIT` (default=70): Critical temperature threshold in °C.
 
 #### Web UI
-- `POWER_SENSE_OFF_MS` (default=10000): How long `POWER_SENSE_PIN` (GPIO4) must stay continuously LOW before the unit plays the goodbye screen and deep-sleeps (500–120000 ms). Any HIGH restarts the window, so ignition bounce and supply dips cannot stall the GPS task or sleep the dash (issue #26). Only used when `ENABLE_POWER_SENSE` is on.
+- `POWER_SENSE_OFF_MS` (default=10000): How long `POWER_SENSE_PIN` (GPIO4) must stay continuously LOW before the unit plays the goodbye screen and deep-sleeps (500–120000 ms). Any HIGH restarts the window, so ignition bounce and supply dips cannot stall the GPS task or sleep the dash (issue #26). Only used when `ENABLE_POWER_SENSE` is on. The Web UI row (**Sleep After Power Loss**) is shown and edited in **seconds** (0.5–120, in 0.5 s steps) and converted on save; NVS, config backups and the firmware keep milliseconds (issue #57).
 - `ADV_MODE` (default=false): Global “Advanced Mode” toggle in the Web UI. When enabled, advanced and technical settings (CPU, GPS, Polling Rates, technical display options, advanced WiFi, and sensor-calibration internals) are shown as normal rows in their groups; when disabled they are hidden.
 
 #### Display & Visual Design
@@ -516,7 +517,7 @@ ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely �
 - `FUEL_INPUT_ENABLED` (default=false): Turns the resistive fuel sender input on. Leave it off until a sender is actually wired to GPIO32 — with no sender the pin floats and the gauge reports "no input" and stays at 0 (issue #18).
 - `FUEL_OHM_EMPTY` / `FUEL_OHM_FULL` (defaults=10.0 / 180.0): Sender resistance at empty and full, in ohms. Any standard works — 10–180 Ω (SAE), 240–33 Ω (European/VDO), 0–90 Ω (GM). Used to size the excitation resistor, define the fault band and pre-fill the calibration ramp.
 - `FUEL_EXC_RES_OHM` (default=220): Resistor from 3V3 to GPIO32 that the sender forms a divider against. The Web UI suggests the best E12 value for the entered range (15 mA sender current budget, top of span below 2.6 V).
-- `FUEL_ADC_VREF` (default=3.30): ADC reference / actual rail voltage in volts, used to turn the code into a divider voltage. Measuring the real 3V3 rail and entering it here removes a rail-error term (the calibration table cancels it at the points that were captured).
+- `FUEL_ADC_VREF` (default=3.30): ADC reference / actual rail voltage in volts, used to turn the code into a divider voltage. It is no longer a Web UI field — the divider hangs off the 3.3 V rail and typing a different value only corrupted the excitation-resistor suggestion (issue #55). The parameter keeps its NVS key and its slot in config backups, so an existing backup still restores; a rail measured to be off should be corrected in the wiring, not here.
 - `FUEL_OVERSAMPLE` (default=16): ADC conversions averaged into one sample (1–64). The ESP32 converter only delivers ~9–10 usable bits; oversampling is what buys the resolution back for a sender whose useful span can be a few hundred codes.
 - `FUEL_TOUCH_POINTS` (default=8): Number of valid entries in the fuel calibration table (`fuelCalOhms`): index 0 = empty, index `N-1` = full, so the number of tank slots is one per litre for the shipped 1 L-per-step default. Changing this regenerates the table as a linear ramp between `FUEL_OHM_EMPTY` and `FUEL_OHM_FULL`.
 - `TRIP_RESET_HOLD_MS` (default=1500): How long the physical trip-reset button on GPIO25 must be held to zero the trip stats (200–10000 ms). Shorter holds are ignored so a knock on the dash cannot wipe a trip. Refuelling no longer resets anything by itself (issue #17).
