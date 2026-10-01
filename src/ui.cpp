@@ -2282,7 +2282,9 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
 
   char dispCity[48];
   const char *citySrc = (g_weatherData.cityName[0] != 0) ? g_weatherData.cityName : WEATHER_CITY;
-  snprintf(dispCity, sizeof(dispCity), "%s", citySrc);
+  // UTF-8-safe copy: a localized name longer than the field is cut on a
+  // character boundary, not through a multi-byte sequence.
+  copyFixed(dispCity, sizeof(dispCity), citySrc);
 
   char tempStr[16];
   // Imperial mode converts to °F for display; the stored value stays °C.

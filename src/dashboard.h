@@ -849,6 +849,10 @@ extern char WEATHER_LOCALE[16];
 
 bool startWeatherFetch();
 void updateWeather();
+// Bounded, UTF-8-safe text copy for the weather strings (defined in web.cpp):
+// truncation never splits a multi-byte character, so the display never sees a
+// dangling continuation byte where a glyph should be.
+void copyFixed(char *dst, size_t n, const char *src);
 
 // ----------------------------------------------------------------------------
 // UI API

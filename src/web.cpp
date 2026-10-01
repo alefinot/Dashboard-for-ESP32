@@ -699,12 +699,153 @@ static bool reverseGeocode(double lat, double lon, String &out) {
 
 // Bounded text copy: always leaves a NUL inside dst, so a display task that
 // samples the shared weather arrays mid-copy still sees a terminated string
-// (issue #8).
-static void copyFixed(char *dst, size_t n, const char *src) {
+// (issue #8). The copy is UTF-8 aware: a localized city name (Monachium,
+// São Paulo) is cut on a character boundary, never through the middle of a
+// multi-byte sequence, because the renderer walks lead bytes and a dangling
+// continuation byte draws as a missing glyph.
+void copyFixed(char *dst, size_t n, const char *src) {
   size_t len = strlen(src);
   if (len > n - 1) len = n - 1;
+  while (len > 0 && ((unsigned char)src[len - 1] & 0xC0) == 0x80) len--;  // trailing continuation bytes
+  if (len > 0 && (unsigned char)src[len - 1] >= 0xC0) len--;              // lead byte whose tail got cut
   memcpy(dst, src, len);
   dst[len] = 0;
+}
+
+// Percent-encode one query value. Everything outside [A-Za-z0-9-_.~] becomes
+// %XX byte by byte, so a UTF-8 city name goes out as its raw UTF-8 bytes.
+static void urlEncode(const char *src, char *dst, size_t n) {
+  static const char *hex = "0123456789ABCDEF";
+  size_t o = 0;
+  for (const char *p = src; *p; p++) {
+    unsigned char c = (unsigned char)*p;
+    bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~';
+    size_t need = safe ? 1 : 3;
+    if (o + need >= n) break;
+    if (safe) {
+      dst[o++] = (char)c;
+    } else {
+      dst[o++] = '%';
+      dst[o++] = hex[c >> 4];
+      dst[o++] = hex[c & 0x0F];
+    }
+  }
+  dst[o] = 0;
+}
+
+// Great-circle distance, used only to sanity-check a geocoding hit.
+static double haversineKm(double aLat, double aLon, double bLat, double bLon) {
+  const double d2r = 0.017453292519943295;
+  double s1 = sin((bLat - aLat) * d2r / 2);
+  double s2 = sin((bLon - aLon) * d2r / 2);
+  double h = s1 * s1 + cos(aLat * d2r) * cos(bLat * d2r) * s2 * s2;
+  return 2 * 6371.0 * atan2(sqrt(h), sqrt(1 - h));
+}
+
+// The panel draws the city name with the Conthrax VLW subset, whose glyph range
+// is not documented anywhere in this repo. Until it is measured (font precheck
+// in the SYSTEM_LANGUAGE plan), only accept a localized spelling for locales
+// whose place names are written in the Latin alphabet - a Cyrillic or CJK name
+// would draw as blanks on the dashboard.
+static bool localeIsLatinScript(const char *loc) {
+  static const char *const latin[] = {"it", "en", "fr", "de", "es", "pt", "nl", "pl", "tr"};
+  for (size_t i = 0; i < sizeof(latin) / sizeof(latin[0]); i++)
+    if (strcasecmp(loc, latin[i]) == 0) return true;
+  return false;
+}
+
+// No GPS fix (or a reverse geocode that came back empty) leaves the typed
+// WEATHER_CITY as the widget label. Look that spelling up on Open-Meteo's
+// geocoding service and show the place's name in WEATHER_LOCALE, so the widget
+// follows the language with the GNSS dark too: "Milan" reads Mailand in German
+// and Monachium reads Munich in Polish. Keyless, plain HTTP, same provider
+// family as the forecast. Note the service matches names in the requested
+// language, so an exonym it does not know ("Milano" asked in German) simply
+// yields no nearby match and the typed label stays as written.
+static void localizeCityName(double lat, double lon, char *out, size_t outN) {
+  out[0] = 0;
+  if (WEATHER_CITY[0] == 0 || WEATHER_LOCALE[0] == 0) return;
+
+  static char warnedLocale[16] = "";
+  if (!localeIsLatinScript(WEATHER_LOCALE)) {
+    if (strcmp(warnedLocale, WEATHER_LOCALE) != 0) {
+      copyFixed(warnedLocale, sizeof(warnedLocale), WEATHER_LOCALE);
+      logPrintf("Weather: locale %s is not drawn by the display font, keeping the typed city name\n",
+                WEATHER_LOCALE);
+    }
+    return;
+  }
+
+  // With no position to check against, a name search cannot be validated: a
+  // bare "Milano" resolves first on Milano, Texas. Only localize when the
+  // widget has coordinates to anchor the match on.
+  if (lat == 0.0 && lon == 0.0) return;
+
+  char key[64];
+  snprintf(key, sizeof(key), "%s\n%s", WEATHER_CITY, WEATHER_LOCALE);
+
+  // Cached across refreshes: the lookup costs one request per typed-name or
+  // locale change, never one per weather refresh. Key is short enough that
+  // copyFixed cannot truncate it (47 + 1 + locale).
+  static char cacheKey[64] = "";
+  static char cacheName[48] = "";
+  if (strcmp(key, cacheKey) == 0) {
+    copyFixed(out, outN, cacheName);
+    return;
+  }
+
+  if (weatherAbort || WiFi.status() != WL_CONNECTED) return;
+
+  char encoded[160];
+  urlEncode(WEATHER_CITY, encoded, sizeof(encoded));
+  char url[320];
+  snprintf(url, sizeof(url),
+           "http://geocoding-api.open-meteo.com/v1/search?name=%s&count=3&language=%s",
+           encoded, WEATHER_LOCALE);
+
+  HTTPClient http;
+  if (!http.begin(url)) return;
+  http.setConnectTimeout(8000);  // plain HTTP, generous bound (issue #11)
+  http.setTimeout(8000);
+  int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    logPrintf("Weather: city lookup failed, HTTP %d\n", code);
+    http.end();
+    return;
+  }
+  String payload = http.getString();
+  http.end();
+  if (weatherAbort) return;  // fetch aborted: drop the result, retry next round
+
+  JsonDocument doc;
+  if (deserializeJson(doc, payload)) {
+    logPrintf("Weather: city lookup returned invalid JSON\n");
+    return;
+  }
+  if (!doc["results"].is<JsonArray>()) {
+    logPrintf("Weather: no %s name found for \"%s\", keeping it as typed\n",
+              WEATHER_LOCALE, WEATHER_CITY);
+    return;
+  }
+
+  // Take the nearest candidate and discard ones from the other side of the
+  // anchor: the un-hinted "Milano" search first hits Milano, Texas (8,694 km).
+  for (JsonVariant hit : doc["results"].as<JsonArray>()) {
+    const char *name = hit["name"] | "";
+    if (name[0] == 0) continue;
+    double hLat = hit["latitude"] | 0.0;
+    double hLon = hit["longitude"] | 0.0;
+    if (haversineKm(lat, lon, hLat, hLon) > 150.0) continue;
+    copyFixed(out, outN, name);
+    break;
+  }
+
+  if (out[0] == 0) return;  // nothing nearby: not cached, so a corrected name is picked up next refresh
+  copyFixed(cacheKey, sizeof(cacheKey), key);
+  copyFixed(cacheName, sizeof(cacheName), out);
+  if (strcmp(out, WEATHER_CITY) != 0)
+    logPrintf("Weather: city \"%s\" reads \"%s\" in %s\n", WEATHER_CITY, out, WEATHER_LOCALE);
 }
 
 void updateWeather() {
@@ -732,6 +873,14 @@ void updateWeather() {
   // otherwise fall back to the saved WEATHER_CITY derived from WEATHER_LAT/LON.
   String resolvedCity;
   if (gpsFix && !weatherAbort) reverseGeocode(lat, lon, resolvedCity);
+
+  // Nothing resolved the name from position - translate the typed label
+  // instead, so the widget follows WEATHER_LOCALE with the GNSS dark too.
+  if (!weatherAbort && resolvedCity.length() == 0) {
+    char localized[48];
+    localizeCityName(lat, lon, localized, sizeof(localized));
+    if (localized[0] != 0) resolvedCity = localized;
+  }
   
   char url[256];
   snprintf(url, sizeof(url),
