@@ -724,9 +724,17 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
 
 /* The list is built in the same language as the Wi-Fi picker box: glass card
    surface, 1px hairline border, 10px radius, and a fade-in on the page's own
-   easing curve. */
+   easing curve.
+
+   position:absolute, not fixed: positionSelPanel() anchors the list in *document*
+   coordinates (face rect + scroll offset), which is correct in every engine. A
+   fixed panel is anchored to the initial containing block, and Android WebView
+   (useWideViewPort off unless the app turns it on) parks that at the document
+   origin instead of the visible viewport - the list then opens off-screen and the
+   control looks dead (issue #50). The list closes on any scroll, so absolute
+   anchoring can never drift. */
 #sel-panel {
-    position: fixed;
+    position: absolute;
     z-index: 900;
     max-height: var(--panel-max);
     overflow-y: auto;
@@ -1534,8 +1542,8 @@ const DEFAULTS = {
     TEMP_WARN_YEL: 45,
     FUEL_WARN_RED: 20,
     FUEL_WARN_YEL: 45,
-    COLOR_TEMP_NORM: "#00ffff",
-    COLOR_TEMP_WARN: "#ff8c00",
+    COLOR_TEMP_NORM: "#00ff00",
+    COLOR_TEMP_WARN: "#ffff00",
     COLOR_TEMP_CRIT: "#ff0000",
     COLOR_FUEL_NORM: "#00ff00",
     COLOR_FUEL_WARN: "#ffff00",
@@ -2693,21 +2701,25 @@ function paintSelFace(sel) {
 
 function positionSelPanel(face, panel) {
     const r = face.getBoundingClientRect();
+    // The panel is position:absolute, so it is placed in document coordinates:
+    // every viewport measurement below has the scroll offset added (issue #50).
+    const sx = window.pageXOffset, sy = window.pageYOffset;
+    const vw = window.innerWidth, vh = window.innerHeight;
     // One control, two states: the list opens exactly as wide as the value box it
     // belongs to, so nothing new appears at a different size when you tap it.
-    const w = Math.min(r.width, Math.max(160, window.innerWidth - 16));
+    const w = Math.min(r.width, Math.max(160, vw - 16));
     panel.style.width = w + 'px';
     const h = panel.offsetHeight;
-    let top = r.bottom + 4;
-    if (top + h > window.innerHeight - 8) {
-        const above = r.top - 4 - h;
-        top = above >= 8 ? above : Math.max(8, window.innerHeight - h - 8);
+    let top = r.bottom + 4 + sy;
+    if (top + h > sy + vh - 8) {
+        const above = r.top - 4 + sy - h;
+        top = above >= sy + 8 ? above : Math.max(sy + 8, sy + vh - h - 8);
     }
-    // Last word: the list always ends up inside the viewport, even when the row
-    // itself is scrolled partly off it.
-    top = Math.max(8, Math.min(top, Math.max(8, window.innerHeight - h - 8)));
+    // Last word: the list always ends up inside the visible window, even when the
+    // row itself is scrolled partly off it.
+    top = Math.max(sy + 8, Math.min(top, Math.max(sy + 8, sy + vh - h - 8)));
     panel.style.top = top + 'px';
-    panel.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+    panel.style.left = Math.max(sx + 8, Math.min(r.left + sx, sx + vw - w - 8)) + 'px';
 }
 
 function highlightSelOption(i) {
