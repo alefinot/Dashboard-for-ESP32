@@ -26,6 +26,11 @@
     --text-dim: #64748b;
     --glass-blur: blur(12px);
     --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    /* Height budget for the dropdown list (#sel-panel). Plain px first so an
+       older browser keeps a limit, svh after it so a phone browser bar cannot
+       push the last option off the screen. */
+    --panel-max: 280px;
+    --panel-max: min(280px, 60svh);
 }
 
 html { background-color: #000000; }
@@ -604,6 +609,148 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
     box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
 }
 
+/* In-card dropdowns. The real <select id> stays in the DOM, shrunk to a pixel
+   and made invisible, so the save path, the reset buttons, the row search and
+   Advanced Mode keep working exactly as before and the browser's own popup can
+   never appear. .sel-face is what the user sees; the option list is one shared
+   #sel-panel parked in <body>, because .card has overflow:hidden plus a
+   backdrop-filter and would clip and re-anchor anything anchored inside it. */
+.sel {
+    position: relative;
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* The narrow inline variant used to size itself to its longest option. */
+.sel.auto {
+    min-width: 120px;
+}
+
+.sel-native {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    margin: 0;
+    padding: 0;
+    pointer-events: none;
+}
+
+.sel-face {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 10px;
+    background: var(--bg-input);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: 'Inter', system-ui, sans-serif;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.sel-face:hover {
+    border-color: rgba(0, 229, 255, 0.45);
+}
+
+/* Same focus language as the text and number boxes; :focus-within covers the
+   keyboard case, where the hidden select is what actually holds focus. */
+.sel-face:focus,
+.sel:focus-within .sel-face {
+    border-color: var(--accent-cyan);
+    outline: none;
+    background: #182030;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
+}
+
+.sel-value {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.sel-chev {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.sel-chev svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.sel-face[aria-expanded="true"] .sel-chev {
+    transform: rotate(180deg);
+    color: var(--accent-cyan);
+}
+
+#sel-panel {
+    position: fixed;
+    z-index: 900;
+    max-height: var(--panel-max);
+    overflow-y: auto;
+    padding: 4px;
+    background: rgba(18, 25, 38, 0.96);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+}
+
+#sel-panel[hidden] {
+    display: none;
+}
+
+.sel-opt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--text-main);
+    cursor: pointer;
+}
+
+/* Every row keeps the dot slot so the labels line up whether or not the option
+   is the stored value. */
+.sel-opt::before {
+    content: '';
+    flex: none;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: transparent;
+}
+
+.sel-opt.cur {
+    color: var(--accent-cyan);
+}
+
+.sel-opt.cur::before {
+    background: var(--accent-cyan);
+}
+
+.sel-opt:hover,
+.sel-opt.hl {
+    background: rgba(0, 229, 255, 0.10);
+}
+
 /* Scrollbars in the dashboard's own language instead of the OS chrome: the
    track stays empty so a glass card still reads as one surface, and the thumb
    is --text-muted at low alpha (rgba(148,163,184,.30)) that lights up in
@@ -938,7 +1085,12 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
     text-align: center;
 }
 
-.cfg-controls select { width: 100%; }
+.cfg-controls .sel-face { width: 100%; }
+
+/* Inline select rows never wrap; a select that stands alone in its card hugs
+   the right edge of the row. */
+.cfg-controls.nowrap { flex-wrap: nowrap; }
+.cfg-controls.tail { width: auto; flex: 1; justify-content: flex-end; }
 
 /* Color rows: fixed-width control block so all color swatches line up,
    regardless of whether a value input/spacer sits next to them */
@@ -1139,10 +1291,10 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
     .details-content { grid-template-columns: 1fr; }
     .cfg-row > label { min-width: 110px; }
     .cfg-controls { width: auto; min-width: 0; }
-    /* In-card selects (time zone, etc.) render width:auto to fit their
+    /* In-card selects (time zone, etc.) used to render width:auto to fit their
        longest option, which is wider than a phone screen and clipped the
-       details box - force them to the available width on mobile */
-    .cfg-controls select { width: 100% !important; }
+       details box - the face fills the row instead, and the list scrolls */
+    .cfg-controls .sel-face { width: 100% !important; }
     /* The absolutely-positioned advanced-mode toggle overlaps the 26px
        page title on narrow screens - flow it in below the IP banner */
     .adv-mode-toggle { position: static; width: fit-content; margin: 6px auto 0 auto; }
@@ -1464,6 +1616,17 @@ const DEFAULTS = {
 };
 
 const resetSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
+
+const selChevSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+
+// One dropdown face: the invisible real select first (its id is what the rest
+// of the page reads), then the styled button the user actually taps.
+function selectHtml(id, opts, auto) {
+    return `<div class="sel${auto ? ' auto' : ''}">` +
+           `<select id="${id}" class="sel-native">${opts}</select>` +
+           `<button type="button" class="sel-face" aria-haspopup="listbox" aria-expanded="false">` +
+           `<span class="sel-value"></span><span class="sel-chev">${selChevSVG}</span></button></div>`;
+}
 
 // Settings applied only at boot (see main.cpp setRotation/GPS UART, web.cpp
 // setTxPower/one-shot NTP sync). Changing these takes effect after a reboot.
@@ -2148,10 +2311,10 @@ function renderForm(d) {
                     let val = d[item.id];
                     let opts = item.options.map(o => `<option value="${o.value}" ${o.value == val ? 'selected' : ''}>${o.label}</option>`).join('');
                     if (inCardSubCard) {
-                        groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls" style="flex-wrap:nowrap;"><select id="${item.id}" style="width:auto;min-width:120px;">${opts}</select>${resetBtn(item.id)}</div></div>`;
+                        groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls nowrap">${selectHtml(item.id, opts, true)}${resetBtn(item.id)}</div></div>`;
                     } else {
                         closeSubCard();
-                        groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls" style="width:auto;flex:1;justify-content:flex-end;"><select id="${item.id}">${opts}</select>${resetBtn(item.id)}</div></div></div>`;
+                        groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls tail">${selectHtml(item.id, opts)}${resetBtn(item.id)}</div></div></div>`;
                     }
                 }
             } else if (iType === 'threshold-row') {
@@ -2337,6 +2500,7 @@ function renderForm(d) {
     bindApPasswordWarn();
     bindWifiPicker();
     bindFuelSender();
+    initSelectDropdowns();
     // Advanced Mode: reflect the ADV_MODE config on the header toggle and
     // show/hide the advanced rows.
     advModeOn = !!d.ADV_MODE;
@@ -2418,6 +2582,211 @@ function bindApPasswordWarn() {
     const update = () => { warn.style.display = (field.value === '12345678') ? '' : 'none'; };
     field.addEventListener('input', update);
     update();
+}
+
+// ── Styled in-card dropdowns ──────────────────────────────────────
+// Each select keeps its real element (see .sel-native in the CSS) so nothing
+// that reads or writes a value by id has to change: collectConfig(), the ↺
+// reset buttons, the search filter and Advanced Mode all still see a plain
+// <select>. What the user sees is the .sel-face button, and the option list is
+// a single shared #sel-panel in <body>, filled in for whichever dropdown is
+// open. Only one list is ever open.
+let selPanel = null;
+let selOpen = null;      // the <select> whose list is showing
+let selHl = -1;          // option index highlighted by the keyboard
+let selWired = false;
+
+function selFaceOf(sel) {
+    const wrap = sel.closest('.sel');
+    return wrap ? wrap.querySelector('.sel-face') : null;
+}
+
+// Put the chosen option on the face. A value the device holds that is not in
+// the list has no matching option, so the raw value is shown instead of
+// silently pointing at the first entry.
+function paintSelFace(sel) {
+    const face = selFaceOf(sel);
+    if (!face) return;
+    const opt = sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
+    face.querySelector('.sel-value').textContent = opt ? opt.textContent : (sel.value || '-');
+}
+
+function positionSelPanel(face, panel) {
+    const r = face.getBoundingClientRect();
+    const w = Math.min(Math.max(r.width, 200), 420, Math.max(160, window.innerWidth - 16));
+    panel.style.width = w + 'px';
+    const h = panel.offsetHeight;
+    let top = r.bottom + 4;
+    if (top + h > window.innerHeight - 8) {
+        const above = r.top - 4 - h;
+        top = above >= 8 ? above : Math.max(8, window.innerHeight - h - 8);
+    }
+    // Last word: the list always ends up inside the viewport, even when the row
+    // itself is scrolled partly off it.
+    top = Math.max(8, Math.min(top, Math.max(8, window.innerHeight - h - 8)));
+    panel.style.top = top + 'px';
+    panel.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+}
+
+function highlightSelOption(i) {
+    if (!selPanel) return;
+    selPanel.querySelectorAll('.sel-opt.hl').forEach(el => el.classList.remove('hl'));
+    const row = selPanel.querySelector(`.sel-opt[data-i="${i}"]`);
+    if (!row) return;
+    row.classList.add('hl');
+    // Scroll the list itself; scrollIntoView would also move the page under the
+    // finger and could jump the row out from under the open list.
+    const pr = selPanel.getBoundingClientRect(), rr = row.getBoundingClientRect();
+    if (rr.top < pr.top) selPanel.scrollTop -= (pr.top - rr.top);
+    else if (rr.bottom > pr.bottom) selPanel.scrollTop += (rr.bottom - pr.bottom);
+    selHl = i;
+}
+
+function closeSelPanel(refocus) {
+    if (!selPanel || selPanel.hidden) return;
+    selPanel.hidden = true;
+    selPanel.innerHTML = '';
+    if (selOpen) {
+        const face = selFaceOf(selOpen);
+        if (face) {
+            face.setAttribute('aria-expanded', 'false');
+            if (refocus) face.focus();
+        }
+    }
+    selOpen = null;
+    selHl = -1;
+}
+
+function chooseSelOption(i) {
+    if (!selOpen) return;
+    const sel = selOpen;
+    const opt = sel.options[i];
+    if (!opt) return;
+    sel.value = opt.value;
+    // The page reads dropdowns from the real select, so announce the change the
+    // same way a native pick would.
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    closeSelPanel(true);
+}
+
+function openSelPanel(sel) {
+    const face = selFaceOf(sel);
+    if (!face || !sel) return;
+    // Tapping the same face again closes the list - but only when it really is
+    // on screen; if the list went away behind our back, the tap must reopen it.
+    if (selOpen === sel && selPanel && !selPanel.hidden && selPanel.isConnected) {
+        closeSelPanel(true);
+        return;
+    }
+    closeSelPanel(false);
+    if (!selPanel) {
+        selPanel = document.createElement('div');
+        selPanel.id = 'sel-panel';
+        selPanel.setAttribute('role', 'listbox');
+        selPanel.tabIndex = -1;
+        selPanel.hidden = true;
+        selPanel.addEventListener('pointerdown', e => {
+            const row = e.target.closest('.sel-opt');
+            if (row) chooseSelOption(parseInt(row.dataset.i, 10));
+        });
+        // Also on click, so a scripted .click() (or a tap that the browser
+        // reports without a pointer event) still picks. The pointerdown above
+        // already closed the list, so the second path sees no open select and
+        // does nothing.
+        selPanel.addEventListener('click', e => {
+            const row = e.target.closest('.sel-opt');
+            if (row) chooseSelOption(parseInt(row.dataset.i, 10));
+        });
+        selPanel.addEventListener('keydown', e => {
+            if (!selOpen) return;
+            const n = selOpen.options.length;
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                highlightSelOption(Math.min(n - 1, Math.max(0, selHl + (e.key === 'ArrowDown' ? 1 : -1))));
+            } else if (e.key === 'Home' || e.key === 'End') {
+                e.preventDefault();
+                highlightSelOption(e.key === 'Home' ? 0 : n - 1);
+            } else if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                chooseSelOption(selHl);
+            }
+        });
+        // Anything outside the list closes it; a click on a row does not.
+        document.addEventListener('pointerdown', e => {
+            if (!selPanel || selPanel.hidden) return;
+            const t = e.target;
+            if (!t || !t.closest) return;              // text nodes, document, SVG parts
+            if (selPanel.contains(t)) return;
+            if (t.closest('.sel')) return;
+            closeSelPanel();
+        }, true);
+        // Escape closes from anywhere - the page has no other popup to dismiss,
+        // and this is the one key every user reaches for.
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && selPanel && !selPanel.hidden) closeSelPanel(true);
+        });
+        document.body.appendChild(selPanel);
+    }
+    // The list is rebuilt on every open; if anything ever wiped the body-level
+    // markup around it, put it back rather than open an invisible list.
+    if (!selPanel.isConnected) document.body.appendChild(selPanel);
+    selOpen = sel;
+    selPanel.innerHTML = '';
+    for (let i = 0; i < sel.options.length; i++) {
+        const o = sel.options[i];
+        const row = document.createElement('div');
+        row.className = 'sel-opt' + (i === sel.selectedIndex ? ' cur' : '');
+        row.dataset.i = i;
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', i === sel.selectedIndex ? 'true' : 'false');
+        row.textContent = o.textContent;
+        selPanel.appendChild(row);
+    }
+    selPanel.hidden = false;
+    face.setAttribute('aria-expanded', 'true');
+    positionSelPanel(face, selPanel);
+    highlightSelOption(Math.max(sel.selectedIndex, 0));
+    selPanel.focus({ preventScroll: true });
+}
+
+function initSelectDropdowns() {
+    if (!selWired) {
+        // Delegated on document, not on a container element: the config form is
+        // rebuilt (and its container reused or replaced) on every save, tab
+        // change and mode switch, and a listener bound to one of those copies
+        // would go silently dead.
+        selWired = true;
+        // The list opens from the face, and also from the hidden select itself:
+        // that is the element Tab lands on, so a keyboard user gets the list too.
+        const selFromEvent = e => {
+            const t = e.target;
+            if (!t || !t.closest) return null;
+            const native = t.closest('.sel-native');
+            if (native) return native;
+            const face = t.closest('.sel-face');
+            return face ? face.closest('.sel').querySelector('.sel-native') : null;
+        };
+        document.addEventListener('click', e => {
+            const sel = selFromEvent(e);
+            if (sel) openSelPanel(sel);
+        });
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'ArrowDown') return;
+            const sel = selFromEvent(e);
+            if (!sel) return;
+            // On the real select, Arrow keys belong to the browser's own selection
+            // (it is hidden but still works); only the keys that mean "open" here.
+            if (e.target.classList && e.target.classList.contains('sel-native') && e.key === 'ArrowDown') return;
+            e.preventDefault();
+            openSelPanel(sel);
+        });
+        // change covers the list and the hidden select's own keyboard edits;
+        // input covers the ↺ reset buttons, which fire input and then save.
+        ['change', 'input'].forEach(ev => document.addEventListener(ev, e => {
+            if (e.target && e.target.classList && e.target.classList.contains('sel-native')) paintSelFace(e.target);
+        }));
+    }
+    document.querySelectorAll('.sel-native').forEach(paintSelFace);
 }
 
 // ── Wi-Fi network picker ──────────────────────────────────────────────
@@ -2962,12 +3331,17 @@ function collectConfig() {
         else if (el.type === 'number' || el.tagName.toLowerCase() === 'select') {
             let val = parseFloat(el.value);
             if (isNaN(val)) {
+                // A dropdown can hold a string: WEATHER_LOCALE is "it", "en",
+                // "fr"... parseFloat turns that into NaN, and the fallback below
+                // then posted the factory default, so changing the city-name
+                // language silently did nothing. A select posts its own value.
+                if (el.tagName.toLowerCase() === 'select') out[el.id] = el.value;
                 // An emptied numeric box used to post an empty string, which the
                 // device read as 0. Fall back to the default the UI already knows
                 // instead (issue #21). The value is put through the same display
                 // conversion the rest of the pipeline expects; note that
                 // DEFAULTS.SPI_BUS_SPEED is stored in MHz, like its input box.
-                if (el.id in DEFAULTS)
+                else if (el.id in DEFAULTS)
                     out[el.id] = (el.id === 'SPI_BUS_SPEED')
                         ? DEFAULTS[el.id] * 1000000
                         : displayFromMetric(el.id, DEFAULTS[el.id]);
