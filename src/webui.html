@@ -639,49 +639,72 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
     pointer-events: none;
 }
 
-.sel-face {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+/* The face must look like the input box it replaces, not like an action button,
+   so every state is written at .sel .sel-face (two classes): the page styles
+   buttons globally (button / button:hover), and those rules would otherwise leak
+   their cyan gradient, their 600 weight and their hover lift onto this control. */
+.sel .sel-face {
+    position: relative;
+    display: block;
     width: 100%;
-    padding: 6px 10px;
+    padding: 6px 26px 6px 10px;
+    margin-top: 0;
     background: var(--bg-input);
+    background-image: none;
     color: var(--text-main);
     border: 1px solid var(--border-color);
     border-radius: 6px;
     font-size: 12px;
+    font-weight: 400;
     font-family: 'Inter', system-ui, sans-serif;
-    text-align: left;
+    /* The number and text boxes in the same row are center-aligned, so the
+       chosen option is too; only the chevron sits at the edge. */
+    text-align: center;
     cursor: pointer;
-    transition: all 0.2s ease;
+    box-shadow: none;
+    transform: none;
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
-.sel-face:hover {
+.sel .sel-face:hover {
+    background: var(--bg-input);
+    background-image: none;
     border-color: rgba(0, 229, 255, 0.45);
+    box-shadow: none;
+    transform: none;
 }
 
 /* Same focus language as the text and number boxes; :focus-within covers the
-   keyboard case, where the hidden select is what actually holds focus. */
-.sel-face:focus,
-.sel:focus-within .sel-face {
+   keyboard case, where the hidden select is what actually holds focus, and the
+   open state gets the same treatment so the control reads as "engaged". */
+.sel .sel-face:focus,
+.sel:focus-within .sel-face,
+.sel .sel-face[aria-expanded="true"] {
     border-color: var(--accent-cyan);
     outline: none;
     background: #182030;
     box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
 }
 
+.sel .sel-face:active {
+    transform: none;
+}
+
 .sel-value {
+    display: block;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
 
 .sel-chev {
-    flex: none;
-    width: 14px;
-    height: 14px;
-    color: var(--text-muted);
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    width: 12px;
+    height: 12px;
+    margin-top: -6px;
+    color: var(--text-dim);
     transition: transform 0.2s ease, color 0.2s ease;
 }
 
@@ -696,59 +719,77 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
     color: var(--accent-cyan);
 }
 
+/* The list is built in the same language as the Wi-Fi picker box: glass card
+   surface, 1px hairline border, 10px radius, and a fade-in on the page's own
+   easing curve. */
 #sel-panel {
     position: fixed;
     z-index: 900;
     max-height: var(--panel-max);
     overflow-y: auto;
-    padding: 4px;
-    background: rgba(18, 25, 38, 0.96);
+    padding: 0;
+    background: var(--bg-card);
     -webkit-backdrop-filter: var(--glass-blur);
     backdrop-filter: var(--glass-blur);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: 10px;
     box-shadow: var(--card-shadow);
+    animation: selFadeIn 0.15s ease-out;
+}
+
+/* Fade only: the card entrance slides 8px, which would visibly tear the list off
+   the control it hangs from. */
+@keyframes selFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 #sel-panel[hidden] {
     display: none;
 }
 
+/* Rows are .wifi-row: full-bleed, hairline between them, and the stored value
+   marked in cyan rather than with a marker glyph. */
 .sel-opt {
     display: flex;
     align-items: center;
     gap: 8px;
     min-height: 40px;
-    padding: 6px 10px;
-    border-radius: 6px;
+    padding: 7px 10px;
     font-size: 12px;
     line-height: 1.4;
     color: var(--text-main);
     cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
 }
 
-/* Every row keeps the dot slot so the labels line up whether or not the option
-   is the stored value. */
-.sel-opt::before {
-    content: '';
-    flex: none;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: transparent;
+.sel-opt + .sel-opt {
+    border-top: 1px solid var(--border-color);
+}
+
+.sel-opt:first-child {
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+
+.sel-opt:last-child {
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
 }
 
 .sel-opt.cur {
     color: var(--accent-cyan);
-}
-
-.sel-opt.cur::before {
-    background: var(--accent-cyan);
+    background: rgba(0, 229, 255, 0.08);
 }
 
 .sel-opt:hover,
 .sel-opt.hl {
-    background: rgba(0, 229, 255, 0.10);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.sel-opt.cur:hover,
+.sel-opt.cur.hl {
+    background: rgba(0, 229, 255, 0.14);
 }
 
 /* Scrollbars in the dashboard's own language instead of the OS chrome: the
@@ -2594,6 +2635,7 @@ function bindApPasswordWarn() {
 let selPanel = null;
 let selOpen = null;      // the <select> whose list is showing
 let selHl = -1;          // option index highlighted by the keyboard
+let selOpenedAt = 0;     // time origin stamp of the last open, see the scroll guard
 let selWired = false;
 
 function selFaceOf(sel) {
@@ -2725,6 +2767,24 @@ function openSelPanel(sel) {
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape' && selPanel && !selPanel.hidden) closeSelPanel(true);
         });
+        // Scrolling anywhere outside the list closes it: the panel is position:
+        // fixed, so it would otherwise sit parked in the middle of the screen
+        // while the content it belongs to scrolls away underneath. Capture phase
+        // so scrolling inside a scrollable card counts too; the only scroll that
+        // keeps the list open is the list's own.
+        document.addEventListener('scroll', e => {
+            if (!selOpen) return;
+            // A scroll that was already queued when the list opened belongs to the
+            // tap that opened it (scrollIntoView before the click, a focus scroll),
+            // so it must not close the list the user just asked for.
+            if (e.timeStamp && e.timeStamp < selOpenedAt) return;
+            if (e.target instanceof Node && selPanel.contains(e.target)) return;
+            closeSelPanel();
+        }, true);
+        // A rotation or a window resize moves the control out from under it too.
+        window.addEventListener('resize', () => {
+            if (selOpen) closeSelPanel();
+        });
         document.body.appendChild(selPanel);
     }
     // The list is rebuilt on every open; if anything ever wiped the body-level
@@ -2743,10 +2803,15 @@ function openSelPanel(sel) {
         selPanel.appendChild(row);
     }
     selPanel.hidden = false;
+    selOpenedAt = performance.now();
     face.setAttribute('aria-expanded', 'true');
     positionSelPanel(face, selPanel);
     highlightSelOption(Math.max(sel.selectedIndex, 0));
     selPanel.focus({ preventScroll: true });
+    // Second pass: the list's own height (rows, scrollbar, fonts) is only final
+    // once it is laid out, and the anchor must be measured against that height or
+    // the clamp can park the list away from its control.
+    positionSelPanel(face, selPanel);
 }
 
 function initSelectDropdowns() {
