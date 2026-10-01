@@ -1272,6 +1272,7 @@ const DEFAULTS = {
     WIFI_TX_POWER_DBM: 20,
     WIFI_RETRY_MODE: 2,
     WIFI_RETRY_SECONDS: 60,
+    WIFI_ATTEMPT_SECONDS: 12,
     NTP_ENABLED: true,
     NTP_SERVER: "pool.ntp.org",
     TZ_OFFSET_HOURS: 1,
@@ -1434,6 +1435,7 @@ const FIRMWARE_LIMITS = {
     WIFI_TX_POWER_DBM: [-1, 20],
     WIFI_RETRY_MODE: [0, 2],
     WIFI_RETRY_SECONDS: [1, 86400],
+    WIFI_ATTEMPT_SECONDS: [5, 60],
     TZ_OFFSET_HOURS: [-14, 14],
     TZ_DST_RULE: [0, 2],
 };
@@ -1623,7 +1625,25 @@ const configMap = [
             { id: "SPLASH_SIGNATURE", label: "Boot Screen Signature" },
             { id: "REBOOT_SIGNATURE", label: "Reboot Screen Signature" },
             { id: "DASHBOARD_SIGNATURE", label: "Main Dashboard Watermark" },
-            { type: "card_header", label: "Wifi" },
+            { type: "card_header", label: "Wifi", content: `
+    <div style="margin:2px 0 10px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button id="wifiScanBtn" onclick="doWifiScan()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Scan Networks</button>
+            <span id="wifiScanNote" style="font-size:11px;color:var(--text-muted);">Not scanned yet. The list only refreshes when you ask: a scan moves the radio off its channel, which can interrupt a live link.</span>
+        </div>
+        <div id="wifiSavedList" style="margin-top:10px;font-size:12px;"></div>
+        <div id="wifiNetList" style="max-height:240px;overflow-y:auto;margin-top:8px;border:1px solid var(--border-color);border-radius:10px;"></div>
+        <div id="wifiOverwrite" style="display:none;margin-top:8px;border:1px solid var(--border-color);border-radius:10px;padding:8px;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">All five stored networks are taken. Choose which one may be replaced - nothing is overwritten until you pick:</div>
+            <div id="wifiOverwriteList" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;align-items:center;">
+            <input data-noconfig="1" id="wifiHiddenSsid" placeholder="Hidden network name (SSID)" style="flex:1 1 180px;">
+            <input data-noconfig="1" id="wifiHiddenPass" type="password" placeholder="Password" style="flex:1 1 130px;">
+            <button onclick="addHiddenWifi()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Add Hidden Network</button>
+        </div>
+        <div id="wifiJoinMsg" style="font-size:11px;margin-top:8px;color:var(--text-muted);"></div>
+    </div>` },
             { id: "WIFI_TX_POWER_DBM", label: "TX Power", type: "range", min: -1, max: 20, step: 1, unit: "dBm", advanced: true },
             { id: "WIFI_RETRY_MODE", label: "WiFi Search Behavior", type: "select",
                 options: [
@@ -1632,26 +1652,11 @@ const configMap = [
                     { value: 2, label: "Search forever" }
                 ], advanced: true },
             { id: "WIFI_RETRY_SECONDS", label: "Search Timeout", unit: "seconds", advanced: true },
-            { type: "note", label: '<span id="wifi-search-note">Networks are tried in order: Primary first, then Fallback 1 to 4, so a fallback is only used when the primary network is out of range. After a dropout the same order is used again, and by default the search never stops.</span>' },
+            { id: "WIFI_ATTEMPT_SECONDS", label: "Timeout Per Network", unit: "seconds", advanced: true },
+            { type: "note", label: '<span id="wifi-search-note">Scan, tap your network, type the password once - that is the whole setup. Up to five networks are stored, and the one that connected last is tried first after a reboot or a dropout, so nothing has to be ordered by hand. A stored network is never dropped on its own; use Forget.</span>' },
             { type: "heading", label: "Device Config AP (Dashboard_Config)" },
             { id: "AP_PASSWORD", label: "AP Password" },
             { type: "note", label: '<span id="ap-pwd-rule">8-63 characters, or empty for an open network. A 1-7 character password is rejected by the Wi-Fi stack, which stops the config hotspot from starting at all.</span> <span id="ap-pwd-warn" style="display:none;color:var(--accent-rose);font-weight:700;">Still using the shipped default password - anyone within range of the hotspot can reconfigure this dashboard.</span>' },
-            { type: "heading", label: "Primary Network" },
-            { id: "WIFI_SSID", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD", label: "Password" },
-            { type: "heading", label: "Fallback Networks" },
-            { type: "section_header", label: "Network 1" },
-            { id: "WIFI_SSID_1", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD_1", label: "Password" },
-            { type: "section_header", label: "Network 2" },
-            { id: "WIFI_SSID_2", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD_2", label: "Password" },
-            { type: "section_header", label: "Network 3" },
-            { id: "WIFI_SSID_3", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD_3", label: "Password" },
-            { type: "section_header", label: "Network 4" },
-            { id: "WIFI_SSID_4", label: "Network Name (SSID)" },
-            { id: "WIFI_PASSWORD_4", label: "Password" },
             { type: "card_header", label: "Firmware Update", content: `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <button id="otaBtn" onclick="doOta()" class="btn-secondary" style="font-size:11px;padding:5px 10px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:13px;height:13px;vertical-align:-2px;margin-right:4px;"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Firmware OTA</button>
         <input type="file" id="otaFile" accept=".bin" style="display:none" onchange="otaFileChosen(this)">
@@ -2171,6 +2176,7 @@ function renderForm(d) {
     updateCpuMode();
     bindPowerSense();
     bindApPasswordWarn();
+    bindWifiPicker();
     bindFuelSender();
     // Advanced Mode: reflect the ADV_MODE config on the header toggle and
     // show/hide the advanced rows.
@@ -2253,6 +2259,256 @@ function bindApPasswordWarn() {
     const update = () => { warn.style.display = (field.value === '12345678') ? '' : 'none'; };
     field.addEventListener('input', update);
     update();
+}
+
+// ── Wi-Fi network picker ──────────────────────────────────────────────
+// The phone-style flow: scan, tap the network, type the passphrase once. What
+// gets stored is still the five credential slots the firmware has always had -
+// POST /api/wifi/join picks the slot, so nobody types an SSID and nobody has to
+// know which slot counts as "primary". The network that connects is moved to the
+// front of the list by the device, so ordering is automatic too.
+// Scanning is never automatic: the search already keeps the radio busy, and a
+// background scan would knock packets off a working link.
+let wifiScanData = null;      // last /api/wifi/scan payload
+let wifiAskPassFor = null;    // SSID whose passphrase is being typed inline
+let wifiScanTimer = null;
+let wifiPendingSsid = null;   // SSID waiting for a slot to be displaced
+
+function wifiEsc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+}
+
+function wifiMsg(text, color) {
+    const el = document.getElementById('wifiJoinMsg');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = color || 'var(--text-muted)';
+}
+
+// Four bars, the way a phone shows field strength. Exact dBm stays in the text
+// next to it because a bar picture alone invites false precision.
+function wifiBars(rssi) {
+    const lvl = rssi >= -55 ? 4 : rssi >= -67 ? 3 : rssi >= -77 ? 2 : 1;
+    let out = '<span style="font-size:9px;letter-spacing:1px;">';
+    for (let i = 1; i <= 4; i++)
+        out += '<span style="color:' + (i <= lvl ? 'var(--accent-cyan)' : 'var(--border-color)') + '">▮</span>';
+    return out + '</span>';
+}
+
+function wifiBadge(text, color) {
+    return '<span style="font-size:9px;padding:2px 6px;border-radius:6px;border:1px solid ' +
+           color + ';color:' + color + ';text-transform:uppercase;letter-spacing:.05em;">' +
+           text + '</span>';
+}
+
+function wifiRowCss() {
+    return 'display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:12px;';
+}
+
+function renderWifiLists() {
+    const listEl = document.getElementById('wifiNetList');
+    const savedEl = document.getElementById('wifiSavedList');
+    const noteEl = document.getElementById('wifiScanNote');
+    const btn = document.getElementById('wifiScanBtn');
+    if (!listEl) return;
+    const d = wifiScanData;
+    if (btn) btn.disabled = !!(d && d.scanning);
+    if (noteEl) {
+        if (!d) noteEl.textContent = 'Not scanned yet.';
+        else if (d.scanning) noteEl.textContent = 'Scanning all channels - a working link may drop for a moment.';
+        else if (d.error) noteEl.textContent = 'Scan failed: ' + d.error;
+        else if (!d.count) noteEl.textContent = 'The radio found nothing in range. Move closer and scan again.';
+        else noteEl.textContent = d.count + ' network(s) in range' +
+            (d.ageMs ? ' (scanned ' + Math.max(1, Math.round(d.ageMs / 1000)) + 's ago)' : '');
+    }
+
+    // Stored networks first: they are the ones the device will actually try, and
+    // one of them is live right now. A stored network that is not in range still
+    // gets a row - forgetting is the user's decision, never the device's.
+    const saved = (d && d.saved) || [];
+    if (savedEl) {
+        if (!saved.length) {
+            savedEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);">No networks stored yet - scan and pick one below.</>';
+        } else {
+            savedEl.innerHTML = saved.map(n => {
+                let right = n.connected ? wifiBadge('connected', 'var(--accent-emerald)')
+                                        : '<button class="btn-secondary" data-act="connect" data-ssid="' + wifiEsc(n.ssid) +
+                                          '" data-saved="1" style="font-size:11px;padding:4px 9px;">Connect</button>';
+                right += ' <button class="btn-secondary" data-act="forget" data-slot="' + n.slot + '" data-ssid="' +
+                         wifiEsc(n.ssid) + '" style="font-size:11px;padding:4px 9px;color:var(--accent-rose);">Forget</button>';
+                return '<div style="' + wifiRowCss() + 'border-bottom:1px solid var(--border-color);">' +
+                       '<span style="flex:1;">' + wifiEsc(n.ssid) + '</span>' + right + '</div>';
+            }).join('');
+        }
+    }
+
+    const nets = (d && d.nets) || [];
+    // The device marks the live network in "saved", not in the scan rows, so the
+    // found list borrows the name from there.
+    const live = saved.filter(n => n.connected).map(n => n.ssid)[0] || null;
+    if (!nets.length) {
+        listEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:8px 10px;">' +
+            'Nothing found. Press Scan Networks.</div>';
+        return;
+    }
+    listEl.innerHTML = nets.map(n => {
+        const isOpen = n.auth === 0;   // WIFI_AUTH_OPEN
+        const authTag = isOpen ? '<span style="color:var(--accent-amber);font-size:10px;">open</span>'
+                               : '<span style="color:var(--text-dim);font-size:10px;">' + wifiEsc(n.authName) + '</span>';
+        const isConn = live && live === n.ssid;
+        let right = '';
+        if (isConn) {
+            right = wifiBadge('connected', 'var(--accent-emerald)');
+        } else if (wifiAskPassFor === n.ssid) {
+            right = '<input data-noconfig="1" id="wifiAskPass" type="password" placeholder="Password" ' +
+                    'style="width:130px;font-size:11px;padding:4px 6px;">' +
+                    '<button class="btn-secondary" data-act="join" data-ssid="' + wifiEsc(n.ssid) +
+                    '" style="font-size:11px;padding:4px 9px;color:var(--accent-emerald);">Join</button>' +
+                    '<button class="btn-secondary" data-act="cancelask" style="font-size:11px;padding:4px 9px;">Cancel</button>';
+        } else {
+            right = '<button class="btn-secondary" data-act="connect" data-ssid="' + wifiEsc(n.ssid) +
+                    '" data-saved="' + (n.saved ? 1 : 0) + '" style="font-size:11px;padding:4px 9px;">' +
+                    (n.saved ? 'Reconnect' : 'Connect') + '</button>';
+        }
+        const tag = n.saved && !isConn ? wifiBadge('saved', 'var(--accent-cyan)') : '';
+        return '<div style="' + wifiRowCss() + 'border-bottom:1px solid var(--border-color);">' +
+               wifiBars(n.rssi) +
+               '<span style="flex:1;">' + wifiEsc(n.ssid) + ' <span style="font-size:10px;color:var(--text-dim);">' +
+               'ch' + n.ch + ' · ' + n.rssi + ' dBm · ' + authTag + '</span></span>' + tag + ' ' + right + '</div>';
+    }).join('');
+    const ask = document.getElementById('wifiAskPass');
+    if (ask) { ask.focus(); ask.addEventListener('keydown', e => { if (e.key === 'Enter') joinTypedPass(); }); }
+}
+
+function bindWifiPicker() {
+    const listEl = document.getElementById('wifiNetList');
+    const savedEl = document.getElementById('wifiSavedList');
+    if (!listEl) return;
+    // One delegated listener: the rows are re-rendered as strings, so binding per
+    // row would leak handlers on every refresh.
+    const onClick = e => {
+        const b = e.target.closest('button[data-act]');
+        if (!b) return;
+        const act = b.dataset.act;
+        if (act === 'connect') connectWifi(b.dataset.ssid, b.dataset.saved === '1');
+        else if (act === 'join') joinTypedPass();
+        else if (act === 'cancelask') { wifiAskPassFor = null; renderWifiLists(); }
+        else if (act === 'forget') forgetWifi(parseInt(b.dataset.slot, 10), b.dataset.ssid);
+        else if (act === 'slot') wifiJoin({ ssid: wifiPendingSsid, slot: parseInt(b.dataset.slot, 10) });
+    };
+    listEl.onclick = onClick;
+    if (savedEl) savedEl.onclick = onClick;
+    // Status only: a plain GET reads the cached scan and the stored slots, and
+    // triggers no radio work.
+    fetch('/api/wifi/scan').then(r => r.json()).then(d => { wifiScanData = d; renderWifiLists(); })
+        .catch(() => {});
+}
+
+function doWifiScan() {
+    wifiMsg('');
+    fetch('/api/wifi/scan', { method: 'POST' }).then(r => r.json())
+        .then(d => { if (d.error) wifiMsg('Scan refused: ' + d.error, 'var(--accent-rose)'); })
+        .catch(() => {});
+    wifiPoll(0);
+}
+
+// A full 1-13 sweep takes a few seconds; poll for the result instead of holding
+// the request open, so the page never sits on a hung fetch.
+function wifiPoll(n) {
+    clearTimeout(wifiScanTimer);
+    fetch('/api/wifi/scan').then(r => r.json()).then(d => {
+        wifiScanData = d;
+        renderWifiLists();
+        if (d.scanning && n < 30) wifiScanTimer = setTimeout(() => wifiPoll(n + 1), 700);
+    }).catch(() => { if (n < 6) wifiScanTimer = setTimeout(() => wifiPoll(n + 1), 1500); });
+}
+
+function connectWifi(ssid, isSaved) {
+    if (isSaved) {
+        // Already stored: reconnect with the saved passphrase. The body carries
+        // no "pass", and the device keeps the stored one rather than blanking it.
+        wifiJoin({ ssid: ssid });
+    } else {
+        wifiAskPassFor = ssid;
+        renderWifiLists();
+    }
+}
+
+function joinTypedPass() {
+    const el = document.getElementById('wifiAskPass');
+    if (!el || !wifiAskPassFor) return;
+    wifiJoin({ ssid: wifiAskPassFor, pass: el.value });
+}
+
+function addHiddenWifi() {
+    const s = document.getElementById('wifiHiddenSsid');
+    const p = document.getElementById('wifiHiddenPass');
+    if (!s || !s.value.trim()) { wifiMsg('Type the hidden network name first.', 'var(--accent-amber)'); return; }
+    // An explicit empty "pass" is deliberate: the network may be open, and a
+    // missing field would instead keep a previously stored passphrase.
+    wifiJoin({ ssid: s.value.trim(), pass: (p && p.value) || '' });
+}
+
+function wifiJoin(payload) {
+    wifiMsg('Storing ' + payload.ssid + ' on the device...');
+    fetch('/api/wifi/join', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(payload) })
+        .then(r => r.json()).then(d => {
+            if (d.status === 'full') {
+                showWifiOverwrite(payload.ssid, d.saved || []);
+                wifiMsg('All five stored networks are in use.', 'var(--accent-amber)');
+                return;
+            }
+            if (d.status !== 'ok') {
+                wifiMsg('Could not store ' + payload.ssid + ': ' + (d.error || 'device refused'),
+                        'var(--accent-rose)');
+                return;
+            }
+            wifiAskPassFor = null;
+            wifiPendingSsid = null;
+            const ow = document.getElementById('wifiOverwrite');
+            if (ow) ow.style.display = 'none';
+            const hid = document.getElementById('wifiHiddenSsid');
+            const hidp = document.getElementById('wifiHiddenPass');
+            if (hid) hid.value = '';
+            if (hidp) hidp.value = '';
+            wifiMsg('Connecting to ' + d.ssid + '. ' +
+                    (d.nvsOk ? '' : 'NVS refused the write - this setting lives until the next reboot. ') +
+                    'If you opened this page over Wi-Fi, the unit may move to a new address: use http://dashboard-pp.local after it joins.',
+                    d.nvsOk ? 'var(--accent-emerald)' : 'var(--accent-amber)');
+            clearTimeout(wifiScanTimer);
+            wifiScanTimer = setTimeout(() => wifiPoll(0), 4000);
+        })
+        .catch(() => wifiMsg('Could not reach the device.', 'var(--accent-rose)'));
+}
+
+// Five slots full: the device refuses to guess which network to drop, and hands
+// the choice back to the user.
+function showWifiOverwrite(ssid, savedList) {
+    const box = document.getElementById('wifiOverwrite');
+    const list = document.getElementById('wifiOverwriteList');
+    if (!box || !list) return;
+    wifiPendingSsid = ssid;
+    list.innerHTML = savedList.map(n =>
+        '<button class="btn-secondary" data-act="slot" data-slot="' + n.slot +
+        '" style="font-size:11px;padding:4px 9px;">' + wifiEsc(n.ssid) + '</button>').join('');
+    box.style.display = '';
+    box.scrollIntoView({ block: 'nearest' });
+}
+
+function forgetWifi(slot, ssid) {
+    if (!confirm('Forget "' + ssid + '" on this dashboard? Its password is deleted from memory, and the device stops trying to join it.')) return;
+    wifiMsg('Forgetting ' + ssid + '...');
+    fetch('/api/wifi/forget', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                               body: JSON.stringify({ slot: slot }) })
+        .then(r => r.json()).then(d => {
+            wifiMsg(d.nvsOk ? ssid + ' forgotten.' : ssid + ' forgotten for this session; NVS refused the write.',
+                    d.nvsOk ? 'var(--accent-emerald)' : 'var(--accent-amber)');
+            clearTimeout(wifiScanTimer);
+            wifiScanTimer = setTimeout(() => wifiPoll(0), 2500);
+        })
+        .catch(() => wifiMsg('Could not reach the device.', 'var(--accent-rose)'));
 }
 
 let rangeScrollLockTimer = null;
@@ -2538,6 +2794,9 @@ function collectConfig() {
     let out = {};
     document.querySelectorAll('input, select').forEach(el => {
         if (el.id.endsWith('_slider') || el.type === 'file') return;
+        // The Wi-Fi picker's boxes are not config parameters: the network they
+        // edit is written by POST /api/wifi/join, which owns the slot choice.
+        if (el.dataset && el.dataset.noconfig) return;
         if (el.id.startsWith('TT_')) {
             let idx = parseInt(el.id.substring(3), 10);
             if (!out['fuelCalOhms']) out['fuelCalOhms'] = [];

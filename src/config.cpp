@@ -248,6 +248,12 @@ int WIFI_TX_POWER_DBM = 20;
 // expired search window only guarantees it sits offline until the next reboot.
 int WIFI_RETRY_MODE = 2;
 int WIFI_RETRY_SECONDS = 60;
+// How long one network gets before the search gives up on it and tries the next
+// slot. A WPA2 join on a cold radio is a band scan (1-3s) plus authentication,
+// association and DHCP; the compiled-in 5s window used to cut off attempts that
+// were still working, which showed up as a timeout followed by a refused config
+// change for the next network.
+int WIFI_ATTEMPT_SECONDS = 12;
 
 bool NTP_ENABLED = true;
 char NTP_SERVER[64] = "pool.ntp.org";
@@ -1042,6 +1048,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(WIFI_TX_POWER_DBM, "WIFI_TXP", 20, -1, 20);
   CFG_INT(WIFI_RETRY_MODE, "WIFI_RETRY_M", 2, 0, 2);
   CFG_INT(WIFI_RETRY_SECONDS, "WIFI_RETRY_S", 60, 1, 86400);
+  CFG_INT(WIFI_ATTEMPT_SECONDS, "WIFI_ATTEM_S", 12, 5, 60);
   // One-time migration for the policy default above. Shipped units stored
   // WIFI_RETRY_M=1 ("search for a fixed time"), which stopped looking for any
   // network 60 s after boot - the reason a dashboard stayed offline after its
@@ -1418,6 +1425,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "WIFI_TX_POWER_DBM": 20,
   "WIFI_RETRY_MODE": 2,
   "WIFI_RETRY_SECONDS": 60,
+  "WIFI_ATTEMPT_SECONDS": 12,
   "NTP_ENABLED": true,
   "NTP_SERVER": "pool.ntp.org",
   "TZ_OFFSET_HOURS": 1,

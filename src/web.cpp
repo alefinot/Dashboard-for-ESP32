@@ -160,7 +160,9 @@ static volatile int s_scanCount = 0;
 static volatile unsigned long s_scanDoneMs = 0;   // 0 = no scan has finished
 static volatile bool s_scanBusy = false;          // async scan in flight
 static volatile bool s_scanRequested = false;     // scan wanted (UI button / auto)
-static char s_scanBody[2600];                     // GET response, built in place
+static char s_scanBody[3072];                     // GET response, built in place
+                                                  // 30 nets + the saved list fit
+                                                  // with the guards in wifiScanJson
 
 // Names for wifi_auth_mode_t (esp_wifi_types_generic.h). The values past OWE
 // are rare enough to be reported as "other" with the number alongside.
@@ -171,13 +173,41 @@ static const char *wifiAuthName(uint8_t auth) {
   return auth < sizeof(names) / sizeof(names[0]) ? names[auth] : "other";
 }
 
+// The five credential pairs, addressed three ways. /api/config, the boot-time
+// search and the factory-reset keeper all use these same keys, so the picker
+// below stores nothing new - it fills the slots the rest of the firmware already
+// reads.
+static const int WIFI_SLOT_COUNT = 5;
+static const char *const WIFI_SLOT_SSID_KEY[WIFI_SLOT_COUNT] = {"WIFI_SSID", "WIFI_S1",
+                                                                "WIFI_S2", "WIFI_S3", "WIFI_S4"};
+static const char *const WIFI_SLOT_PASS_KEY[WIFI_SLOT_COUNT] = {"WIFI_PWD", "WIFI_P1",
+                                                                "WIFI_P2", "WIFI_P3", "WIFI_P4"};
+
+static char *wifiSlotSsid(int i) {
+  switch (i) {
+    case 0: return WIFI_SSID;
+    case 1: return WIFI_SSID_1;
+    case 2: return WIFI_SSID_2;
+    case 3: return WIFI_SSID_3;
+    default: return WIFI_SSID_4;
+  }
+}
+
+static char *wifiSlotPass(int i) {
+  switch (i) {
+    case 0: return WIFI_PASSWORD;
+    case 1: return WIFI_PASSWORD_1;
+    case 2: return WIFI_PASSWORD_2;
+    case 3: return WIFI_PASSWORD_3;
+    default: return WIFI_PASSWORD_4;
+  }
+}
+
 // True when this SSID already has a credential slot. The picker uses it to
 // connect straight away instead of asking for a known password again.
 static bool wifiSsidSaved(const char *ssid) {
-  const char *ssids[] = {WIFI_SSID, WIFI_SSID_1, WIFI_SSID_2, WIFI_SSID_3,
-                         WIFI_SSID_4};
-  for (const char *s : ssids)
-    if (s[0] && strncmp(s, ssid, 64) == 0) return true;
+  for (int i = 0; i < WIFI_SLOT_COUNT; i++)
+    if (wifiSlotSsid(i)[0] && strncmp(wifiSlotSsid(i), ssid, 64) == 0) return true;
   return false;
 }
 
@@ -241,8 +271,124 @@ static void wifiScanSortBySignal() {
   }
 }
 
+// Channel of a saved network when the radio has just seen it, 0 when it has not
+// been seen or the scan is too old to trust. Passing it to begin() lets the
+// driver start its FAST_SCAN on the right channel instead of sweeping 1-13
+// first, which is the difference between a join in ~1s and one in ~4s. A router
+// that hopped channels would be re-reported by the scan that runs after every
+// failed cycle, so the 30s limit is what makes pinning safe rather than stale.
+static uint8_t wifiScanChannel(const char *ssid) {
+  if (!s_scanDoneMs || millis() - s_scanDoneMs > 30000UL || !ssid || !ssid[0])
+    return 0;
+  for (int i = 0; i < s_scanCount; i++)
+    if (strncmp(s_scan[i].ssid, ssid, sizeof(s_scan[i].ssid)) == 0)
+      return s_scan[i].ch;
+  return 0;
+}
+
+// SSID of the network the STA is on, empty when it is not connected. Kept here
+// so the scan response can mark the connected row without asking the core for a
+// String on a request path.
+static char s_joinedSsid[33] = "";
+
+// Set by POST /api/wifi/join and /api/wifi/forget; consumed by the search state
+// machine, which owns the driver. The index is the slot to aim at, -1 = start
+// from the top.
+static volatile bool s_wifiSearchRequested = false;
+static volatile int s_wifiSearchIdx = -1;
+
+// Store one network into one slot: the globals the search machine reads, plus
+// NVS so it survives a reboot. Returns false when NVS refused the write, which
+// the caller reports rather than hiding - a credential that is in RAM but not in
+// flash works until the next reboot and then looks like a random failure.
+static bool wifiSlotWrite(int slot, const char *ssid, const char *pass) {
+  if (slot < 0 || slot >= WIFI_SLOT_COUNT) return false;
+  char *dstSsid = wifiSlotSsid(slot), *dstPass = wifiSlotPass(slot);
+  strncpy(dstSsid, ssid ? ssid : "", 63);
+  dstSsid[63] = 0;
+  strncpy(dstPass, pass ? pass : "", 63);
+  dstPass[63] = 0;
+  NvsSession session("cfg", false);
+  if (!session.opened()) {
+    logPrintf("WiFi slot %d: NVS could not be opened\n", slot);
+    return false;
+  }
+  bool ok = true;
+  if (nvsWriteFailed(WIFI_SLOT_SSID_KEY[slot],
+                     session.nvs.putString(WIFI_SLOT_SSID_KEY[slot], dstSsid))) ok = false;
+  if (nvsWriteFailed(WIFI_SLOT_PASS_KEY[slot],
+                     session.nvs.putString(WIFI_SLOT_PASS_KEY[slot], dstPass))) ok = false;
+  return ok;
+}
+
+// Drop one saved network. Credentials are only ever removed by an explicit
+// request from the user - a failing network is never forgotten on its own, since
+// "it is out of range right now" is the normal case for a vehicle.
+static bool wifiSlotForget(int slot) {
+  if (slot < 0 || slot >= WIFI_SLOT_COUNT) return false;
+  NvsSession session("cfg", false);
+  bool ok = session.opened();
+  if (ok) {
+    if (nvsWriteFailed(WIFI_SLOT_SSID_KEY[slot],
+                       session.nvs.remove(WIFI_SLOT_SSID_KEY[slot]))) ok = false;
+    if (nvsWriteFailed(WIFI_SLOT_PASS_KEY[slot],
+                       session.nvs.remove(WIFI_SLOT_PASS_KEY[slot]))) ok = false;
+  }
+  wifiSlotSsid(slot)[0] = 0;
+  wifiSlotPass(slot)[0] = 0;
+  return ok;
+}
+
+// Move the network that just joined to the front of the saved list. The search
+// starts every cycle at index 0, so this is what makes "connect to whatever is
+// actually here" automatic: the network this unit reached last is the first one
+// it tries next time, with no manual primary/fallback ordering. Pairs that
+// already match are not rewritten, and joins are rare (a handful a day), so this
+// stays inside the NVS wear rule (AGENTS §12).
+static void wifiRotateToTop(int idx) {
+  if (idx < 1 || idx >= WIFI_SLOT_COUNT) return;  // already first
+  static char newSsid[WIFI_SLOT_COUNT][64];
+  static char newPass[WIFI_SLOT_COUNT][64];
+  for (int i = 0; i < WIFI_SLOT_COUNT; i++) { newSsid[i][0] = 0; newPass[i][0] = 0; }
+  int out = 0;
+  for (int pass = 0; pass < 2; pass++) {  // the joined network, then the rest in order
+    for (int i = 0; i < WIFI_SLOT_COUNT; i++) {
+      bool take = (pass == 0) ? (i == idx) : (i != idx && wifiSlotSsid(i)[0] != 0);
+      if (!take) continue;
+      strncpy(newSsid[out], wifiSlotSsid(i), 63);
+      newSsid[out][63] = 0;
+      strncpy(newPass[out], wifiSlotPass(i), 63);
+      newPass[out][63] = 0;
+      out++;
+    }
+  }
+  NvsSession session("cfg", false);
+  int fails = 0;
+  if (!session.opened()) fails = 1;
+  for (int i = 0; i < WIFI_SLOT_COUNT; i++) {
+    char *dstSsid = wifiSlotSsid(i), *dstPass = wifiSlotPass(i);
+    if (strcmp(dstSsid, newSsid[i]) != 0) {
+      strncpy(dstSsid, newSsid[i], 63);
+      dstSsid[63] = 0;
+      if (session.opened() &&
+          nvsWriteFailed(WIFI_SLOT_SSID_KEY[i], session.nvs.putString(WIFI_SLOT_SSID_KEY[i], dstSsid)))
+        fails++;
+    }
+    if (strcmp(dstPass, newPass[i]) != 0) {
+      strncpy(dstPass, newPass[i], 63);
+      dstPass[63] = 0;
+      if (session.opened() &&
+          nvsWriteFailed(WIFI_SLOT_PASS_KEY[i], session.nvs.putString(WIFI_SLOT_PASS_KEY[i], dstPass)))
+        fails++;
+    }
+  }
+  logPrintf("WiFi: %s is now the first network tried%s\n", newSsid[0],
+            fails ? " (NVS write failed)" : "");
+}
+
 // Build the /api/wifi/scan body with snprintf into a static buffer: no
 // JsonDocument and no growing String on a request path (AGENTS §14).
+static void wifiSavedJson(size_t cap, int *off);  // defined below, uses the slots
 static void wifiScanJson() {
   size_t cap = sizeof(s_scanBody) - 1;
   int off = snprintf(s_scanBody, cap,
@@ -266,12 +412,175 @@ static void wifiScanJson() {
     off += w;
     shown++;
   }
-  snprintf(s_scanBody + off, cap - off, "]}");
+  wifiSavedJson(cap, &off);
+}
+
+// The five credential slots, as the picker needs them: which names are stored,
+// in which slot, and which one is live. Kept in the same response as the scan so
+// the panel is one request, and so a saved-but-currently-invisible network is
+// still listed (a network out of range is normal for a vehicle, and forgetting
+// it must stay the user's choice).
+static void wifiSavedJson(size_t cap, int *off) {
+  char esc[67];
+  if ((size_t)*off >= cap - 16) {
+    if ((size_t)*off < cap - 2) snprintf(s_scanBody + *off, cap - *off, "]}");
+    return;
+  }
+  int w = snprintf(s_scanBody + *off, cap - *off, "],\"saved\":[");
+  if (w <= 0 || (size_t)(*off + w) >= cap) return;
+  *off += w;
+  int shown = 0;
+  for (int i = 0; i < WIFI_SLOT_COUNT; i++) {
+    char *sid = wifiSlotSsid(i);
+    if (!sid[0]) continue;
+    if ((size_t)*off >= cap - 120) break;
+    wifiSsidEscaped(esc, sizeof(esc), sid);
+    w = snprintf(s_scanBody + *off, cap - *off,
+                 "%s{\"slot\":%d,\"ssid\":\"%s\",\"connected\":%s}",
+                 shown ? "," : "", i, esc,
+                 (s_joinedSsid[0] && strcmp(s_joinedSsid, sid) == 0) ? "true" : "false");
+    if (w <= 0 || (size_t)(*off + w) >= cap) break;
+    *off += w;
+    shown++;
+  }
+  if ((size_t)*off < cap - 2) *off += snprintf(s_scanBody + *off, cap - *off, "]}");
 }
 
 static void wifiScanGetHandler() {
   wifiScanJson();
   server.send(200, "application/json", s_scanBody);
+}
+
+// POST /api/wifi/join {"ssid":"...","pass":"..."}
+// The phone-style flow: pick a name from the scan list, type the passphrase once.
+// An SSID already stored keeps its slot (so a corrected password does not create
+// a duplicate); otherwise the first free slot is used. With all five slots full
+// the caller gets "full" back plus the list, and has to name the slot to
+// overwrite - nothing is silently replaced.
+static void wifiJoinPostHandler() {
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"status\":\"error\",\"error\":\"no body\"}");
+    return;
+  }
+  // A join is a person pressing a button, not a poller, so the parse pool here
+  // matches what POST /api/config already does.
+  JsonDocument doc;
+  if (deserializeJson(doc, server.arg("plain"))) {
+    server.send(400, "application/json", "{\"status\":\"error\",\"error\":\"bad JSON\"}");
+    return;
+  }
+  const char *ssid = doc["ssid"];
+  JsonVariantConst passVal = doc["pass"];
+  const char *passIn = passVal;  // null when the caller sent no passphrase at all
+  int reqSlot = doc["slot"] | -1;
+  if (!ssid || !ssid[0]) {
+    server.send(400, "application/json", "{\"status\":\"error\",\"error\":\"missing ssid\"}");
+    return;
+  }
+  char ssidClean[33];  // 32 bytes is the wire limit: a longer name is refused by
+  strncpy(ssidClean, ssid, 32);
+  ssidClean[32] = 0;   // the core, so do not store a half-name either
+  const size_t passLen = passIn ? strlen(passIn) : 0;
+  if (passLen > 63) {  // WPA2/3 passphrases are 8-63 printable characters
+    server.send(400, "application/json",
+                "{\"status\":\"error\",\"error\":\"passphrase too long\"}");
+    return;
+  }
+
+  int slot = -1, freeSlot = -1;
+  bool matchedExisting = false;
+  for (int i = 0; i < WIFI_SLOT_COUNT; i++) {
+    char *sid = wifiSlotSsid(i);
+    if (sid[0] && strcmp(sid, ssidClean) == 0) { slot = i; matchedExisting = true; break; }
+    if (freeSlot < 0 && !sid[0]) freeSlot = i;
+  }
+  bool overwrite = false;
+  if (slot < 0) {
+    if (freeSlot >= 0) {
+      slot = freeSlot;
+    } else if (reqSlot >= 0 && reqSlot < WIFI_SLOT_COUNT) {
+      slot = reqSlot;  // the user named which network may be displaced
+      overwrite = true;
+    } else {
+      // All five slots hold a network: say so, with the list, and let the UI ask
+      // which one may go.
+      static char fullBody[640];
+      int off = snprintf(fullBody, sizeof(fullBody),
+                         "{\"status\":\"full\",\"max\":%d,\"saved\":[", WIFI_SLOT_COUNT);
+      int shown = 0;
+      char esc[67];
+      for (int i = 0; i < WIFI_SLOT_COUNT && (size_t)off < sizeof(fullBody) - 110; i++) {
+        char *sid = wifiSlotSsid(i);
+        if (!sid[0]) continue;
+        wifiSsidEscaped(esc, sizeof(esc), sid);
+        off += snprintf(fullBody + off, sizeof(fullBody) - off, "%s{\"slot\":%d,\"ssid\":\"%s\"}",
+                        shown ? "," : "", i, esc);
+        shown++;
+      }
+      snprintf(fullBody + off, sizeof(fullBody) - off, "]}");
+      server.send(200, "application/json", fullBody);
+      return;
+    }
+  }
+
+  // Resolve the passphrase against the slot. "Reconnect" from the stored list
+  // sends no passphrase field, and must reuse what is already stored rather than
+  // write an empty one; a tap on an open network sends "" on purpose.
+  char passBuf[64];
+  const char *pass = passIn;
+  if (!passIn) {
+    if (matchedExisting) {
+      strncpy(passBuf, wifiSlotPass(slot), 63);
+      passBuf[63] = 0;
+      pass = passBuf;
+    } else {
+      pass = "";
+    }
+  }
+
+  bool nvsOk = wifiSlotWrite(slot, ssidClean, pass);
+  s_wifiSearchIdx = slot;
+  s_wifiSearchRequested = true;
+  char esc[67];
+  wifiSsidEscaped(esc, sizeof(esc), ssidClean);
+  char body[192];
+  snprintf(body, sizeof(body),
+           "{\"status\":\"ok\",\"slot\":%d,\"ssid\":\"%s\",\"nvsOk\":%s,\"overwrite\":%s}",
+           slot, esc, nvsOk ? "true" : "false", overwrite ? "true" : "false");
+  logPrintf("WiFi: slot %d set to %s (%s), searching now\n", slot, ssidClean,
+            strlen(pass) ? "secured" : "open network");
+  if (!nvsOk)
+    logPrintf("WiFi: %s is set for this session but NVS refused the write\n", ssidClean);
+  server.send(200, "application/json", body);
+}
+
+// POST /api/wifi/forget {"slot":n}
+static void wifiForgetPostHandler() {
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"status\":\"error\",\"error\":\"no body\"}");
+    return;
+  }
+  JsonDocument doc;
+  if (deserializeJson(doc, server.arg("plain"))) {
+    server.send(400, "application/json", "{\"status\":\"error\",\"error\":\"bad JSON\"}");
+    return;
+  }
+  int slot = doc["slot"] | -1;
+  if (slot < 0 || slot >= WIFI_SLOT_COUNT) {
+    server.send(400, "application/json", "{\"status\":\"error\",\"error\":\"bad slot\"}");
+    return;
+  }
+  char gone[67];
+  wifiSsidEscaped(gone, sizeof(gone), wifiSlotSsid(slot));
+  bool nvsOk = wifiSlotForget(slot);
+  s_wifiSearchIdx = -1;  // whatever else is saved decides what to try next
+  s_wifiSearchRequested = true;
+  char body[160];
+  snprintf(body, sizeof(body),
+           "{\"status\":\"ok\",\"slot\":%d,\"ssid\":\"%s\",\"nvsOk\":%s}", slot, gone,
+           nvsOk ? "true" : "false");
+  logPrintf("WiFi: slot %d (%s) forgotten\n", slot, gone);
+  server.send(200, "application/json", body);
 }
 
 // The list refreshes only when the user asks for it: a scan makes the radio hop
@@ -1481,6 +1790,8 @@ void webServerTask(void *pvParameters) {
   // only asks the network task to scan (see the scan runner in the task loop).
   server.on("/api/wifi/scan", HTTP_GET, wifiScanGetHandler);
   server.on("/api/wifi/scan", HTTP_POST, wifiScanPostHandler);
+  server.on("/api/wifi/join", HTTP_POST, wifiJoinPostHandler);
+  server.on("/api/wifi/forget", HTTP_POST, wifiForgetPostHandler);
 
   server.on("/api/time", HTTP_POST, []() {
     if (!server.hasArg("plain")) {
@@ -2084,6 +2395,53 @@ void webServerTask(void *pvParameters) {
     }
 
     // ---------------------------------------------------------------------
+    // A network was just picked or forgotten in the Web UI. Restart the search
+    // immediately and aim it at that slot rather than waiting for the current
+    // cycle to walk around the list. Same shape as the link-loss re-arm in the
+    // STA_UP branch below: end the old link through the driver, let GAP wait for
+    // the event, then try.
+    if (s_wifiSearchRequested) {
+      s_wifiSearchRequested = false;
+      buildWifiList();
+      int configured = 0;
+      for (int i = 0; i < wifiNetCount; i++)
+        if (strlen(wifiNets[i].ssid) > 0) configured++;
+      if (configured == 0) {
+        // Everything was forgotten: hand it back to the init branch, which says
+        // plainly that there is nothing to search for.
+        s_joinedSsid[0] = 0;
+        staConnected = false;
+        if (staPhase == STA_ATTEMPT || staPhase == STA_UP) WiFi.disconnect(false);
+        staFinalized = false;
+        staPhase = STA_INIT;
+      } else {
+      int want = s_wifiSearchIdx;
+      if (want < 0 || want >= wifiNetCount || strlen(wifiNets[want].ssid) == 0) want = 0;
+      if (staConnected && want == staNetIdx) {
+        logPrintf("WiFi: %s is already the connected network\n", wifiNets[staNetIdx].ssid);
+      } else {
+        if (staConnected)
+          logPrintf("WiFi: switching from %s to %s on request\n", wifiNets[staNetIdx].ssid,
+                    wifiNets[want].ssid);
+        else
+          logPrintf("WiFi: searching for %s now\n", wifiNets[want].ssid);
+        // End whatever link or attempt is in flight before aiming at the new
+        // network, otherwise the driver refuses the config change.
+        WiFi.disconnect(false);
+        staConnected = false;
+        // Re-arms the weather fetch and re-binds mDNS for whatever IP the new
+        // network hands out (same reason as the link-loss path).
+        staFinalized = false;
+        staNetIdx = want;
+        staRefusals = 0;
+        staSearchStart = millis();
+        staPhase = STA_GAP;
+        staDeadline = millis() + 1000;
+      }
+      }
+    }
+
+    // ---------------------------------------------------------------------
     // Non-blocking STA search. wifiNets[] is in priority order and index 0 is
     // the primary network (WIFI_SSID), so every cycle - at boot and after a
     // link loss - offers the primary first and a fallback is only ever used
@@ -2116,8 +2474,9 @@ void webServerTask(void *pvParameters) {
         staLinkDropped = false;
         logPrintf("STA link lost (reason=%u), re-searching networks\n",
                   (unsigned)staDrvReason);
+        s_joinedSsid[0] = 0;
         staConnected = false;
-        staNetIdx = 0;  // the primary network gets first refusal again
+        staNetIdx = 0;  // slot 0 is the network that worked last (see rotation)
         staSearchStart = millis();
         staRefusals = 0;
         // Clear the finalize latch so the post-join block re-runs on the
@@ -2178,11 +2537,19 @@ void webServerTask(void *pvParameters) {
         } else if (strlen(wifiNets[staNetIdx].ssid) == 0) {
           staNetIdx++;  // empty slot: skip it without burning a backoff
         } else {
-          logPrintf("Trying WiFi[%d]: %s\n", staNetIdx, wifiNets[staNetIdx].ssid);
+          // If the radio just saw this SSID, aim the join at its channel. A
+          // whole-band FAST_SCAN costs 1-3s of every attempt window.
+          uint8_t pinCh = wifiScanChannel(wifiNets[staNetIdx].ssid);
+          char chNote[16];
+          chNote[0] = 0;
+          if (pinCh) snprintf(chNote, sizeof(chNote), " ch%u", (unsigned)pinCh);
+          logPrintf("Trying WiFi[%d]: %s%s\n", staNetIdx, wifiNets[staNetIdx].ssid,
+                    chNote);
           staDrvAttemptOpen = true;  // begin() arms it; the events clear it
           staAttemptStart = millis();
           wl_status_t beginRes = WiFi.begin(wifiNets[staNetIdx].ssid,
-                                            wifiNets[staNetIdx].pass);
+                                            wifiNets[staNetIdx].pass,
+                                            (int32_t)pinCh);
           if (beginRes == WL_CONNECT_FAILED) {
             // The driver refused the config: this network was NOT tried, an
             // attempt was still in flight (ESP_ERR_WIFI_STATE). Retrying the
@@ -2202,12 +2569,20 @@ void webServerTask(void *pvParameters) {
               staDeadline = millis() + 3000;
             } else {
               staPhase = STA_GAP;
-              staDeadline = millis() + 1500;
+              // Give the driver room to report the attempt over; the shorter
+              // 1500ms budget expired before the event, which is how the next
+              // begin() got refused (ESP_ERR_WIFI_STATE) and the refusal
+              // counter climbed on a network that had never really been tried.
+              staDeadline = millis() + 3000;
             }
           } else {
             staRefusals = 0;
             staPhase = STA_ATTEMPT;
-            staDeadline = millis() + 5000;
+            // One network's share of the search: WIFI_ATTEMPT_SECONDS, tunable
+            // in the Web UI because a marginal signal on a busy channel needs
+            // more than any compiled-in constant can guess.
+            staDeadline =
+                millis() + (unsigned long)WIFI_ATTEMPT_SECONDS * 1000UL;
           }
         }
       } else if (staPhase == STA_ATTEMPT) {
@@ -2219,6 +2594,16 @@ void webServerTask(void *pvParameters) {
                     wifiNets[staNetIdx].ssid);
           logPrintf("STA connected: %s\n", WiFi.localIP().toString().c_str());
           logPrintf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
+          // Last known good first: the network this unit can actually reach
+          // becomes slot 0, so the next boot and the next dropout start with it
+          // instead of walking a hand-ordered primary/fallback list.
+          strncpy(s_joinedSsid, wifiNets[staNetIdx].ssid, sizeof(s_joinedSsid) - 1);
+          s_joinedSsid[sizeof(s_joinedSsid) - 1] = 0;
+          wifiRotateToTop(staNetIdx);
+          // The rotation moved this network to slot 0, and wifiNets[] points at
+          // the globals, so the connected network is now index 0. Keeping the
+          // old index would make later logs and the picker name the wrong row.
+          staNetIdx = 0;
         } else if (!staDrvAttemptOpen && millis() - staAttemptStart > 300) {
           // The driver already ended this attempt (NO_AP_FOUND, wrong password,
           // auth timeout...): no reason to burn the rest of the window.
@@ -2237,7 +2622,7 @@ void webServerTask(void *pvParameters) {
           WiFi.disconnect(false);
           staNetIdx++;
           staPhase = STA_GAP;
-          staDeadline = millis() + 1500;
+          staDeadline = millis() + 3000;
         }
       }
     }

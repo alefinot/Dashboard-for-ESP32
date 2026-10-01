@@ -363,6 +363,7 @@ extern char AP_PASSWORD[64];
 extern int WIFI_TX_POWER_DBM;
 extern int WIFI_RETRY_MODE;
 extern int WIFI_RETRY_SECONDS;
+extern int WIFI_ATTEMPT_SECONDS;
 
 // WiFi STA search diagnostics, written by the web task's search state machine
 // and read by the diagnostic heartbeat: phase (0=init 1=backoff 2=try
