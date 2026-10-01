@@ -2399,6 +2399,10 @@ function bindWifiPicker() {
     };
     listEl.onclick = onClick;
     if (savedEl) savedEl.onclick = onClick;
+    // The "all five slots are full" chooser is a third delegated container; without
+    // this the replace-a-network buttons rendered but did nothing.
+    const owList = document.getElementById('wifiOverwriteList');
+    if (owList) owList.onclick = onClick;
     // Status only: a plain GET reads the cached scan and the stored slots, and
     // triggers no radio work.
     fetch('/api/wifi/scan').then(r => r.json()).then(d => { wifiScanData = d; renderWifiLists(); })
