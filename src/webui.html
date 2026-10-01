@@ -672,16 +672,7 @@ input[type="checkbox"]:checked::after {
     box-shadow: 0 0 8px var(--accent-cyan);
 }
 
-/* XY Coordinates Group */
-.xy-group h4 {
-    margin: 0 0 8px 0;
-    color: #fff;
-    font-size: 12px;
-    font-weight: 700;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    padding-bottom: 4px;
-}
-
+/* XY coordinate rows (the card title itself is a .card-title like everywhere else) */
 .xy-row {
     display: flex;
     align-items: center;
@@ -759,14 +750,6 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 .perf-card:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
-}
-
-.perf-card h4 {
-    margin: 0 0 8px 0;
-    color: var(--accent-cyan);
-    font-family: 'Outfit', sans-serif;
-    font-size: 13px;
-    font-weight: 700;
 }
 
 .perf-row {
@@ -970,6 +953,182 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 
 .cfg-color-controls input[type="color"] { flex-shrink: 0; }
 
+/* The slider block: the class is the search filter's hook (see isRow()), the
+   padding was inline on both slider renderers. */
+.cfg-slider { padding: 4px 0; }
+
+/* Shared recipes for the settings form. These blocks used to be pasted inline
+   on every card, which is how the four sections drifted apart; one definition
+   now covers System & General, Display, Sensors Tuning and UI Layout. Every
+   value below is the one the cards already used - nothing here moves a pixel. */
+/* One title treatment for every card: the settings renderer emits
+   <h4 class="card-title">, the Performance Monitor uses plain h4, and the
+   original .card h4 rule above already carries the look. The perf cards keep a
+   slightly larger bottom margin because their grid is denser. */
+.card-title, .perf-card h4 {
+    color: var(--accent-cyan);
+    font-family: 'Outfit', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+.perf-card h4 {
+    margin: 0 0 8px 0;
+}
+
+/* .cfg-note   = static line sitting under a setting
+   .cfg-help   = line the JavaScript rewrites live (scan status, excitation)
+   .cfg-warn   = something the user must not miss
+   .cfg-live   = "Reading: 23.4 C" value inside a card
+   .cfg-label  = the label above a slider or an XY pair */
+.cfg-note {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    padding: 2px 2px 8px 2px;
+}
+
+.cfg-help {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.cfg-warn {
+    color: var(--accent-rose);
+    font-weight: 700;
+}
+
+.cfg-live { font-size: 12px; color: var(--text-muted); }
+.cfg-live strong { color: #fff; font-family: 'JetBrains Mono', monospace; }
+
+.cfg-label {
+    font-size: 12px;
+    display: block;
+    margin-bottom: 4px;
+}
+
+/* Row of action buttons inside a card; the variants only move them sideways. */
+.cfg-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.cfg-toolbar.end { justify-content: flex-end; }
+.cfg-toolbar.spread { justify-content: space-between; }
+
+/* Compact action buttons: exactly the two sizes the in-card buttons used, now
+   in one place. nowrap keeps "Reset Trip Stats Now" on a single line. */
+.btn-sm { font-size: 11px; padding: 5px 10px; white-space: nowrap; }
+.btn-xs { font-size: 11px; padding: 4px 9px; white-space: nowrap; }
+
+.btn-icon {
+    width: 13px;
+    height: 13px;
+    vertical-align: -2px;
+    margin-right: 4px;
+}
+
+/* WiFi picker: one row definition for stored and found networks, one box
+   definition for the list and the overwrite chooser. */
+.wifi-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    font-size: 12px;
+}
+.wifi-div { border-bottom: 1px solid var(--border-color); }
+
+.wifi-badge {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid currentColor;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.wifi-list {
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+}
+
+.wifi-row-meta { font-size: 10px; color: var(--text-dim); }
+.wifi-open { font-size: 10px; color: var(--accent-amber); }
+.wifi-ssid { flex: 1; }
+.wifi-empty { padding: 8px 10px; }
+.wifi-ask { width: 130px; font-size: 11px; padding: 4px 6px; }
+.wifi-chosen { display: flex; gap: 6px; flex-wrap: wrap; }
+
+#wifiSavedList { margin-top: 10px; font-size: 12px; }
+#wifiNetList { max-height: 240px; overflow-y: auto; margin-top: 8px; }
+#wifiOverwrite { margin-top: 8px; padding: 8px; }
+#wifiJoinMsg { margin-top: 8px; }
+
+/* Bar caption in the Performance Monitor ("RAM Usage ... 118 / 292 KB") and the
+   storage legend lines under it - they were inline in the markup twice. */
+.perf-bar-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+}
+.perf-bar-label strong { color: #fff; }
+
+#fl-legend { font-size: 11px; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 6px; }
+#fl-nvs { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+.pl-item { display: inline-flex; align-items: center; gap: 3px; }
+.pl-item.free { color: var(--text-dim); }
+.pl-swatch { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
+/* Offline state of the settings form - a designed empty state, not loose markup. */
+.api-error {
+    grid-column: 1 / -1;
+    padding: 24px;
+    text-align: center;
+    color: var(--text-muted);
+    border: 1px dashed var(--border-color);
+    border-radius: 10px;
+}
+.api-error-icon { font-size: 28px; margin-bottom: 8px; }
+.api-error-title { font-weight: 600; color: var(--text-main); margin-bottom: 4px; }
+.api-error-detail { font-size: 12px; line-height: 1.6; }
+.api-error a { color: var(--accent-blue); font-weight: 600; }
+
+/* Signal bars in the network list: the "on" class carries the colour. */
+.wifi-bars { font-size: 9px; letter-spacing: 1px; }
+.wifi-bar { color: var(--border-color); }
+.wifi-bar.on { color: var(--accent-cyan); }
+
+/* Fuel calibration table: auto-fit grid of point rows. */
+.fuel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 6px 12px;
+    align-items: center;
+}
+.fuel-point { display: flex; align-items: center; gap: 6px; }
+.fuel-point input { width: 100%; }
+
+/* Small leftovers that were inline in the renderer: the fuel-table point
+   index, the fixed spacer that lines color swatches up, a monospace value, the
+   checkbox slot in a toggle card, and the 11px label above the fuel table. */
+.tt-index {
+    font-weight: 700;
+    color: var(--accent-cyan);
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.cfg-color-spacer { display: inline-block; width: 90px; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+.checkbox-slot { display: flex; align-items: center; gap: 6px; }
+.cfg-sublabel { font-size: 11px; }
+
 /* Responsive Tweaks */
 @media (max-width: 600px) {
     .main-content { padding: 10px 8px 50px 8px; }
@@ -1052,7 +1211,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
             <div class="perf-row"><span class="perf-label">Mode</span><span class="perf-value" id="p-cpu-mode">Fixed 240 MHz</span></div>
             <div class="perf-row"><span class="perf-label">Temperature</span><span class="perf-value" id="p-cpu-temp">50.0 °C</span></div>
             <div style="margin-top:8px;">
-                <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:4px;">
+                <div class="perf-bar-label">
                     <span>CPU Usage</span><span class="perf-value"><strong id="cpu-pct">100.0</strong>%</span>
                 </div>
                 <div class="perf-bar">
@@ -1062,20 +1221,20 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
         </div>
         <div class="perf-card" style="grid-column:1/-1;">
             <h4>Memory &amp; Storage</h4>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:flex;justify-content:space-between;">
-                <span>RAM Usage</span><span><strong id="mem-used" style="color:#fff;">118</strong> / <strong id="mem-total" style="color:#fff;">292</strong> KB (<strong id="mem-pct" style="color:#fff;">40.3</strong>%)</span>
+            <div class="perf-bar-label">
+                <span>RAM Usage</span><span><strong id="mem-used">118</strong> / <strong id="mem-total">292</strong> KB (<strong id="mem-pct">40.3</strong>%)</span>
             </div>
             <div class="perf-bar" style="margin-bottom:14px;">
                 <div id="mem-used-bar" class="perf-bar-fill" style="width:40%;background:var(--accent-emerald);border-radius:4px;"></div>
             </div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:flex;justify-content:space-between;">
-                <span>Flash Storage</span><span><strong id="fl-used" style="color:#fff;">--</strong> / <strong id="fl-total" style="color:#fff;">4096</strong> KB (<strong id="fl-pct" style="color:#fff;">--</strong>%)</span>
+            <div class="perf-bar-label">
+                <span>Flash Storage</span><span><strong id="fl-used">--</strong> / <strong id="fl-total">4096</strong> KB (<strong id="fl-pct">--</strong>%)</span>
             </div>
             <div class="perf-bar" style="margin-bottom:6px;">
                 <div id="fl-partitions-bar" style="display:flex;width:100%;height:100%;"></div>
             </div>
-            <div id="fl-legend" style="font-size:11px;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:2px 12px;margin-top:6px;"></div>
-            <div id="fl-nvs" style="font-size:11px;color:var(--text-muted);margin-top:8px;"></div>
+            <div id="fl-legend"></div>
+            <div id="fl-nvs"></div>
         </div>
         <div class="perf-card" style="grid-column:1/-1;">
             <h4>Serial Output Monitor</h4>
@@ -1543,11 +1702,8 @@ const configMap = [
             { id: "SHOW_ELEMENT_BOUNDS", label: "Show UI Element Bounds (Debug)" },
             { id: "UNITS_IMPERIAL", label: "Use Imperial Units" },
             { type: "card_header", label: "Trip Reset", content: `
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;line-height:1.5;">
-            A momentary button wired to <strong style="color:var(--text-main);">GPIO25</strong> and GND resets the trip: trip distance, trip fuel, average speed and average consumption. Hold it for the time set below so a knock on the dash cannot wipe a trip. The odometer and the session max speed are never reset. Refuelling no longer resets anything by itself - press the button (or use the button on the right) after a fill-up.
-        </div>
-        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:4px;">
-            <button onclick="resetTripStats()" class="btn-secondary" style="font-size:11px;padding:5px 10px;white-space:nowrap;">Reset Trip Stats Now</button>
+        <div class="cfg-toolbar end">
+            <button onclick="resetTripStats()" class="btn-secondary btn-sm">Reset Trip Stats Now</button>
         </div>` },
             { id: "TRIP_RESET_HOLD_MS", label: "Button Hold Time", type: "number", unit: "ms" },
             { type: "card_header", label: "CPU", advanced: true },
@@ -1637,45 +1793,42 @@ const configMap = [
                     { value: "zh", label: "中文" },
                     { value: "ko", label: "한국어" }
                 ] },
-            { type: "note", label: "If GPS is active, coordinates are updated automatically from the satellite feed. Otherwise, the fallback coordinates are used to fetch local weather from Open-Meteo." },
             { type: "card_header", label: "Custom Signatures" },
             { id: "SPLASH_SIGNATURE", label: "Boot Screen Signature" },
             { id: "REBOOT_SIGNATURE", label: "Reboot Screen Signature" },
             { id: "DASHBOARD_SIGNATURE", label: "Main Dashboard Watermark" },
             { type: "card_header", label: "Wifi", content: `
     <div style="margin:2px 0 10px;">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <button id="wifiScanBtn" onclick="doWifiScan()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Scan Networks</button>
-            <span id="wifiScanNote" style="font-size:11px;color:var(--text-muted);">Not scanned yet. The list only refreshes when you ask: a scan moves the radio off its channel, which can interrupt a live link.</span>
+        <div class="cfg-toolbar">
+            <button id="wifiScanBtn" onclick="doWifiScan()" class="btn-secondary btn-sm">Scan Networks</button>
+            <span id="wifiScanNote" class="cfg-help">Not scanned yet.</span>
         </div>
-        <div id="wifiSavedList" style="margin-top:10px;font-size:12px;"></div>
-        <div id="wifiNetList" style="max-height:240px;overflow-y:auto;margin-top:8px;border:1px solid var(--border-color);border-radius:10px;"></div>
-        <div id="wifiOverwrite" style="display:none;margin-top:8px;border:1px solid var(--border-color);border-radius:10px;padding:8px;">
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">All five stored networks are taken. Choose which one may be replaced - nothing is overwritten until you pick:</div>
-            <div id="wifiOverwriteList" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+        <div id="wifiSavedList"></div>
+        <div id="wifiNetList" class="wifi-list"></div>
+        <div id="wifiOverwrite" class="wifi-list" style="display:none;">
+            <div class="cfg-help" style="margin-bottom:6px;">All five stored networks are taken. Choose which one may be replaced - nothing is overwritten until you pick:</div>
+            <div id="wifiOverwriteList" class="wifi-chosen"></div>
         </div>
-        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;align-items:center;">
+        <div class="cfg-toolbar" style="margin-top:10px;">
             <input data-noconfig="1" type="text" id="wifiHiddenSsid" placeholder="Hidden network name (SSID)" style="flex:1 1 180px;">
             <input data-noconfig="1" id="wifiHiddenPass" type="password" placeholder="Password" style="flex:1 1 130px;">
-            <button onclick="addHiddenWifi()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Add Hidden Network</button>
+            <button onclick="addHiddenWifi()" class="btn-secondary btn-sm">Add Hidden Network</button>
         </div>
-        <div id="wifiJoinMsg" style="font-size:11px;margin-top:8px;color:var(--text-muted);"></div>
+        <div id="wifiJoinMsg" class="cfg-help"></div>
     </div>` },
             { id: "WIFI_ATTEMPT_SECONDS", label: "Timeout Per Network", unit: "seconds", advanced: true },
-            { type: "note", label: '<span id="wifi-search-note">Scan, tap your network, type the password once - that is the whole setup. Up to five networks are stored, and the one that connected last is tried first after a reboot or a dropout, so nothing has to be ordered by hand. A stored network is never dropped on its own; use Forget. The search never stops (it keeps walking the list while the radio is out of range) and the transmitter runs at its 19.5 dBm maximum.</span>' },
-            { type: "heading", label: "Device Config AP (Dashboard_Config)" },
+            { type: "section_header", label: "Hotspot Configuration" },
             { id: "AP_PASSWORD", label: "AP Password" },
-            { type: "note", label: '<span id="ap-pwd-rule">8-63 characters, or empty for an open network. A 1-7 character password is rejected by the Wi-Fi stack, which stops the config hotspot from starting at all.</span> <span id="ap-pwd-warn" style="display:none;color:var(--accent-rose);font-weight:700;">Still using the shipped default password - anyone within range of the hotspot can reconfigure this dashboard.</span>' },
-            { type: "card_header", label: "Firmware Update", content: `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <button id="otaBtn" onclick="doOta()" class="btn-secondary" style="font-size:11px;padding:5px 10px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:13px;height:13px;vertical-align:-2px;margin-right:4px;"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Firmware OTA</button>
+            { type: "note", label: '<span id="ap-pwd-rule" class="cfg-help">8-63 characters, or empty for an open network.</span> <span id="ap-pwd-warn" class="cfg-warn" style="display:none;">Still using the shipped default password - anyone within range of the hotspot can reconfigure this dashboard.</span>' },
+            { type: "card_header", label: "Firmware Update", content: `<div class="cfg-toolbar">
+        <button id="otaBtn" onclick="doOta()" class="btn-secondary btn-sm"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="btn-icon"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Firmware OTA</button>
         <input type="file" id="otaFile" accept=".bin" style="display:none" onchange="otaFileChosen(this)">
-        <button id="otaChangeBtn" onclick="otaChangeFile()" class="btn-secondary" style="font-size:11px;padding:5px 10px;display:none;">Change file</button>
-        <button id="otaPullBtn" onclick="doOtaPull()" class="btn-secondary" style="font-size:11px;padding:5px 10px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:13px;height:13px;vertical-align:-2px;margin-right:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Check Updates</button>
+        <button id="otaChangeBtn" onclick="otaChangeFile()" class="btn-secondary btn-sm" style="display:none;">Change file</button>
+        <button id="otaPullBtn" onclick="doOtaPull()" class="btn-secondary btn-sm"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="btn-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Check Updates</button>
     </div>` },
             { id: "OTA_PULL_ENABLED", label: "Enable Automatic OTA Pull" },
             { id: "OTA_PULL_URL", label: "Firmware Manifest URL" },
             { id: "VERSION_OVERRIDE", label: "Version Label (override)" },
-            { type: "note", label: 'Empty = the device reports the version built into the firmware. Type a version here only to label the unit or to test an update pull against a chosen version; the firmware file itself is never affected, and an update check never changes this field.' },
             { type: "status", id: "build_version", label: "Firmware Build (compiled in)" },
             { type: "status", id: "core_version", label: "ESP Core FW" }
         ]
@@ -1695,11 +1848,11 @@ const configMap = [
             { id: "BACKLIGHT_BRIGHTNESS", label: "Backlight Brightness", type: "range", min: 0, max: 100, step: 1 },
             { id: "FADE_DURATION_MS", label: "Fade Duration", type: "range", min: 100, max: 5000, step: 100, unit: "ms" },
             { id: "ENABLE_AUTO_BRIGHTNESS", label: "Enable Auto Brightness" },
-            { type: "card_header", label: "Auto Brightness", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-        <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="ambient-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong></span>
-        <div style="display:flex;gap:6px;">
-            <button onclick="calibrateDark()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Capture Dark</button>
-            <button onclick="calibrateBright()" class="btn-secondary" style="font-size:11px;padding:5px 10px;">Capture Bright</button>
+            { type: "card_header", label: "Auto Brightness", content: `<div class="cfg-toolbar spread" style="margin-bottom:10px;">
+        <span class="cfg-live">Reading: <strong id="ambient-reading">--</strong></span>
+        <div class="cfg-toolbar">
+            <button onclick="calibrateDark()" class="btn-secondary btn-sm">Capture Dark</button>
+            <button onclick="calibrateBright()" class="btn-secondary btn-sm">Capture Bright</button>
         </div>
     </div>` },
             { id: "LIGHT_SENSOR_DARK_VAL", label: "Dark Value (ADC)", type: "number" },
@@ -1721,34 +1874,32 @@ const configMap = [
             { id: "FUEL_OHM_EMPTY", label: "Sender resistance when EMPTY (ohm)" },
             { id: "FUEL_OHM_FULL", label: "Sender resistance when FULL (ohm)" },
             { id: "FUEL_EXC_RES_OHM", label: "Excitation resistor from 3V3 (ohm)" },
-            { id: "FUEL_ADC_VREF", label: "ADC reference / rail voltage (V)" },
-            { id: "FUEL_OVERSAMPLE", label: "ADC samples averaged per reading" },
-            { type: "note", label: '<span id="fuel-exciter-hint">Wiring: 3V3 - excitation resistor - GPIO32 - sender - tank ground. The dashboard recovers the sender resistance from that divider, so any sender standard works: 10-180 ohm (SAE), 240-33 ohm (European/VDO, high = empty), 0-90 ohm (GM).</span>' },
+            { id: "FUEL_ADC_VREF", label: "ADC reference / rail voltage (V)", advanced: true },
+            { id: "FUEL_OVERSAMPLE", label: "ADC samples averaged per reading", advanced: true },
+            { type: "note", label: '<span id="fuel-exciter-hint" class="cfg-help"></span>' },
             { type: "touch-table", label: "Fuel Tank Calibration", pointCount: "FUEL_TOUCH_POINTS", arrayId: "fuelCalOhms", liveId: "fuel-reading", rows: [
                 { id: "FUEL_FILTER_ALPHA", label: "Smoothing Factor" }
             ] },
             { type: "card_header", label: "Engine Temperature", content: `
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:8px;">
-            <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="temp-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> °C</span>
+        <div class="cfg-toolbar spread" style="margin-bottom:8px;">
+            <span class="cfg-live">Reading: <strong id="temp-reading">--</strong> °C</span>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <div class="cfg-toolbar">
             <input type="number" id="temp-ref" step="0.1" placeholder="Reference (°C)" style="flex:1;min-width:0;text-align:center;">
-            <button onclick="applyTempCal()" class="btn-secondary" style="font-size:11px;padding:5px 10px;white-space:nowrap;">Apply</button>
-        </div>
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Offset corrects the reading. R25, Balance and Beta match the NTC part.</div>` },
+            <button onclick="applyTempCal()" class="btn-secondary btn-sm">Apply</button>
+        </div>` },
             { id: "NTC_TEMP_OFFSET", label: "Offset", unit: "°C", advanced: true },
             { id: "NTC_R25", label: "R25", unit: "Ω", advanced: true },
             { id: "NTC_R_BALANCE", label: "Balance", unit: "Ω", advanced: true },
             { id: "NTC_BETA", label: "Beta", advanced: true },
             { type: "card_header", label: "Battery Voltage", content: `
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:8px;">
-            <span style="font-size:12px;color:var(--text-muted);">Reading: <strong id="bat-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> V</span>
+        <div class="cfg-toolbar spread" style="margin-bottom:8px;">
+            <span class="cfg-live">Reading: <strong id="bat-reading">--</strong> V</span>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <div class="cfg-toolbar">
             <input type="number" id="bat-ref" step="0.01" placeholder="Reference (V)" style="flex:1;min-width:0;text-align:center;">
-            <button onclick="applyBatCal()" class="btn-secondary" style="font-size:11px;padding:5px 10px;white-space:nowrap;">Apply</button>
-        </div>
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Offset corrects the reading. Scale is the divider ratio (4.7 for a 4.7 kΩ / 1 kΩ divider).</div>` },
+            <button onclick="applyBatCal()" class="btn-secondary btn-sm">Apply</button>
+        </div>` },
             { id: "BATTERY_OFFSET", label: "Offset", unit: "V", advanced: true },
             { id: "BATTERY_SCALE", label: "Scale", unit: "×", advanced: true },
             { type: "card_header", label: "Acceleration Timer" },
@@ -1757,12 +1908,12 @@ const configMap = [
             { id: "ACCEL_MAX_TIME", label: "Timer Max Time (0 = off)", unit: "sec" },
             { id: "ACCEL_BADGE_LINE1", label: "Badge Line 1 (e.g., '0-50')" },
             { id: "ACCEL_BADGE_LINE2", label: "Badge Line 2 (e.g., 'km/h')" },
-            { type: "card_header", label: "Odometer (ODO_UNIT)", content: `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-        <span style="font-size:12px;color:var(--text-muted);">Current value: <strong id="odo-reading" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> ODO_UNIT</span>
+            { type: "card_header", label: "Odometer", content: `<div class="cfg-toolbar spread" style="margin-bottom:10px;">
+        <span class="cfg-live">Current value: <strong id="odo-reading">--</strong> ODO_UNIT</span>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;">
-        <input type="number" id="ODO_SET" step="0.1" min="0" placeholder="Set odometer (ODO_UNIT)" style="flex:1;min-width:0;">
-        <button onclick="setOdometer()" class="btn-secondary" style="font-size:11px;padding:5px 10px;white-space:nowrap;">Set Value</button>
+    <div class="cfg-toolbar">
+        <input type="number" id="ODO_SET" step="0.1" min="0" placeholder="Set odometer" style="flex:1;min-width:0;">
+        <button onclick="setOdometer()" class="btn-secondary btn-sm">Set Value</button>
     </div>` },
             { id: "WHEEL_CIRCUMFERENCE_MM", label: "Wheel Circumference", unit: "mm" },
             { id: "MIN_SPEED_THRESHOLD", label: "Minimum Speed Threshold", unit: "km/h" },
@@ -1790,14 +1941,13 @@ const configMap = [
             { id: "HALL_MEDIAN_SAMPLES", label: "Hall Speed Window (samples, 1 = raw)" },
             { id: "HALL_PERIOD_GUARD", label: "Hall Period Guard (1 = off)" },
             { id: "HALL_PULSE_MIN_US", label: "Hall Min Pulse Width (10-1000)", unit: "us" },
-            { id: "GPS_DEBUG_DEFAULT", label: "Show GPS Debug Overlay" },
+            { id: "GPS_DEBUG_DEFAULT", label: "Show GPS Debug Overlay", advanced: true },
         ]
     },
     {
         title: "UI Layout", icon: iconSVG.layout,
         items: [
             { type: "card_header", label: "System" },
-            { type: "note", label: "The Visible checkbox next to each element controls what is drawn on the display. Sensors, GPS, odometer and all calculations keep running regardless." },
             { type: "section_header", label: "Viewport Center" },
             { type: 'xy', idX: "BIG_CENTER_X", idY: "BIG_CENTER_Y", label: "Position" },
             { type: "section_header", label: "Ghost Digits" },
@@ -1923,13 +2073,13 @@ document.addEventListener('DOMContentLoaded', function() {
             msgBox.className = 'msg-error';
             msgBox.innerText = 'Could not load the configuration from the device (' + healthInfo + ').';
             document.getElementById('form-container').innerHTML =
-                '<div style="grid-column:1/-1;padding:24px;text-align:center;color:var(--text-muted);border:1px dashed var(--border-color);border-radius:10px;">' +
-                '<div style="font-size:28px;margin-bottom:8px;">&#9888;&#65039;</div>' +
-                '<div style="font-weight:600;color:var(--text-main);margin-bottom:4px;">Cannot reach the device configuration API</div>' +
-                '<div style="font-size:12px;line-height:1.6;">' + healthInfo + '.<br>' +
+                '<div class="api-error">' +
+                '<div class="api-error-icon">&#9888;&#65039;</div>' +
+                '<div class="api-error-title">Cannot reach the device configuration API</div>' +
+                '<div class="api-error-detail">' + healthInfo + '.<br>' +
                 'The web server may still be starting, or the device is low on memory.<br>' +
                 'Try again in a few seconds, or reboot the device.</div><br>' +
-                '<a href="/" style="color:var(--accent-blue);font-weight:600;">Retry</a>' +
+                '<a href="/">Retry</a>' +
                 '</div>';
         }).catch(() => {
             let msgBox = document.getElementById('msg');
@@ -1986,7 +2136,7 @@ function renderForm(d) {
             if (iType === 'card_header' || iType === 'subtitle') {
                 hasItems = true;
                 closeSubCard();
-                groupHtml += `<div class="card"${advAttr} style="grid-column:1/-1;"><h4 style="margin:0 0 5px 0;color:var(--accent-cyan);font-size:13px;">${trUnitTokens(item.label)}</h4><div style="display:flex;flex-direction:column;gap:0;">`;
+                groupHtml += `<div class="card"${advAttr} style="grid-column:1/-1;"><h4 class="card-title">${trUnitTokens(item.label)}</h4><div style="display:flex;flex-direction:column;gap:0;">`;
                 if (item.content) groupHtml += trUnitTokens(item.content);
                 inCardSubCard = true;
             } else if (iType === 'section_header' || iType === 'heading') {
@@ -2014,7 +2164,7 @@ function renderForm(d) {
                         valHtml = `${unitHtml}<input type="number" id="${item.valueId}" value="${displayFromMetric(item.valueId, d[item.valueId])}" step="any" style="width:70px;text-align:center;">`;
                         resetKeys = item.colorId + ',' + item.valueId;
                     } else {
-                        valHtml = `<span style="display:inline-block;width:90px;"></span>`;
+                        valHtml = `<span class="cfg-color-spacer"></span>`;
                     }
                     groupHtml += `<div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-color-controls">${valHtml}<input type="color" id="${item.colorId}" value="${d[item.colorId]}">${resetBtn(resetKeys)}</div></div>`;
                 }
@@ -2022,7 +2172,7 @@ function renderForm(d) {
                 if (d.hasOwnProperty(item.id)) {
                     hasItems = true;
                     let val = d[item.id];
-                    groupHtml += `<div class="cfg-row"><label>${item.label}</label><div class="cfg-color-controls"><span style="display:inline-block;width:90px;"></span><input type="color" id="${item.id}" value="${val}">${resetBtn(item.id)}</div></div>`;
+                    groupHtml += `<div class="cfg-row"><label>${item.label}</label><div class="cfg-color-controls"><span class="cfg-color-spacer"></span><input type="color" id="${item.id}" value="${val}">${resetBtn(item.id)}</div></div>`;
                 }
             } else if (iType === 'range') {
                 if (d.hasOwnProperty(item.id)) {
@@ -2030,8 +2180,8 @@ function renderForm(d) {
                     let val = displayFromMetric(item.id, d[item.id]);
                     let unitHtml = item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : '';
                     let sliderHtml = `
-                    <div${advAttr} class="cfg-slider" style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">${trUnitTokens(item.label)}</label>
+                    <div${advAttr} class="cfg-slider">
+                        <label class="cfg-label">${trUnitTokens(item.label)}</label>
                         <div class="xy-row">
                             <input type="range" id="${item.id}_slider" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}" oninput="document.getElementById('${item.id}').value = this.value">
                             ${unitHtml}<input type="number" id="${item.id}" value="${val}" min="${item.min}" max="${item.max}" step="${item.step}" oninput="document.getElementById('${item.id}_slider').value = this.value">${resetBtn(item.id)}
@@ -2049,8 +2199,8 @@ function renderForm(d) {
                     let maxY = item.idY.includes("OFFSET") ? Math.floor(maxH/2) : maxH;
 
                     let xyContent = `
-                    <div class="cfg-slider" style="padding:4px 0;">
-                        <label style="font-size:12px;display:block;margin-bottom:4px;">${trUnitTokens(item.label)}</label>
+                    <div class="cfg-slider">
+                        <label class="cfg-label">${trUnitTokens(item.label)}</label>
                         <div class="xy-row">
                             <label>X</label>
                             <input type="range" id="${item.idX}_slider" min="${minX}" max="${maxX}" value="${valX}" oninput="document.getElementById('${item.idX}').value = this.value">
@@ -2066,32 +2216,32 @@ function renderForm(d) {
                 }
             } else if (iType === 'note') {
                 hasItems = true;
-                groupHtml += `<div style="font-size:11px;color:var(--text-dim);padding:2px 2px 8px 2px;">${trUnitTokens(item.label)}</div>`;
+                groupHtml += `<div class="cfg-note">${trUnitTokens(item.label)}</div>`;
             } else if (iType === 'touch-table') {
                 closeSubCard();
                 hasItems = true;
                 let tableArr = d[item.arrayId] || DEFAULTS.fuelCalOhms;
-                let liveLine = item.liveId ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px 0;"><span style="font-size:12px;color:var(--text-muted);">Live sender reading: <strong id="${item.liveId}" style="color:#fff;font-family:'JetBrains Mono',monospace;">--</strong> ohm <span id="fuel-state" style="color:var(--text-dim);"></span></span></div>` : '';
+                let liveLine = item.liveId ? `<div class="cfg-toolbar" style="margin:0 0 8px 0;"><span class="cfg-live">Live sender reading: <strong id="${item.liveId}">--</strong> ohm <span id="fuel-state" style="color:var(--text-dim);"></span></span></div>` : '';
                 let tableHtml = `
                 <div class="card" style="grid-column:1/-1;">
-                    <h4 style="margin:0 0 6px 0;color:var(--accent-cyan);font-size:13px;">${item.label}</h4>${liveLine}
-                    <label style="font-size:11px;">Calibration points (tank slots = litres + 1):</label>
-                    <div style="display:flex; align-items:center; gap:8px; margin:6px 0 10px 0;">
+                    <h4 class="card-title">${item.label}</h4>${liveLine}
+                    <label class="cfg-sublabel">Calibration points (tank slots = litres + 1):</label>
+                    <div class="cfg-toolbar" style="margin:6px 0 10px 0;">
                         <input type="number" id="${item.pointCount}" value="${tableArr.length}" min="2" max="20" style="width:70px;">${resetBtn(item.pointCount)}
-                        <button onclick="save();setTimeout(() => location.reload(), 500)" class="btn-secondary" style="padding:5px 10px; font-size:11px;">↻ Refresh Table</button>
-                        <button onclick="fillFuelTable()" class="btn-secondary" style="padding:5px 10px; font-size:11px;">⤓ Fill from empty/full ohm</button>
+                        <button onclick="save();setTimeout(() => location.reload(), 500)" class="btn-secondary btn-sm">↻ Refresh Table</button>
+                        <button onclick="fillFuelTable()" class="btn-secondary btn-sm">⤓ Fill from empty/full ohm</button>
                     </div>
-                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:6px 12px; align-items:center;">`;
+                    <div class="fuel-grid">`;
                 
                 tableArr.forEach((val, idx) => {
-                    tableHtml += `<div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:700;color:var(--accent-cyan);font-size:11px;font-family:'JetBrains Mono',monospace;">#${idx}</span><input type="number" id="TT_${idx}" value="${val}" min="0" max="100000" step="0.1" style="width:100%;">${resetBtn('TT_' + idx)}</div>`;
+                    tableHtml += `<div class="fuel-point"><span class="tt-index">#${idx}</span><input type="number" id="TT_${idx}" value="${val}" min="0" max="100000" step="0.1">${resetBtn('TT_' + idx)}</div>`;
                 });
                 tableHtml += `</div>
-                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--text-muted);">
+                    <div class="cfg-toolbar cfg-help" style="margin-top:10px;">
                         <span>Store the live reading in slot</span>
                         <input type="number" id="TT_slot" value="0" min="0" max="19" style="width:56px;">
-                        <button onclick="captureFuelSlot()" class="btn-secondary" style="padding:5px 10px; font-size:11px;">⊕ Capture</button>
-                        <span>#0 = empty tank, #${tableArr.length - 1} = full. Drive the tank through its levels and capture each one, then Save.</span>
+                        <button onclick="captureFuelSlot()" class="btn-secondary btn-sm">⊕ Capture</button>
+                        <span>#0 = empty, #${tableArr.length - 1} = full.</span>
                     </div>`;
                 if (item.rows) {
                     item.rows.forEach(row => {
@@ -2107,7 +2257,7 @@ function renderForm(d) {
                 if (d.hasOwnProperty(item.id)) {
                     hasItems = true;
                     let val = String(d[item.id]);
-                    let rowHtml = `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls"><span style="font-family:'JetBrains Mono',monospace;">${val}</span></div></div>`;
+                    let rowHtml = `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls"><span class="mono">${val}</span></div></div>`;
                     if (inCardSubCard) {
                         groupHtml += rowHtml;
                     } else {
@@ -2148,7 +2298,7 @@ function renderForm(d) {
                     } else {
                         closeSubCard();
                         if (isBool) {
-                            groupHtml += `<div class="card checkbox-card"${advAttr}><label>${trUnitTokens(item.label)}</label><div style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
+                            groupHtml += `<div class="card checkbox-card"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="checkbox-slot"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
                         } else {
                             groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}"${rangeAttr}>${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div></div>`;
                         }
@@ -2299,20 +2449,15 @@ function wifiMsg(text, color) {
 // next to it because a bar picture alone invites false precision.
 function wifiBars(rssi) {
     const lvl = rssi >= -55 ? 4 : rssi >= -67 ? 3 : rssi >= -77 ? 2 : 1;
-    let out = '<span style="font-size:9px;letter-spacing:1px;">';
+    let out = '<span class="wifi-bars">';
     for (let i = 1; i <= 4; i++)
-        out += '<span style="color:' + (i <= lvl ? 'var(--accent-cyan)' : 'var(--border-color)') + '">▮</span>';
+        out += '<span class="wifi-bar' + (i <= lvl ? ' on' : '') + '">▮</span>';
     return out + '</span>';
 }
 
+// The badge colour is the only per-call part; size and shape come from .wifi-badge.
 function wifiBadge(text, color) {
-    return '<span style="font-size:9px;padding:2px 6px;border-radius:6px;border:1px solid ' +
-           color + ';color:' + color + ';text-transform:uppercase;letter-spacing:.05em;">' +
-           text + '</span>';
-}
-
-function wifiRowCss() {
-    return 'display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:12px;';
+    return '<span class="wifi-badge" style="color:' + color + ';">' + text + '</span>';
 }
 
 function renderWifiLists() {
@@ -2338,16 +2483,16 @@ function renderWifiLists() {
     const saved = (d && d.saved) || [];
     if (savedEl) {
         if (!saved.length) {
-            savedEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);">No networks stored yet - scan and pick one below.</>';
+            savedEl.innerHTML = '<div class="cfg-help">No networks stored yet - scan and pick one below.</>';
         } else {
             savedEl.innerHTML = saved.map(n => {
                 let right = n.connected ? wifiBadge('connected', 'var(--accent-emerald)')
-                                        : '<button class="btn-secondary" data-act="connect" data-ssid="' + wifiEsc(n.ssid) +
-                                          '" data-saved="1" style="font-size:11px;padding:4px 9px;">Connect</button>';
-                right += ' <button class="btn-secondary" data-act="forget" data-slot="' + n.slot + '" data-ssid="' +
-                         wifiEsc(n.ssid) + '" style="font-size:11px;padding:4px 9px;color:var(--accent-rose);">Forget</button>';
-                return '<div style="' + wifiRowCss() + 'border-bottom:1px solid var(--border-color);">' +
-                       '<span style="flex:1;">' + wifiEsc(n.ssid) + '</span>' + right + '</div>';
+                                        : '<button class="btn-secondary btn-xs" data-act="connect" data-ssid="' + wifiEsc(n.ssid) +
+                                          '" data-saved="1">Connect</button>';
+                right += ' <button class="btn-danger btn-xs" data-act="forget" data-slot="' + n.slot + '" data-ssid="' +
+                         wifiEsc(n.ssid) + '">Forget</button>';
+                return '<div class="wifi-row wifi-div">' +
+                       '<span class="wifi-ssid">' + wifiEsc(n.ssid) + '</span>' + right + '</div>';
             }).join('');
         }
     }
@@ -2357,33 +2502,30 @@ function renderWifiLists() {
     // found list borrows the name from there.
     const live = saved.filter(n => n.connected).map(n => n.ssid)[0] || null;
     if (!nets.length) {
-        listEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:8px 10px;">' +
-            'Nothing found. Press Scan Networks.</div>';
+        listEl.innerHTML = '<div class="cfg-help wifi-empty">Nothing found. Press Scan Networks.</div>';
         return;
     }
     listEl.innerHTML = nets.map(n => {
         const isOpen = n.auth === 0;   // WIFI_AUTH_OPEN
-        const authTag = isOpen ? '<span style="color:var(--accent-amber);font-size:10px;">open</span>'
-                               : '<span style="color:var(--text-dim);font-size:10px;">' + wifiEsc(n.authName) + '</span>';
+        const authTag = isOpen ? '<span class="wifi-open">open</span>'
+                               : '<span class="wifi-row-meta">' + wifiEsc(n.authName) + '</span>';
         const isConn = live && live === n.ssid;
         let right = '';
         if (isConn) {
             right = wifiBadge('connected', 'var(--accent-emerald)');
         } else if (wifiAskPassFor === n.ssid) {
-            right = '<input data-noconfig="1" id="wifiAskPass" type="password" placeholder="Password" ' +
-                    'style="width:130px;font-size:11px;padding:4px 6px;">' +
-                    '<button class="btn-secondary" data-act="join" data-ssid="' + wifiEsc(n.ssid) +
-                    '" style="font-size:11px;padding:4px 9px;color:var(--accent-emerald);">Join</button>' +
-                    '<button class="btn-secondary" data-act="cancelask" style="font-size:11px;padding:4px 9px;">Cancel</button>';
+            right = '<input data-noconfig="1" id="wifiAskPass" class="wifi-ask" type="password" placeholder="Password">' +
+                    '<button class="btn-primary btn-xs" data-act="join" data-ssid="' + wifiEsc(n.ssid) + '">Join</button>' +
+                    '<button class="btn-secondary btn-xs" data-act="cancelask">Cancel</button>';
         } else {
-            right = '<button class="btn-secondary" data-act="connect" data-ssid="' + wifiEsc(n.ssid) +
-                    '" data-saved="' + (n.saved ? 1 : 0) + '" style="font-size:11px;padding:4px 9px;">' +
+            right = '<button class="btn-secondary btn-xs" data-act="connect" data-ssid="' + wifiEsc(n.ssid) +
+                    '" data-saved="' + (n.saved ? 1 : 0) + '">' +
                     (n.saved ? 'Reconnect' : 'Connect') + '</button>';
         }
         const tag = n.saved && !isConn ? wifiBadge('saved', 'var(--accent-cyan)') : '';
-        return '<div style="' + wifiRowCss() + 'border-bottom:1px solid var(--border-color);">' +
+        return '<div class="wifi-row wifi-div">' +
                wifiBars(n.rssi) +
-               '<span style="flex:1;">' + wifiEsc(n.ssid) + ' <span style="font-size:10px;color:var(--text-dim);">' +
+               '<span class="wifi-ssid">' + wifiEsc(n.ssid) + ' <span class="wifi-row-meta">' +
                'ch' + n.ch + ' · ' + n.rssi + ' dBm · ' + authTag + '</span></span>' + tag + ' ' + right + '</div>';
     }).join('');
     const ask = document.getElementById('wifiAskPass');
@@ -2504,24 +2646,26 @@ function showWifiOverwrite(ssid, savedList) {
     if (!box || !list) return;
     wifiPendingSsid = ssid;
     list.innerHTML = savedList.map(n =>
-        '<button class="btn-secondary" data-act="slot" data-slot="' + n.slot +
-        '" style="font-size:11px;padding:4px 9px;">' + wifiEsc(n.ssid) + '</button>').join('');
+        '<button class="btn-danger btn-xs" data-act="slot" data-slot="' + n.slot + '">' +
+        wifiEsc(n.ssid) + '</button>').join('');
     box.style.display = '';
     box.scrollIntoView({ block: 'nearest' });
 }
 
 function forgetWifi(slot, ssid) {
-    if (!confirm('Forget "' + ssid + '" on this dashboard? Its password is deleted from memory, and the device stops trying to join it.')) return;
-    wifiMsg('Forgetting ' + ssid + '...');
-    fetch('/api/wifi/forget', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                               body: JSON.stringify({ slot: slot }) })
-        .then(r => r.json()).then(d => {
-            wifiMsg(d.nvsOk ? ssid + ' forgotten.' : ssid + ' forgotten for this session; NVS refused the write.',
-                    d.nvsOk ? 'var(--accent-emerald)' : 'var(--accent-amber)');
-            clearTimeout(wifiScanTimer);
-            wifiScanTimer = setTimeout(() => wifiPoll(0), 2500);
-        })
-        .catch(() => wifiMsg('Could not reach the device.', 'var(--accent-rose)'));
+    // The styled dialog everywhere else, not the browser's bare confirm().
+    confirmDialog('Forget "' + ssid + '" on this dashboard? Its password is deleted from memory, and the device stops trying to join it.', () => {
+        wifiMsg('Forgetting ' + ssid + '...');
+        fetch('/api/wifi/forget', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                   body: JSON.stringify({ slot: slot }) })
+            .then(r => r.json()).then(d => {
+                wifiMsg(d.nvsOk ? ssid + ' forgotten.' : ssid + ' forgotten for this session; NVS refused the write.',
+                        d.nvsOk ? 'var(--accent-emerald)' : 'var(--accent-amber)');
+                clearTimeout(wifiScanTimer);
+                wifiScanTimer = setTimeout(() => wifiPoll(0), 2500);
+            })
+            .catch(() => wifiMsg('Could not reach the device.', 'var(--accent-rose)'));
+    });
 }
 
 let rangeScrollLockTimer = null;
@@ -3520,12 +3664,12 @@ function updatePerf() {
                 usedTotal += used;
                 barHtml += '<div style="width:' + pct.toFixed(2) + '%;background:' + color + ';height:100%;min-width:2px;" title="' + p.label + ': ' + (used/1024).toFixed(0) + 'KB"></div>';
                 let info = p.label + ' ' + (used/1024).toFixed(0) + 'KB (' + pct.toFixed(1) + '%)';
-                legendHtml += '<span style="display:inline-flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:2px;background:' + color + ';display:inline-block;"></span>' + info + '</span>';
+                legendHtml += '<span class="pl-item"><span class="pl-swatch" style="background:' + color + ';"></span>' + info + '</span>';
             });
             let freePct = flTotal > usedTotal ? ((flTotal - usedTotal) / flTotal * 100) : 0;
             if (freePct > 0) {
                 barHtml += '<div style="flex:1;background:var(--bg-tertiary);height:100%;" title="Free: ' + ((flTotal - usedTotal)/1024).toFixed(0) + 'KB"></div>';
-                legendHtml += '<span style="display:inline-flex;align-items:center;gap:3px;color:var(--text-dim);"><span style="width:8px;height:8px;border-radius:2px;background:var(--bg-tertiary);border:1px solid rgba(255,255,255,0.1);display:inline-block;"></span>free ' + ((flTotal - usedTotal)/1024).toFixed(0) + 'KB (' + freePct.toFixed(1) + '%)</span>';
+                legendHtml += '<span class="pl-item free"><span class="pl-swatch" style="background:var(--bg-tertiary);border:1px solid rgba(255,255,255,0.1);"></span>free ' + ((flTotal - usedTotal)/1024).toFixed(0) + 'KB (' + freePct.toFixed(1) + '%)</span>';
             }
             partBar.innerHTML = barHtml;
             if (legend) legend.innerHTML = legendHtml;

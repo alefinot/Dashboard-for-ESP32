@@ -317,6 +317,8 @@ where $R_{\text{room}} =$ `NTC_R25` (default=10,000 $\Omega$), $T_{\text{room}} 
 The **Sensors Tuning** WebUI card calibrates the two analog sensors against a reference, using the live `/api/sensors` reading (no raw-ADC conversion needed):
 - **Engine Temperature** — the live reading is shown; type a reference temperature and press **Apply** to set `NTC_TEMP_OFFSET`. `NTC_R25`, `NTC_R_BALANCE` and `NTC_BETA` are under **Advanced**.
 - **Battery Voltage** — the live reading is shown; type a reference voltage (e.g. a multimeter) and press **Apply** to set `BATTERY_OFFSET`. `BATTERY_SCALE` (divider ratio) is under **Advanced**.
+- **Fuel sender** — the live sender resistance (Ω) is shown next to a fault state (`open` / `shorted` / `out of range` / `no sender`). Two ways to build the table (`fuelCalOhms`): **Fill from empty/full ohm** pre-fills a linear ramp from `FUEL_OHM_EMPTY` to `FUEL_OHM_FULL` (a good start, no driving needed), or drive the tank through its levels and **Capture** the live reading into each slot — slot `0` = empty, slot `N-1` = full. Changing the point count regenerates the ramp.
+- Calibrating against a live reading means no raw-ADC arithmetic in the browser: the offset is derived on the device from the value it is currently seeing.
 
 ---
 
@@ -409,6 +411,8 @@ The management portal features a modern grouped card-based layout:
 - **Collapsible sections** with smooth accordion animations (non-JS fallback)
 - **Live search bar** to filter configuration parameters across all sections
 - **Autosave** triggered 2 seconds after any input change
+- **Visible checkboxes** (UI Layout → Screen Elements) control only what is drawn on the display; sensors, GPS, odometer and every calculation keep running whether the element is visible or not, so hiding a readout never stops the data behind it
+- **Advanced Mode** switch in the header reveals the technical parameters, so the common setup path stays short (see `ADV_MODE`)
 - **Color pickers** with inline preview for all UI color values
 - **Slider + number inputs** with mouse-wheel scroll protection for all range parameters
 - **XY offset controls** with linked sliders for UI element positioning
@@ -535,7 +539,7 @@ ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely �
 #### Weather Widget (Open-Meteo)
 - `SHOW_ELEMENT_WEATHER` (default=true): Toggle the weather widget on/off.
 - `WEATHER_CITY` (default=""): City label shown in the widget (GPS-geocoded when empty).
-- `WEATHER_LAT` (default=0.0) and `WEATHER_LON` (default=0.0): Coordinates for the Open-Meteo forecast request.
+- `WEATHER_LAT` (default=0.0) and `WEATHER_LON` (default=0.0): Fallback coordinates for the Open-Meteo forecast request. While the unit has a GPS fix it uses the **live position** instead and these two are ignored; they are what the widget uses when there is no fix (no antenna, parked underground, GNSS off). With no fix **and** no coordinates set, no weather request is made at all. `WEATHER_CITY` is only the label, never the source of the coordinates.
 - `WEATHER_REFRESH_MIN` (default=15): Refresh interval in minutes.
 - `WEATHER_LOCALE` (default="en"): ISO locale code for weather-condition naming.
 
