@@ -622,9 +622,12 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
     min-width: 0;
 }
 
-/* The narrow inline variant used to size itself to its longest option. */
+/* The narrow inline variant sizes itself to its longest option, the way a native
+   select does. fitSelBoxes() measures that width and parks it in --sel-w, capped
+   at the room the row actually has; the list that opens is then exactly as wide
+   as the box, so the control never changes size between closed and open. */
 .sel.auto {
-    min-width: 120px;
+    min-width: max(120px, var(--sel-w, 0px));
 }
 
 .sel-native {
@@ -746,6 +749,20 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
 
 #sel-panel[hidden] {
     display: none;
+}
+
+/* Off-screen, never rendered, but measurable: same text style as an option row,
+   so fitSelBoxes() can ask how wide the widest label really is. */
+.sel-fit-probe {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    visibility: hidden;
+    white-space: nowrap;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.4;
 }
 
 /* Rows are .wifi-row: full-bleed, hairline between them, and the stored value
@@ -1128,14 +1145,6 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 
 .cfg-controls .sel-face { width: 100%; }
 
-/* A select whose choices are short (a CPU frequency, a language code) takes the
-   same box as the number inputs beside it instead of stretching across the card;
-   the option list still opens at its comfortable reading width, which is where a
-   long language name is read in full. */
-.cfg-controls .sel.compact { flex: none; }
-.cfg-controls .sel.compact .sel-face { width: 85px; padding-right: 20px; }
-.cfg-controls .sel.compact .sel-chev { right: 6px; }
-
 /* Inline select rows never wrap; a select that stands alone in its card hugs
    the right edge of the row. */
 .cfg-controls.nowrap { flex-wrap: nowrap; }
@@ -1259,8 +1268,6 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
     padding: 4px 9px;
     border-radius: 8px;
     white-space: nowrap;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
 }
 .wifi-badge.on {
     background: linear-gradient(135deg, rgba(0, 230, 118, 0.2), rgba(0, 130, 70, 0.3));
@@ -1367,9 +1374,6 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
        longest option, which is wider than a phone screen and clipped the
        details box - the face fills the row instead, and the list scrolls */
     .cfg-controls .sel-face { width: 100% !important; }
-    /* …but a compact select keeps the 85px box it has on the desktop, which is
-       the same width as the number boxes on a phone too. */
-    .cfg-controls .sel.compact .sel-face { width: 85px !important; }
     /* The absolutely-positioned advanced-mode toggle overlaps the 26px
        page title on narrow screens - flow it in below the IP banner */
     .adv-mode-toggle { position: static; width: fit-content; margin: 6px auto 0 auto; }
@@ -1696,8 +1700,8 @@ const selChevSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" 
 
 // One dropdown face: the invisible real select first (its id is what the rest
 // of the page reads), then the styled button the user actually taps.
-function selectHtml(id, opts, auto, compact) {
-    return `<div class="sel${auto ? ' auto' : ''}${compact ? ' compact' : ''}">` +
+function selectHtml(id, opts, auto) {
+    return `<div class="sel${auto ? ' auto' : ''}">` +
            `<select id="${id}" class="sel-native">${opts}</select>` +
            `<button type="button" class="sel-face" aria-haspopup="listbox" aria-expanded="false">` +
            `<span class="sel-value"></span><span class="sel-chev">${selChevSVG}</span></button></div>`;
@@ -1949,7 +1953,6 @@ const configMap = [
                 id: "MANUAL_CPU_FREQ", 
                 label: "Manual CPU Frequency", 
                 type: "select",
-                compact: true,
                 options: [
                     { value: 80, label: "80 MHz" },
                     { value: 160, label: "160 MHz" },
@@ -2013,9 +2016,9 @@ const configMap = [
             { id: "WEATHER_LAT", label: "Location Latitude (Fallback)" },
             { id: "WEATHER_LON", label: "Location Longitude (Fallback)" },
             { id: "WEATHER_REFRESH_MIN", label: "Refresh Interval", type: "range", min: 1, max: 60, step: 1, unit: "min" },
-            { id: "WEATHER_LOCALE", label: "City Name Language", type: "select", compact: true,
+            { id: "WEATHER_LOCALE", label: "City Name Language", type: "select",
                 options: [
-                    { value: "it", label: "Italiano" },
+                    { value: "it", label: "Italiano (default)" },
                     { value: "en", label: "English" },
                     { value: "fr", label: "Français" },
                     { value: "de", label: "Deutsch" },
@@ -2049,7 +2052,7 @@ const configMap = [
             <div id="wifiOverwriteList" class="wifi-chosen"></div>
         </div>
         <div class="cfg-toolbar nowrap" style="margin-top:10px;">
-            <input data-noconfig="1" type="text" id="wifiHiddenSsid" placeholder="Network name (SSID)">
+            <input data-noconfig="1" type="text" id="wifiHiddenSsid" placeholder="Network SSID">
             <input data-noconfig="1" id="wifiHiddenPass" type="password" placeholder="Password">
             <button onclick="addHiddenWifi()" class="btn-secondary btn-sm">Add Network</button>
         </div>
@@ -2387,10 +2390,10 @@ function renderForm(d) {
                     let val = d[item.id];
                     let opts = item.options.map(o => `<option value="${o.value}" ${o.value == val ? 'selected' : ''}>${o.label}</option>`).join('');
                     if (inCardSubCard) {
-                        groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls nowrap">${selectHtml(item.id, opts, true, item.compact)}${resetBtn(item.id)}</div></div>`;
+                        groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls nowrap">${selectHtml(item.id, opts, true)}${resetBtn(item.id)}</div></div>`;
                     } else {
                         closeSubCard();
-                        groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls tail">${selectHtml(item.id, opts, false, item.compact)}${resetBtn(item.id)}</div></div></div>`;
+                        groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls tail">${selectHtml(item.id, opts, false)}${resetBtn(item.id)}</div></div></div>`;
                     }
                 }
             } else if (iType === 'threshold-row') {
@@ -2690,7 +2693,9 @@ function paintSelFace(sel) {
 
 function positionSelPanel(face, panel) {
     const r = face.getBoundingClientRect();
-    const w = Math.min(Math.max(r.width, 200), 420, Math.max(160, window.innerWidth - 16));
+    // One control, two states: the list opens exactly as wide as the value box it
+    // belongs to, so nothing new appears at a different size when you tap it.
+    const w = Math.min(r.width, Math.max(160, window.innerWidth - 16));
     panel.style.width = w + 'px';
     const h = panel.offsetHeight;
     let top = r.bottom + 4;
@@ -2885,8 +2890,70 @@ function initSelectDropdowns() {
         ['change', 'input'].forEach(ev => document.addEventListener(ev, e => {
             if (e.target && e.target.classList && e.target.classList.contains('sel-native')) paintSelFace(e.target);
         }));
+        // toggle does not bubble, so listen in the capture phase
+        document.addEventListener('toggle', e => {
+            if (e.target && e.target.tagName === 'DETAILS') scheduleSelFit();
+        }, true);
+        window.addEventListener('resize', scheduleSelFit);
     }
     document.querySelectorAll('.sel-native').forEach(paintSelFace);
+    fitSelBoxes();
+}
+
+// One control, one width: the box, the value it shows and the list that opens are
+// all the same width, so the box is floored at the width its own widest option
+// needs - otherwise a short current value ("240 MHz") opens a list that cuts the
+// longer ones. The hidden select is 1px wide (see .sel-native) and cannot report
+// that itself, so the labels are measured with a probe in the body: that works
+// even while the details box is closed, when the row itself has no width to ask.
+// The ceiling is the room left in the row, so a box can never push past its card.
+function fitSelBoxes() {
+    const probe = document.createElement('span');
+    probe.className = 'sel-fit-probe';
+    probe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(probe);
+    document.querySelectorAll('.sel').forEach(wrap => {
+        const sel = wrap.querySelector('.sel-native');
+        let widest = 0;
+        if (sel) {
+            for (const o of sel.options) {
+                probe.textContent = o.textContent || '';
+                widest = Math.max(widest, probe.getBoundingClientRect().width);
+            }
+        }
+        // +10px left padding, +26px chevron allowance, +2px border and slack
+        wrap.style.setProperty('--sel-w', Math.ceil(Math.min(widest + 38, selRoom(wrap))) + 'px');
+    });
+    probe.remove();
+}
+
+// Everything that shares the select's line - its label when the label sits beside
+// it, the ↺ reset button, 8px for the gap - eats room. Elements that wrapped onto
+// another line don't. A row inside a closed details box reports no width, so fall
+// back to the viewport.
+function selRoom(wrap) {
+    const row = wrap.closest('.cfg-row');
+    const ctl = wrap.parentElement;
+    if (!row || !row.clientWidth || !ctl) return Math.max(120, Math.min(320, window.innerWidth - 60));
+    const line = ctl.getBoundingClientRect();
+    let used = 8;                                  // the gap between the controls
+    for (const el of row.querySelectorAll('*')) {
+        if (el === wrap || wrap.contains(el) || el.contains(wrap)) continue;   // the select itself
+        const r = el.getBoundingClientRect();
+        if (!r.width) continue;
+        // only what shares the control's line can crowd it out
+        if (r.bottom <= line.top + 1 || r.top >= line.bottom - 1) continue;
+        used += r.width;
+    }
+    return Math.max(120, Math.round(row.clientWidth - used));
+}
+
+// A details box being opened is the moment the row first has a real width, and a
+// resize / rotation changes it: re-fit on both so --sel-w never goes stale.
+let selFitTimer = 0;
+function scheduleSelFit() {
+    clearTimeout(selFitTimer);
+    selFitTimer = setTimeout(fitSelBoxes, 120);
 }
 
 // ── Wi-Fi network picker ──────────────────────────────────────────────
@@ -2955,7 +3022,7 @@ function renderWifiLists() {
             savedEl.innerHTML = '<div class="cfg-help">No networks stored yet - scan and pick one below.</>';
         } else {
             savedEl.innerHTML = saved.map(n => {
-                let right = n.connected ? wifiBadge('connected', 'on')
+                let right = n.connected ? wifiBadge('Connected', 'on')
                                         : '<button class="btn-secondary btn-xs" data-act="connect" data-ssid="' + wifiEsc(n.ssid) +
                                           '" data-saved="1">Connect</button>';
                 right += ' <button class="btn-danger btn-xs" data-act="forget" data-slot="' + n.slot + '" data-ssid="' +
@@ -2981,7 +3048,7 @@ function renderWifiLists() {
         const isConn = live && live === n.ssid;
         let right = '';
         if (isConn) {
-            right = wifiBadge('connected', 'on');
+            right = wifiBadge('Connected', 'on');
         } else if (wifiAskPassFor === n.ssid) {
             right = '<input data-noconfig="1" id="wifiAskPass" class="wifi-ask" type="password" placeholder="Password">' +
                     '<button class="btn-primary btn-xs" data-act="join" data-ssid="' + wifiEsc(n.ssid) + '">Join</button>' +
@@ -2991,7 +3058,7 @@ function renderWifiLists() {
                     '" data-saved="' + (n.saved ? 1 : 0) + '">' +
                     (n.saved ? 'Reconnect' : 'Connect') + '</button>';
         }
-        const tag = n.saved && !isConn ? wifiBadge('saved', 'saved') : '';
+        const tag = n.saved && !isConn ? wifiBadge('Saved', 'saved') : '';
         return '<div class="wifi-row wifi-div">' +
                wifiBars(n.rssi) +
                '<span class="wifi-ssid">' + wifiEsc(n.ssid) + ' <span class="wifi-row-meta">' +
