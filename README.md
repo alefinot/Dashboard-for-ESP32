@@ -541,7 +541,7 @@ ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely �
 - `WEATHER_CITY` (default=""): City label shown in the widget (GPS-geocoded when empty).
 - `WEATHER_LAT` (default=0.0) and `WEATHER_LON` (default=0.0): Fallback coordinates for the Open-Meteo forecast request. While the unit has a GPS fix it uses the **live position** instead and these two are ignored; they are what the widget uses when there is no fix (no antenna, parked underground, GNSS off). With no fix **and** no coordinates set, no weather request is made at all. `WEATHER_CITY` is only the label, never the source of the coordinates.
 - `WEATHER_REFRESH_MIN` (default=15): Refresh interval in minutes.
-- `WEATHER_LOCALE` (default="en"): ISO locale code for weather-condition naming.
+- `WEATHER_LOCALE` (default="it"): ISO locale code for the **city name** — the language the reverse-geocode (BigDataCloud) spells the name in. It applies whenever the widget derives the name from a live GPS fix; a `WEATHER_CITY` you typed yourself is displayed exactly as written and is never re-geocoded. The forecast itself comes from Open-Meteo and is not translated. Saving a new value re-fetches the weather straight away, so the name changes without a reboot.
 
 #### Time, Date & Daylight Saving
 - `NTP_ENABLED` (default=true): Sync the system clock from NTP once the WiFi station is up. `configTime()` is armed and then polled **once per web-loop iteration** over a 5 s window — the old `delay(500)` retry loop ran inside the web task and left the config page and API unreachable for up to 5 s after every Wi-Fi join (issue #43). A missed sync is logged; a GPS fix or `POST /api/time` can still set the clock.

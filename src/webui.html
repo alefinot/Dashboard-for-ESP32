@@ -2745,8 +2745,12 @@ function chooseSelOption(i) {
     const opt = sel.options[i];
     if (!opt) return;
     sel.value = opt.value;
-    // The page reads dropdowns from the real select, so announce the change the
-    // same way a native pick would.
+    // Announce the pick exactly as a native one would: input first, then change.
+    // The form's autosave listens for *input* (2s debounce -> POST /api/config),
+    // while per-field handlers (CPU mode, power sense) listen for change. Firing
+    // only change left every custom dropdown in a state where the box looked
+    // updated but nothing was ever sent to the device - not live, not stored.
+    sel.dispatchEvent(new Event('input', { bubbles: true }));
     sel.dispatchEvent(new Event('change', { bubbles: true }));
     closeSelPanel(true);
 }
