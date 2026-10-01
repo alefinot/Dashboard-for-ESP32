@@ -1128,6 +1128,14 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 
 .cfg-controls .sel-face { width: 100%; }
 
+/* A select whose choices are short (a CPU frequency, a language code) takes the
+   same box as the number inputs beside it instead of stretching across the card;
+   the option list still opens at its comfortable reading width, which is where a
+   long language name is read in full. */
+.cfg-controls .sel.compact { flex: none; }
+.cfg-controls .sel.compact .sel-face { width: 85px; padding-right: 20px; }
+.cfg-controls .sel.compact .sel-chev { right: 6px; }
+
 /* Inline select rows never wrap; a select that stands alone in its card hugs
    the right edge of the row. */
 .cfg-controls.nowrap { flex-wrap: nowrap; }
@@ -1211,6 +1219,10 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 }
 .cfg-toolbar.end { justify-content: flex-end; }
 .cfg-toolbar.spread { justify-content: space-between; }
+/* The hidden-network row: name, password and button on one line, so the two
+   inputs shrink to make room instead of pushing the button onto its own row. */
+.cfg-toolbar.nowrap { flex-wrap: nowrap; }
+.cfg-toolbar.nowrap > input { flex: 1 1 0; min-width: 0; }
 
 /* Compact action buttons: exactly the two sizes the in-card buttons used, now
    in one place. nowrap keeps "Reset Trip Stats Now" on a single line. */
@@ -1235,13 +1247,32 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 }
 .wifi-div { border-bottom: 1px solid var(--border-color); }
 
+/* The connected / saved tag in a network row. It carries the same box as the
+   row buttons (.btn-xs) so the row lines up, and the tint recipe of the Forget
+   button - gradient fill, 0.4 border, pale text - in green for "live". */
 .wifi-badge {
-    font-size: 9px;
-    padding: 2px 6px;
-    border-radius: 6px;
-    border: 1px solid currentColor;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 9px;
+    border-radius: 8px;
+    white-space: nowrap;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+}
+.wifi-badge.on {
+    background: linear-gradient(135deg, rgba(0, 230, 118, 0.2), rgba(0, 130, 70, 0.3));
+    border: 1px solid rgba(0, 230, 118, 0.4);
+    color: #7ce8b0;
+}
+/* A stored network that is not the live one: quiet, so it never reads as a
+   button you could press. */
+.wifi-badge.saved {
+    background: rgba(0, 229, 255, 0.08);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    color: var(--accent-cyan);
 }
 
 .wifi-list {
@@ -1336,6 +1367,9 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
        longest option, which is wider than a phone screen and clipped the
        details box - the face fills the row instead, and the list scrolls */
     .cfg-controls .sel-face { width: 100% !important; }
+    /* …but a compact select keeps the 85px box it has on the desktop, which is
+       the same width as the number boxes on a phone too. */
+    .cfg-controls .sel.compact .sel-face { width: 85px !important; }
     /* The absolutely-positioned advanced-mode toggle overlaps the 26px
        page title on narrow screens - flow it in below the IP banner */
     .adv-mode-toggle { position: static; width: fit-content; margin: 6px auto 0 auto; }
@@ -1662,8 +1696,8 @@ const selChevSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" 
 
 // One dropdown face: the invisible real select first (its id is what the rest
 // of the page reads), then the styled button the user actually taps.
-function selectHtml(id, opts, auto) {
-    return `<div class="sel${auto ? ' auto' : ''}">` +
+function selectHtml(id, opts, auto, compact) {
+    return `<div class="sel${auto ? ' auto' : ''}${compact ? ' compact' : ''}">` +
            `<select id="${id}" class="sel-native">${opts}</select>` +
            `<button type="button" class="sel-face" aria-haspopup="listbox" aria-expanded="false">` +
            `<span class="sel-value"></span><span class="sel-chev">${selChevSVG}</span></button></div>`;
@@ -1915,6 +1949,7 @@ const configMap = [
                 id: "MANUAL_CPU_FREQ", 
                 label: "Manual CPU Frequency", 
                 type: "select",
+                compact: true,
                 options: [
                     { value: 80, label: "80 MHz" },
                     { value: 160, label: "160 MHz" },
@@ -1978,9 +2013,9 @@ const configMap = [
             { id: "WEATHER_LAT", label: "Location Latitude (Fallback)" },
             { id: "WEATHER_LON", label: "Location Longitude (Fallback)" },
             { id: "WEATHER_REFRESH_MIN", label: "Refresh Interval", type: "range", min: 1, max: 60, step: 1, unit: "min" },
-            { id: "WEATHER_LOCALE", label: "City Name Language", type: "select",
+            { id: "WEATHER_LOCALE", label: "City Name Language", type: "select", compact: true,
                 options: [
-                    { value: "it", label: "Italiano (default)" },
+                    { value: "it", label: "Italiano" },
                     { value: "en", label: "English" },
                     { value: "fr", label: "Français" },
                     { value: "de", label: "Deutsch" },
@@ -2013,10 +2048,10 @@ const configMap = [
             <div class="cfg-help" style="margin-bottom:6px;">All five stored networks are taken. Choose which one may be replaced - nothing is overwritten until you pick:</div>
             <div id="wifiOverwriteList" class="wifi-chosen"></div>
         </div>
-        <div class="cfg-toolbar" style="margin-top:10px;">
-            <input data-noconfig="1" type="text" id="wifiHiddenSsid" placeholder="Hidden network name (SSID)" style="flex:1 1 180px;">
-            <input data-noconfig="1" id="wifiHiddenPass" type="password" placeholder="Password" style="flex:1 1 130px;">
-            <button onclick="addHiddenWifi()" class="btn-secondary btn-sm">Add Hidden Network</button>
+        <div class="cfg-toolbar nowrap" style="margin-top:10px;">
+            <input data-noconfig="1" type="text" id="wifiHiddenSsid" placeholder="Network name (SSID)">
+            <input data-noconfig="1" id="wifiHiddenPass" type="password" placeholder="Password">
+            <button onclick="addHiddenWifi()" class="btn-secondary btn-sm">Add Network</button>
         </div>
         <div id="wifiJoinMsg" class="cfg-help"></div>
     </div>` },
@@ -2352,10 +2387,10 @@ function renderForm(d) {
                     let val = d[item.id];
                     let opts = item.options.map(o => `<option value="${o.value}" ${o.value == val ? 'selected' : ''}>${o.label}</option>`).join('');
                     if (inCardSubCard) {
-                        groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls nowrap">${selectHtml(item.id, opts, true)}${resetBtn(item.id)}</div></div>`;
+                        groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls nowrap">${selectHtml(item.id, opts, true, item.compact)}${resetBtn(item.id)}</div></div>`;
                     } else {
                         closeSubCard();
-                        groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls tail">${selectHtml(item.id, opts)}${resetBtn(item.id)}</div></div></div>`;
+                        groupHtml += `<div class="card"${advAttr}><div class="cfg-row"><label>${trUnitTokens(item.label)}</label><div class="cfg-controls tail">${selectHtml(item.id, opts, false, item.compact)}${resetBtn(item.id)}</div></div></div>`;
                     }
                 }
             } else if (iType === 'threshold-row') {
@@ -2890,8 +2925,8 @@ function wifiBars(rssi) {
 }
 
 // The badge colour is the only per-call part; size and shape come from .wifi-badge.
-function wifiBadge(text, color) {
-    return '<span class="wifi-badge" style="color:' + color + ';">' + text + '</span>';
+function wifiBadge(text, kind) {
+    return '<span class="wifi-badge ' + kind + '">' + text + '</span>';
 }
 
 function renderWifiLists() {
@@ -2920,7 +2955,7 @@ function renderWifiLists() {
             savedEl.innerHTML = '<div class="cfg-help">No networks stored yet - scan and pick one below.</>';
         } else {
             savedEl.innerHTML = saved.map(n => {
-                let right = n.connected ? wifiBadge('connected', 'var(--accent-emerald)')
+                let right = n.connected ? wifiBadge('connected', 'on')
                                         : '<button class="btn-secondary btn-xs" data-act="connect" data-ssid="' + wifiEsc(n.ssid) +
                                           '" data-saved="1">Connect</button>';
                 right += ' <button class="btn-danger btn-xs" data-act="forget" data-slot="' + n.slot + '" data-ssid="' +
@@ -2946,7 +2981,7 @@ function renderWifiLists() {
         const isConn = live && live === n.ssid;
         let right = '';
         if (isConn) {
-            right = wifiBadge('connected', 'var(--accent-emerald)');
+            right = wifiBadge('connected', 'on');
         } else if (wifiAskPassFor === n.ssid) {
             right = '<input data-noconfig="1" id="wifiAskPass" class="wifi-ask" type="password" placeholder="Password">' +
                     '<button class="btn-primary btn-xs" data-act="join" data-ssid="' + wifiEsc(n.ssid) + '">Join</button>' +
@@ -2956,7 +2991,7 @@ function renderWifiLists() {
                     '" data-saved="' + (n.saved ? 1 : 0) + '">' +
                     (n.saved ? 'Reconnect' : 'Connect') + '</button>';
         }
-        const tag = n.saved && !isConn ? wifiBadge('saved', 'var(--accent-cyan)') : '';
+        const tag = n.saved && !isConn ? wifiBadge('saved', 'saved') : '';
         return '<div class="wifi-row wifi-div">' +
                wifiBars(n.rssi) +
                '<span class="wifi-ssid">' + wifiEsc(n.ssid) + ' <span class="wifi-row-meta">' +
