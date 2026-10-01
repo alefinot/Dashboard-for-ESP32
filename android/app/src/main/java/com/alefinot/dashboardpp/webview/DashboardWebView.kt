@@ -21,6 +21,27 @@ object FileChooser {
 }
 
 /**
+ * Build the document picker the page asked for. The type used to be pinned to
+ * "application/json", so the OTA input (`accept=".bin"`) opened a chooser with
+ * nothing selectable in it - the reported "cannot select the firmware file"
+ * (issue #49). The page's own accept list drives the filter; when it carries no
+ * usable MIME type (an extension WebView cannot map, e.g. .bin) the picker stays
+ * unrestricted rather than showing an empty list.
+ */
+internal fun fileChooserIntent(params: WebChromeClient.FileChooserParams?): Intent {
+    val accept = params?.acceptTypes?.filter { it.contains('/') }?.toTypedArray() ?: emptyArray()
+    return Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (params?.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        type = "*/*"
+        if (accept.isNotEmpty()) putExtra(Intent.EXTRA_MIME_TYPES, accept)
+    }
+}
+
+/**
  * Creates the WebView that hosts the ESP32's Web UI, with a load timeout
  * (device asleep / powered off) and the file picker used by the
  * backup-import input on the ESP UI. Pull-to-refresh is handled by the
@@ -38,6 +59,12 @@ fun createDashboardWebView(
     val settings = webView.settings
     settings.javaScriptEnabled = true
     settings.domStorageEnabled = true
+    // Honour the page's own <meta name="viewport">. WebView's default is off -
+    // unlike a real browser - so the Web UI was laid out at the default 980 CSS
+    // px and scaled to fit, which also mis-anchors body-level overlays such as
+    // the dropdown list (issue #50).
+    settings.useWideViewPort = true
+    settings.loadWithOverviewMode = false
     webView.setBackgroundColor(android.graphics.Color.parseColor("#05080D"))
 
     val handler = Handler(Looper.getMainLooper())
@@ -71,16 +98,26 @@ fun createDashboardWebView(
         override fun onShowFileChooser(
             view: WebView?,
             filePathCallback: ValueCallback<Array<Uri>>?,
-            fileChooserParams: WebChromeClient.FileChooserParams?
+            fileChooserParams: FileChooserParams?
         ): Boolean {
+            // A chooser whose callback was never resolved makes Chromium refuse to
+            // open the next one, so one abandoned attempt used to kill every file
+            // input on the page - OTA upload and backup import alike (issue #49).
+            FileChooser.pendingCallback?.onReceiveValue(null)
             FileChooser.pendingCallback = filePathCallback
-            try {
-                val intent = Intent(Intent.ACTION_GET_CONTENT)
-                intent.type = "application/json"
-                activity.startActivity(intent)
+            return try {
+                activity.startActivityForResult(
+                    fileChooserIntent(fileChooserParams),
+                    FileChooser.REQUEST_CODE
+                )
+                true
             } catch (e: Exception) {
+                // Nothing to open the picker with: hand the page an empty result
+                // now instead of leaving the callback hanging.
+                FileChooser.pendingCallback = null
+                filePathCallback?.onReceiveValue(null)
+                false
             }
-            return true
         }
     })
 
