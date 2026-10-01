@@ -18,8 +18,8 @@ int TEMP_WARN_YEL = 45;
 int FUEL_WARN_RED = 20;
 int FUEL_WARN_YEL = 45;
 
-char COLOR_TEMP_NORM[8] = "#00ffff";
-char COLOR_TEMP_WARN[8] = "#ff8c00";
+char COLOR_TEMP_NORM[8] = "#00ff00";
+char COLOR_TEMP_WARN[8] = "#ffff00";
 char COLOR_TEMP_CRIT[8] = "#ff0000";
 
 char COLOR_FUEL_NORM[8] = "#00ff00";
@@ -872,8 +872,8 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(FUEL_WARN_RED, "FUL_WRN_R", 20, 0, 100);
   CFG_INT(FUEL_WARN_YEL, "FUL_WRN_Y", 45, 0, 100);
 
-  CFG_STR(COLOR_TEMP_NORM, "C_TMP_N", "#00ffff");
-  CFG_STR(COLOR_TEMP_WARN, "C_TMP_W", "#ff8c00");
+  CFG_STR(COLOR_TEMP_NORM, "C_TMP_N", "#00ff00");
+  CFG_STR(COLOR_TEMP_WARN, "C_TMP_W", "#ffff00");
   CFG_STR(COLOR_TEMP_CRIT, "C_TMP_C", "#ff0000");
   CFG_STR(COLOR_FUEL_NORM, "C_FUL_N", "#00ff00");
   CFG_STR(COLOR_FUEL_WARN, "C_FUL_W", "#ffff00");
@@ -1245,8 +1245,8 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "TEMP_WARN_YEL": 45,
   "FUEL_WARN_RED": 20,
   "FUEL_WARN_YEL": 45,
-  "COLOR_TEMP_NORM": "#00ffff",
-  "COLOR_TEMP_WARN": "#ff8c00",
+  "COLOR_TEMP_NORM": "#00ff00",
+  "COLOR_TEMP_WARN": "#ffff00",
   "COLOR_TEMP_CRIT": "#ff0000",
   "COLOR_FUEL_NORM": "#00ff00",
   "COLOR_FUEL_WARN": "#ffff00",

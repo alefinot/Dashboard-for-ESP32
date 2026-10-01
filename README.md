@@ -504,10 +504,10 @@ ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely �
 - `ENABLE_ANTIALIASING` (default=true): Anti-aliased line rendering toggle.
 - `AA_SHARPNESS` (default=1.0): Anti-aliasing gamma correction factor.
 - `GHOST_COLOR_STR` (default="#212021"): Hex color code for inactive 7-segment digit background.
-- `COLOR_TEMP_NORM`, `COLOR_TEMP_WARN`, `COLOR_TEMP_CRIT`: Hex color strings for engine temperature gradient bar.
+- `COLOR_TEMP_NORM` (default=`#00ff00`), `COLOR_TEMP_WARN` (default=`#ffff00`), `COLOR_TEMP_CRIT` (default=`#ff0000`): Hex color strings for the engine temperature sidebar ramp.
 - `TEMP_BAR_MIN` / `TEMP_BAR_MAX` (default=10 / 110): the two ends of the engine-temp sidebar bar in °C.
 - `TEMP_WARN_YEL` (default=45): °C where the bar leaves plain `COLOR_TEMP_NORM` and starts fading toward `COLOR_TEMP_WARN`.
-- `TEMP_WARN_RED` (default=90): °C where that fade reaches amber and the amber→`COLOR_TEMP_CRIT` fade begins; full red at `TEMP_BAR_MAX`. Always kept at or above `TEMP_WARN_YEL`. The ramp is **light blue → amber → red**: a third marker (`TEMP_WARN_GRN`) existed in the code but was never stored in NVS, never in a backup and never in the Web UI, so it has been removed (issue #29).
+- `TEMP_WARN_RED` (default=90): °C where that fade reaches `COLOR_TEMP_WARN` and the `COLOR_TEMP_WARN`→`COLOR_TEMP_CRIT` fade begins; full red at `TEMP_BAR_MAX`. Always kept at or above `TEMP_WARN_YEL`. The ramp is **green → yellow → red**, the same three stops the fuel bar uses: the stops are blended in RGB (`blendColorLinear`), so the shipped defaults are chosen to stay on the green→yellow→red hue arc — a cyan low stop (the old default) blended to amber through a muddy green that is in neither endpoint (issue #46). A third marker (`TEMP_WARN_GRN`) existed in the code but was never stored in NVS, never in a backup and never in the Web UI, so it has been removed (issue #29).
 - `COLOR_FUEL_NORM`, `COLOR_FUEL_WARN`, `COLOR_FUEL_CRIT`: Hex color strings for fuel status bar.
 
 #### Sensors & Vehicle Calibration
