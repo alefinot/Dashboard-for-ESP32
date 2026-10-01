@@ -1,20 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- HUD hexagon glyph: outer ring + inner core -->
+<!-- Splash glyph (issue #51): the launcher gauge, same paths as
+     ic_launcher_foreground.xml, scaled up about its centre because the splash has
+     no adaptive-icon mask to keep clear of. Painted by SplashScreen() in
+     ui/screens/DashboardRoot.kt, so the splash and the launcher icon are the same
+     drawing. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="96dp"
-    android:height="96dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#22D3EE"
-        android:fillAlpha="0.12"
-        android:pathData="M12,2 L20.9,7.5 L20.9,16.5 L12,22 L3.1,16.5 L3.1,7.5 Z" />
-    <path
-        android:strokeColor="#22D3EE"
-        android:strokeWidth="1.2"
-        android:fillColor="#00000000"
-        android:pathData="M12,4.5 L19.4,9 L19.4,15 L12,19.5 L4.6,15 L4.6,9 Z" />
-    <path
-        android:fillColor="#22D3EE"
-        android:pathData="M12,8 L14.8,9.7 L14.8,14.3 L12,16 L9.2,14.3 L9.2,9.7 Z" />
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:name="gauge"
+        android:scaleX="1.55"
+        android:scaleY="1.55"
+        android:pivotX="54"
+        android:pivotY="54">
+        <path
+            android:strokeColor="@color/hud_cyan"
+            android:strokeWidth="5"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000"
+            android:pathData="M31.02,73.28 A30,30 0 1 1 83.89,56.61" />
+        <path
+            android:strokeColor="@color/hud_red"
+            android:strokeWidth="5"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000"
+            android:pathData="M83.89,56.61 A30,30 0 0 1 76.98,73.28" />
+        <path android:strokeColor="@color/hud_cyan" android:strokeWidth="2.5" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M34.08,70.71 L39.45,66.21" />
+        <path android:strokeColor="@color/hud_cyan" android:strokeWidth="1.5" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M28.22,57.39 L32.19,56.87" />
+        <path android:strokeColor="@color/hud_cyan" android:strokeWidth="2.5" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M30.44,43.01 L36.78,45.97" />
+        <path android:strokeColor="@color/hud_cyan" android:strokeWidth="1.5" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M40.03,32.07 L42.18,35.45" />
+        <path android:strokeColor="@color/hud_cyan" android:strokeWidth="2.5" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M54,28 L54,35" />
+        <path android:strokeColor="@color/hud_cyan" android:strokeWidth="1.5" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M67.97,32.07 L65.82,35.45" />
+        <path android:strokeColor="@color/hud_cyan" android:strokeWidth="2.5" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M77.56,43.01 L71.22,45.97" />
+        <path android:strokeColor="@color/hud_red" android:strokeWidth="1.5" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M79.78,57.39 L75.81,56.87" />
+        <path android:strokeColor="@color/hud_red" android:strokeWidth="2.5" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M73.92,70.71 L68.55,66.21" />
+        <path
+            android:fillColor="@color/hud_amber"
+            android:pathData="M57.31,48.61 L70.09,40.50 L59.88,51.68 L55.53,52.71 Z" />
+        <path
+            android:strokeColor="@color/hud_cyan"
+            android:strokeWidth="2.5"
+            android:fillColor="#00000000"
+            android:pathData="M54,47.5 A6.5,6.5 0 1 1 54,60.5 A6.5,6.5 0 1 1 54,47.5 Z" />
+    </group>
 </vector>
