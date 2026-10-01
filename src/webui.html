@@ -1052,6 +1052,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
                 <div id="fl-partitions-bar" style="display:flex;width:100%;height:100%;"></div>
             </div>
             <div id="fl-legend" style="font-size:11px;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:2px 12px;margin-top:6px;"></div>
+            <div id="fl-nvs" style="font-size:11px;color:var(--text-muted);margin-top:8px;"></div>
         </div>
         <div class="perf-card" style="grid-column:1/-1;">
             <h4>Serial Output Monitor</h4>
@@ -3256,6 +3257,19 @@ function updatePerf() {
             }
             partBar.innerHTML = barHtml;
             if (legend) legend.innerHTML = legendHtml;
+        }
+
+        // Settings-storage budget. NVS runs out of ENTRY SLOTS, not bytes, and
+        // it can keep hundreds free while refusing a write (its tidier needs a
+        // spare page), so `available` is the number worth watching.
+        let nvsLine = document.getElementById('fl-nvs');
+        if (nvsLine && d.nvs_entries_total) {
+            let avail = d.nvs_entries_available, used = d.nvs_entries_used, tot = d.nvs_entries_total;
+            let col = avail > tot * 0.15 ? 'var(--accent-emerald)' : (avail > tot * 0.03 ? 'var(--accent-amber)' : 'var(--accent-rose)');
+            let warn = avail <= tot * 0.03 ? ' <span style="color:var(--accent-rose);">- nearly full, new settings may not save</span>' : '';
+            nvsLine.innerHTML = 'Settings storage (NVS ' + ((d.nvs_bytes || 0) / 1024).toFixed(0) + ' KB): '
+                + '<strong style="color:#fff;">' + used + '</strong> of ' + tot + ' entries used, '
+                + '<strong style="color:' + col + ';">' + avail + '</strong> available' + warn;
         }
 
         set('p-fps-cur', d.fps_current.toFixed(1));

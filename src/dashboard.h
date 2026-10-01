@@ -497,7 +497,12 @@ void cfgNoteFailedKey(const char *key);  // records only while a config save is 
 // save response reports `available` so a full partition is visible from the
 // browser; on a fragmented-but-not-full partition it still looks roomy, which is
 // itself the answer.
-extern size_t nvsStatsUsed, nvsStatsAvailable, nvsStatsTotal;
+extern size_t nvsStatsUsed, nvsStatsAvailable, nvsStatsTotal, nvsStatsBytes;
+
+// Refresh those numbers without printing them, at most once every maxAgeMs.
+// The health endpoint serves them to the Web UI; walking every NVS page on a
+// one-second poll would be wasted work, so this is throttled.
+void refreshNvsStats(uint32_t maxAgeMs);
 
 // Logs the NVS partition's entry budget (used / available / total). Free space
 // is the first thing to rule out when writes start failing.

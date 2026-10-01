@@ -1696,6 +1696,16 @@ void webServerTask(void *pvParameters) {
       }
       doc["flash_used"] = flashUsed;
     }
+    // Settings-storage budget, in ENTRIES rather than bytes. This is the unit
+    // that actually runs out: the old 20 KB partition held ~630 entries, the
+    // factory settings alone occupy ~420 of them, and one lost WiFi save costs
+    // three. Showing bytes here would have looked healthy right up to the
+    // failure (throttled read - see refreshNvsStats()).
+    refreshNvsStats(5000);
+    doc["nvs_bytes"] = (uint32_t)nvsStatsBytes;
+    doc["nvs_entries_used"] = (uint32_t)nvsStatsUsed;
+    doc["nvs_entries_available"] = (uint32_t)nvsStatsAvailable;
+    doc["nvs_entries_total"] = (uint32_t)nvsStatsTotal;
     doc["fps_current"] = currentMeasuredFps;
     doc["fps_average"] = currentAverageFps;
     doc["fps_target"] = TARGET_FPS;

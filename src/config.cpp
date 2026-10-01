@@ -387,28 +387,50 @@ void cfgNoteFailedKey(const char *key) {
 // The entry budget of the NVS partition. A failing write on a unit that still
 // has hundreds of available entries points at page fragmentation (a string
 // needs one page with room for the whole value), not at a full partition.
-size_t nvsStatsUsed = 0, nvsStatsAvailable = 0, nvsStatsTotal = 0;
+size_t nvsStatsUsed = 0, nvsStatsAvailable = 0, nvsStatsTotal = 0, nvsStatsBytes = 0;
+static size_t nvsStatsFree = 0;        // free_entries: includes the spare page
+static size_t nvsStatsNamespaces = 0;  // namespaces currently stored
+static uint32_t nvsStatsAt = 0;        // millis() of the last successful read
 
-void logNvsStats() {
+// One read of the partition budget into the globals. Kept separate from the log
+// line because /api/health polls the numbers continuously: walking every NVS
+// page on a 1 s poll is pointless work, so display callers go through
+// refreshNvsStats() and only logNvsStats() prints.
+static bool readNvsStats() {
   nvs_stats_t st;
+  if (nvs_get_stats("nvs", &st) != ESP_OK) return false;
+  nvsStatsUsed = st.used_entries;
+  nvsStatsAvailable = st.available_entries;
+  nvsStatsTotal = st.total_entries;
+  nvsStatsFree = st.free_entries;
+  nvsStatsNamespaces = st.namespace_count;
   const esp_partition_t *part = esp_partition_find_first(
       ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "nvs");
-  if (nvs_get_stats("nvs", &st) == ESP_OK) {
-    nvsStatsUsed = st.used_entries;
-    nvsStatsAvailable = st.available_entries;
-    nvsStatsTotal = st.total_entries;
-    // The byte size is printed too because a unit updated over OTA keeps the
-    // partition table it was flashed with: the same firmware runs against 20 KB
-    // or 80 KB of NVS depending on how that board was last flashed, and the log
-    // is the only place that difference is visible.
+  nvsStatsBytes = part ? part->size : 0;
+  nvsStatsAt = millis();
+  return true;
+}
+
+void refreshNvsStats(uint32_t maxAgeMs) {
+  if (nvsStatsAt && millis() - nvsStatsAt < maxAgeMs) return;
+  readNvsStats();
+}
+
+void logNvsStats() {
+  // The byte size is printed too because a unit updated over OTA keeps the
+  // partition table it was flashed with: the same firmware runs against 20 KB
+  // or 80 KB of NVS depending on how that board was last flashed, and the log
+  // is the only place that difference is visible. `available` is the number that
+  // matters — free minus the page NVS must keep for its own tidying. A partition
+  // can report hundreds of slots free and still fail a write; that is what 503
+  // used / 125 free / 1 available looked like.
+  if (readNvsStats())
     logPrintf("NVS 'nvs' %u bytes: %u entries used, %u available, %u free, %u total, %u namespace(s)\n",
-              part ? (unsigned)part->size : 0u,
-              (unsigned)st.used_entries, (unsigned)st.available_entries,
-              (unsigned)st.free_entries, (unsigned)st.total_entries,
-              (unsigned)st.namespace_count);
-  } else {
+              (unsigned)nvsStatsBytes, (unsigned)nvsStatsUsed,
+              (unsigned)nvsStatsAvailable, (unsigned)nvsStatsFree,
+              (unsigned)nvsStatsTotal, (unsigned)nvsStatsNamespaces);
+  else
     logPrintf("NVS: nvs_get_stats failed\n");
-  }
 }
 
 // A save that rewrites every parameter spends the NVS budget on churn rather
