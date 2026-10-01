@@ -604,6 +604,29 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
     box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
 }
 
+/* Scrollbars in the dashboard's own language instead of the OS chrome: the
+   track stays empty so a glass card still reads as one surface, and the thumb
+   is --text-muted at low alpha (rgba(148,163,184,.30)) that lights up in
+   --accent-cyan while hovered or dragged. Applies to everything that scrolls -
+   the page, the scan list, the serial console. -webkit-* covers Chrome/Edge/
+   Safari (the phone and the desktop browser); scrollbar-width/-color is the
+   Firefox equivalent, and overlay scrollbars on touch simply ignore the sizes. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-track-piece { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.30);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active {
+    background: rgba(0, 229, 255, 0.45);
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
 /* Checkbox Modern Toggle */
 .checkbox-card {
     flex-direction: row;
