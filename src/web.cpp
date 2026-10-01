@@ -136,6 +136,180 @@ static void wifiStaEventHandler(arduino_event_t *ev) {
   }
 }
 
+// ── Wi-Fi scan cache ────────────────────────────────────────────────────────
+// What the radio can actually see. Without this, "it will not join my network"
+// and "it cannot see my network" produce the same log, and reason=201
+// (WIFI_REASON_NO_AP_FOUND) cannot be trusted on its own. Written by the search
+// state machine in webServerTask - the async scan API is non-blocking, so a
+// scan never stalls server.handleClient() - and read by GET /api/wifi/scan plus
+// the failed-cycle log line.
+//
+// Fixed static storage, no per-request heap (AGENTS §14): an SSID is at most 32
+// bytes on the wire, and 30 entries is more than a home radio ever reports, so
+// the cache and the response body are buffers that exist for the life of the
+// binary. The web task runs with a 6 KB stack, so neither may be a local.
+static const int WIFI_SCAN_MAX = 30;
+struct WifiScanEntry {
+  char ssid[33];
+  int32_t rssi;
+  uint8_t ch;
+  uint8_t auth;  // wifi_auth_mode_t of the strongest reported copy
+};
+static WifiScanEntry s_scan[WIFI_SCAN_MAX];
+static volatile int s_scanCount = 0;
+static volatile unsigned long s_scanDoneMs = 0;   // 0 = no scan has finished
+static volatile bool s_scanBusy = false;          // async scan in flight
+static volatile bool s_scanRequested = false;     // scan wanted (UI button / auto)
+static char s_scanBody[2600];                     // GET response, built in place
+
+// Names for wifi_auth_mode_t (esp_wifi_types_generic.h). The values past OWE
+// are rare enough to be reported as "other" with the number alongside.
+static const char *wifiAuthName(uint8_t auth) {
+  static const char *const names[] = {"open", "WEP", "WPA", "WPA2", "WPA/WPA2",
+                                      "enterprise", "WPA3", "WPA2/WPA3", "WAPI",
+                                      "OWE"};
+  return auth < sizeof(names) / sizeof(names[0]) ? names[auth] : "other";
+}
+
+// True when this SSID already has a credential slot. The picker uses it to
+// connect straight away instead of asking for a known password again.
+static bool wifiSsidSaved(const char *ssid) {
+  const char *ssids[] = {WIFI_SSID, WIFI_SSID_1, WIFI_SSID_2, WIFI_SSID_3,
+                         WIFI_SSID_4};
+  for (const char *s : ssids)
+    if (s[0] && strncmp(s, ssid, 64) == 0) return true;
+  return false;
+}
+
+// JSON-safe SSID: quotes and backslashes are legal in an SSID and would break
+// the body, and anything outside printable ASCII is replaced rather than
+// shipped as bytes the browser may not decode as UTF-8.
+static void wifiSsidEscaped(char *dst, size_t n, const char *src) {
+  size_t o = 0;
+  for (const char *p = src; *p && o + 2 < n; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c == '"' || c == '\\') { dst[o++] = '\\'; dst[o++] = (char)c; }
+    else if (c >= 0x20 && c < 0x7F) dst[o++] = (char)c;
+    else dst[o++] = '?';
+  }
+  dst[o] = 0;
+}
+
+// Merge one beacon into the cache, keeping the strongest copy per SSID. When the
+// cache is full the weakest entry is replaced, so the list that ships is the 30
+// strongest signals rather than the first 30 beacons.
+static void wifiScanAdd(const char *ssid, int32_t rssi, uint8_t ch, uint8_t auth) {
+  if (!ssid || !ssid[0]) return;
+  int n = s_scanCount;
+  for (int i = 0; i < n; i++) {
+    if (strncmp(s_scan[i].ssid, ssid, sizeof(s_scan[i].ssid)) == 0) {
+      if (rssi > s_scan[i].rssi) {
+        s_scan[i].rssi = rssi;
+        s_scan[i].ch = ch;
+        s_scan[i].auth = auth;
+      }
+      return;
+    }
+  }
+  int slot;
+  if (n < WIFI_SCAN_MAX) {
+    slot = n;
+    s_scanCount = n + 1;
+  } else {
+    int weakest = 0;
+    for (int i = 1; i < WIFI_SCAN_MAX; i++)
+      if (s_scan[i].rssi < s_scan[weakest].rssi) weakest = i;
+    if (rssi <= s_scan[weakest].rssi) return;
+    slot = weakest;
+  }
+  strncpy(s_scan[slot].ssid, ssid, sizeof(s_scan[slot].ssid) - 1);
+  s_scan[slot].ssid[sizeof(s_scan[slot].ssid) - 1] = 0;
+  s_scan[slot].rssi = rssi;
+  s_scan[slot].ch = ch;
+  s_scan[slot].auth = auth;
+}
+
+// Strongest signal first, so the UI list and the log line lead with what the
+// unit is most likely to join.
+static void wifiScanSortBySignal() {
+  int n = s_scanCount;
+  for (int i = 1; i < n; i++) {
+    WifiScanEntry key = s_scan[i];
+    int j = i - 1;
+    while (j >= 0 && s_scan[j].rssi < key.rssi) { s_scan[j + 1] = s_scan[j]; j--; }
+    s_scan[j + 1] = key;
+  }
+}
+
+// Build the /api/wifi/scan body with snprintf into a static buffer: no
+// JsonDocument and no growing String on a request path (AGENTS §14).
+static void wifiScanJson() {
+  size_t cap = sizeof(s_scanBody) - 1;
+  int off = snprintf(s_scanBody, cap,
+                     "{\"scanning\":%s,\"ageMs\":%lu,\"count\":%d,\"max\":%d,\"nets\":[",
+                     s_scanBusy ? "true" : "false",
+                     s_scanDoneMs ? (unsigned long)(millis() - s_scanDoneMs) : 0UL,
+                     (int)s_scanCount, WIFI_SCAN_MAX);
+  if (off < 0 || (size_t)off >= cap) off = 0;
+  int shown = 0;
+  char esc[67];
+  for (int i = 0; i < s_scanCount && (size_t)off < cap - 140; i++) {
+    wifiSsidEscaped(esc, sizeof(esc), s_scan[i].ssid);
+    int w = snprintf(s_scanBody + off, cap - off,
+                     "%s{\"ssid\":\"%s\",\"rssi\":%ld,\"ch\":%u,\"auth\":%u,"
+                     "\"authName\":\"%s\",\"saved\":%s}",
+                     shown ? "," : "", esc, (long)s_scan[i].rssi,
+                     (unsigned)s_scan[i].ch, (unsigned)s_scan[i].auth,
+                     wifiAuthName(s_scan[i].auth),
+                     wifiSsidSaved(s_scan[i].ssid) ? "true" : "false");
+    if (w <= 0 || (size_t)(off + w) >= cap) break;
+    off += w;
+    shown++;
+  }
+  snprintf(s_scanBody + off, cap - off, "]}");
+}
+
+static void wifiScanGetHandler() {
+  wifiScanJson();
+  server.send(200, "application/json", s_scanBody);
+}
+
+// The list refreshes only when the user asks for it: a scan makes the radio hop
+// off the current channel, which is a call for the person holding the phone,
+// not for a poller. The search machine raises the same flag on its own, but only
+// when there is no link to disturb.
+static void wifiScanPostHandler() {
+  bool wasBusy = s_scanBusy;
+  s_scanRequested = true;
+  server.send(200, "application/json",
+              wasBusy ? "{\"status\":\"scanning\"}" : "{\"status\":\"requested\"}");
+}
+
+// One line that settles visibility: the networks the radio reported, strongest
+// first, with the age of that scan. Called when a search cycle fails.
+static void logWifiScanSummary() {
+  static char line[512];
+  int n = s_scanCount;
+  size_t off = snprintf(line, sizeof(line), "WiFi scan (%lus ago): ",
+                        s_scanDoneMs ? (unsigned long)((millis() - s_scanDoneMs) / 1000UL)
+                                     : 0UL);
+  if (off >= sizeof(line)) off = sizeof(line) - 1;
+  int shown = 0;
+  for (int i = 0; i < n && off < sizeof(line) - 60; i++) {
+    int w = snprintf(line + off, sizeof(line) - off, "%s%s ch%u %ld %s",
+                     shown ? " | " : "", s_scan[i].ssid, (unsigned)s_scan[i].ch,
+                     (long)s_scan[i].rssi, wifiAuthName(s_scan[i].auth));
+    if (w <= 0 || off + (size_t)w >= sizeof(line) - 1) break;
+    off += w;
+    shown++;
+  }
+  if (!n)
+    snprintf(line + off, sizeof(line) - off, "nothing reported yet");
+  else if (shown < n)
+    snprintf(line + off, sizeof(line) - off, " (+%d more)", n - shown);
+  logPrintf("%s\n", line);
+}
+
 // OTA Pull state
 static bool otaPullBootCheckDone = false;  // automatic check runs once per boot
 static char otaPullStatus[96] = "idle";
@@ -1131,6 +1305,8 @@ void webServerTask(void *pvParameters) {
   // Start of the current search episode (boot or the last link loss). Mode 1
   // (fixed search window) counts from here; reset on every re-arm.
   unsigned long staSearchStart = 0;
+  // Start of the in-flight Wi-Fi scan, for the timeout guard below.
+  unsigned long scanStartMs = 0;
   // GAP exists because of the IDF 5.5 config rule above: the machine never
   // installs the next network until the driver has reported the previous
   // attempt over. Values are mirrored into staDbgPhase for the heartbeat.
@@ -1299,6 +1475,12 @@ void webServerTask(void *pvParameters) {
     if (!ENABLE_AUTO_BRIGHTNESS)
       pendingBacklightValue = BACKLIGHT_BRIGHTNESS;
   });
+
+  // What the radio sees, and the entry point for "scan, pick, type the
+  // password" network setup. GET is read-only against the cached list; POST
+  // only asks the network task to scan (see the scan runner in the task loop).
+  server.on("/api/wifi/scan", HTTP_GET, wifiScanGetHandler);
+  server.on("/api/wifi/scan", HTTP_POST, wifiScanPostHandler);
 
   server.on("/api/time", HTTP_POST, []() {
     if (!server.hasArg("plain")) {
@@ -1845,6 +2027,63 @@ void webServerTask(void *pvParameters) {
     else { webLoopCount++; vTaskDelay(pdMS_TO_TICKS(20)); }
 
     // ---------------------------------------------------------------------
+    // Wi-Fi scan runner. Deliberately here rather than in the request handler:
+    // scanNetworks(async=true) returns straight away and the radio reports back
+    // through scanComplete(), so a multi-second full-band scan cannot stall
+    // server.handleClient() and trip the "web server hung" self-heal. A scan is
+    // requested by the Web UI button, and by the search machine itself when a
+    // cycle fails (nothing is connected at that point, so hopping costs
+    // nothing).
+    if (s_scanRequested && !s_scanBusy && !staDrvAttemptOpen) {
+      s_scanRequested = false;
+      // show_hidden stays false: a hidden SSID cannot be picked from a list, so
+      // it stays typed-entry territory.
+      int16_t startRes = WiFi.scanNetworks(true, false, false);
+      if (startRes == WIFI_SCAN_RUNNING) {
+        s_scanBusy = true;
+        scanStartMs = millis();
+        logPrintf("WiFi scan started%s\n",
+                  staConnected ? " (link up: it may drop briefly)" : "");
+      } else {
+        logPrintf("WiFi scan refused by the driver (%d)\n", (int)startRes);
+      }
+    }
+    if (s_scanBusy) {
+      int16_t found = WiFi.scanComplete();
+      if (found == WIFI_SCAN_RUNNING) {
+        // IDF's own scan of 1-13 at ~300ms/channel finishes well inside this;
+        // the guard only exists so a lost SCAN_DONE event cannot wedge the
+        // search machine, which holds still while a scan is in flight.
+        if (millis() - scanStartMs > 20000) {
+          WiFi.scanDelete();
+          s_scanBusy = false;
+          logPrintf("WiFi scan timed out\n");
+        }
+      } else if (found == WIFI_SCAN_FAILED) {
+        s_scanBusy = false;
+        logPrintf("WiFi scan failed\n");
+      } else {
+        // One String reused for every result: its buffer grows once instead of
+        // once per beacon (AGENTS §14).
+        String ssidStr;
+        s_scanCount = 0;
+        for (int i = 0; i < found; i++) {
+          uint8_t auth = 0;
+          uint8_t *bssid = NULL;
+          int32_t rssi = 0, ch = 0;
+          if (!WiFi.getNetworkInfo((uint8_t)i, ssidStr, auth, rssi, bssid, ch))
+            continue;
+          wifiScanAdd(ssidStr.c_str(), rssi, (uint8_t)ch, auth);
+        }
+        WiFi.scanDelete();
+        wifiScanSortBySignal();
+        s_scanBusy = false;
+        s_scanDoneMs = millis();
+        logWifiScanSummary();
+      }
+    }
+
+    // ---------------------------------------------------------------------
     // Non-blocking STA search. wifiNets[] is in priority order and index 0 is
     // the primary network (WIFI_SSID), so every cycle - at boot and after a
     // link loss - offers the primary first and a fallback is only ever used
@@ -1891,7 +2130,12 @@ void webServerTask(void *pvParameters) {
         staDeadline = millis() + 500;
       }
     } else if (staPhase != STA_GIVEUP) {
-      if (staPhase == STA_BACKOFF) {
+      // esp_wifi_set_config() and begin() are refused while a scan owns the
+      // radio, so the search waits for the scan to land rather than burning a
+      // refusal counter. A scan is a few seconds; the backoff absorbs it.
+      if (s_scanBusy) {
+        staDeadline = millis() + 200;  // keep the current phase's budget alive
+      } else if (staPhase == STA_BACKOFF) {
         if (millis() >= staDeadline) staPhase = STA_TRY;
       } else if (staPhase == STA_GAP) {
         // Wait for the driver to report the previous attempt over - only then
@@ -1917,10 +2161,14 @@ void webServerTask(void *pvParameters) {
           }
           if (giveUp) {
             staPhase = STA_GIVEUP;
+            logWifiScanSummary();
+            s_scanRequested = true;  // fresh visibility for the next episode
           } else {
             // Mode 1 (still inside its window) or mode 2 (forever): run the
             // next cycle after a short backoff so the radio is not hammered.
             logPrintf("WiFi cycle failed, searching again\n");
+            logWifiScanSummary();
+            s_scanRequested = true;  // nothing is connected: safe to look around
             staNetIdx = 0;
             staRefusals = 0;
             buildWifiList();  // pick up networks saved since the last cycle
