@@ -730,6 +730,12 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
     z-index: 900;
     max-height: var(--panel-max);
     overflow-y: auto;
+    /* Dragging the list past its own end must not scroll the page underneath it:
+       that would move the control out from under the list, and the page-scroll
+       listener closes the list mid-gesture. Vertical panning only, and no
+       double-tap zoom on the rows. */
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     padding: 0;
     background: var(--bg-card);
     -webkit-backdrop-filter: var(--glass-blur);
@@ -777,6 +783,8 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
     line-height: 1.4;
     color: var(--text-main);
     cursor: pointer;
+    /* 40px is the touch target; no double-tap zoom delay on a row tap. */
+    touch-action: manipulation;
     transition: background 0.15s ease, color 0.15s ease;
 }
 
@@ -2699,6 +2707,7 @@ let selPanel = null;
 let selOpen = null;      // the <select> whose list is showing
 let selHl = -1;          // option index highlighted by the keyboard
 let selOpenedAt = 0;     // time origin stamp of the last open, see the scroll guard
+let selPress = null;     // where the last press landed, see the panel's click guard
 let selWired = false;
 
 function selFaceOf(sel) {
@@ -2770,8 +2779,12 @@ function chooseSelOption(i) {
     const opt = sel.options[i];
     if (!opt) return;
     sel.value = opt.value;
-    // The page reads dropdowns from the real select, so announce the change the
-    // same way a native pick would.
+    // Announce the pick the way a native one does: input first, then change. The
+    // form's autosave listens for *input* (2 s debounce -> POST /api/config) while
+    // the per-field handlers (CPU mode, power sense) listen for change, so firing
+    // only change left the box looking updated while nothing reached the device
+    // (issue #59, measured as postsMade: 0 after a pick).
+    sel.dispatchEvent(new Event('input', { bubbles: true }));
     sel.dispatchEvent(new Event('change', { bubbles: true }));
     closeSelPanel(true);
 }
@@ -2786,23 +2799,34 @@ function openSelPanel(sel) {
         return;
     }
     closeSelPanel(false);
+    selPress = null;
     if (!selPanel) {
         selPanel = document.createElement('div');
         selPanel.id = 'sel-panel';
         selPanel.setAttribute('role', 'listbox');
         selPanel.tabIndex = -1;
         selPanel.hidden = true;
+        // Pressing a row only highlights it; the pick happens on click. Choosing at
+        // pointerdown picked the row under the finger the instant it landed, so a
+        // touch could never drag the list to the options below the fold (the wheel
+        // on a desktop escape that, which is why it only misbehaves on phones), and
+        // destroying the list inside that handler let the browser's touch-to-mouse
+        // click hit-test the page behind it: measured as "pointerdown DIV.sel-opt
+        // [IN-PANEL]" followed by "mousedown/click DIV.cfg-row" - a control the user
+        // never touched. A small movement is tolerated so a shaky thumb still picks.
         selPanel.addEventListener('pointerdown', e => {
             const row = e.target.closest('.sel-opt');
-            if (row) chooseSelOption(parseInt(row.dataset.i, 10));
+            if (!row) { selPress = null; return; }
+            selPress = { x: e.clientX, y: e.clientY };
+            highlightSelOption(parseInt(row.dataset.i, 10));
         });
-        // Also on click, so a scripted .click() (or a tap that the browser
-        // reports without a pointer event) still picks. The pointerdown above
-        // already closed the list, so the second path sees no open select and
-        // does nothing.
         selPanel.addEventListener('click', e => {
             const row = e.target.closest('.sel-opt');
-            if (row) chooseSelOption(parseInt(row.dataset.i, 10));
+            if (!row) return;
+            // A drag that scrolled the list must not pick, even on engines that still
+            // send a click after it; a scripted .click() has no recorded press.
+            if (selPress && Math.abs(e.clientX - selPress.x) + Math.abs(e.clientY - selPress.y) > 24) { selPress = null; return; }
+            chooseSelOption(parseInt(row.dataset.i, 10));
         });
         selPanel.addEventListener('keydown', e => {
             if (!selOpen) return;
@@ -3334,6 +3358,16 @@ window.addEventListener('scroll', function() {
     // fires pointercancel and hides the arrow mid-pull.
     document.addEventListener('touchstart', function(e) {
         if (refreshing || e.touches.length !== 1) return;
+        // A drag that starts inside the open option list belongs to the list. If the
+        // pull is armed here, the touchmove handler below cancels the drag (measured:
+        // every touchmove inside #sel-panel arrived defaultPrevented while the page sat
+        // at scroll top), so the list could not be scrolled and the refresh arrow
+        // armed under the user's thumb.
+        if (e.target && e.target.closest && e.target.closest('#sel-panel')) {
+            pulling = false;
+            hideArrow();
+            return;
+        }
         pulling = window.scrollY <= 0;
         if (pulling) {
             startX = e.touches[0].clientX;
