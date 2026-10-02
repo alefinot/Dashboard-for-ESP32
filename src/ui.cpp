@@ -1345,7 +1345,7 @@ if (!vlw120Ready) {
     display.setTextColor(batColor, TFT_BLACK);
     display.print(" V");
     int iconCY = batY + ds15_refY1 + (h_bat_max / 2);
-    drawBatteryIcon(batX, iconCY - 9, displayBat, batColor);
+    drawBatteryIcon(batX, batteryIconTop(iconCY), displayBat, batColor);
     drawDebugBox(display, batX, batClearTop, w_bat_max, batClearH);
   }
 

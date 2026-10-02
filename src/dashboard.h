@@ -724,6 +724,16 @@ void fillAARoundRect(T &disp, int x, int y, int w, int h, int r, uint16_t color,
                      uint16_t bg_top = 0x0000, uint16_t bg_bottom = 0x0000);
 
 void drawBatteryIcon(int x, int y, float voltage, uint16_t color);
+// Battery glyph geometry (issue #48), shared by the drawing code in gfx.cpp and
+// the battery readout layout in ui.cpp. (x, y) for drawBatteryIcon is the
+// top-left of the whole glyph including the terminal; batteryIconTop() converts
+// a visual centre into that top-left, so the *body* - the glyph the eye reads -
+// sits on the requested axis and the terminal is an overhang above it.
+constexpr int BATTERY_ICON_W = 10;
+constexpr int BATTERY_ICON_H = 16;
+constexpr int BATTERY_TERMINAL_W = 4;
+constexpr int BATTERY_TERMINAL_H = 2;
+int batteryIconTop(int centerY);
 int getDayOfWeek(int y, int m, int d);
 // Daylight-saving rules (issue #22): UTC date + the zone's standard offset in,
 // extra hours out (0 = standard, 1 = daylight). See src/gfx.cpp.

@@ -402,9 +402,19 @@ template void fillAARoundRect(LGFX_ST7789_4 &, int, int, int, int, int, uint16_t
 // ----------------------------------------------------------------------------
 // Icons
 // ----------------------------------------------------------------------------
+// Top-left y for drawBatteryIcon() that puts the icon *body* on centerY. The
+// call site used a hand-tuned `iconCY - 9` (half of body + terminal), which put
+// the body 1 px below the axis of the digits next to it and went stale the
+// moment the glyph was resized (issue #48).
+int batteryIconTop(int centerY) {
+  return centerY - BATTERY_ICON_H / 2 - BATTERY_TERMINAL_H;
+}
+
 void drawBatteryIcon(int x, int y, float voltage, uint16_t color) {
-  constexpr int iconW = 10, iconH = 16, nippleW = 4, nippleH = 2, innerX = 2,
-                innerY = nippleH + 2, innerW = iconW - 4, innerH = iconH - 4;
+  constexpr int iconW = BATTERY_ICON_W, iconH = BATTERY_ICON_H,
+                nippleW = BATTERY_TERMINAL_W, nippleH = BATTERY_TERMINAL_H,
+                innerX = 2, innerY = nippleH + 2, innerW = iconW - 4,
+                innerH = iconH - 4;
   display.fillRect(x, y, iconW, iconH + nippleH, TFT_BLACK);
   display.fillRect(x + (iconW - nippleW) / 2, y, nippleW, nippleH, color);
   display.drawRect(x, y + nippleH, iconW, iconH, color);
