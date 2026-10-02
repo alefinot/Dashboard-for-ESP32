@@ -724,25 +724,12 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
 
 /* The list is built in the same language as the Wi-Fi picker box: glass card
    surface, 1px hairline border, 10px radius, and a fade-in on the page's own
-   easing curve.
-
-   position:absolute, not fixed: positionSelPanel() anchors the list in *document*
-   coordinates (face rect + scroll offset), which is correct in every engine. A
-   fixed panel is anchored to the initial containing block, and Android WebView
-   (useWideViewPort off unless the app turns it on) parks that at the document
-   origin instead of the visible viewport - the list then opens off-screen and the
-   control looks dead (issue #50). The list closes on any scroll, so absolute
-   anchoring can never drift. */
+   easing curve. */
 #sel-panel {
-    position: absolute;
+    position: fixed;
     z-index: 900;
     max-height: var(--panel-max);
     overflow-y: auto;
-    /* Touch: a vertical drag inside the list belongs to the list, and must not
-       chain out to the page. Chaining used to scroll the page, and the page
-       scroll dismissed the list - which is why it read as unscrollable (#58). */
-    touch-action: pan-y;
-    overscroll-behavior: contain;
     padding: 0;
     background: var(--bg-card);
     -webkit-backdrop-filter: var(--glass-blur);
@@ -2711,8 +2698,7 @@ function bindApPasswordWarn() {
 let selPanel = null;
 let selOpen = null;      // the <select> whose list is showing
 let selHl = -1;          // option index highlighted by the keyboard
-let selPress = null;     // the row a press started on, see the commit handler
-let selReposFrame = 0;   // queued reposition, see requestSelReposition
+let selOpenedAt = 0;     // time origin stamp of the last open, see the scroll guard
 let selWired = false;
 
 function selFaceOf(sel) {
@@ -2732,49 +2718,21 @@ function paintSelFace(sel) {
 
 function positionSelPanel(face, panel) {
     const r = face.getBoundingClientRect();
-    // The panel is position:absolute, so it is placed in document coordinates:
-    // every viewport measurement below has the scroll offset added (issue #50).
-    const sx = window.pageXOffset, sy = window.pageYOffset;
-    const vw = window.innerWidth, vh = window.innerHeight;
-    // The document's own box: a list parked outside it would stretch the page and
-    // hand the user a scroll into empty space (issue #58).
-    const docW = Math.max(document.documentElement.clientWidth, vw);
-    const docH = Math.max(document.documentElement.scrollHeight, vh);
     // One control, two states: the list opens exactly as wide as the value box it
     // belongs to, so nothing new appears at a different size when you tap it.
-    const w = Math.min(r.width, Math.max(160, Math.min(vw, docW) - 16));
+    const w = Math.min(r.width, Math.max(160, window.innerWidth - 16));
     panel.style.width = w + 'px';
-    // Never taller than the room between the control and the nearer window edge.
-    // The stylesheet cap is read back in px first, so the inline value can only
-    // lower it; the list cannot spill past the window and grow the page.
-    panel.style.maxHeight = '';
-    const cap = parseFloat(getComputedStyle(panel).maxHeight) || 0;
-    const room = Math.max((sy + vh - 8) - (r.bottom + 4), (r.top - 4) - (sy + 8));
-    if (cap > 0 && room < cap) panel.style.maxHeight = Math.max(96, room) + 'px';
     const h = panel.offsetHeight;
-    let top = r.bottom + 4 + sy;
-    if (top + h > sy + vh - 8) {
-        const above = r.top - 4 + sy - h;
-        top = above >= sy + 8 ? above : Math.max(sy + 8, sy + vh - h - 8);
+    let top = r.bottom + 4;
+    if (top + h > window.innerHeight - 8) {
+        const above = r.top - 4 - h;
+        top = above >= 8 ? above : Math.max(8, window.innerHeight - h - 8);
     }
-    // Last word: inside the visible window *and* inside the document box, even
-    // when the row itself is scrolled partly off it.
-    top = Math.max(sy + 8, Math.min(top, Math.max(sy + 8, Math.min(sy + vh, docH) - h - 8)));
+    // Last word: the list always ends up inside the viewport, even when the row
+    // itself is scrolled partly off it.
+    top = Math.max(8, Math.min(top, Math.max(8, window.innerHeight - h - 8)));
     panel.style.top = top + 'px';
-    panel.style.left = Math.max(sx + 8, Math.min(r.left + sx, sx + Math.min(vw, docW) - w - 8)) + 'px';
-}
-
-// The list is anchored in document coordinates, so a page scroll keeps it glued to
-// its control; only a scroll inside a scrollable card moves the control sideways,
-// and that is followed, not dismissed. Frame-coalesced: scrolls arrive in bursts.
-function requestSelReposition() {
-    if (selReposFrame) return;
-    selReposFrame = requestAnimationFrame(() => {
-        selReposFrame = 0;
-        if (!selOpen || !selPanel || selPanel.hidden) return;
-        const face = selFaceOf(selOpen);
-        if (face) positionSelPanel(face, selPanel);
-    });
+    panel.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
 }
 
 function highlightSelOption(i) {
@@ -2812,12 +2770,8 @@ function chooseSelOption(i) {
     const opt = sel.options[i];
     if (!opt) return;
     sel.value = opt.value;
-    // Announce the pick exactly as a native one would: input first, then change.
-    // The form's autosave listens for *input* (2s debounce -> POST /api/config),
-    // while per-field handlers (CPU mode, power sense) listen for change. Firing
-    // only change left every custom dropdown in a state where the box looked
-    // updated but nothing was ever sent to the device - not live, not stored.
-    sel.dispatchEvent(new Event('input', { bubbles: true }));
+    // The page reads dropdowns from the real select, so announce the change the
+    // same way a native pick would.
     sel.dispatchEvent(new Event('change', { bubbles: true }));
     closeSelPanel(true);
 }
@@ -2838,32 +2792,14 @@ function openSelPanel(sel) {
         selPanel.setAttribute('role', 'listbox');
         selPanel.tabIndex = -1;
         selPanel.hidden = true;
-        // A press only commits a choice if the pointer stayed where it landed.
-        // Choosing on pointerdown meant that putting a finger on the list to
-        // scroll it picked the row underneath and closed the list before the
-        // scroll could begin - the list looked impossible to scroll (issue #58).
         selPanel.addEventListener('pointerdown', e => {
             const row = e.target.closest('.sel-opt');
-            selPress = row ? { i: parseInt(row.dataset.i, 10), row: row,
-                               x: e.clientX, y: e.clientY, top: selPanel.scrollTop }
-                           : null;
+            if (row) chooseSelOption(parseInt(row.dataset.i, 10));
         });
-        selPanel.addEventListener('pointerup', e => {
-            if (!selPress) return;
-            const row = e.target && e.target.closest ? e.target.closest('.sel-opt') : null;
-            const moved = !row || row !== selPress.row
-                          || Math.abs(e.clientX - selPress.x) > 8
-                          || Math.abs(e.clientY - selPress.y) > 8
-                          || selPanel.scrollTop !== selPress.top;
-            const i = selPress.i;
-            selPress = null;
-            if (moved) return;              // a drag: the list scrolled, nothing picked
-            chooseSelOption(i);
-        });
-        selPanel.addEventListener('pointercancel', () => { selPress = null; });
-        // Also on click, so a scripted .click() (tests, keyboard activation) still
-        // picks. A real press already committed above and closed the list, so the
-        // second path sees no open select and does nothing.
+        // Also on click, so a scripted .click() (or a tap that the browser
+        // reports without a pointer event) still picks. The pointerdown above
+        // already closed the list, so the second path sees no open select and
+        // does nothing.
         selPanel.addEventListener('click', e => {
             const row = e.target.closest('.sel-opt');
             if (row) chooseSelOption(parseInt(row.dataset.i, 10));
@@ -2896,22 +2832,23 @@ function openSelPanel(sel) {
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape' && selPanel && !selPanel.hidden) closeSelPanel(true);
         });
-        // Only a scroll inside a scrollable card moves the control sideways; a page
-        // scroll keeps the list attached to it, so nothing here may close it -
-        // closing on scroll is what made the list vanish the moment the page moved
-        // under a finger (issue #58). Capture phase, so inner scrollers count too.
+        // Scrolling anywhere outside the list closes it: the panel is position:
+        // fixed, so it would otherwise sit parked in the middle of the screen
+        // while the content it belongs to scrolls away underneath. Capture phase
+        // so scrolling inside a scrollable card counts too; the only scroll that
+        // keeps the list open is the list's own.
         document.addEventListener('scroll', e => {
             if (!selOpen) return;
+            // A scroll that was already queued when the list opened belongs to the
+            // tap that opened it (scrollIntoView before the click, a focus scroll),
+            // so it must not close the list the user just asked for.
+            if (e.timeStamp && e.timeStamp < selOpenedAt) return;
             if (e.target instanceof Node && selPanel.contains(e.target)) return;
-            if (!(e.target instanceof Node) || e.target === document
-                || e.target === document.documentElement || e.target === document.body) return;
-            requestSelReposition();
+            closeSelPanel();
         }, true);
-        // A rotation, an address-bar collapse or a window resize moves the control:
-        // follow it. Mobile browsers fire resize while scrolling, so closing here
-        // alone could dismiss the list on its own scroll.
+        // A rotation or a window resize moves the control out from under it too.
         window.addEventListener('resize', () => {
-            if (selOpen) requestSelReposition();
+            if (selOpen) closeSelPanel();
         });
         document.body.appendChild(selPanel);
     }
@@ -2931,6 +2868,7 @@ function openSelPanel(sel) {
         selPanel.appendChild(row);
     }
     selPanel.hidden = false;
+    selOpenedAt = performance.now();
     face.setAttribute('aria-expanded', 'true');
     positionSelPanel(face, selPanel);
     highlightSelOption(Math.max(sel.selectedIndex, 0));
