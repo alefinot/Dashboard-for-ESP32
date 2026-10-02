@@ -26,11 +26,18 @@
     --text-dim: #64748b;
     --glass-blur: blur(12px);
     --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    /* Height budget for the dropdown list (#sel-panel). Plain px first so an
-       older browser keeps a limit, svh after it so a phone browser bar cannot
-       push the last option off the screen. */
+    /* Height budget for the dropdown list (#sel-panel), px only. The app's
+       Android WebView evaluates *every* height-based viewport unit to 0 - measured
+       over CDP on the phone (Xiaomi, WebView 153): 100vh, 100svh, 100lvh, 100dvh
+       and 100vmin all computed 0px while innerHeight reported 801. So
+       "min(280px, 60svh)" produced max-height: 0px, which squeezed the option list
+       into a 2px sliver: open, correctly anchored, and invisible (issue #60).
+       openSelPanel() sets the real budget in px from the numbers the engine gives.
+       A px value declared before a modern one would not have helped either: a
+       custom property stores raw tokens, so the bad one still wins where var() is
+       substituted and the whole declaration is dropped - measured: computed
+       max-height became 'none' instead of the 280px "fallback". */
     --panel-max: 280px;
-    --panel-max: min(280px, 60svh);
 }
 
 html { background-color: #000000; }
@@ -42,7 +49,9 @@ body {
     background-color: var(--bg-base);
     color: var(--text-main);
     margin: 0;
-    min-height: 100vh;
+    /* Same reason as --panel-max: 100vh is 0px inside the app's WebView, which made
+       the page exactly as tall as its content. JS keeps --vp-h in px. */
+    min-height: var(--vp-h, 100vh);
     animation: pageFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -749,13 +758,26 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
     overscroll-behavior: contain;
     touch-action: pan-y;
     padding: 0;
-    background: var(--bg-card);
-    -webkit-backdrop-filter: var(--glass-blur);
-    backdrop-filter: var(--glass-blur);
+    /* Opaque, and deliberately no backdrop-filter: over this near-black page a
+       blur behind a 280px list buys nothing, and a blurred position:fixed layer is
+       a documented Android WebView paint failure (react-native-webview #3469 paints
+       a black box instead of the layer). This element has to be the one that always
+       paints. Cards keep their blur - it demonstrably works there. */
+    background: #131c28;
     border: 1px solid var(--border-color);
     border-radius: 10px;
     box-shadow: var(--card-shadow);
     animation: selFadeIn 0.15s ease-out;
+}
+
+/* Last-resort placement, applied by positionSelPanel() when the engine hands back
+   a collapsed or off-screen box: the list is centred on the visible area with
+   geometry taken from JS instead of anchored to its control. A list in the middle
+   of the screen beats a list nobody can see. No percentages here on purpose - an
+   engine that reports a zero-height viewport for lengths can also give a
+   fixed-position element a zero-height containing block. */
+#sel-panel.sel-sheet {
+    border-color: var(--accent-cyan);
 }
 
 /* Fade only: the card entrance slides 8px, which would visibly tear the list off
@@ -2345,6 +2367,9 @@ const configMap = [
 ];
 
 document.addEventListener('DOMContentLoaded', function() {
+    // px "screen height" for CSS before anything is measured (100vh is 0 in the
+    // app's WebView, see the note at --panel-max)
+    syncVpVars();
     fetch('/api/config').then(r => {
         if (!r.ok) throw { status: r.status };
         return r.json();
@@ -2737,23 +2762,87 @@ function paintSelFace(sel) {
     face.querySelector('.sel-value').textContent = opt ? opt.textContent : (sel.value || '-');
 }
 
+// The app runs inside Android WebView, where every height-based viewport unit
+// evaluates to 0 (see the note at --panel-max), so anything the list needs in the
+// way of size has to come from numbers the engine reports, not from CSS units.
+function selVpW() {
+    const vv = window.visualViewport;
+    return Math.round((vv && vv.width) || window.innerWidth || 0);
+}
+
+function selVpH() {
+    const vv = window.visualViewport;
+    return Math.round((vv && vv.height) || window.innerHeight || 0);
+}
+
+// Keep a px custom property in step with the reported viewport height, so rules
+// that want "most of the screen" (body min-height) still work where 100vh is 0.
+// Runs at boot and on resize - never per frame, never in a loop.
+function syncVpVars() {
+    document.documentElement.style.setProperty('--vp-h', selVpH() + 'px');
+}
+
+// ?dbg=1 on the config URL logs the list's geometry on every open, and
+// window.__selDbg('tag') does the same on demand (over CDP, or from the console).
+// One screenshot or one CDP readout then says which engine behaviour went wrong -
+// this bug stayed invisible for two rounds because there was nothing to read.
+const SEL_DBG = /[?&]dbg=1/.test(location.search);
+
+function selDbg(tag) {
+    if (!SEL_DBG || !selPanel) return;
+    const r = selPanel.getBoundingClientRect();
+    console.log('[sel ' + tag + '] vp ' + selVpW() + 'x' + selVpH() +
+        ' | inner ' + window.innerWidth + 'x' + window.innerHeight +
+        ' | maxH ' + getComputedStyle(selPanel).maxHeight +
+        ' | box ' + Math.round(r.width) + 'x' + Math.round(r.height) +
+        ' @ ' + Math.round(r.left) + ',' + Math.round(r.top) +
+        (selPanel.classList.contains('sel-sheet') ? ' | SHEET' : ''));
+}
+window.__selDbg = selDbg;
+
+// Centred fallback geometry: px, derived from the visible area, never units.
+function layoutSelSheet(panel) {
+    const vw = selVpW(), vh = selVpH();
+    panel.style.maxHeight = Math.max(160, Math.min(360, vh - 32)) + 'px';
+    panel.style.width = Math.max(160, Math.min(vw - 24, 420)) + 'px';
+    const h = panel.offsetHeight, w = panel.offsetWidth;
+    panel.style.top = Math.max(12, Math.round((vh - h) / 2)) + 'px';
+    panel.style.left = Math.max(12, Math.round((vw - w) / 2)) + 'px';
+}
+
 function positionSelPanel(face, panel) {
+    if (panel.classList.contains('sel-sheet')) { layoutSelSheet(panel); return; }
     const r = face.getBoundingClientRect();
+    const vw = selVpW(), vh = selVpH();
+    // Height budget in px: tall enough to be worth scrolling, short enough to fit
+    // the visible area, and floored so a mis-reported height cannot collapse it.
+    panel.style.maxHeight = Math.max(120, Math.min(280, vh - 24)) + 'px';
     // One control, two states: the list opens exactly as wide as the value box it
-    // belongs to, so nothing new appears at a different size when you tap it.
-    const w = Math.min(r.width, Math.max(160, window.innerWidth - 16));
+    // belongs to, so nothing new appears at a different size when you tap it. The
+    // floor matters: a face measured 0px wide would hand the list a 0px width.
+    const w = Math.max(120, Math.min(r.width, vw - 16));
     panel.style.width = w + 'px';
     const h = panel.offsetHeight;
     let top = r.bottom + 4;
-    if (top + h > window.innerHeight - 8) {
+    if (top + h > vh - 8) {
         const above = r.top - 4 - h;
-        top = above >= 8 ? above : Math.max(8, window.innerHeight - h - 8);
+        top = above >= 8 ? above : Math.max(8, vh - h - 8);
     }
     // Last word: the list always ends up inside the viewport, even when the row
     // itself is scrolled partly off it.
-    top = Math.max(8, Math.min(top, Math.max(8, window.innerHeight - h - 8)));
+    top = Math.max(8, Math.min(top, Math.max(8, vh - h - 8)));
     panel.style.top = top + 'px';
-    panel.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+    panel.style.left = Math.max(8, Math.min(r.left, vw - w - 8)) + 'px';
+    // Then read the box back instead of trusting the arithmetic: if the engine
+    // still gave us a collapsed or off-screen list, place it centred. Without this
+    // the failure mode is "tapping does nothing", which is the bug this was.
+    const pr = panel.getBoundingClientRect();
+    if (panel.offsetHeight < 40 || panel.offsetWidth < 40 ||
+        pr.bottom <= 0 || pr.top >= vh || pr.right <= 0 || pr.left >= vw) {
+        panel.classList.add('sel-sheet');
+        layoutSelSheet(panel);
+        selDbg('sheet');
+    }
 }
 
 function highlightSelOption(i) {
@@ -2913,6 +3002,7 @@ function openSelPanel(sel) {
     // once it is laid out, and the anchor must be measured against that height or
     // the clamp can park the list away from its control.
     positionSelPanel(face, selPanel);
+    selDbg('open');
 }
 
 function initSelectDropdowns() {
@@ -2956,6 +3046,7 @@ function initSelectDropdowns() {
             if (e.target && e.target.tagName === 'DETAILS') scheduleSelFit();
         }, true);
         window.addEventListener('resize', scheduleSelFit);
+        window.addEventListener('resize', syncVpVars);
     }
     document.querySelectorAll('.sel-native').forEach(paintSelFace);
     fitSelBoxes();
