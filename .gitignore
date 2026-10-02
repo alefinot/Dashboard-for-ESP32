@@ -18,5 +18,8 @@ __pycache__/
 graphify-out/
 graphify-watch.bat
 
+# landing-page prototype (local only - not part of the firmware repo)
+site/
+
 # OTA release signing private key - NEVER commit (scripts/ota_sign.py)
 keys/
