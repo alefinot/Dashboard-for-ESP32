@@ -542,7 +542,10 @@ details[open] summary .summary-chevron {
 .details-content {
     padding: 12px;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    /* min(240px, 100%) keeps the column floor inside the container; the 0 floor
+       stops a wide card (a select showing a long option, for instance) from
+       widening the whole column and pushing the page past the right edge. */
+    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
     gap: 10px;
     overflow: visible;
 }
@@ -552,6 +555,9 @@ details[open] summary .summary-chevron {
     display: flex;
     flex-direction: column;
     justify-content: center;
+    /* Cards are grid items, and a grid item's minimum is its content size: one
+       wide row would size the entire column (every card in it) past the viewport. */
+    min-width: 0;
     background: rgba(22, 30, 46, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.05);
     padding: 12px 14px;
@@ -650,6 +656,12 @@ input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:foc
     position: relative;
     display: block;
     width: 100%;
+    /* The button is a flex item of .sel, and a flex item's minimum is its content
+       size: with the value text on one line that minimum is the whole option label,
+       so the box refused to shrink, the row pushed out of its card and the settings
+       grid widened past the viewport - the page overflowing to the right. The label
+       is meant to ellipsize (.sel-value), so let the box shrink. */
+    min-width: 0;
     padding: 6px 26px 6px 10px;
     margin-top: 0;
     background: var(--bg-input);
@@ -1375,7 +1387,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
     .bottom-toolbar { grid-template-columns: repeat(2, 1fr); }
     .bottom-toolbar button:nth-child(-n+4) { grid-column: span 1; }
     .bottom-toolbar button:nth-child(5) { grid-row: 3; grid-column: 1 / -1; }
-    .details-content { grid-template-columns: 1fr; }
+    .details-content { grid-template-columns: minmax(0, 1fr); }
     .cfg-row > label { min-width: 110px; }
     .cfg-controls { width: auto; min-width: 0; }
     /* In-card selects (time zone, etc.) used to render width:auto to fit their
