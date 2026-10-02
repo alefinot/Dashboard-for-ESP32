@@ -686,8 +686,8 @@ The cloud pull (Web UI → **System & Modes** → *Cloud OTA Pull*) reads a smal
 manifest from `OTA_PULL_URL`, then downloads and flashes the image it points at:
 
 ```json
-{ "version": "1.4.0",
-  "firmware_url": "https://github.com/alefinot/Dashboard-for-ESP32/releases/download/v1.4.0/firmware.bin" }
+{ "version": "1.4.1",
+  "firmware_url": "https://github.com/alefinot/Dashboard-for-ESP32/releases/download/v1.4.1/firmware.bin" }
 ```
 
 `OTA_PULL_URL` may also point straight at the GitHub API
@@ -718,14 +718,14 @@ regenerate with the script, never hand-edit):
 ```bash
 python scripts/ota_sign.py keygen                                  # once, on the signing machine
 python scripts/ota_sign.py pubkey                                  # refresh include/ota_pubkey.h
-python scripts/ota_sign.py sign   1.4.0 .pio/build/esp32dev/firmware.bin
-python scripts/ota_sign.py verify 1.4.0 .pio/build/esp32dev/firmware.bin
+python scripts/ota_sign.py sign   1.4.1 .pio/build/esp32dev/firmware.bin
+python scripts/ota_sign.py verify 1.4.1 .pio/build/esp32dev/firmware.bin
 ```
 
 `sign` writes `firmware.bin.sig` next to the binary — a DER ECDSA P-256 signature
 over `sha256(firmware.bin) || 0x0A || version`. Upload it as a **sibling release
 asset**; a release without the `.sig` will not install on any device. The signed
-version is the plain number (`1.4.0`) — the release tag is `v1.4.0`, and a `v`
+version is the plain number (`1.4.1`) — the release tag is `v1.4.1`, and a `v`
 prefix in a manifest version is stripped before the version compare.
 
 Keep `keys/ota_sign_key.pem` backed up offline and private: lose it and no future
@@ -757,6 +757,32 @@ In Demo Mode:
 ---
 
 ## Changelog
+
+### V1.4.1 — The settings page on a phone: option lists that really open in the Android WebView
+
+Everything in this release is on the config page and in the Android app: how settings are grouped, read and saved, and the dropdown lists that were invisible in the app on some phones. No firmware behaviour, no pins, no endpoints, no NVS parameters changed.
+
+**Config dropdowns (issues #50, #58, #59, #60)**
+- **The native `<select>` popup is gone** — every option list on the settings page is drawn by the page itself (`#sel-panel`), so the list keeps the dashboard's look instead of the phone's system picker, and the same markup behaves the same in a desktop browser (6c65d30, e86d1cc).
+- **A list opens on its control, at its width** — the panel is anchored to the value box it belongs to and sized to it, flips above when there is no room below, and is clamped so it always ends up inside the visible area (fee85a0, e417ffc). Long option labels no longer push a settings card wider than the page (#60 follow-up).
+- **Touch scrolling works and a dismissed list does not eat the next tap (#58, #59)** — the list scrolls with a finger, the panel closes on an outside tap, and the ghost click that used to land on whatever sat under the closing panel is swallowed (5571533). Picking an option fires the `input` event, so the choice reaches the autosave instead of sitting unapplied until the next field was touched (a22e08d).
+- **Why the lists never appeared in the app (#60)** — measured on the reporting phone (Xiaomi, WebView 153) with the page laid out correctly at 380 × 801 CSS px: `1svh`, `1vh`, `1lvh`, `1dvh` and `1vmin` **all resolve to 0 px**, while `innerHeight` reports 801 and `100vw` reports 380. The panel's `max-height: min(280px, 60svh)` therefore computed to **0 px** and the box measured 120 × 2 px — a strip nobody could see, with the three options still in the DOM, which is why a blind tap on empty space still changed the value. Nothing else about the page was wrong, which is why it looked like an overlay or font problem for two rounds.
+- **So the list is sized in px, from numbers the engine reports** — `--panel-max` is a plain `280px`, and `positionSelPanel()` writes `max-height`, `width`, `top` and `left` in px from `visualViewport`/`innerHeight`, with floors (120 px minimum height, 120 px minimum width) so a viewport reported as 0 can never collapse the box. `body { min-height }` uses a `--vp-h` property written in px at boot and on resize, because `100vh` is 0 there too — the pull-to-refresh distance used the same broken unit. No height-based viewport unit remains anywhere the option list depends on.
+- **The box is read back instead of trusted** — after anchoring, the panel's real `offsetHeight`/`getBoundingClientRect()` are checked; if it came back under 40 px or off-screen it switches to a centred sheet layout and is placed again. The failure mode stops being "tapping does nothing", which is what this bug was. `?dbg=1` on the config URL logs the panel geometry on every open (`window.__selDbg(tag)` on demand) — the missing piece in the two earlier blind attempts.
+- **No frosted glass on the list** — `backdrop-filter: blur(12px)` over a 75 %-opaque panel is replaced by a solid background. It was the standing suspect for #60 (a blurred translucent overlay can render empty in this WebView class), it costs nothing to remove, and it is one failure mode fewer.
+
+**Settings page readability**
+- **Cards regrouped, prose trimmed** — the settings cards are re-grouped, paragraph text cut, and card titles, notes and buttons unified in one style (ca971e5, eb1e1b7). Scrollbars are themed to the dashboard palette instead of the browser default (094e9a8). The page polls telemetry at 1 Hz rather than per-panel timers, and the power-off countdown is shown in seconds (eb1e1b7).
+- **Small consistency fixes** — `WEATHER_LOCALE` is stored as text and the `(default)` marker is dropped from the *Italiano* option, "Connected" is no longer forced to caps, the Wi-Fi badge and the hidden-network add row line up with the rest of the card (6c65d30, 3355abb, e417ffc, 68f5e2d).
+
+**Android app**
+- **The WebView honours the page's own viewport (#50)** — `useWideViewPort` is now enabled (WebView's default is off, unlike a browser), so the config page is laid out at the device width — 380 CSS px on the reporting phone — instead of a 980 px canvas scaled to fit. Body-level overlays such as the option list were anchored against that phantom geometry (b9e36e0).
+- **One abandoned file picker no longer kills the next ones (#49)** — the OTA upload and backup-import inputs share a single chooser callback; an abandoned attempt now resolves the previous callback with an empty result instead of leaving it pending, which used to make Chromium refuse every later chooser on the page (b9e36e0).
+- **New launcher icon** — a stylized speed gauge replaces the placeholder mark (1d22469). `versionCode` 5 → 6 for the shipped debug APK.
+
+**Reverted, and therefore not in this release** — the VLW font loader rewrite (25d9ae1), the overlay font-fallback / weather-card-margin / battery-axis changes (ccd062a, reverted in ad6294a) and the first attempt at dropdown anchoring, scrolling and picking (reverted in 8fe7d83) are all out; the symptoms they were aimed at remain open, and #60 is now closed without them.
+
+**Size and tooling** — `RAM 24.3 %` (79,564 B of 327,680 B), `Flash 91.8 %` (1,744,531 B of the 1,900,544 B OTA slot, ~156 KB headroom). Firmware `1.4.1` signed for the cloud pull (`firmware.bin.sig`, verified with `scripts/ota_sign.py`).
 
 ### V1.4.0 — Input validation sweep, NVS discipline, receive-only GNSS, marine fuel sender and a trip-reset button
 

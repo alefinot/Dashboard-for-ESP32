@@ -275,7 +275,7 @@ char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ES
 // rewritten from the release manifest after every pull, so the device ended up
 // *claiming* whatever the server said and could decide it was permanently
 // up-to-date (or hold a version brought back by a config backup).
-const char FW_VERSION[] = "1.4.0";
+const char FW_VERSION[] = "1.4.1";
 char VERSION_OVERRIDE[32] = "";
 
 int FUEL_TOUCH_POINTS = 8;
