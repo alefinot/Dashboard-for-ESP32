@@ -588,7 +588,8 @@ Dashboard++ for ESP32/
 │       └── Conthrax_SemiBold_10px.vlw # 10px micro label font
 ├── scripts/
 │   ├── gzip_webui.py      # Pre-gzips webui.html -> webui_html_gz.h (~93 KB raw -> ~20 KB)
-│   └── vlw_to_header.py   # Compiles .vlw font files into PROGMEM C headers
+│   ├── vlw_to_header.py   # Compiles .vlw font files into PROGMEM C headers
+│   └── preview_icon.py    # Generates + geometry-checks the Android icon layers (android/app/src/main/res/drawable/)
 ├── include/
 │   ├── Conthrax_SemiBold7pt7b.h  # GFXfont fallback (Small badge size)
 │   ├── Conthrax_SemiBold4pt7b.h  # GFXfont fallback (Micro label size)
@@ -758,6 +759,22 @@ In Demo Mode:
 ---
 
 ## Changelog
+
+### Unreleased — the launcher icon redrawn around one bold dial (Android app only)
+
+Nothing in the firmware: the app's icon, the script that generates it, and a debug APK with `versionCode` 6 → 7 (1e85ea5).
+
+**The mark**
+- **One bold dial, not a decorated gauge** — a 260° arc in a single 8.5 dp weight, open at the bottom-left where a real speedo's zero sits. The old mark's ticks, inner rim and hairline needle are gone; at launcher size they were noise (1e85ea5).
+- **The redline is part of the dial, not a patch on it** — the last 26° of the same arc is painted `hud_red` and joins the cyan at one shared endpoint, so the two strokes meet with no seam and no overlap (1e85ea5).
+- **The needle is held by the hub** — a solid amber wedge with parallel 5.5 dp shoulders and a tail inside the hub circle, pivot at the dial centre, tip at r 20 dp against a dial at r 25.5 dp. The hub is a 7 dp amber disc with a 2.5 dp dark pivot hole (1e85ea5).
+- **The mark sits 2.5 dp low on purpose** — an arc open at the bottom carries all its ink high, so a canvas-centred dial reads high inside the launcher mask; the gauge centre is at y 56.5 of 108 and the ink lands 4.1 dp below centre (1e85ea5).
+- **The background is no longer flat** — `@drawable/ic_launcher_background` lifts `hud_bg` with a radial cyan glow (`hud_icon_glow` → `hud_icon_mid` → `hud_bg`) behind the dial, so the black tile has depth instead of looking like a dead screen (1e85ea5).
+- **Themed icons still work** — `ic_launcher_monochrome.xml` carries the same path data in one colour, and `ic_splash.xml` (the in-app splash glyph) is the same mark scaled 1.55×, pivoting on the gauge centre rather than the canvas centre (1e85ea5).
+
+**Why the old mark could not be saved** — measured, not judged: its 1.5–2.5 dp strokes are under one physical pixel on a 48 dp launcher tile, so at 28 px the ticks smear into a fringe and the needle disappears entirely. A gauge that only reads at 512 px is a poster, not an icon.
+
+**How the design is kept honest** — `scripts/preview_icon.py` is now the single source of the icon: one spec entry generates all four vectors (`--write`), and the geometry is checked (`--check`) rather than eyeballed — nothing outside the 66 dp guaranteed-visible circle, 1.25 dp of air inside it, no stroke thinner than 3 dp, the air above and below the mark within a factor of two, one dominant weight and one secondary, the needle symmetric about its own axis with its tail inside the hub, and the redline meeting the dial at a shared endpoint. `--xml FILE` fails when a shipped vector drifts from the design, and `--write` refuses to emit a design that fails its own check. The four `drawable/ic_launcher_*.xml` / `ic_splash.xml` files are generated output — change the spec in the script, never the XML.
 
 ### V1.4.1 — The settings page on a phone: option lists that really open in the Android WebView
 
