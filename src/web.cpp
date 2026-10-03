@@ -1700,6 +1700,587 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
 // from the raw literal that used to live here).
 #include "webui_html_gz.h"
 
+
+// Endpoint handlers. Named functions rather than inline lambdas: each
+// closure type gets its own std::function trampoline in flash, a plain
+// function pointer shares one, and the bodies stay readable outside the
+// 7 KB registration block. Same behaviour, same responses.
+
+static void indexGetHandler() {
+  // The page itself is always served without PIN: it contains no secrets.
+  // The /api/config endpoints (which carry WiFi passwords etc.) still
+  // require the PIN when one is set. The HTML is pre-gzipped at build time
+  // (~93KB raw -> ~20KB) so slow clients receive the page in a few seconds
+  // instead of >10s; every modern browser sends Accept-Encoding: gzip.
+  server.sendHeader("Content-Encoding", "gzip");
+  server.setContentLength(index_html_gz_len);
+  server.send(200, "text/html", "");
+  server.sendContent_P((const char *)index_html_gz, index_html_gz_len);
+}
+
+static void debugGetHandler() {
+  char buf[420];
+  int pos = snprintf(buf, sizeof(buf), "index_html_gz_len = %u\n",
+                     (unsigned int)index_html_gz_len);
+  pos += snprintf(buf + pos, sizeof(buf) - pos, "First 100 hex: ");
+  for (int i = 0; i < 100 && pos < (int)sizeof(buf) - 4; i++)
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "%02X ", index_html_gz[i]);
+  server.send(200, "text/plain", buf);
+}
+
+static void configGetHandler() {
+  // The full-config serialization needs ~30-40KB of transient heap
+  // (JsonDocument + JSON text). Fully-loaded steady state with WiFi is only
+  // ~40-50KB free (see the HB log), so when a fetch lands in that band we
+  // must ask the display task to drop the big UI sprites (memory-saver) and
+  // WAIT until the heap actually recovers instead of guessing at a fixed
+  // delay. 503 only if even that is not enough.
+  unsigned long memT0 = millis();
+  uint32_t fh0 = ESP.getFreeHeap();
+  while (ESP.getFreeHeap() < 25000 && (millis() - memT0) < 1000) {
+    if (!memSaverRequested) {
+      logPrintf("GET /api/config: heap %lu B, requesting memory-saver\n",
+                (unsigned long)ESP.getFreeHeap());
+      memSaverRequested = true;
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+  if (ESP.getFreeHeap() < 15000) {
+    logPrintf("GET /api/config: heap too low (%lu), skipping serialization\n",
+              (unsigned long)ESP.getFreeHeap());
+    char buf[96];
+    snprintf(buf, sizeof(buf),
+             "{\"status\":\"error\",\"error\":\"device memory low\",\"heap\":%lu}",
+             (unsigned long)ESP.getFreeHeap());
+    server.send(503, "application/json", buf);
+    return;
+  }
+  JsonDocument doc;
+  processConfig(1, &doc);
+  doc["ambientLightValue"] = ambientLightValue;
+  // Runtime-only field (read by the WebUI, ignored by processConfig on POST):
+  // the arduino-esp32 core version this firmware was built with.
+  doc["core_version"] = ESP.getCoreVersion();
+  // Read-only build identity, shown next to the editable version override so
+  // the compiled-in truth is always visible in the WebUI. Not a config key:
+  // posting it back is ignored (no matching CFG_STR).
+  doc["build_version"] = FW_VERSION;
+  String out;
+  serializeJson(doc, out);
+  logPrintf("GW: entry=%lu heap=%lu wait=%lums mem_active=%d keys=%lu over=%d out=%u\n",
+            (unsigned long)fh0, (unsigned long)ESP.getFreeHeap(),
+            (unsigned long)(millis() - memT0),
+            memSaverActive ? 1 : 0,
+            (unsigned long)doc.size(), (int)doc.overflowed(),
+            (unsigned int)out.length());
+  server.send(200, "application/json", out);
+}
+
+static void configPostHandler() {
+  if (!server.hasArg("plain")) {
+    server.send(400);
+    return;
+  }
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) {
+    logPrintf("Config save rejected: JSON parse error: %s\n", err.c_str());
+    server.send(400, "application/json",
+                "{\"status\":\"error\",\"error\":\"JSON parse failed\"}");
+    return;
+  }
+
+  // A save parses the full config JSON and rewrites ~90 NVS keys; if free
+  // heap is tight, drop the UI sprites first, same as the GET handler.
+  unsigned long memT0 = millis();
+  while (ESP.getFreeHeap() < 45000 && (millis() - memT0) < 3000) {
+    if (!memSaverRequested) {
+      logPrintf("POST /api/config: heap %lu B, requesting memory-saver\n",
+                (unsigned long)ESP.getFreeHeap());
+      memSaverRequested = true;
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+
+  // The parameters are written as one group. Painting is paused for the
+  // duration so the display never renders a half-old/half-new set (geometry,
+  // offsets and digit counts belong together), and the live panel bus plus the
+  // CPU-frequency switch are handed to the display loop, which owns the bus and
+  // applies them between frames - never inside a LovyanGFX transaction
+  // (issue #10).
+  configSaveStartMs = millis();
+  configSaveInProgress = true;
+  processConfig(2, &doc);
+  recalculateDerivedParams();
+  configSaveInProgress = false;
+  pendingApplyBusConfig = true;
+  pendingCpuReeval = true;
+  // If the save touched the weather location/city/locale/interval, ask the
+  // fetch loop to refresh right away so the widget shows the new city's
+  // weather immediately instead of after the next scheduled interval.
+  if (!doc["WEATHER_CITY"].isNull() || !doc["WEATHER_LAT"].isNull() ||
+      !doc["WEATHER_LON"].isNull() || !doc["WEATHER_REFRESH_MIN"].isNull() ||
+      !doc["WEATHER_LOCALE"].isNull()) {
+    weatherRefreshRequested = true;
+  }
+  // CPU frequency: applied by the display loop on the core that draws
+  // (processConfigApply), so the clock never changes under an SPI transfer.
+  // A save whose NVS writes never reached flash used to answer "ok" anyway.
+  // The failing-write count rides along in the response so the Web UI can say
+  // the settings are live but not stored, instead of a green "saved" banner
+  // over values a reboot will undo.
+  char saveResp[192];
+  if (cfgNvsWriteErrors)
+    snprintf(saveResp, sizeof(saveResp),
+             "{\"status\":\"ok\",\"nvsErrors\":%u,\"nvsFailedKeys\":\"%s\",\"nvsAvailable\":%u}",
+             (unsigned)cfgNvsWriteErrors, cfgNvsFailedKeys, (unsigned)nvsStatsAvailable);
+  else
+    snprintf(saveResp, sizeof(saveResp), "{\"status\":\"ok\"}");
+  server.send(200, "application/json", saveResp);
+  forceFullRedraw = true;
+  pendingInvertDisplay = true;
+  if (!ENABLE_AUTO_BRIGHTNESS)
+    pendingBacklightValue = BACKLIGHT_BRIGHTNESS;
+}
+
+static void timePostHandler() {
+  if (!server.hasArg("plain")) {
+    server.send(400);
+    return;
+  }
+  JsonDocument doc;
+  deserializeJson(doc, server.arg("plain"));
+  // Same plausible window the GPS apply path uses (2020-01-01 .. 2100-01-01).
+  // An unvalidated value put the clock in 1970 or 2106, which broke the date
+  // display and the night-mode window, and made systemTimeToLocal() bail out
+  // on its own epoch guard - so the clock read as dead rather than wrong
+  // (issue #40).
+  if (!doc["timestamp"].is<long long>()) {
+    server.send(400, "application/json", "{\"status\":\"bad timestamp\"}");
+    return;
+  }
+  long long epoch = doc["timestamp"].as<long long>();
+  if (epoch <= 1577836800LL || epoch >= 4102444800LL) {
+    logPrintf("RTC sync rejected: %lld outside 2020..2100\n", epoch);
+    server.send(400, "application/json",
+                "{\"status\":\"timestamp out of range (2020..2100)\"}");
+    return;
+  }
+  struct timeval tv;
+  tv.tv_sec = (time_t)epoch;
+  tv.tv_usec = 0;
+  settimeofday(&tv, NULL);
+  logPrintf("RTC sync: %lld\n", epoch);
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+static void odoGetHandler() {
+  JsonDocument doc;
+  doc["km"] = odoGet();
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void fuelGetHandler() {
+  char buf[96];
+  float liters = 0.0f;
+  int pct = 0;
+  if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+    liters = g_sensorData.fuelLiters;
+    pct = g_sensorData.fuelPercentage;
+    xSemaphoreGive(g_stateMutex);
+  }
+  float ohm = fuelMeasuredOhms > 9999.9f ? 9999.9f : fuelMeasuredOhms;
+  snprintf(buf, sizeof(buf),
+           "{\"raw\":%d,\"liters\":%.1f,\"pct\":%d,\"ohm\":%.1f,\"st\":%d}",
+           rawFuelADC, liters, pct, ohm, (int)fuelInputState);
+  server.send(200, "application/json", buf);
+}
+
+static void odoPostHandler() {
+  if (!server.hasArg("plain")) {
+    server.send(400);
+    return;
+  }
+  JsonDocument doc;
+  deserializeJson(doc, server.arg("plain"));
+  if (doc["km"].is<double>()) {
+    setOdometerKm(doc["km"].as<double>());
+    forceFullRedraw = true;
+    JsonDocument resp;
+    resp["km"] = odoGet();
+    String out;
+    serializeJson(resp, out);
+    server.send(200, "application/json", out);
+  } else {
+    server.send(400, "application/json", "{\"status\":\"error\"}");
+  }
+}
+
+static void tripResetPostHandler() {
+  pendingTripReset = true;
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+static void rebootPostHandler() {
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+  pendingReboot = true;
+}
+
+static void sleepPostHandler() {
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+  pendingSleep = true;
+}
+
+static void resetPostHandler() {
+  factoryResetConfig();
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+  logPrintf("Factory reset, rebooting\n");
+
+  pendingReboot = true;
+}
+
+static void ambientGetHandler() {
+  char buf[40];
+  snprintf(buf, sizeof(buf), "{\"raw\":%d}", ambientLightValue);
+  server.send(200, "application/json", buf);
+}
+
+static void sensorsGetHandler() {
+  char buf[96];
+  float v = 0.0f, t = 0.0f;
+  if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+    v = g_sensorData.batteryVoltage;
+    t = g_sensorData.engineTemperature;
+    xSemaphoreGive(g_stateMutex);
+  }
+  snprintf(buf, sizeof(buf), "{\"v\":%.2f,\"t\":%.1f}", v, t);
+  server.send(200, "application/json", buf);
+}
+
+static void ambientCalDarkPostHandler() {
+  LIGHT_SENSOR_DARK_VAL = ambientLightValue;
+  bool saved = false;
+  { NvsSession s("cfg", false);
+    if (s.opened())
+      saved = !nvsWriteFailed("LIGHT_DARK", s.nvs.putInt("LIGHT_DARK", LIGHT_SENSOR_DARK_VAL)); }
+  char buf[64];
+  // The calibration is live in RAM either way; say when it did not reach NVS
+  // so the Web UI can warn instead of letting the user assume it persisted.
+  snprintf(buf, sizeof(buf), "{\"status\":\"%s\",\"value\":%d}",
+           saved ? "ok" : "saved-ram-only", LIGHT_SENSOR_DARK_VAL);
+  server.send(200, "application/json", buf);
+}
+
+static void ambientCalBrightPostHandler() {
+  LIGHT_SENSOR_BRIGHT_VAL = ambientLightValue;
+  bool saved = false;
+  { NvsSession s("cfg", false);
+    if (s.opened())
+      saved = !nvsWriteFailed("LIGHT_BRIGHT", s.nvs.putInt("LIGHT_BRIGHT", LIGHT_SENSOR_BRIGHT_VAL)); }
+  char buf[64];
+  snprintf(buf, sizeof(buf), "{\"status\":\"%s\",\"value\":%d}",
+           saved ? "ok" : "saved-ram-only", LIGHT_SENSOR_BRIGHT_VAL);
+  server.send(200, "application/json", buf);
+}
+
+static void otaPostHandler() {
+  if (otaUpdateSuccess) {
+    server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Update OK\"}");
+    delay(100);
+    bootinfo_tag_reboot("ota");
+    ESP.restart();
+  } else {
+    server.send(500, "application/json", "{\"status\":\"error\",\"msg\":\"Update failed\"}");
+    otaUpdateInProgress = false;
+    forceFullRedraw = true;
+  }
+}
+
+static void otaUploadHandler() {
+  HTTPUpload &upload = server.upload();
+  // Per-upload bookkeeping (issue #28). Only one upload can be in flight and
+  // this handler only runs from the web task, so function-scope statics are
+  // safe; they are re-armed on UPLOAD_FILE_START.
+  static size_t uploadWritten = 0;   // bytes accepted into the OTA slot
+  static size_t uploadSeen = 0;      // bytes the client has handed us
+  static bool uploadFailed = false;  // set once, ignores the rest of the body
+  static uint8_t uploadMagic[2] = {0, 0};  // first bytes: image header check
+
+  if (upload.status == UPLOAD_FILE_START) {
+    uploadWritten = 0;
+    uploadSeen = 0;
+    uploadFailed = false;
+    uploadMagic[0] = uploadMagic[1] = 0;
+    if (otaSessionPoisoned || otaFlashSessionOpen) {
+      // The slot is already being written by a pull (or a reset pull left it
+      // in an unknown state). A second writer would corrupt the image.
+      logPrintf("OTA web: upload refused - OTA slot busy\n");
+      uploadFailed = true;
+      return;
+    }
+    otaUpdateSuccess = false;
+    otaUpdateInProgress = true;
+    pendingOtaScreen = true;
+    logPrintf("OTA web: start %s\n", upload.filename.c_str());
+    if (!otaFlashOpen(UPDATE_SIZE_UNKNOWN)) {
+      Update.printError(Serial);
+      uploadFailed = true;
+    }
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (uploadFailed) return;
+    uploadSeen += upload.currentSize;
+    // UPDATE_SIZE_UNKNOWN means nothing bounds this write, and Update.end(true)
+    // marks whatever arrived as bootable - so a too-big or truncated upload
+    // used to be activated. Bound it by the real OTA partition and check the
+    // image header before activating.
+    const esp_partition_t *slot = esp_ota_get_next_update_partition(NULL);
+    size_t slotSize = slot ? slot->size : (size_t)ESP.getFreeSketchSpace();
+    if (uploadSeen > slotSize) {
+      logPrintf("OTA web: upload bigger than the OTA slot (%zu bytes) - aborted\n",
+                uploadSeen);
+      otaFlashAbort();
+      uploadFailed = true;
+      return;
+    }
+    if (uploadWritten == 0 && upload.currentSize >= 2) {
+      uploadMagic[0] = upload.buf[0];
+      uploadMagic[1] = upload.buf[1];
+    }
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      Update.printError(Serial);
+      logPrintf("OTA web: write failed at %zu bytes - upload aborted\n",
+                uploadWritten);
+      otaFlashAbort();
+      uploadFailed = true;
+      return;
+    }
+    uploadWritten += upload.currentSize;
+    // upload.totalSize is cumulative bytes received so far during upload.
+    // Scaling target progress up to max 240 during writing prevents
+    // premature reboot (fillW >= 258) before Update.end(true) runs.
+    size_t written = Update.progress();
+    int targetW = (240L * (long)written) / (long)(written + 300000);
+    if (targetW > 240) targetW = 240;
+    if (targetW > otaProgressTarget) otaProgressTarget = targetW;
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (uploadFailed) {
+      logPrintf("OTA web: upload discarded (%zu bytes)\n", uploadWritten);
+      otaUpdateInProgress = false;
+      forceFullRedraw = true;
+      return;
+    }
+    // Reject a wrong or truncated file before end(true) would make it
+    // bootable: ESP image magic, plausible segment count, plausible size, and
+    // a byte count that matches what the client actually sent.
+    if (uploadWritten != uploadSeen || uploadWritten < 4096 ||
+        uploadMagic[0] != ESP_IMAGE_HEADER_MAGIC ||
+        uploadMagic[1] > ESP_IMAGE_MAX_SEGMENTS) {
+      logPrintf("OTA web: %zu bytes rejected (magic 0x%02X, segments %u) - not activated\n",
+                uploadWritten, uploadMagic[0], uploadMagic[1]);
+      otaFlashAbort();
+      otaUpdateInProgress = false;
+      forceFullRedraw = true;
+      return;
+    }
+    if (Update.end(true)) {
+      otaFlashClose();
+      logPrintf("OTA web: success %u bytes\n", upload.totalSize);
+      otaUpdateSuccess = true;
+      otaProgressTarget = 258;
+    } else {
+      Update.printError(Serial);
+      otaFlashAbort();
+      otaUpdateInProgress = false;
+      forceFullRedraw = true;
+    }
+  }
+}
+
+static void otaPullPostHandler() {
+  if (otaUpdateInProgress || otaPullTaskRunning) {
+    char buf[96];
+    snprintf(buf, sizeof(buf),
+             "{\"status\":\"busy\",\"msg\":\"OTA already in progress%s%s\"}",
+             otaPullTaskRunning && !otaUpdateInProgress ? " (pull task running)" : "",
+             !otaPullTaskRunning && otaUpdateInProgress ? " (update in progress)" : "");
+    server.send(200, "application/json", buf);
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    server.send(200, "application/json", "{\"status\":\"error\",\"msg\":\"Not connected to WiFi\"}");
+    return;
+  }
+  setOtaPullStatus("checking...");
+  server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"OTA pull started\"}");
+  logPrintf("OTA Pull: triggered from web UI\n");
+  startOtaPull(true, false);
+}
+
+static void otaCheckGetHandler() {
+  JsonDocument doc;
+  doc["enabled"] = OTA_PULL_ENABLED;
+  doc["url"] = OTA_PULL_URL;
+  doc["current_version"] = effectiveVersion();
+  // Always-visible build truth next to the reported version, so an override
+  // (or a mismatch) is obvious from the WebUI and the phone app. Additive:
+  // existing consumers keep reading current_version.
+  doc["build_version"] = FW_VERSION;
+  if (VERSION_OVERRIDE[0]) doc["version_override"] = VERSION_OVERRIDE;
+  doc["previous_version"] = bootinfo_previous_version();
+  if (otaStatusMutex) xSemaphoreTake(otaStatusMutex, portMAX_DELAY);
+  doc["status"] = otaPullStatus;
+  doc["status_updated"] = otaPullStatusUpdated;
+  if (otaStatusMutex) xSemaphoreGive(otaStatusMutex);
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void bootGetHandler() {
+  // Boot/reboot forensics (Phase 0): reset reason, fast-reboot-storm state,
+  // last reboot tag + heap, and the heap watermark since boot. /api/serial
+  // keeps the *live* log; /api/boot keeps the *surviving* facts that outlive
+  // a crash (the reset reason and the tag written before the reboot).
+  server.send(200, "application/json", bootinfo_json());
+}
+
+static void serialGetHandler() {
+  // Copy the echo ring window into a static scratch buffer (LOG_BUF_SIZE
+  // max, plus NUL) so this frequently-polled endpoint never allocates heap.
+  static char out[LOG_BUF_SIZE + 1];
+  int len = 0;
+  // Hold logMux so a writer task can't tear the buffer mid-copy and the
+  // tail advance can't race a concurrent wrap. server.send happens AFTER
+  // the lock (out is static; the response write may block on the client).
+  portENTER_CRITICAL(&logMux);
+  {
+    int tail = logTail;
+    int head = logHead;
+    len = (head >= tail) ? (head - tail) : (LOG_BUF_SIZE - tail + head);
+
+    if (len > 0) {
+      if (head >= tail) {
+        memcpy(out, &logBuf[tail], len);
+      } else {
+        int n1 = LOG_BUF_SIZE - tail;
+        memcpy(out, &logBuf[tail], n1);
+        memcpy(out + n1, logBuf, head);
+      }
+      logTail = head;
+    }
+  }
+  portEXIT_CRITICAL(&logMux);
+  out[len] = 0;
+  server.send(200, "text/plain", out);
+}
+
+static void perfGetHandler() {
+  JsonDocument doc;
+
+  doc["cpu_freq"] = getCpuFrequencyMhz();
+  doc["cpu_temp"] = temperatureRead();
+  doc["cpu_dynamic"] = ENABLE_DYNAMIC_CPU;
+  doc["cpu_usage"] = cpuUsagePct;
+  doc["uptime_s"] = millis() / 1000;
+  doc["free_heap"] = ESP.getFreeHeap();
+  doc["min_free_heap"] = ESP.getMinFreeHeap();
+
+  // Stack headroom in bytes (issue #27) - the smallest free stack each of our
+  // tasks has had since boot. This is deliberately measurement only: the GPS
+  // task stack and its 1 KB parse buffer stay exactly as they are, and these
+  // numbers are the evidence for any future change. ESP-IDF's
+  // uxTaskGetStackHighWaterMark() reports bytes (vanilla FreeRTOS reports
+  // words), and a 0/NULL handle simply means the task has not started yet.
+  JsonObject stackFree = doc["stack_free"].to<JsonObject>();
+  stackFree["SensorTaskCore1"] = uxTaskGetStackHighWaterMark(sensorTaskHandle);
+  stackFree["GpsTaskCore0"] = uxTaskGetStackHighWaterMark(gpsTaskHandle);
+  stackFree["WebTaskCore0"] = uxTaskGetStackHighWaterMark(webTaskHandle);
+  doc["mem_saver"] = memSaverActive ? 1 : 0;
+  doc["heap_size"] = ESP.getHeapSize();
+  doc["psram_size"] = ESP.getPsramSize();
+  doc["psram_free"] = ESP.getFreePsram();
+  doc["flash_total"] = ESP.getFlashChipSize();
+  doc["flash_free"] = ESP.getFreeSketchSpace();
+
+  {
+    JsonArray parts = doc["partitions"].to<JsonArray>();
+    const char *knownLabels[] = {"nvs","otadata","app0","app1","spiffs"};
+    esp_partition_type_t knownTypes[] = {ESP_PARTITION_TYPE_DATA,ESP_PARTITION_TYPE_DATA,ESP_PARTITION_TYPE_APP,ESP_PARTITION_TYPE_APP,ESP_PARTITION_TYPE_DATA};
+    esp_partition_subtype_t knownSubtypes[] = {ESP_PARTITION_SUBTYPE_DATA_NVS,ESP_PARTITION_SUBTYPE_DATA_OTA,ESP_PARTITION_SUBTYPE_APP_OTA_0,ESP_PARTITION_SUBTYPE_APP_OTA_1,ESP_PARTITION_SUBTYPE_DATA_SPIFFS};
+    uint32_t flashUsed = 0;
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    for (int i = 0; i < 5; i++) {
+      const esp_partition_t *p = esp_partition_find_first(knownTypes[i], knownSubtypes[i], knownLabels[i]);
+      if (p) {
+        JsonObject part = parts.add<JsonObject>();
+        part["label"] = p->label;
+        part["type"] = (int)p->type;
+        part["subtype"] = (int)p->subtype;
+        part["size"] = p->size;
+        part["addr"] = p->address;
+        if (strcmp(p->label, "spiffs") == 0) {
+          uint32_t u = LittleFS.usedBytes();
+          part["used"] = u;
+          flashUsed += u;
+        } else if (p == running) {
+          part["used"] = p->size;
+          flashUsed += p->size;
+        } else {
+          part["used"] = 0;
+        }
+      }
+    }
+    doc["flash_used"] = flashUsed;
+  }
+  // Settings-storage budget, in ENTRIES rather than bytes. This is the unit
+  // that actually runs out: the old 20 KB partition held ~630 entries, the
+  // factory settings alone occupy ~420 of them, and one lost WiFi save costs
+  // three. Showing bytes here would have looked healthy right up to the
+  // failure (throttled read - see refreshNvsStats()).
+  refreshNvsStats(5000);
+  doc["nvs_bytes"] = (uint32_t)nvsStatsBytes;
+  doc["nvs_entries_used"] = (uint32_t)nvsStatsUsed;
+  doc["nvs_entries_available"] = (uint32_t)nvsStatsAvailable;
+  doc["nvs_entries_total"] = (uint32_t)nvsStatsTotal;
+  doc["fps_current"] = currentMeasuredFps;
+  doc["fps_average"] = currentAverageFps;
+  doc["fps_target"] = TARGET_FPS;
+  doc["refresh_ms"] = (unsigned long)DISPLAY_REFRESH_MS;
+  doc["spi_speed"] = SPI_BUS_SPEED;
+  doc["wifi_clients"] = WiFi.softAPgetStationNum();
+  String lanIp = "";
+  if (WiFi.status() == WL_CONNECTED) {
+    lanIp = WiFi.localIP().toString();
+    // Only set if it's a valid LAN IP (not the AP address)
+    if (lanIp.length() > 0 && !lanIp.equals("192.168.4.1")) {
+      doc["lan_ip"] = lanIp;
+    } else {
+      doc["lan_ip"] = "";
+    }
+  }
+  doc["ambient_light"] = ambientLightValue;
+  doc["resolution"] = String(DISPLAY_WIDTH) + "x" + String(DISPLAY_HEIGHT);
+
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void healthGetHandler() {
+  char buf[128];
+  snprintf(buf, sizeof(buf),
+           "{\"heap\":%lu,\"maxalloc\":%lu,\"minheap\":%lu,\"mem_saver\":%d,"
+           "\"uptime\":%lu}",
+           (unsigned long)ESP.getFreeHeap(),
+           (unsigned long)ESP.getMaxAllocHeap(),
+           (unsigned long)ESP.getMinFreeHeap(),
+           memSaverActive ? 1 : 0,
+           millis() / 1000);
+  server.send(200, "application/json", buf);
+}
+
 void webServerTask(void *pvParameters) {
   otaStatusMutex = xSemaphoreCreateMutex();
   weatherFetchMutex = xSemaphoreCreateMutex();
@@ -1800,141 +2381,12 @@ void webServerTask(void *pvParameters) {
   // Config page PIN enforcement is disabled: the config page and admin API
   // are open. A previously stored PIN in NVS is ignored.
 
-  server.on("/", HTTP_GET, []() {
-    // The page itself is always served without PIN: it contains no secrets.
-    // The /api/config endpoints (which carry WiFi passwords etc.) still
-    // require the PIN when one is set. The HTML is pre-gzipped at build time
-    // (~93KB raw -> ~20KB) so slow clients receive the page in a few seconds
-    // instead of >10s; every modern browser sends Accept-Encoding: gzip.
-    server.sendHeader("Content-Encoding", "gzip");
-    server.setContentLength(index_html_gz_len);
-    server.send(200, "text/html", "");
-    server.sendContent_P((const char *)index_html_gz, index_html_gz_len);
-  });
-  server.on("/debug", HTTP_GET, []() {
-    char buf[420];
-    int pos = snprintf(buf, sizeof(buf), "index_html_gz_len = %u\n",
-                       (unsigned int)index_html_gz_len);
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "First 100 hex: ");
-    for (int i = 0; i < 100 && pos < (int)sizeof(buf) - 4; i++)
-      pos += snprintf(buf + pos, sizeof(buf) - pos, "%02X ", index_html_gz[i]);
-    server.send(200, "text/plain", buf);
-  });
+  server.on("/", HTTP_GET, indexGetHandler);
+  server.on("/debug", HTTP_GET, debugGetHandler);
 
-  server.on("/api/config", HTTP_GET, []() {
-    // The full-config serialization needs ~30-40KB of transient heap
-    // (JsonDocument + JSON text). Fully-loaded steady state with WiFi is only
-    // ~40-50KB free (see the HB log), so when a fetch lands in that band we
-    // must ask the display task to drop the big UI sprites (memory-saver) and
-    // WAIT until the heap actually recovers instead of guessing at a fixed
-    // delay. 503 only if even that is not enough.
-    unsigned long memT0 = millis();
-    uint32_t fh0 = ESP.getFreeHeap();
-    while (ESP.getFreeHeap() < 25000 && (millis() - memT0) < 1000) {
-      if (!memSaverRequested) {
-        logPrintf("GET /api/config: heap %lu B, requesting memory-saver\n",
-                  (unsigned long)ESP.getFreeHeap());
-        memSaverRequested = true;
-      }
-      vTaskDelay(pdMS_TO_TICKS(50));
-    }
-    if (ESP.getFreeHeap() < 15000) {
-      logPrintf("GET /api/config: heap too low (%lu), skipping serialization\n",
-                (unsigned long)ESP.getFreeHeap());
-      char buf[96];
-      snprintf(buf, sizeof(buf),
-               "{\"status\":\"error\",\"error\":\"device memory low\",\"heap\":%lu}",
-               (unsigned long)ESP.getFreeHeap());
-      server.send(503, "application/json", buf);
-      return;
-    }
-    JsonDocument doc;
-    processConfig(1, &doc);
-    doc["ambientLightValue"] = ambientLightValue;
-    // Runtime-only field (read by the WebUI, ignored by processConfig on POST):
-    // the arduino-esp32 core version this firmware was built with.
-    doc["core_version"] = ESP.getCoreVersion();
-    // Read-only build identity, shown next to the editable version override so
-    // the compiled-in truth is always visible in the WebUI. Not a config key:
-    // posting it back is ignored (no matching CFG_STR).
-    doc["build_version"] = FW_VERSION;
-    String out;
-    serializeJson(doc, out);
-    logPrintf("GW: entry=%lu heap=%lu wait=%lums mem_active=%d keys=%lu over=%d out=%u\n",
-              (unsigned long)fh0, (unsigned long)ESP.getFreeHeap(),
-              (unsigned long)(millis() - memT0),
-              memSaverActive ? 1 : 0,
-              (unsigned long)doc.size(), (int)doc.overflowed(),
-              (unsigned int)out.length());
-    server.send(200, "application/json", out);
-  });
+  server.on("/api/config", HTTP_GET, configGetHandler);
 
-  server.on("/api/config", HTTP_POST, []() {
-    if (!server.hasArg("plain")) {
-      server.send(400);
-      return;
-    }
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, server.arg("plain"));
-    if (err) {
-      logPrintf("Config save rejected: JSON parse error: %s\n", err.c_str());
-      server.send(400, "application/json",
-                  "{\"status\":\"error\",\"error\":\"JSON parse failed\"}");
-      return;
-    }
-
-    // A save parses the full config JSON and rewrites ~90 NVS keys; if free
-    // heap is tight, drop the UI sprites first, same as the GET handler.
-    unsigned long memT0 = millis();
-    while (ESP.getFreeHeap() < 45000 && (millis() - memT0) < 3000) {
-      if (!memSaverRequested) {
-        logPrintf("POST /api/config: heap %lu B, requesting memory-saver\n",
-                  (unsigned long)ESP.getFreeHeap());
-        memSaverRequested = true;
-      }
-      vTaskDelay(pdMS_TO_TICKS(50));
-    }
-
-    // The parameters are written as one group. Painting is paused for the
-    // duration so the display never renders a half-old/half-new set (geometry,
-    // offsets and digit counts belong together), and the live panel bus plus the
-    // CPU-frequency switch are handed to the display loop, which owns the bus and
-    // applies them between frames - never inside a LovyanGFX transaction
-    // (issue #10).
-    configSaveStartMs = millis();
-    configSaveInProgress = true;
-    processConfig(2, &doc);
-    recalculateDerivedParams();
-    configSaveInProgress = false;
-    pendingApplyBusConfig = true;
-    pendingCpuReeval = true;
-    // If the save touched the weather location/city/locale/interval, ask the
-    // fetch loop to refresh right away so the widget shows the new city's
-    // weather immediately instead of after the next scheduled interval.
-    if (!doc["WEATHER_CITY"].isNull() || !doc["WEATHER_LAT"].isNull() ||
-        !doc["WEATHER_LON"].isNull() || !doc["WEATHER_REFRESH_MIN"].isNull() ||
-        !doc["WEATHER_LOCALE"].isNull()) {
-      weatherRefreshRequested = true;
-    }
-    // CPU frequency: applied by the display loop on the core that draws
-    // (processConfigApply), so the clock never changes under an SPI transfer.
-    // A save whose NVS writes never reached flash used to answer "ok" anyway.
-    // The failing-write count rides along in the response so the Web UI can say
-    // the settings are live but not stored, instead of a green "saved" banner
-    // over values a reboot will undo.
-    char saveResp[192];
-    if (cfgNvsWriteErrors)
-      snprintf(saveResp, sizeof(saveResp),
-               "{\"status\":\"ok\",\"nvsErrors\":%u,\"nvsFailedKeys\":\"%s\",\"nvsAvailable\":%u}",
-               (unsigned)cfgNvsWriteErrors, cfgNvsFailedKeys, (unsigned)nvsStatsAvailable);
-    else
-      snprintf(saveResp, sizeof(saveResp), "{\"status\":\"ok\"}");
-    server.send(200, "application/json", saveResp);
-    forceFullRedraw = true;
-    pendingInvertDisplay = true;
-    if (!ENABLE_AUTO_BRIGHTNESS)
-      pendingBacklightValue = BACKLIGHT_BRIGHTNESS;
-  });
+  server.on("/api/config", HTTP_POST, configPostHandler);
 
   // What the radio sees, and the entry point for "scan, pick, type the
   // password" network setup. GET is read-only against the cached list; POST
@@ -1944,453 +2396,55 @@ void webServerTask(void *pvParameters) {
   server.on("/api/wifi/join", HTTP_POST, wifiJoinPostHandler);
   server.on("/api/wifi/forget", HTTP_POST, wifiForgetPostHandler);
 
-  server.on("/api/time", HTTP_POST, []() {
-    if (!server.hasArg("plain")) {
-      server.send(400);
-      return;
-    }
-    JsonDocument doc;
-    deserializeJson(doc, server.arg("plain"));
-    // Same plausible window the GPS apply path uses (2020-01-01 .. 2100-01-01).
-    // An unvalidated value put the clock in 1970 or 2106, which broke the date
-    // display and the night-mode window, and made systemTimeToLocal() bail out
-    // on its own epoch guard - so the clock read as dead rather than wrong
-    // (issue #40).
-    if (!doc["timestamp"].is<long long>()) {
-      server.send(400, "application/json", "{\"status\":\"bad timestamp\"}");
-      return;
-    }
-    long long epoch = doc["timestamp"].as<long long>();
-    if (epoch <= 1577836800LL || epoch >= 4102444800LL) {
-      logPrintf("RTC sync rejected: %lld outside 2020..2100\n", epoch);
-      server.send(400, "application/json",
-                  "{\"status\":\"timestamp out of range (2020..2100)\"}");
-      return;
-    }
-    struct timeval tv;
-    tv.tv_sec = (time_t)epoch;
-    tv.tv_usec = 0;
-    settimeofday(&tv, NULL);
-    logPrintf("RTC sync: %lld\n", epoch);
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
-  });
+  server.on("/api/time", HTTP_POST, timePostHandler);
 
-  server.on("/api/odo", HTTP_GET, []() {
-    JsonDocument doc;
-    doc["km"] = odoGet();
-    String out;
-    serializeJson(doc, out);
-    server.send(200, "application/json", out);
-  });
+  server.on("/api/odo", HTTP_GET, odoGetHandler);
 
   // Fuel readout. "raw" is the averaged ADC code on GPIO32, "ohm" the sender
   // resistance derived from it (issue #18) and "st" the input state
   // (0 = input disabled, 1 = ok, 2 = open circuit, 3 = shorted) - what the Web UI
   // fuel card shows while calibrating, so a broken wire never looks like a
   // plausible tank level.
-  server.on("/api/fuel", HTTP_GET, []() {
-    char buf[96];
-    float liters = 0.0f;
-    int pct = 0;
-    if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-      liters = g_sensorData.fuelLiters;
-      pct = g_sensorData.fuelPercentage;
-      xSemaphoreGive(g_stateMutex);
-    }
-    float ohm = fuelMeasuredOhms > 9999.9f ? 9999.9f : fuelMeasuredOhms;
-    snprintf(buf, sizeof(buf),
-             "{\"raw\":%d,\"liters\":%.1f,\"pct\":%d,\"ohm\":%.1f,\"st\":%d}",
-             rawFuelADC, liters, pct, ohm, (int)fuelInputState);
-    server.send(200, "application/json", buf);
-  });
+  server.on("/api/fuel", HTTP_GET, fuelGetHandler);
 
-  server.on("/api/odo", HTTP_POST, []() {
-    if (!server.hasArg("plain")) {
-      server.send(400);
-      return;
-    }
-    JsonDocument doc;
-    deserializeJson(doc, server.arg("plain"));
-    if (doc["km"].is<double>()) {
-      setOdometerKm(doc["km"].as<double>());
-      forceFullRedraw = true;
-      JsonDocument resp;
-      resp["km"] = odoGet();
-      String out;
-      serializeJson(resp, out);
-      server.send(200, "application/json", out);
-    } else {
-      server.send(400, "application/json", "{\"status\":\"error\"}");
-    }
-  });
+  server.on("/api/odo", HTTP_POST, odoPostHandler);
 
   // Trip reset (issue #17): the same zeroing the physical button on GPIO25
   // performs. The handler only raises the flag - the sensor task owns the trip
   // state, so it applies the reset on its next tick and the web task never
   // touches trip counters cross-core.
-  server.on("/api/trip/reset", HTTP_POST, []() {
-    pendingTripReset = true;
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
-  });
+  server.on("/api/trip/reset", HTTP_POST, tripResetPostHandler);
 
-  server.on("/api/reboot", HTTP_POST, []() {
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
-    pendingReboot = true;
-  });
+  server.on("/api/reboot", HTTP_POST, rebootPostHandler);
 
-  server.on("/api/sleep", HTTP_POST, []() {
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
-    pendingSleep = true;
-  });
+  server.on("/api/sleep", HTTP_POST, sleepPostHandler);
 
-  server.on("/api/reset", HTTP_POST, []() {
-    factoryResetConfig();
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
-    logPrintf("Factory reset, rebooting\n");
+  server.on("/api/reset", HTTP_POST, resetPostHandler);
 
-    pendingReboot = true;
-  });
-
-  server.on("/api/ambient", HTTP_GET, []() {
-    char buf[40];
-    snprintf(buf, sizeof(buf), "{\"raw\":%d}", ambientLightValue);
-    server.send(200, "application/json", buf);
-  });
+  server.on("/api/ambient", HTTP_GET, ambientGetHandler);
 
   // Live processed sensor values, used by the WebUI calibration "Current"
   // readings (battery voltage + engine temperature). Additive read-only
   // endpoint; values are the calibrated outputs, not raw ADC.
-  server.on("/api/sensors", HTTP_GET, []() {
-    char buf[96];
-    float v = 0.0f, t = 0.0f;
-    if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-      v = g_sensorData.batteryVoltage;
-      t = g_sensorData.engineTemperature;
-      xSemaphoreGive(g_stateMutex);
-    }
-    snprintf(buf, sizeof(buf), "{\"v\":%.2f,\"t\":%.1f}", v, t);
-    server.send(200, "application/json", buf);
-  });
+  server.on("/api/sensors", HTTP_GET, sensorsGetHandler);
 
-  server.on("/api/ambient/cal-dark", HTTP_POST, []() {
-    LIGHT_SENSOR_DARK_VAL = ambientLightValue;
-    bool saved = false;
-    { NvsSession s("cfg", false);
-      if (s.opened())
-        saved = !nvsWriteFailed("LIGHT_DARK", s.nvs.putInt("LIGHT_DARK", LIGHT_SENSOR_DARK_VAL)); }
-    char buf[64];
-    // The calibration is live in RAM either way; say when it did not reach NVS
-    // so the Web UI can warn instead of letting the user assume it persisted.
-    snprintf(buf, sizeof(buf), "{\"status\":\"%s\",\"value\":%d}",
-             saved ? "ok" : "saved-ram-only", LIGHT_SENSOR_DARK_VAL);
-    server.send(200, "application/json", buf);
-  });
+  server.on("/api/ambient/cal-dark", HTTP_POST, ambientCalDarkPostHandler);
 
-  server.on("/api/ambient/cal-bright", HTTP_POST, []() {
-    LIGHT_SENSOR_BRIGHT_VAL = ambientLightValue;
-    bool saved = false;
-    { NvsSession s("cfg", false);
-      if (s.opened())
-        saved = !nvsWriteFailed("LIGHT_BRIGHT", s.nvs.putInt("LIGHT_BRIGHT", LIGHT_SENSOR_BRIGHT_VAL)); }
-    char buf[64];
-    snprintf(buf, sizeof(buf), "{\"status\":\"%s\",\"value\":%d}",
-             saved ? "ok" : "saved-ram-only", LIGHT_SENSOR_BRIGHT_VAL);
-    server.send(200, "application/json", buf);
-  });
+  server.on("/api/ambient/cal-bright", HTTP_POST, ambientCalBrightPostHandler);
 
-  server.on("/api/ota", HTTP_POST, []() {
-    if (otaUpdateSuccess) {
-      server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Update OK\"}");
-      delay(100);
-      bootinfo_tag_reboot("ota");
-      ESP.restart();
-    } else {
-      server.send(500, "application/json", "{\"status\":\"error\",\"msg\":\"Update failed\"}");
-      otaUpdateInProgress = false;
-      forceFullRedraw = true;
-    }
-  }, []() {
-    HTTPUpload &upload = server.upload();
-    // Per-upload bookkeeping (issue #28). Only one upload can be in flight and
-    // this handler only runs from the web task, so function-scope statics are
-    // safe; they are re-armed on UPLOAD_FILE_START.
-    static size_t uploadWritten = 0;   // bytes accepted into the OTA slot
-    static size_t uploadSeen = 0;      // bytes the client has handed us
-    static bool uploadFailed = false;  // set once, ignores the rest of the body
-    static uint8_t uploadMagic[2] = {0, 0};  // first bytes: image header check
+  server.on("/api/ota", HTTP_POST, otaPostHandler, otaUploadHandler);
 
-    if (upload.status == UPLOAD_FILE_START) {
-      uploadWritten = 0;
-      uploadSeen = 0;
-      uploadFailed = false;
-      uploadMagic[0] = uploadMagic[1] = 0;
-      if (otaSessionPoisoned || otaFlashSessionOpen) {
-        // The slot is already being written by a pull (or a reset pull left it
-        // in an unknown state). A second writer would corrupt the image.
-        logPrintf("OTA web: upload refused - OTA slot busy\n");
-        uploadFailed = true;
-        return;
-      }
-      otaUpdateSuccess = false;
-      otaUpdateInProgress = true;
-      pendingOtaScreen = true;
-      logPrintf("OTA web: start %s\n", upload.filename.c_str());
-      if (!otaFlashOpen(UPDATE_SIZE_UNKNOWN)) {
-        Update.printError(Serial);
-        uploadFailed = true;
-      }
-    } else if (upload.status == UPLOAD_FILE_WRITE) {
-      if (uploadFailed) return;
-      uploadSeen += upload.currentSize;
-      // UPDATE_SIZE_UNKNOWN means nothing bounds this write, and Update.end(true)
-      // marks whatever arrived as bootable - so a too-big or truncated upload
-      // used to be activated. Bound it by the real OTA partition and check the
-      // image header before activating.
-      const esp_partition_t *slot = esp_ota_get_next_update_partition(NULL);
-      size_t slotSize = slot ? slot->size : (size_t)ESP.getFreeSketchSpace();
-      if (uploadSeen > slotSize) {
-        logPrintf("OTA web: upload bigger than the OTA slot (%zu bytes) - aborted\n",
-                  uploadSeen);
-        otaFlashAbort();
-        uploadFailed = true;
-        return;
-      }
-      if (uploadWritten == 0 && upload.currentSize >= 2) {
-        uploadMagic[0] = upload.buf[0];
-        uploadMagic[1] = upload.buf[1];
-      }
-      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-        Update.printError(Serial);
-        logPrintf("OTA web: write failed at %zu bytes - upload aborted\n",
-                  uploadWritten);
-        otaFlashAbort();
-        uploadFailed = true;
-        return;
-      }
-      uploadWritten += upload.currentSize;
-      // upload.totalSize is cumulative bytes received so far during upload.
-      // Scaling target progress up to max 240 during writing prevents
-      // premature reboot (fillW >= 258) before Update.end(true) runs.
-      size_t written = Update.progress();
-      int targetW = (240L * (long)written) / (long)(written + 300000);
-      if (targetW > 240) targetW = 240;
-      if (targetW > otaProgressTarget) otaProgressTarget = targetW;
-    } else if (upload.status == UPLOAD_FILE_END) {
-      if (uploadFailed) {
-        logPrintf("OTA web: upload discarded (%zu bytes)\n", uploadWritten);
-        otaUpdateInProgress = false;
-        forceFullRedraw = true;
-        return;
-      }
-      // Reject a wrong or truncated file before end(true) would make it
-      // bootable: ESP image magic, plausible segment count, plausible size, and
-      // a byte count that matches what the client actually sent.
-      if (uploadWritten != uploadSeen || uploadWritten < 4096 ||
-          uploadMagic[0] != ESP_IMAGE_HEADER_MAGIC ||
-          uploadMagic[1] > ESP_IMAGE_MAX_SEGMENTS) {
-        logPrintf("OTA web: %zu bytes rejected (magic 0x%02X, segments %u) - not activated\n",
-                  uploadWritten, uploadMagic[0], uploadMagic[1]);
-        otaFlashAbort();
-        otaUpdateInProgress = false;
-        forceFullRedraw = true;
-        return;
-      }
-      if (Update.end(true)) {
-        otaFlashClose();
-        logPrintf("OTA web: success %u bytes\n", upload.totalSize);
-        otaUpdateSuccess = true;
-        otaProgressTarget = 258;
-      } else {
-        Update.printError(Serial);
-        otaFlashAbort();
-        otaUpdateInProgress = false;
-        forceFullRedraw = true;
-      }
-    }
-  });
+  server.on("/api/ota/pull", HTTP_POST, otaPullPostHandler);
 
-  server.on("/api/ota/pull", HTTP_POST, []() {
-    if (otaUpdateInProgress || otaPullTaskRunning) {
-      char buf[96];
-      snprintf(buf, sizeof(buf),
-               "{\"status\":\"busy\",\"msg\":\"OTA already in progress%s%s\"}",
-               otaPullTaskRunning && !otaUpdateInProgress ? " (pull task running)" : "",
-               !otaPullTaskRunning && otaUpdateInProgress ? " (update in progress)" : "");
-      server.send(200, "application/json", buf);
-      return;
-    }
-    if (WiFi.status() != WL_CONNECTED) {
-      server.send(200, "application/json", "{\"status\":\"error\",\"msg\":\"Not connected to WiFi\"}");
-      return;
-    }
-    setOtaPullStatus("checking...");
-    server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"OTA pull started\"}");
-    logPrintf("OTA Pull: triggered from web UI\n");
-    startOtaPull(true, false);
-  });
+  server.on("/api/ota/check", HTTP_GET, otaCheckGetHandler);
 
-  server.on("/api/ota/check", HTTP_GET, []() {
-    JsonDocument doc;
-    doc["enabled"] = OTA_PULL_ENABLED;
-    doc["url"] = OTA_PULL_URL;
-    doc["current_version"] = effectiveVersion();
-    // Always-visible build truth next to the reported version, so an override
-    // (or a mismatch) is obvious from the WebUI and the phone app. Additive:
-    // existing consumers keep reading current_version.
-    doc["build_version"] = FW_VERSION;
-    if (VERSION_OVERRIDE[0]) doc["version_override"] = VERSION_OVERRIDE;
-    doc["previous_version"] = bootinfo_previous_version();
-    if (otaStatusMutex) xSemaphoreTake(otaStatusMutex, portMAX_DELAY);
-    doc["status"] = otaPullStatus;
-    doc["status_updated"] = otaPullStatusUpdated;
-    if (otaStatusMutex) xSemaphoreGive(otaStatusMutex);
-    String out;
-    serializeJson(doc, out);
-    server.send(200, "application/json", out);
-  });
+  server.on("/api/boot", HTTP_GET, bootGetHandler);
 
-  server.on("/api/boot", HTTP_GET, []() {
-    // Boot/reboot forensics (Phase 0): reset reason, fast-reboot-storm state,
-    // last reboot tag + heap, and the heap watermark since boot. /api/serial
-    // keeps the *live* log; /api/boot keeps the *surviving* facts that outlive
-    // a crash (the reset reason and the tag written before the reboot).
-    server.send(200, "application/json", bootinfo_json());
-  });
+  server.on("/api/serial", HTTP_GET, serialGetHandler);
 
-  server.on("/api/serial", HTTP_GET, []() {
-    // Copy the echo ring window into a static scratch buffer (LOG_BUF_SIZE
-    // max, plus NUL) so this frequently-polled endpoint never allocates heap.
-    static char out[LOG_BUF_SIZE + 1];
-    int len = 0;
-    // Hold logMux so a writer task can't tear the buffer mid-copy and the
-    // tail advance can't race a concurrent wrap. server.send happens AFTER
-    // the lock (out is static; the response write may block on the client).
-    portENTER_CRITICAL(&logMux);
-    {
-      int tail = logTail;
-      int head = logHead;
-      len = (head >= tail) ? (head - tail) : (LOG_BUF_SIZE - tail + head);
+  server.on("/api/perf", HTTP_GET, perfGetHandler);
 
-      if (len > 0) {
-        if (head >= tail) {
-          memcpy(out, &logBuf[tail], len);
-        } else {
-          int n1 = LOG_BUF_SIZE - tail;
-          memcpy(out, &logBuf[tail], n1);
-          memcpy(out + n1, logBuf, head);
-        }
-        logTail = head;
-      }
-    }
-    portEXIT_CRITICAL(&logMux);
-    out[len] = 0;
-    server.send(200, "text/plain", out);
-  });
-
-  server.on("/api/perf", HTTP_GET, []() {
-    JsonDocument doc;
-
-    doc["cpu_freq"] = getCpuFrequencyMhz();
-    doc["cpu_temp"] = temperatureRead();
-    doc["cpu_dynamic"] = ENABLE_DYNAMIC_CPU;
-    doc["cpu_usage"] = cpuUsagePct;
-    doc["uptime_s"] = millis() / 1000;
-    doc["free_heap"] = ESP.getFreeHeap();
-    doc["min_free_heap"] = ESP.getMinFreeHeap();
-
-    // Stack headroom in bytes (issue #27) - the smallest free stack each of our
-    // tasks has had since boot. This is deliberately measurement only: the GPS
-    // task stack and its 1 KB parse buffer stay exactly as they are, and these
-    // numbers are the evidence for any future change. ESP-IDF's
-    // uxTaskGetStackHighWaterMark() reports bytes (vanilla FreeRTOS reports
-    // words), and a 0/NULL handle simply means the task has not started yet.
-    JsonObject stackFree = doc["stack_free"].to<JsonObject>();
-    stackFree["SensorTaskCore1"] = uxTaskGetStackHighWaterMark(sensorTaskHandle);
-    stackFree["GpsTaskCore0"] = uxTaskGetStackHighWaterMark(gpsTaskHandle);
-    stackFree["WebTaskCore0"] = uxTaskGetStackHighWaterMark(webTaskHandle);
-    doc["mem_saver"] = memSaverActive ? 1 : 0;
-    doc["heap_size"] = ESP.getHeapSize();
-    doc["psram_size"] = ESP.getPsramSize();
-    doc["psram_free"] = ESP.getFreePsram();
-    doc["flash_total"] = ESP.getFlashChipSize();
-    doc["flash_free"] = ESP.getFreeSketchSpace();
-
-    {
-      JsonArray parts = doc["partitions"].to<JsonArray>();
-      const char *knownLabels[] = {"nvs","otadata","app0","app1","spiffs"};
-      esp_partition_type_t knownTypes[] = {ESP_PARTITION_TYPE_DATA,ESP_PARTITION_TYPE_DATA,ESP_PARTITION_TYPE_APP,ESP_PARTITION_TYPE_APP,ESP_PARTITION_TYPE_DATA};
-      esp_partition_subtype_t knownSubtypes[] = {ESP_PARTITION_SUBTYPE_DATA_NVS,ESP_PARTITION_SUBTYPE_DATA_OTA,ESP_PARTITION_SUBTYPE_APP_OTA_0,ESP_PARTITION_SUBTYPE_APP_OTA_1,ESP_PARTITION_SUBTYPE_DATA_SPIFFS};
-      uint32_t flashUsed = 0;
-      const esp_partition_t *running = esp_ota_get_running_partition();
-      for (int i = 0; i < 5; i++) {
-        const esp_partition_t *p = esp_partition_find_first(knownTypes[i], knownSubtypes[i], knownLabels[i]);
-        if (p) {
-          JsonObject part = parts.add<JsonObject>();
-          part["label"] = p->label;
-          part["type"] = (int)p->type;
-          part["subtype"] = (int)p->subtype;
-          part["size"] = p->size;
-          part["addr"] = p->address;
-          if (strcmp(p->label, "spiffs") == 0) {
-            uint32_t u = LittleFS.usedBytes();
-            part["used"] = u;
-            flashUsed += u;
-          } else if (p == running) {
-            part["used"] = p->size;
-            flashUsed += p->size;
-          } else {
-            part["used"] = 0;
-          }
-        }
-      }
-      doc["flash_used"] = flashUsed;
-    }
-    // Settings-storage budget, in ENTRIES rather than bytes. This is the unit
-    // that actually runs out: the old 20 KB partition held ~630 entries, the
-    // factory settings alone occupy ~420 of them, and one lost WiFi save costs
-    // three. Showing bytes here would have looked healthy right up to the
-    // failure (throttled read - see refreshNvsStats()).
-    refreshNvsStats(5000);
-    doc["nvs_bytes"] = (uint32_t)nvsStatsBytes;
-    doc["nvs_entries_used"] = (uint32_t)nvsStatsUsed;
-    doc["nvs_entries_available"] = (uint32_t)nvsStatsAvailable;
-    doc["nvs_entries_total"] = (uint32_t)nvsStatsTotal;
-    doc["fps_current"] = currentMeasuredFps;
-    doc["fps_average"] = currentAverageFps;
-    doc["fps_target"] = TARGET_FPS;
-    doc["refresh_ms"] = (unsigned long)DISPLAY_REFRESH_MS;
-    doc["spi_speed"] = SPI_BUS_SPEED;
-    doc["wifi_clients"] = WiFi.softAPgetStationNum();
-    String lanIp = "";
-    if (WiFi.status() == WL_CONNECTED) {
-      lanIp = WiFi.localIP().toString();
-      // Only set if it's a valid LAN IP (not the AP address)
-      if (lanIp.length() > 0 && !lanIp.equals("192.168.4.1")) {
-        doc["lan_ip"] = lanIp;
-      } else {
-        doc["lan_ip"] = "";
-      }
-    }
-    doc["ambient_light"] = ambientLightValue;
-    doc["resolution"] = String(DISPLAY_WIDTH) + "x" + String(DISPLAY_HEIGHT);
-
-    String out;
-    serializeJson(doc, out);
-    server.send(200, "application/json", out);
-  });
-
-  server.on("/api/health", HTTP_GET, []() {
-    char buf[128];
-    snprintf(buf, sizeof(buf),
-             "{\"heap\":%lu,\"maxalloc\":%lu,\"minheap\":%lu,\"mem_saver\":%d,"
-             "\"uptime\":%lu}",
-             (unsigned long)ESP.getFreeHeap(),
-             (unsigned long)ESP.getMaxAllocHeap(),
-             (unsigned long)ESP.getMinFreeHeap(),
-             memSaverActive ? 1 : 0,
-             millis() / 1000);
-    server.send(200, "application/json", buf);
-  });
+  server.on("/api/health", HTTP_GET, healthGetHandler);
 
   server.begin();
   logPrintf("Web server started: heap=%lu B, maxalloc=%lu B\n",
