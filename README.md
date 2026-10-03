@@ -422,7 +422,7 @@ The management portal features a modern grouped card-based layout:
 - **Ambient light calibration** (dark / bright reference points)
 - **Cloud OTA pull** controls (enable, URL) with live status polling
 - **OTA firmware upload** via file picker
-- **NVS backup/restore** (export/import JSON)
+- **NVS backup/restore** (export downloads `GET /api/config` as `dashboard_backup.json`, import posts it back to `POST /api/config`)
 
 ### REST API Endpoints
 
@@ -460,11 +460,11 @@ The management portal features a modern grouped card-based layout:
 
 ## NVS Configuration Parameter Reference
 
-Dashboard++ uses a generic 3-mode macro system (`processConfig()`) to load, serialize, and deserialize over 60 configuration variables from ESP32 NVS flash storage.
+Dashboard++ keeps every configuration parameter as one row of a single table, `CFG_TABLE` in `src/config.cpp`: the C++ global, the JSON key, the NVS key, the default, the allowed band and the kind (`CK_INT` / `CK_UINT` / `CK_FLT` / `CK_BOOL` / `CK_STR` / `CK_SECRET`) all on one line. `processConfig()` walks that table in its three modes — boot load, JSON serialize (`GET /api/config`) and restore/save (`POST /api/config`) — across 197 parameters (192 regular + 5 WiFi secrets), plus the fuel-calibration table kept beside it.
 
 ### Numeric Range Validation (issue #21)
 
-Every numeric parameter carries an explicit **known-good band** in its `CFG_INT` / `CFG_UINT` / `CFG_FLT` declaration in `src/config.cpp` — that table is the single source of truth. The band is enforced on **all three write paths** (boot load, `POST /api/config`, and config restore): an out-of-range value is **clamped to the nearest end of the band, logged by name, and the clamped value is what gets written to NVS** — a bad value never reaches the running system, and a restore is never rejected outright because one field is off.
+Every numeric parameter carries an explicit **known-good band** in its `CFG_TABLE` row in `src/config.cpp` (`lo`/`hi` for `CK_INT` / `CK_UINT`, `flo`/`fhi` for `CK_FLT`) — that table is the single source of truth. The band is enforced on **all three write paths** (boot load, `POST /api/config`, and config restore): an out-of-range value is **clamped to the nearest end of the band, logged by name, and the clamped value is what gets written to NVS** — a bad value never reaches the running system, and a restore is never rejected outright because one field is off.
 
 - **Non-finite floats** (`nan`, `inf`) fall back to the parameter's default rather than poisoning a calculation.
 - **Cross-field rules** are repaired after the per-field clamps, in one place (`sanitizeConfigPairs()`): `TEMP_BAR_MIN < TEMP_BAR_MAX`, `TEMP_BAR_MIN <= TEMP_WARN_LOW <= TEMP_WARN_YEL <= TEMP_WARN_RED <= TEMP_BAR_MAX` (the three temp color fade points, repaired cold→hot so a band can never flip direction), `FUEL_WARN_RED <= FUEL_WARN_YEL` (fuel is mirrored — it turns red *below* its marker), `LIGHT_SENSOR_DARK_VAL < LIGHT_SENSOR_BRIGHT_VAL`, `MIN_SATELLITES <= OPTIMAL_SATELLITES`, `CPU_THROTTLE_TEMP_WARN <= CPU_THROTTLE_TEMP_CRIT`.
@@ -479,8 +479,9 @@ Bands are also checked offline by `python scripts/verify_config_ranges.py`: ever
 ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely — what is *not* protected is the session. Two tasks opening and closing the same namespace independently can still collide: one task's `end()` closes the handle the other is still using, which comes back as `ESP_ERR_NVS_*` from `putInt()`/`putString()` and shows up as a setting that quietly reverted after a reboot. The old code took `prefsMux` at some call sites and not at others, so the protection depended on which file the code happened to live in.
 
 - Every namespace open now goes through **`NvsSession`** (`src/dashboard.h`): an RAII wrapper that holds `prefsMux` for the whole `begin()`/`end()` pair, logs when a namespace cannot be opened, and closes on scope exit so an early return cannot leak the handle. It skips the lock while `prefsMux` is still `NULL` (early boot, single-threaded). The long-lived `preferences` object for the `dashboard` namespace keeps its explicit `prefsMux` pairs.
-- **Write results are checked.** `nvsWriteFailed(key, esp_err_t)` logs the failing key with `esp_err_to_name()`; the `CFG_*` save macros count the failures and a save ends with `Config save: N parameter(s) failed to reach NVS … they will revert on reboot` instead of pretending nothing happened. The same check covers the fuel-table writes, the factory-reset credential restore, the bootinfo writes and the ambient calibrations.
+- **Write results are checked.** `nvsWriteFailed(key, esp_err_t)` logs the failing key with `esp_err_to_name()`; the table-driven save counts them (`cfgApply()` bumps `cfgNvsWriteErrors` for every row that fails) and a save ends with `Config save: N parameter(s) failed to reach NVS … they will revert on reboot` instead of pretending nothing happened. The same check covers the fuel-table writes, the factory-reset credential restore, the bootinfo writes and the ambient calibrations.
 - **A failed read is not a default.** Where an unreadable NVS would previously have produced "no value" and triggered a factory seed, the seed is now skipped with a log line — a flash that cannot be read must never be answered by overwriting it.
+- **Factory defaults are the table.** On first boot (`CFG_VER` missing or below 5) the seed writes each `CFG_TABLE` default straight into NVS and RAM (`cfgSeedDefaults()`, one `NvsSession` for the whole pass) — there is no second copy of the defaults in flash and no `JsonDocument` to build one. The WiFi credentials are deliberately not seeded, so a lost `CFG_VER` stamp can never strand a unit without a network, and the fuel ramp is rebuilt from the seeded `FUEL_OHM_EMPTY`/`FUEL_OHM_FULL` only when the stored table is not already the factory ramp.
 - `prefsMux` is a plain (non-recursive) mutex: nothing inside a locked NVS region may open NVS itself.
 
 ### Key Configuration Categories
@@ -578,7 +579,6 @@ ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely �
 Dashboard++ for ESP32/
 ├── platformio.ini         # PlatformIO project configuration & dependencies
 ├── partitions.csv         # Custom flash partition table (OTA + LittleFS)
-├── dashboard_backup.json  # Reference JSON configuration backup template
 ├── data/
 │   └── Fonts/             # VLW font sources (compiled to PROGMEM by scripts/vlw_to_header.py)
 │       ├── DS-DIGIT_120px.vlw         # 120px 7-segment font (speed sprite)
@@ -604,7 +604,7 @@ Dashboard++ for ESP32/
 └── src/
     ├── dashboard.h        # Central global header, structure definitions, API declarations
     ├── main.cpp           # System setup(), dual FreeRTOS task spawns, main display loop
-    ├── config.cpp         # NVS parameter storage, JSON serialization/deserialization engine
+    ├── config.cpp         # One CFG_TABLE row per NVS parameter (global, keys, default, band); load/serialize/restore
     ├── gfx.cpp            # LovyanGFX display device class, PROGMEM VLW font loader, AA primitives, icons
     ├── sensors.cpp        # Core 0 GPS task (bulk UART drain, TinyGPS++/UBX parser, speed fusion, odo, time-sync) + Core 1 sensor task (Hall ISR, ADC sensors, snapshot)
     ├── ui.cpp             # Dirty-rendering dashboard visual layout engine
