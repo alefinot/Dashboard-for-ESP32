@@ -242,29 +242,65 @@ def run_lane(port, ticks, tick_ms, rec, timeout_s=0.9):
 
 
 def check_live_shape():
-    """Task 2 gate: the /api/live contract is seven numeric keys inside budget."""
+    """Task 2 gate: the firmware's GET /api/live contract is seven numeric
+    keys in a fixed buffer, and the four single-value endpoints it replaces in
+    the page are still served unchanged (AGENTS.md rule 17)."""
     problems = []
     try:
         doc = json.loads(LIVE_JSON)
     except ValueError as exc:
-        problems.append(f"live JSON does not parse: {exc}")
+        problems.append(f"live fixture does not parse: {exc}")
         doc = {}
-    missing = [k for k in LIVE_KEYS if k not in doc]
-    extra = [k for k in doc if k not in LIVE_KEYS]
-    if missing:
-        problems.append("missing keys: " + ",".join(missing))
-    if extra:
-        problems.append("unexpected keys: " + ",".join(extra))
+    if [k for k in doc if k not in LIVE_KEYS]:
+        problems.append("fixture has keys the contract does not allow: "
+                        + ",".join(k for k in doc if k not in LIVE_KEYS))
     for k, v in doc.items():
         if not isinstance(v, (int, float)):
-            problems.append(f"{k} is not numeric: {v!r}")
+            problems.append(f"fixture {k} is not numeric: {v!r}")
     if len(LIVE_JSON.encode()) > LIVE_BUDGET_BYTES:
-        problems.append(f"payload {len(LIVE_JSON.encode())} B exceeds the "
+        problems.append(f"fixture payload {len(LIVE_JSON.encode())} B exceeds the "
                         f"{LIVE_BUDGET_BYTES} B firmware buffer")
+
+    try:
+        src = open(WEBSRC, encoding="utf-8").read()
+    except OSError as exc:
+        return problems + [f"cannot read {WEBSRC}: {exc}"]
+
+    body = re.search(r"static void liveGetHandler\(\)\s*\{(.*?)\n\}", src, re.S)
+    if body is None:
+        problems.append(f"{WEBSRC} has no liveGetHandler()")
+    else:
+        # The C++ format string escapes its quotes (\"ambient\":), so compare
+        # against the unescaped form.
+        handler = body.group(1).replace('\\"', '"')
+        for key in LIVE_KEYS:
+            field = '"%s":' % key          # e.g. "ambient":
+            if field not in handler:
+                problems.append(f"live handler is missing the {key} field")
+            elif '"%s":"%%' % key in handler:   # e.g. "ambient":"%s" -> a string
+                problems.append(f"live handler formats {key} as a string")
+        if "JsonDocument" in handler or "String out" in handler:
+            problems.append("live handler allocates (JsonDocument/String) - "
+                            "AGENTS.md rule 14 wants a fixed buffer")
+        buf = re.search(r"char\s+buf\[(\d+)\]", handler)
+        if buf is None:
+            problems.append("live handler does not use a fixed char buf[]")
+        elif int(buf.group(1)) < len(LIVE_JSON) + 1:
+            problems.append(f"live handler buffer ({buf.group(1)}) is smaller "
+                            f"than the payload ({len(LIVE_JSON)} B + NUL)")
+        if handler.count("xSemaphoreTake") > 1:
+            problems.append("live handler takes g_stateMutex more than once")
+    if 'server.on("/api/live", HTTP_GET, liveGetHandler)' not in src:
+        problems.append("/api/live is not registered on the server")
+    for ep in ("/api/ambient", "/api/odo", "/api/fuel", "/api/sensors"):
+        if '"%s", HTTP_GET' % ep not in src:
+            problems.append(f"regression: GET {ep} is no longer registered "
+                            "(AGENTS.md rule 17)")
     return problems
 
 
 WEBUI = "src/webui.html"
+WEBSRC = "src/web.cpp"
 
 
 def check_webui():

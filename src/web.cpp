@@ -1959,6 +1959,36 @@ static void sensorsGetHandler() {
   server.send(200, "application/json", buf);
 }
 
+// The WebUI's single 1 Hz source: every live reading the settings page shows,
+// in ONE response. It exists because the core's WebServer serves a single
+// client at a time (WebServer.cpp: "Supports only one simultaneous client";
+// NetworkServer listens with a backlog of 4; every reply is Connection: close,
+// so the browser cannot reuse a socket). Four simultaneous polls per tick
+// therefore queue against each other, and when a batch outlives the tick the
+// next batch's sockets find a full backlog and are refused - readings then
+// land on alternate ticks ("sometimes it updates every 2 seconds"). One
+// request per tick keeps the socket count at one AND makes the five readings
+// an atomic snapshot, so no cell can disagree with its neighbour.
+// Allocation-free like /api/health: fixed buffer, no JsonDocument (rule 14).
+// The single-value endpoints stay registered for other consumers (rule 17);
+// the values and clamps here are identical to theirs.
+static void liveGetHandler() {
+  char buf[176];
+  float v = 0.0f, t = 0.0f;
+  if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+    v = g_sensorData.batteryVoltage;
+    t = g_sensorData.engineTemperature;
+    xSemaphoreGive(g_stateMutex);
+  }
+  float ohm = fuelMeasuredOhms > 9999.9f ? 9999.9f : fuelMeasuredOhms;
+  snprintf(buf, sizeof(buf),
+           "{\"ambient\":%d,\"odo\":%.2f,\"fuel_raw\":%d,\"fuel_ohm\":%.1f,"
+           "\"fuel_st\":%d,\"volts\":%.2f,\"temp\":%.1f}",
+           ambientLightValue, odoGet(), rawFuelADC, ohm, (int)fuelInputState,
+           v, t);
+  server.send(200, "application/json", buf);
+}
+
 static void ambientCalDarkPostHandler() {
   LIGHT_SENSOR_DARK_VAL = ambientLightValue;
   bool saved = false;
@@ -2427,6 +2457,9 @@ void webServerTask(void *pvParameters) {
   // readings (battery voltage + engine temperature). Additive read-only
   // endpoint; values are the calibrated outputs, not raw ADC.
   server.on("/api/sensors", HTTP_GET, sensorsGetHandler);
+
+  // One combined snapshot for the WebUI's live readings - see liveGetHandler.
+  server.on("/api/live", HTTP_GET, liveGetHandler);
 
   server.on("/api/ambient/cal-dark", HTTP_POST, ambientCalDarkPostHandler);
 
