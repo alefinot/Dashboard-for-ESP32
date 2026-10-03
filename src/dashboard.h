@@ -862,6 +862,8 @@ extern WeatherData g_weatherData;
 extern bool SHOW_ELEMENT_WEATHER;
 extern int OFFSET_WEATHER_X;
 extern int OFFSET_WEATHER_Y;
+extern int WEATHER_WIDTH;   // card size in pixels, centre-anchored on the offsets
+extern int WEATHER_HEIGHT;
 extern char WEATHER_CITY[48];
 extern float WEATHER_LAT;
 extern float WEATHER_LON;

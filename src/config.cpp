@@ -152,6 +152,10 @@ bool SHOW_GHOST_DIGITS = true;
 bool SHOW_ELEMENT_WEATHER = true;
 int OFFSET_WEATHER_X = 0;
 int OFFSET_WEATHER_Y = 146;
+// Card size in pixels. 480x28 is what the renderer used to hardcode, so a unit
+// that never touches the new sliders keeps the picture it already has.
+int WEATHER_WIDTH = 480;
+int WEATHER_HEIGHT = 28;
 char WEATHER_CITY[48] = "";
 float WEATHER_LAT = 0.0f;
 float WEATHER_LON = 0.0f;
@@ -772,6 +776,10 @@ static const CfgParam CFG_TABLE[] = {
   { &OFFSET_WEATHER_X, "OFFSET_WEATHER_X", "O_WEATH_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
 
   { &OFFSET_WEATHER_Y, "OFFSET_WEATHER_Y", "O_WEATH_Y", nullptr, -4096, 4096, 146, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &WEATHER_WIDTH, "WEATHER_WIDTH", "WEATH_W", nullptr, 160, 480, 480, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &WEATHER_HEIGHT, "WEATHER_HEIGHT", "WEATH_H", nullptr, 20, 120, 28, 0.0f, 0.0f, 0.0f, 0, CK_INT },
 
   { &WEATHER_CITY, "WEATHER_CITY", "WEATH_CITY", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WEATHER_CITY), CK_STR },
 

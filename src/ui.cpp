@@ -329,6 +329,20 @@ static bool weatherIsNight(const SensorSnapshot &snap) {
   return (snap.localHour >= NIGHT_MODE_START_HOUR || snap.localHour < NIGHT_MODE_END_HOUR);
 }
 
+// Effective weather card size in pixels. The CFG_TABLE band already clamps the
+// stored value on every write path; this clamp is about the panel, not the
+// input - a unit configured with a smaller DISPLAY_WIDTH/DISPLAY_HEIGHT must not
+// have the card run off the screen, and a card shorter than the 16px Conthrax
+// text it draws would clip that text. Both callers ask for the same number, so
+// the anchor and the dirty rect can never disagree about the card's size.
+static void weatherCardSize(int &w, int &h) {
+  const int WEATHER_MIN_H = 20;
+  w = constrain(WEATHER_WIDTH, 160, DISPLAY_WIDTH);
+  h = constrain(WEATHER_HEIGHT, WEATHER_MIN_H, DISPLAY_HEIGHT);
+}
+
+void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDraw);
+
 // ----------------------------------------------------------------------------
 // Main dashboard renderer
 // ----------------------------------------------------------------------------
@@ -1987,9 +2001,15 @@ if (!vlw120Ready) {
   static char lastSunrise[8] = "";
   static char lastCity[48] = "";
   static bool lastWeatherNight = false;
+  static int lastWw = -1, lastWh = -1;  // size the card was last drawn at
 
-  int wx = BIG_CENTER_X + OFFSET_WEATHER_X - 240;
-  int wy = BIG_CENTER_Y + OFFSET_WEATHER_Y - 14;
+  // OFFSET_WEATHER_X/Y name the card's centre, so a wider or taller card grows
+  // out from the point the user placed instead of sliding right and down.
+  int cw, ch;
+  weatherCardSize(cw, ch);
+  int wx = BIG_CENTER_X + OFFSET_WEATHER_X - cw / 2;
+  int wy = BIG_CENTER_Y + OFFSET_WEATHER_Y - ch / 2;
+  bool weatherSizeChanged = (lastWw != cw || lastWh != ch);
   bool showWeather = SHOW_ELEMENT_WEATHER;
 
   bool weatherNight = weatherIsNight(displaySnap);
@@ -1997,8 +2017,11 @@ if (!vlw120Ready) {
 
   const char *dispCitySrc = (g_weatherData.cityName[0] != 0) ? g_weatherData.cityName : WEATHER_CITY;
 
-  if ((lastWx != wx || lastWy != wy || lastWeatherShow != showWeather || forceDraw) && lastWeatherShow) {
-    display.fillRect(lastWx - 2, lastWy - 2, 480 + 4, 28 + 4, TFT_BLACK);
+  if ((lastWx != wx || lastWy != wy || lastWeatherShow != showWeather ||
+       weatherSizeChanged || forceDraw) && lastWeatherShow) {
+    // Erase at the size the card had last frame, not its current one: shrinking
+    // the widget would otherwise leave the wider card it replaced on the panel.
+    display.fillRect(lastWx - 2, lastWy - 2, lastWw + 4, lastWh + 4, TFT_BLACK);
   }
 
   bool weatherChanged = (g_weatherData.temperature != lastTemp ||
@@ -2010,7 +2033,8 @@ if (!vlw120Ready) {
                         weatherNightChanged;
 
   if (showWeather) {
-    if (weatherChanged || lastWx != wx || lastWy != wy || lastWeatherShow != showWeather || forceDraw) {
+    if (weatherChanged || lastWx != wx || lastWy != wy || weatherSizeChanged ||
+        lastWeatherShow != showWeather || forceDraw) {
       lastTemp = g_weatherData.temperature;
       lastHum = g_weatherData.humidity;
       lastCode = g_weatherData.weatherCode;
@@ -2020,10 +2044,11 @@ if (!vlw120Ready) {
       lastCity[sizeof(lastCity) - 1] = 0;
       lastWx = wx;
       lastWy = wy;
+      lastWw = cw;
+      lastWh = ch;
       lastWeatherShow = showWeather;
       lastWeatherNight = weatherNight;
-      
-      void drawWeatherWidget(int x, int y, const SensorSnapshot &snap, bool forceDraw);
+
       drawWeatherWidget(wx, wy, displaySnap, forceDraw);
       weatherPaintedFrame = true;
     }
@@ -2260,8 +2285,16 @@ void drawWeatherIcon(int cx, int cy, int size, int weatherCode, bool isNight) {
 }
 
 void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDraw) {
-  int w = 480;
-  int h = 28;
+  int w, h;
+  weatherCardSize(w, h);
+
+  // Every row is placed from h so a taller or shorter card keeps its content
+  // centred. At the shipped h = 28 these land on the pixels the widget has
+  // always used - text baseline wy+20, stat icons wy+6, sunset icon wy+15,
+  // weather icon wy+14 - so a default-sized card draws exactly what it did.
+  const int baseY = wy + h / 2 + 6;       // text datum is baseline_left
+  const int iconTop = wy + (h - 16) / 2;  // top of a 16px stat icon
+  const int iconCY = wy + h / 2;          // centre of the weather icon
   
   uint16_t cardBg = display.color565(15, 15, 15);
   uint16_t borderCol = display.color565(45, 45, 45);
@@ -2272,7 +2305,7 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
   if (!g_weatherData.valid) {
     display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
     display.setTextColor(display.color565(150, 150, 150));
-    display.setCursor(wx + 20, wy + 20);
+    display.setCursor(wx + 20, baseY);
     display.print("Weather Offline (Syncing with WiFi...)");
     return;
   }
@@ -2320,27 +2353,46 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
 
   // Icon extents (pixels right of the icon anchor) + 12px icon-to-text gap.
   const int tempIconW = 8, humIconW = 8, windIconW = 11, sunsetIconW = 13;
-  int span0 = (tempIconW + 12 + tempW) + (humIconW + 12 + humW)
-            + (windIconW + 12 + windW) + (sunsetIconW + 12 + sunsetW);
+  // Equal gap across the slots (city->temp, temp->hum, hum->wind,
+  // wind->sunset). The weather group is right-anchored so the last stat always
+  // ends 6px inside the card; a gap too tight for the city is absorbed by the
+  // city-name fade below, so nothing can leave the screen.
+  // Cap city width in the gap calculation so the stats keep their spacing.
+  //
+  // On a narrow card even the minimum gap cannot hold every stat: the sunset
+  // group goes first, then wind, until the rest clear the weather icon.
+  // Overlapping text is worse than a stat the user asked not to squeeze.
+  bool showWind = true, showSunset = true;
+  int gInt = 12;
+  int iconX1 = 0, iconX2 = 0, iconX3 = 0, iconX4 = 0;
+  for (int attempt = 0; attempt < 3; attempt++) {
+    int span0 = (tempIconW + 12 + tempW) + (humIconW + 12 + humW);
+    int gaps = 1;
+    if (showWind) { span0 += windIconW + 12 + windW; gaps++; }
+    if (showSunset) { span0 += sunsetIconW + 12 + sunsetW; gaps++; }
 
-  // Equal gap across the 4 slots (city->temp, temp->hum, hum->wind,
-  // wind->sunset). The weather group is right-anchored so the sunset text
-  // always ends 6px inside the card; a gap too tight for the city is absorbed
-  // by the city-name fade below, so nothing can leave the screen.
-  // Cap city width in gap calculation so the right-side weather stats stay properly spaced.
-  int availW = (w - 6) - 28 - span0;
-  int targetCityW = (cityW > 130) ? 130 : cityW;
-  int gInt = (availW - targetCityW) / 4;
-  if (gInt > 24) gInt = 24;
-  if (gInt < 12) gInt = 12;
+    int availW = (w - 6) - 28 - span0;
+    int targetCityW = (cityW > 130) ? 130 : cityW;
+    gInt = (availW - targetCityW) / gaps;
+    if (gInt > 24) gInt = 24;
+    if (gInt < 12) gInt = 12;
 
-  int iconX4 = (wx + w - 6) - (sunsetIconW + 12 + sunsetW);
-  int iconX3 = iconX4 - gInt - (windIconW + 12 + windW);
-  int iconX2 = iconX3 - gInt - (humIconW + 12 + humW);
-  int iconX1 = iconX2 - gInt - (tempIconW + 12 + tempW);
+    // Right-to-left chain, so dropping a group closes the row up instead of
+    // leaving a hole where that stat used to sit.
+    int statX = wx + w - 6;
+    iconX4 = statX - (sunsetIconW + 12 + sunsetW);
+    if (showSunset) statX = iconX4 - gInt;
+    iconX3 = statX - (windIconW + 12 + windW);
+    if (showWind) statX = iconX3 - gInt;
+    iconX2 = statX - (humIconW + 12 + humW);
+    iconX1 = iconX2 - gInt - (tempIconW + 12 + tempW);
+
+    if (iconX1 >= wx + 24) break;  // temperature group clears the weather icon
+    if (showSunset) showSunset = false; else showWind = false;
+  }
 
   // Section 1: Weather Icon and City Name (fades out gracefully before temperature section)
-  drawWeatherIcon(wx + 16, wy + 14, 16, g_weatherData.weatherCode, isNight);
+  drawWeatherIcon(wx + 16, iconCY, 16, g_weatherData.weatherCode, isNight);
 
   int fadeX1 = iconX1 - 6;
   int fadeX0 = fadeX1 - 45;
@@ -2389,7 +2441,7 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
         display.setTextColor(TFT_WHITE, cardBg);
       }
 
-      display.setCursor(curX, wy + 20);
+      display.setCursor(curX, baseY);
       display.print(cStr);
       curX += cW;
     }
@@ -2401,47 +2453,51 @@ void drawWeatherWidget(int wx, int wy, const SensorSnapshot &snap, bool forceDra
 
 
   // Section 2: Temperature
-  int iconY1 = wy + 6;
+  int iconY1 = iconTop;
   display.fillCircle(iconX1 + 4, iconY1 + 11, 2, TFT_RED);
   display.fillRect(iconX1 + 3, iconY1 + 3, 2, 6, TFT_RED);
   display.drawCircle(iconX1 + 4, iconY1 + 11, 3, TFT_WHITE);
   display.drawRect(iconX1 + 2, iconY1 + 2, 3, 8, TFT_WHITE);
   
   display.setTextColor(display.color565(255, 120, 120));
-  display.setCursor(iconX1 + 12, wy + 20);
+  display.setCursor(iconX1 + 12, baseY);
   display.print(tempStr);
   int degX = iconX1 + 12 + tempNumW + 2;
-  display.drawCircle(degX, wy + 20 - 8, 2, display.color565(255, 120, 120));
-  display.setCursor(degX + 3, wy + 20);
+  display.drawCircle(degX, baseY - 8, 2, display.color565(255, 120, 120));
+  display.setCursor(degX + 3, baseY);
   display.print(UNITS_IMPERIAL ? "F" : "C");
   
   // Section 3: Humidity
-  int iconY2 = wy + 6;
+  int iconY2 = iconTop;
   display.fillCircle(iconX2 + 4, iconY2 + 9, 3, display.color565(100, 180, 255));
   display.fillTriangle(iconX2 + 4, iconY2 + 2, iconX2 + 1, iconY2 + 8, iconX2 + 7, iconY2 + 8, display.color565(100, 180, 255));
   
   display.setTextColor(display.color565(150, 200, 255));
-  display.setCursor(iconX2 + 12, wy + 20);
+  display.setCursor(iconX2 + 12, baseY);
   display.print(humStr);
   
-  // Section 4: Wind
-  int iconY3 = wy + 6;
-  display.fillRect(iconX3 + 1, iconY3 + 2, 1, 12, TFT_WHITE);
-  display.fillRoundRect(iconX3 + 2, iconY3 + 3, 8, 4, 1, TFT_ORANGE);
-  display.fillRect(iconX3 + 4, iconY3 + 3, 2, 4, TFT_WHITE);
+  // Section 4: Wind (dropped when the card is too narrow to hold it)
+  if (showWind) {
+    int iconY3 = iconTop;
+    display.fillRect(iconX3 + 1, iconY3 + 2, 1, 12, TFT_WHITE);
+    display.fillRoundRect(iconX3 + 2, iconY3 + 3, 8, 4, 1, TFT_ORANGE);
+    display.fillRect(iconX3 + 4, iconY3 + 3, 2, 4, TFT_WHITE);
+
+    display.setTextColor(display.color565(180, 255, 180));
+    display.setCursor(iconX3 + 12, baseY);
+    display.print(windStr);
+  }
   
-  display.setTextColor(display.color565(180, 255, 180));
-  display.setCursor(iconX3 + 12, wy + 20);
-  display.print(windStr);
-  
-  // Section 5: Sunset
-  int iconY4 = wy + 15;
-  display.fillCircle(iconX4, iconY4, 4, TFT_YELLOW);
-  display.fillRect(iconX4 - 4, iconY4 + 1, 8, 4, cardBg);
-  display.drawFastHLine(iconX4 - 6, iconY4 + 1, 12, TFT_ORANGE);
-  display.drawFastVLine(iconX4, iconY4 - 7, 3, TFT_RED);
-  
-  display.setTextColor(display.color565(255, 200, 100));
-  display.setCursor(iconX4 + 12, wy + 20);
-  display.print(sunsetStr);
+  // Section 5: Sunset (dropped first when the card is too narrow)
+  if (showSunset) {
+    int iconY4 = iconTop + 9;
+    display.fillCircle(iconX4, iconY4, 4, TFT_YELLOW);
+    display.fillRect(iconX4 - 4, iconY4 + 1, 8, 4, cardBg);
+    display.drawFastHLine(iconX4 - 6, iconY4 + 1, 12, TFT_ORANGE);
+    display.drawFastVLine(iconX4, iconY4 - 7, 3, TFT_RED);
+
+    display.setTextColor(display.color565(255, 200, 100));
+    display.setCursor(iconX4 + 12, baseY);
+    display.print(sunsetStr);
+  }
 }
