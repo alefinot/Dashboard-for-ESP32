@@ -134,6 +134,7 @@ extern int TEMP_BAR_MIN;
 extern int TEMP_BAR_MAX;
 extern int TEMP_WARN_RED;
 extern int TEMP_WARN_YEL;
+extern int TEMP_WARN_LOW;
 
 extern int FUEL_WARN_RED;
 extern int FUEL_WARN_YEL;
@@ -708,6 +709,10 @@ uint16_t hexToRGB565(const char *hex);
 // ----------------------------------------------------------------------------
 uint16_t blendColor(uint16_t fg, uint16_t bg, float alpha);
 uint16_t blendColorLinear(uint16_t c1, uint16_t c2, float t);
+// Three-anchor sidebar ramp in RGB565: flat c0 below v0, linear blends between
+// the anchors, flat c2 above v2. Anchors must ascend (v0 <= v1 <= v2); a
+// zero-width band collapses to the upper colour instead of dividing by zero.
+uint16_t rampColor3(int v, int v0, uint16_t c0, int v1, uint16_t c1, int v2, uint16_t c2);
 uint16_t blendColorWithBlack(uint16_t color, float alpha);
 
 template <typename T>

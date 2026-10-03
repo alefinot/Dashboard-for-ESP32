@@ -890,23 +890,18 @@ if (!vlw120Ready) {
 
     int barX = SIDEBAR_LEFT_X, barY = SIDEBAR_LEFT_Y, barW = SIDEBAR_BAR_WIDTH, barH = SIDEBAR_BAR_HEIGHT;
 
-    // Three-colour ramp with two markers: light blue up to TEMP_WARN_YEL, a
-    // blue->amber fade across YEL..RED, then amber->red from RED up to the top
-    // of the bar. The old third marker (TEMP_WARN_GRN) was never stored in NVS,
-    // never exported and never in the WebUI, and its branch swallowed the amber
-    // band below it - it was a leftover, so it is gone (issue #29).
-    uint16_t tempColor;
-    if (currentTemp <= TEMP_WARN_YEL) {
-      tempColor = c_temp_norm;
-    } else if (currentTemp <= TEMP_WARN_RED) {
-      float range = (float)(TEMP_WARN_RED - TEMP_WARN_YEL);
-      float t = (range > 0) ? (currentTemp - TEMP_WARN_YEL) / range : 1.0f;
-      tempColor = blendColorLinear(c_temp_norm, c_temp_warn, t);
-    } else {
-      float range = (float)(TEMP_BAR_MAX - TEMP_WARN_RED);
-      float t = (range > 0) ? (currentTemp - TEMP_WARN_RED) / range : 1.0f;
-      tempColor = blendColorLinear(c_temp_warn, c_temp_crit, t);
-    }
+    // Colour ramp with three fade points, cold to hot: flat c_temp_norm below
+    // TEMP_WARN_LOW, norm->warn across LOW..YEL, warn->crit across YEL..RED, then
+    // flat c_temp_crit up to TEMP_BAR_MAX (the bar ends are scale only). The stops
+    // are blended in RGB565, so warn->crit walks yellow->orange->red on its own.
+    // The old third marker (TEMP_WARN_GRN) was never stored in NVS, never exported
+    // and never in the WebUI, and its branch swallowed the amber band below it -
+    // it was a leftover, so it is gone (issue #29); TEMP_WARN_LOW is its
+    // replacement, this time stored, backed up and editable.
+    uint16_t tempColor = rampColor3(currentTemp,
+                                    TEMP_WARN_LOW, c_temp_norm,
+                                    TEMP_WARN_YEL, c_temp_warn,
+                                    TEMP_WARN_RED, c_temp_crit);
 
     drawAARoundRect(display, barX - 2, barY - 2, barW + 4, barH + 4, 4, tempColor);
 

@@ -15,6 +15,7 @@ int TEMP_BAR_MIN = 10;
 int TEMP_BAR_MAX = 110;
 int TEMP_WARN_RED = 90;
 int TEMP_WARN_YEL = 45;
+int TEMP_WARN_LOW = 20;
 int FUEL_WARN_RED = 20;
 int FUEL_WARN_YEL = 45;
 
@@ -772,17 +773,44 @@ void sanitizeConfigPairs() {
               TEMP_BAR_MIN, TEMP_BAR_MAX, TEMP_BAR_MIN, TEMP_BAR_MIN + 1);
     TEMP_BAR_MAX = TEMP_BAR_MIN + 1;
   }
-  // Colour thresholds are hot-side markers: RED is the hotter of the two and
-  // both live inside the bar band, otherwise a colour can never show.
+  // Colour fade points, cold to hot: LOW -> YEL -> RED, all inside the bar band.
+  // The bar is flat COLOR_TEMP_NORM below LOW and flat COLOR_TEMP_CRIT above RED,
+  // so the two bar ends are scale only. Equal neighbours are legal (the band
+  // collapses to a hard switch); an out-of-order triple would flip a blend
+  // direction, so the whole chain is repaired here into
+  // BAR_MIN <= LOW <= YEL <= RED <= BAR_MAX.
+  if (TEMP_WARN_YEL < TEMP_BAR_MIN) {
+    logPrintf("Config: TEMP_WARN_YEL=%d below TEMP_BAR_MIN=%d, raised into the bar\n",
+              TEMP_WARN_YEL, TEMP_BAR_MIN);
+    TEMP_WARN_YEL = TEMP_BAR_MIN;
+  }
+  if (TEMP_WARN_RED < TEMP_BAR_MIN) {
+    logPrintf("Config: TEMP_WARN_RED=%d below TEMP_BAR_MIN=%d, raised into the bar - "
+              "it would never show\n",
+              TEMP_WARN_RED, TEMP_BAR_MIN);
+    TEMP_WARN_RED = TEMP_BAR_MIN;
+  }
+  if (TEMP_WARN_RED > TEMP_BAR_MAX) {
+    logPrintf("Config: TEMP_WARN_RED=%d above TEMP_BAR_MAX=%d, lowered - the bar "
+              "would never reach COLOR_TEMP_CRIT\n",
+              TEMP_WARN_RED, TEMP_BAR_MAX);
+    TEMP_WARN_RED = TEMP_BAR_MAX;
+  }
   if (TEMP_WARN_YEL > TEMP_WARN_RED) {
     logPrintf("Config: TEMP_WARN_YEL=%d above TEMP_WARN_RED=%d, lowered\n",
               TEMP_WARN_YEL, TEMP_WARN_RED);
     TEMP_WARN_YEL = TEMP_WARN_RED;
   }
-  if (TEMP_WARN_RED < TEMP_BAR_MIN || TEMP_WARN_RED > TEMP_BAR_MAX)
-    logPrintf("Config: TEMP_WARN_RED=%d outside the bar %d..%d, it will never "
-              "show\n",
-              TEMP_WARN_RED, TEMP_BAR_MIN, TEMP_BAR_MAX);
+  if (TEMP_WARN_LOW < TEMP_BAR_MIN) {
+    logPrintf("Config: TEMP_WARN_LOW=%d below TEMP_BAR_MIN=%d, raised\n",
+              TEMP_WARN_LOW, TEMP_BAR_MIN);
+    TEMP_WARN_LOW = TEMP_BAR_MIN;
+  }
+  if (TEMP_WARN_LOW > TEMP_WARN_YEL) {
+    logPrintf("Config: TEMP_WARN_LOW=%d above TEMP_WARN_YEL=%d, lowered\n",
+              TEMP_WARN_LOW, TEMP_WARN_YEL);
+    TEMP_WARN_LOW = TEMP_WARN_YEL;
+  }
   // Fuel is the mirror image: the gauge turns red BELOW its marker, so the red
   // threshold has to sit under the yellow one.
   if (FUEL_WARN_RED > FUEL_WARN_YEL) {
@@ -869,6 +897,7 @@ void processConfig(int mode, JsonDocument *doc) {
   CFG_INT(TEMP_BAR_MAX, "TMP_BAR_MAX", 110, -40, 300);
   CFG_INT(TEMP_WARN_RED, "TMP_WRN_R", 90, -40, 300);
   CFG_INT(TEMP_WARN_YEL, "TMP_WRN_Y", 45, -40, 300);
+  CFG_INT(TEMP_WARN_LOW, "TMP_WRN_L", 20, -40, 300);
   CFG_INT(FUEL_WARN_RED, "FUL_WRN_R", 20, 0, 100);
   CFG_INT(FUEL_WARN_YEL, "FUL_WRN_Y", 45, 0, 100);
 
@@ -1243,6 +1272,7 @@ const char FACTORY_DEFAULT_JSON[] = R"({
   "TEMP_BAR_MAX": 110,
   "TEMP_WARN_RED": 90,
   "TEMP_WARN_YEL": 45,
+  "TEMP_WARN_LOW": 20,
   "FUEL_WARN_RED": 20,
   "FUEL_WARN_YEL": 45,
   "COLOR_TEMP_NORM": "#00ff00",

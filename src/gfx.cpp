@@ -173,6 +173,19 @@ uint16_t blendColorLinear(uint16_t c1, uint16_t c2, float t) {
   return (uint16_t)((r & 0xF800) | (g & 0x07E0) | (b & 0x001F));
 }
 
+uint16_t rampColor3(int v, int v0, uint16_t c0, int v1, uint16_t c1, int v2, uint16_t c2) {
+  if (v <= v0) return c0;
+  if (v <= v1) {
+    int range = v1 - v0;
+    return blendColorLinear(c0, c1, (range > 0) ? (float)(v - v0) / (float)range : 1.0f);
+  }
+  if (v <= v2) {
+    int range = v2 - v1;
+    return blendColorLinear(c1, c2, (range > 0) ? (float)(v - v1) / (float)range : 1.0f);
+  }
+  return c2;
+}
+
 uint16_t blendColorWithBlack(uint16_t color, float alpha) {
   return blendColor(color, 0x0000, alpha);
 }
