@@ -323,15 +323,25 @@ def check_webui():
             if re.search(r"function\s+" + n + r"\b", src)]
     ok("(b) the four poll functions are gone", not gone)
     lane = re.search(r"function\s+laneFetch\b", src)
-    abort = re.search(r"setTimeout\([^,]+,\s*(\d+)\)", src)
     ok("(c) laneFetch exists with an in-flight guard", lane is not None and
-       re.search(r"laneInFlight|laneAbort", src) is not None)
-    ok("(c) its timeout is below the 1000 ms tick", abort is not None and
+       re.search(r"laneAbort", src) is not None)
+    abort = re.search(r"LIVE_ABORT_MS\s*=\s*(\d+)", src)
+    ok("(c) the lane aborts below the 1000 ms tick", abort is not None and
        int(abort.group(1)) < 1000)
-    ok("(d) /api/live is fetched", "'/api/live'" in src or '"/api/live"' in src)
-    old = [p for p in ("/api/ambient", "/api/odo", "/api/fuel", "/api/sensors")
-           if re.search(r"fetch\(\s*['\"]" + p + r"['\"]", src)]
-    ok("(d) no periodic fetch of the four single-value endpoints", not old)
+    ok("(d) /api/live is fetched",
+       re.search(r"laneFetch\(\s*['\"]/api/live", src) is not None)
+    old = [p for p in ("/api/ambient", "/api/fuel", "/api/sensors")
+           if re.search(r"(fetch|laneFetch)\(\s*['\"]" + p + r"['\"]", src)]
+    if old:
+        checks.append(("(d) no periodic read of " + ",".join(old), False))
+    # /api/odo stays legal only as the odometer POST (a user action); it must
+    # not be a periodic GET any more.
+    odo_get = False
+    for m in re.finditer(r"(fetch|laneFetch)\(\s*['\"]/api/odo['\"]", src):
+        tail = src[m.end():m.end() + 160]
+        if "method" not in tail:
+            odo_get = True
+    ok("(d) /api/odo is only ever requested by the odometer POST", not odo_get)
     return [name for name, cond in checks if not cond]
 
 

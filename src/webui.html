@@ -1476,6 +1476,8 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
             <div class="perf-row"><span class="perf-label">WiFi Clients</span><span class="perf-value" id="p-wifi">0</span></div>
             <div class="perf-row"><span class="perf-label">SPI Bus</span><span class="perf-value" id="p-spi">60 MHz</span></div>
             <div class="perf-row"><span class="perf-label">Heap</span><span class="perf-value" id="p-heap">--</span></div>
+            <div class="perf-row"><span class="perf-label">Live Poll</span><span class="perf-value" id="p-live-poll">--</span></div>
+            <div class="perf-row"><span class="perf-value" id="p-live-detail" style="font-weight:400;color:var(--text-dim);">--</span></div>
         </div>
         <div class="perf-card" style="grid-column:1/-1;">
             <h4>CPU Performance</h4>
@@ -2410,12 +2412,13 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     syncTime();
-    // One 1 Hz clock drives every live reader on the page (issue #52). Four
-    // independent timers on four different periods - ambient on 2 s, the rest on
-    // 1 s - made the readings advance out of step, which read as the page
-    // drifting between 1 s and 2 s updates.
-    pollAmbient(); pollOdo(); pollFuel(); pollSensors();
-    setInterval(() => { pollAmbient(); pollOdo(); pollFuel(); pollSensors(); }, 1000);
+    // One 1 Hz clock drives the live readings, and it issues ONE request per
+    // tick (issue #52). Four readers on four periods drifted out of step; four
+    // simultaneous fetches per tick then queued against a server that serves a
+    // single client at a time, and refused batches made the cells land every
+    // 2 s. See laneFetch() for the full mechanism.
+    liveTick();
+    setInterval(liveTick, 1000);
 
     fetch('/api/perf').then(r => r.json()).then(perf => {
         let ipEl = document.getElementById('ip-info');
@@ -3979,20 +3982,93 @@ function calibrateBright() {
     }).catch(() => {});
 }
 
-function pollAmbient() {
-    if (tabHidden) return;
-    fetch('/api/ambient').then(r => r.json()).then(d => {
-        let el = document.getElementById('ambient-reading');
-        if (el) el.textContent = d.raw;
-    }).catch(() => {});
+// ---- One request lane for every periodic read on this page (issue #52) -----
+// The firmware's web server serves ONE client at a time: the core's
+// WebServer.cpp states "Supports only one simultaneous client", NetworkServer
+// listens with a backlog of 4, and every reply carries Connection: close, so
+// each poll costs a fresh TCP handshake. Four simultaneous fetches per tick
+// queue against each other, and when a batch outlives the 1000 ms tick the next
+// batch finds a full backlog and its sockets are refused - the readings then
+// land on alternate ticks, which is the "sometimes every 2 seconds" report.
+// One request in flight, aborted at LIVE_ABORT_MS (under the tick, far under
+// the server's HTTP_MAX_DATA_WAIT = 5 s), makes the 1 Hz cadence structural:
+// a slow device loses that sample instead of stacking sockets on the device.
+let laneAbort = null;   // AbortController of the request in flight, else null
+let laneTimer = null;   // its abort deadline
+let laneLastMs = 0;     // round trip of the last request, shown in the monitor
+const LIVE_ABORT_MS = 900;
+
+function laneFetch(url, opts, consume) {
+    if (laneAbort) return Promise.reject(new Error('lane-busy'));
+    const ctrl = new AbortController();
+    laneAbort = ctrl;
+    const started = performance.now();
+    laneTimer = setTimeout(() => ctrl.abort(), LIVE_ABORT_MS);
+    const release = () => {
+        clearTimeout(laneTimer); laneTimer = null;
+        if (laneAbort === ctrl) laneAbort = null;
+        laneLastMs = Math.round(performance.now() - started);
+    };
+    // Release only after the body is consumed: freeing the lane at the response
+    // head would let the body read overlap the next request's socket.
+    return fetch(url, Object.assign({ signal: ctrl.signal }, opts))
+        .then(consume || (r => r))
+        .then(v => { release(); return v; },
+              e => { release(); throw e; });
 }
 
-function pollOdo() {
+// The live readings come from one snapshot, so the five cells always show the
+// same instant: ambient, odometer, fuel ohms/state, coolant temp, battery V.
+let liveOk = 0, liveMiss = 0, liveLastMs = 0;
+
+function renderLive(d) {
+    let el = document.getElementById('ambient-reading');
+    if (el) el.textContent = d.ambient;
+    el = document.getElementById('odo-reading');
+    if (el) el.textContent = (CURRENT_UNITS_IMPERIAL ? d.odo * KMH_TO_MPH : d.odo).toFixed(1);
+    el = document.getElementById('fuel-reading');
+    if (el) el.textContent = d.fuel_ohm;
+    lastFuelOhms = (typeof d.fuel_ohm === 'number') ? d.fuel_ohm : null;
+    lastFuelState = d.fuel_st;
+    const st = document.getElementById('fuel-state');
+    if (st) st.textContent = ({0: '(input disabled - enable the sender above)',
+                               1: '',
+                               2: '(open circuit - sender unplugged or wire broken)',
+                               3: '(shorted input - signal wire on ground?)'}[d.fuel_st] || '');
+    el = document.getElementById('temp-reading');
+    if (el) el.textContent = d.temp;
+    el = document.getElementById('bat-reading');
+    if (el) el.textContent = d.volts;
+}
+
+function liveTick() {
     if (tabHidden) return;
-    fetch('/api/odo').then(r => r.json()).then(d => {
-        let el = document.getElementById('odo-reading');
-        if (el) el.textContent = (CURRENT_UNITS_IMPERIAL ? d.km * KMH_TO_MPH : d.km).toFixed(1);
-    }).catch(() => {});
+    laneFetch('/api/live', null, r => r.json()).then(d => {
+        liveOk++; liveLastMs = laneLastMs; renderLive(d);
+    }).catch(() => {
+        // A refused or stalled poll used to be invisible (.catch(() => {})),
+        // which is why the symptom read as "the cell did not change". Count it.
+        liveMiss++; liveLastMs = laneLastMs;
+    }).then(() => updateLivePollRow());
+}
+
+// Device-side half of the same measurement (from /api/perf), printed next to
+// the browser round trip so "it skipped a second" becomes a number from both
+// ends instead of a report.
+let devServeLast = null, devServeMax = null, devSlowIters = null;
+
+function updateLivePollRow() {
+    const el = document.getElementById('p-live-poll');
+    if (!el) return;   // Performance Monitor is closed
+    el.textContent = liveLastMs + ' ms';
+    const det = document.getElementById('p-live-detail');
+    if (!det) return;
+    let txt = liveOk + ' ok / ' + liveMiss + ' missed';
+    if (devServeLast !== null) {
+        txt += ' - device serve ' + devServeLast + ' ms, max ' + devServeMax +
+               ' ms, ' + devSlowIters + ' slow iterations';
+    }
+    det.textContent = txt;
 }
 
 // Fuel sender helpers (issue #18). The calibration table lives in ohms - the
@@ -4087,32 +4163,8 @@ function captureFuelSlot() {
     el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-function pollFuel() {
-    if (tabHidden) return;
-    fetch('/api/fuel').then(r => r.json()).then(d => {
-        let el = document.getElementById('fuel-reading');
-        if (el) el.textContent = (d.ohm === undefined ? d.raw : d.ohm);
-        lastFuelOhms = (typeof d.ohm === 'number') ? d.ohm : null;
-        lastFuelState = d.st;
-        const st = document.getElementById('fuel-state');
-        if (st) st.textContent = ({0: '(input disabled - enable the sender above)',
-                                   1: '',
-                                   2: '(open circuit - sender unplugged or wire broken)',
-                                   3: '(shorted input - signal wire on ground?)'}[d.st] || '');
-    }).catch(() => {});
-}
-
-// Live calibrated readings for the calibration sections (battery + engine
-// temperature). Drives the "Reading:" value the Apply buttons compute from.
-function pollSensors() {
-    if (tabHidden) return;
-    fetch('/api/sensors').then(r => r.json()).then(d => {
-        let el = document.getElementById('temp-reading');
-        if (el) el.textContent = d.t;
-        el = document.getElementById('bat-reading');
-        if (el) el.textContent = d.v;
-    }).catch(() => {});
-}
+// The fuel and battery/temperature live readings are part of the /api/live
+// snapshot (renderLive) - they used to be three more fetches per tick.
 
 // "Match to reference": set the offset so the calibrated reading equals the
 // reference the user types. currentOffset is added back so applying twice
@@ -4169,7 +4221,7 @@ function setOdometer() {
         msgBox.className = 'msg-success';
         msgBox.innerText = 'Odometer set to ' + disp.toFixed(1) + ' ' + (CURRENT_UNITS_IMPERIAL ? 'mi' : 'km');
         input.value = '';
-        pollOdo();
+        liveTick();   // refresh the odometer cell straight away
     }).catch(() => {
         msgBox.className = 'msg-error'; msgBox.innerText = "Failed to set odometer.";
     });
@@ -4181,11 +4233,16 @@ let serialHasData = false;
 // A throttled background tab keeps fetching and stalling TCP on the device
 // (errno 11 write storms). Stop all polling whenever the tab is not visible.
 let tabHidden = false;
-document.addEventListener('visibilitychange', () => { tabHidden = document.hidden; });
+document.addEventListener('visibilitychange', () => {
+    tabHidden = document.hidden;
+    // Coming back to the foreground must not wait for the next tick, and the
+    // lane is already free: the 900 ms abort ran while the tab was hidden.
+    if (!tabHidden) liveTick();
+});
 
 function pollSerial() {
     if (tabHidden) return;
-    fetch('/api/serial').then(r => r.text()).then(data => {
+    laneFetch('/api/serial', null, r => r.text()).then(data => {
         let el = document.getElementById('serial-out');
         if (!data || data.length === 0) {
             if (!serialHasData) el.innerHTML = 'Waiting for data...';
@@ -4326,7 +4383,7 @@ let perfTimer = null;
 
 function updatePerf() {
     if (tabHidden) return;
-    fetch('/api/perf').then(r => r.json()).then(d => {
+    laneFetch('/api/perf', null, r => r.json()).then(d => {
         function set(id, v) { let el = document.getElementById(id); if (el) el.textContent = v; }
         set('p-cpu-freq', d.cpu_freq + ' MHz');
         set('p-cpu-mode', d.cpu_dynamic ? 'Dynamic' : 'Fixed ' + d.cpu_freq + ' MHz');
@@ -4407,6 +4464,9 @@ function updatePerf() {
         // evidence). Dropped from the monitor by request (issue #53); /api/perf
         // still reports stack_free for anyone querying the endpoint directly.
         set('p-spi', (d.spi_speed / 1e6).toFixed(0) + ' MHz');
+        devServeLast = d.web_serve_ms_last; devServeMax = d.web_serve_ms_max;
+        devSlowIters = d.web_slow_iters;
+        updateLivePollRow();
     }).catch(() => {});
 }
 
