@@ -11,4 +11,9 @@
     <color name="hud_red">#FF3D5E</color>
     <color name="hud_text_primary">#D8F0F5</color>
     <color name="hud_text_dim">#5F7F88</color>
+    <!-- Launcher icon background layer: hud_bg lifted by a radial cyan glow behind
+         the gauge. scripts/preview_icon.py references these two by name (COLOR_NAMES),
+         so the icon and the app share one palette. -->
+    <color name="hud_icon_glow">#0C1B26</color>
+    <color name="hud_icon_mid">#081118</color>
 </resources>

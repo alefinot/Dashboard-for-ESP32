@@ -23,3 +23,8 @@ site/
 
 # OTA release signing private key - NEVER commit (scripts/ota_sign.py)
 keys/
+
+# Icon design previews rendered by scripts/preview_icon.py (local only)
+icon-preview.png
+icon-sheet*.png
+icon-*-preview.png
