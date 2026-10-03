@@ -20,8 +20,12 @@ This script re-creates those server constraints on the host and measures the
   lane     - what the page should do: one request in flight, 900 ms timeout
 
 Run:  python scripts/verify_live_poll.py --serve-ms <ms> --ticks <n>
-Exit: 0 when the lane pattern holds 1 Hz (and, at or above OVERFLOW_SERVE_MS,
-      the parallel pattern is demonstrably degraded).
+      python scripts/verify_live_poll.py --device http://192.168.1.116 --ticks 20 --load 2
+Exit: 0 when the lane pattern holds 1 Hz (and, at or above OVERFLOW_SERVE_MS, the
+      parallel pattern is demonstrably degraded). ``--device`` runs the same two
+      patterns against a real dashboard, where ``--load`` adds clients pulling
+      the UI page - an idle device on a bench hides the bug, a working install
+      does not.
 """
 
 import argparse
@@ -139,10 +143,10 @@ class _Handler:  # placeholder: requests are handled inline by SingleClientServe
     pass
 
 
-def fetch(port, path, timeout=None):
+def fetch(target, path, timeout=None):
     """One poll. Returns parsed JSON, or None if the request failed."""
     try:
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+        conn = http.client.HTTPConnection(target[0], target[1], timeout=timeout)
         conn.request("GET", path)
         resp = conn.getresponse()
         body = resp.read()
@@ -190,14 +194,14 @@ class Recorder:
         return misses, median_ms
 
 
-def run_parallel(port, ticks, tick_ms, rec):
+def run_parallel(target, ticks, tick_ms, rec):
     """What the page does today: four simultaneous fetches per tick, no timeout,
     no in-flight guard - a slow tick just stacks more sockets on the device."""
     for _ in range(ticks):
         started = time.monotonic()
         for path in PARALLEL_ENDPOINTS:
             def grab(p=path):
-                if fetch(port, p) is None:
+                if fetch(target, p) is None:
                     rec.fail()
                 else:
                     rec.hit(p, time.monotonic())
@@ -208,7 +212,7 @@ def run_parallel(port, ticks, tick_ms, rec):
     time.sleep(4.0)  # let stragglers land, the browser waits too
 
 
-def run_lane(port, ticks, tick_ms, rec, timeout_s=0.9):
+def run_lane(target, ticks, tick_ms, rec, timeout_s=0.9):
     """What the fixed page does: one request in flight per tick, aborted at
     900 ms so a stalled poll can never hold the device's single client slot
     (the core holds one for HTTP_MAX_DATA_WAIT = 5 s) and can never stack a
@@ -227,7 +231,7 @@ def run_lane(port, ticks, tick_ms, rec, timeout_s=0.9):
 
         def grab():
             try:
-                if fetch(port, "/api/live", timeout=timeout_s) is None:
+                if fetch(target, "/api/live", timeout=timeout_s) is None:
                     rec.fail()
                 else:
                     rec.hit("/api/live", time.monotonic())
@@ -369,6 +373,66 @@ def check_counters():
     return problems
 
 
+def load_puller(target, stop_at, counter):
+    """A second client pulling the 51 KB UI page - a settings tab left open, the
+    Android app, another browser. Idle on the bench, this is what a real install
+    looks like to the pollers, and it is what makes the four-fetch page fail."""
+    while time.monotonic() < stop_at:
+        try:
+            conn = http.client.HTTPConnection(target[0], target[1], timeout=20)
+            conn.request("GET", "/")
+            conn.getresponse().read()
+            conn.close()
+            counter[0] += 1
+        except (OSError, http.client.HTTPException):
+            counter[1] += 1
+        time.sleep(1.0)
+
+
+def device_snapshot(target):
+    """The firmware's own numbers for the same window (they are cumulative since
+    boot, so the interesting value is the delta across a pattern)."""
+    d = fetch(target, "/api/perf", timeout=10)
+    if not d:
+        return None
+    return {k: d.get(k) for k in ("web_serve_ms_last", "web_serve_ms_max",
+                                  "web_slow_iters")}
+
+
+def run_device(target, args):
+    """Same two patterns, against a real dashboard instead of the fake server.
+    The device is the thing the fix has to hold, and its web_serve_* counters
+    come from the firmware itself rather than from the simulation."""
+    print("device=%s:%d ticks=%d load=%d" % (target[0], target[1], args.ticks,
+                                             args.load))
+    results = {}
+    for name, runner in (("parallel", run_parallel), ("lane", run_lane)):
+        rec = Recorder()
+        pulled = [0, 0]
+        stop_at = time.monotonic() + (args.ticks + 6) * args.tick_ms / 1000.0
+        helpers = [threading.Thread(target=load_puller, args=(target, stop_at, pulled),
+                                    daemon=True) for _ in range(args.load)]
+        for t in helpers:
+            t.start()
+        before = device_snapshot(target)
+        runner(target, args.ticks, args.tick_ms, rec)
+        after = device_snapshot(target)
+        for t in helpers:
+            t.join()
+        misses, median_ms = rec.stats(args.tick_ms)
+        results[name] = (misses, median_ms, rec.failures)
+        print("pattern=%s ticks=%d misses=%d interval_median=%dms failures=%d "
+              "skips=%d ui_pages=%d device=%s"
+              % (name, args.ticks, misses, median_ms, rec.failures, rec.skips,
+                 pulled[0], after))
+        if before and after and before["web_serve_ms_max"] is not None:
+            print("  device serve max %s ms, slow iterations %d -> %d"
+                  % (after["web_serve_ms_max"], before["web_slow_iters"],
+                     after["web_slow_iters"]))
+        time.sleep(3.0)
+    return results
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--serve-ms", type=int, default=0,
@@ -381,6 +445,11 @@ def main():
     ap.add_argument("--shape-only", action="store_true")
     ap.add_argument("--counters-only", action="store_true")
     ap.add_argument("--webui-only", action="store_true")
+    ap.add_argument("--device", metavar="URL",
+                    help="run the same two patterns against a real dashboard "
+                         "(http://192.168.1.116) instead of the fake server")
+    ap.add_argument("--load", type=int, default=0,
+                    help="with --device: extra clients pulling the UI page")
     args = ap.parse_args()
 
     if args.shape_only:
@@ -405,6 +474,35 @@ def main():
         print("PASS webui" if not problems else "FAIL webui: %d problem(s)" % len(problems))
         return 1 if problems else 0
 
+    if args.device:
+        from urllib.parse import urlparse
+        u = urlparse(args.device if "://" in args.device else "http://" + args.device)
+        target = (u.hostname, u.port or 80)
+        probe = fetch(target, "/api/live", timeout=10)
+        if probe is None:
+            print("ASSERT FAIL: %s:%d has no GET /api/live - flash the firmware "
+                  "this plan builds first" % target)
+            return 1
+        results = run_device(target, args)
+        pm, pmed, pfails = results["parallel"]
+        lm, lmed, lfails = results["lane"]
+        if lm != 0:
+            print("ASSERT FAIL: lane pattern missed %d tick(s) on the device" % lm)
+            return 1
+        if lfails:
+            print("ASSERT FAIL: lane pattern had %d failed request(s) on the device"
+                  % lfails)
+            return 1
+        if not (0 <= lmed <= args.tick_ms + 250):
+            print("ASSERT FAIL: device lane interval median %dms is not within "
+                  "250ms of %dms" % (lmed, args.tick_ms))
+            return 1
+        print("note: parallel on the device was misses=%d failures=%d "
+              "interval_median=%dms (idle devices hide the bug; --load exposes it)"
+              % (pm, pfails, pmed))
+        print("RESULT: PASS")
+        return 0
+
     server = SingleClientServer(args.port, args.serve_ms, args.loop_ms)
     server.start()
     try:
@@ -412,7 +510,7 @@ def main():
         for name, runner in (("parallel", run_parallel), ("lane", run_lane)):
             rec = Recorder()
             server.served = 0  # per-pattern count, not cumulative
-            runner(args.port, args.ticks, args.tick_ms, rec)
+            runner(("127.0.0.1", args.port), args.ticks, args.tick_ms, rec)
             misses, median_ms = rec.stats(args.tick_ms)
             results[name] = (misses, median_ms, rec.failures)
             print("pattern=%s ticks=%d misses=%d interval_median=%dms failures=%d "
