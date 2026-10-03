@@ -515,202 +515,398 @@ struct CfgParam {
 // list and both lists were diffed field by field (global, NVS key, default,
 // band) before the macros were removed - see scripts/cfg_table_migration.py.
 static const CfgParam CFG_TABLE[] = {
-  { &DISPLAY_ROTATION, "DISPLAY_ROTATION", "DISP_ROT", nullptr, 0, 3, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &UNITS_IMPERIAL, "UNITS_IMPERIAL", "UNITS_IMP", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &ADV_MODE, "ADV_MODE", "ADV_MODE", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SPI_BUS_SPEED, "SPI_BUS_SPEED", "SPI_FREQ", nullptr, SPI_SPEED_MIN_HZ, SPI_SPEED_MAX_HZ, 60000000, 0.0f, 0.0f, 0.0f, 0, CK_UINT },
-  { &DISPLAY_WIDTH, "DISPLAY_WIDTH", "DISP_W", nullptr, 16, 2048, 480, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &DISPLAY_HEIGHT, "DISPLAY_HEIGHT", "DISP_H", nullptr, 16, 2048, 320, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &TARGET_FPS, "TARGET_FPS", "TGT_FPS", nullptr, 5, 120, 60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &BACKLIGHT_BRIGHTNESS, "BACKLIGHT_BRIGHTNESS", "BL_BRIGHT", nullptr, 0, 100, 100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &ENABLE_AUTO_BRIGHTNESS, "ENABLE_AUTO_BRIGHTNESS", "EN_AUTO_BL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &LIGHT_SENSOR_DARK_VAL, "LIGHT_SENSOR_DARK_VAL", "LIGHT_DARK", nullptr, 0, 4095, 432, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &LIGHT_SENSOR_BRIGHT_VAL, "LIGHT_SENSOR_BRIGHT_VAL", "LIGHT_BRIGHT", nullptr, 0, 4095, 2851, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &AUTO_BRIGHT_DARK, "AUTO_BRIGHT_DARK", "AB_DARK", nullptr, 0, 100, 13, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &AUTO_BRIGHT_LIGHT, "AUTO_BRIGHT_LIGHT", "AB_LIGHT", nullptr, 0, 100, 100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &AUTO_BRIGHT_FADE_MS, "AUTO_BRIGHT_FADE_MS", "AB_FADE", nullptr, 0, 60000, 4000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &FADE_DURATION_MS, "FADE_DURATION_MS", "FADE_DUR", nullptr, 0, 10000, 700, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SPLASH_SIGNATURE, "SPLASH_SIGNATURE", "SPLASH_SIG", "by @ale.finot", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(SPLASH_SIGNATURE), CK_STR },
-  { &REBOOT_SIGNATURE, "REBOOT_SIGNATURE", "REBOOT_SIG", "Dashboard++ by @ale.finot", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(REBOOT_SIGNATURE), CK_STR },
-  { &DASHBOARD_SIGNATURE, "DASHBOARD_SIGNATURE", "DASH_SIG", "<<<<<<    Dashboard++ by @ale.finot    >>>>>>", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(DASHBOARD_SIGNATURE), CK_STR },
-  { &TEMP_BAR_MIN, "TEMP_BAR_MIN", "TMP_BAR_MIN", nullptr, -40, 300, 10, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &TEMP_BAR_MAX, "TEMP_BAR_MAX", "TMP_BAR_MAX", nullptr, -40, 300, 110, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &TEMP_WARN_RED, "TEMP_WARN_RED", "TMP_WRN_R", nullptr, -40, 300, 90, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &TEMP_WARN_YEL, "TEMP_WARN_YEL", "TMP_WRN_Y", nullptr, -40, 300, 45, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &TEMP_WARN_LOW, "TEMP_WARN_LOW", "TMP_WRN_L", nullptr, -40, 300, 20, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &FUEL_WARN_RED, "FUEL_WARN_RED", "FUL_WRN_R", nullptr, 0, 100, 20, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &FUEL_WARN_YEL, "FUEL_WARN_YEL", "FUL_WRN_Y", nullptr, 0, 100, 45, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &COLOR_TEMP_NORM, "COLOR_TEMP_NORM", "C_TMP_N", "#00ff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_TEMP_NORM), CK_STR },
-  { &COLOR_TEMP_WARN, "COLOR_TEMP_WARN", "C_TMP_W", "#ffff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_TEMP_WARN), CK_STR },
-  { &COLOR_TEMP_CRIT, "COLOR_TEMP_CRIT", "C_TMP_C", "#ff0000", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_TEMP_CRIT), CK_STR },
-  { &COLOR_FUEL_NORM, "COLOR_FUEL_NORM", "C_FUL_N", "#00ff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_FUEL_NORM), CK_STR },
-  { &COLOR_FUEL_WARN, "COLOR_FUEL_WARN", "C_FUL_W", "#ffff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_FUEL_WARN), CK_STR },
-  { &COLOR_FUEL_CRIT, "COLOR_FUEL_CRIT", "C_FUL_C", "#ff0000", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_FUEL_CRIT), CK_STR },
-  { &GHOST_COLOR_STR, "GHOST_COLOR_STR", "GHOST_C", "#474747", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(GHOST_COLOR_STR), CK_STR },
-  { &WHEEL_CIRCUMFERENCE_MM, "WHEEL_CIRCUMFERENCE_MM", "WHL_CIRC", nullptr, 0, 0, 0, 50.0f, 10000.0f, 1650.0f, 0, CK_FLT },
-  { &FUEL_FILTER_ALPHA, "FUEL_FILTER_ALPHA", "FUEL_FILT", nullptr, 0, 0, 0, 0.001f, 1.0f, 0.08f, 0, CK_FLT },
-  { &TRIP_RESET_HOLD_MS, "TRIP_RESET_HOLD_MS", "TRP_RST_H", nullptr, 200, 10000, 1500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &FUEL_TOUCH_POINTS, "FUEL_TOUCH_POINTS", "FTL_PTS", nullptr, 2, 20, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &FUEL_INPUT_ENABLED, "FUEL_INPUT_ENABLED", "FUEL_EN", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &FUEL_EXC_RES_OHM, "FUEL_EXC_RES_OHM", "FUEL_EXR", nullptr, 10, 100000, 220, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &FUEL_ADC_VREF, "FUEL_ADC_VREF", "FUEL_VRF", nullptr, 0, 0, 0, 2.5f, 4.2f, 3.30f, 0, CK_FLT },
-  { &FUEL_OHM_EMPTY, "FUEL_OHM_EMPTY", "FUEL_OE", nullptr, 0, 0, 0, 0.0f, 100000.0f, 10.0f, 0, CK_FLT },
-  { &FUEL_OHM_FULL, "FUEL_OHM_FULL", "FUEL_OF", nullptr, 0, 0, 0, 0.0f, 100000.0f, 180.0f, 0, CK_FLT },
-  { &FUEL_OVERSAMPLE, "FUEL_OVERSAMPLE", "FUEL_OSM", nullptr, 1, 64, 16, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &BATTERY_SCALE, "BATTERY_SCALE", "BAT_SCALE", nullptr, 0, 0, 0, 0.01f, 1000.0f, 5.7f, 0, CK_FLT },
-  { &BATTERY_OFFSET, "BATTERY_OFFSET", "BAT_OFFS", nullptr, 0, 0, 0, -50.0f, 50.0f, 0.2f, 0, CK_FLT },
-  { &NTC_R_BALANCE, "NTC_R_BALANCE", "NTC_BAL", nullptr, 0, 0, 0, 100.0f, 10000000.0f, 10000.0f, 0, CK_FLT },
-  { &NTC_R25, "NTC_R25", "NTC_R25", nullptr, 0, 0, 0, 100.0f, 10000000.0f, 10000.0f, 0, CK_FLT },
-  { &NTC_BETA, "NTC_BETA", "NTC_BETA", nullptr, 0, 0, 0, 1000.0f, 20000.0f, 3950.0f, 0, CK_FLT },
-  { &NTC_TEMP_OFFSET, "NTC_TEMP_OFFSET", "NTC_OFFS", nullptr, 0, 0, 0, -50.0f, 50.0f, 0.0f, 0, CK_FLT },
-  { &GPS_BAUD, "GPS_BAUD", "GPS_BAUD", nullptr, 1200, 921600, 115200, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &MIN_SATELLITES, "MIN_SATELLITES", "MIN_SAT", nullptr, 1, 32, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OPTIMAL_SATELLITES, "OPTIMAL_SATELLITES", "OPT_SAT", nullptr, 1, 32, 12, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &MAX_SPEED_DELTA_KMH, "MAX_SPEED_DELTA_KMH", "MAX_SPD_DELT", nullptr, 0, 0, 0, 0.01f, 100.0f, 5.0f, 0, CK_FLT },
-  { &MIN_SPEED_THRESHOLD, "MIN_SPEED_THRESHOLD", "MIN_SPD_THR", nullptr, 0, 0, 0, 0.0f, 50.0f, 1.0f, 0, CK_FLT },
-  { &GPS_START_KMH, "GPS_START_KMH", "GPS_START", nullptr, 0, 0, 0, 0.0f, 200.0f, 3.0f, 0, CK_FLT },
-  { &GPS_STOP_SETTLE_MS, "GPS_STOP_SETTLE_MS", "GPS_STL_MS", nullptr, 0, 60000, 1500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &GPS_MIN_DEV_KMH, "GPS_MIN_DEV_KMH", "GPS_MIN_DV", nullptr, 0, 0, 0, 0.0f, 50.0f, 1.0f, 0, CK_FLT },
-  { &SPEED_SOURCE_MODE, "SPEED_SOURCE_MODE", "SPD_SRC_MODE", nullptr, 0, 2, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SPEED_SOURCE_HOLD_MS, "SPEED_SOURCE_HOLD_MS", "SPD_SRC_HOLD", nullptr, 0, 10000, 500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &HALL_MEDIAN_SAMPLES, "HALL_MEDIAN_SAMPLES", "HALL_MED_N", nullptr, 1, 31, 3, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &HALL_PERIOD_GUARD, "HALL_PERIOD_GUARD", "HALL_PRD_GRD", nullptr, 1, 100, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &HALL_PULSE_MIN_US, "HALL_PULSE_MIN_US", "HALL_PL_MIN", nullptr, 10, 1000, 150, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &ACCEL_START_SPEED, "ACCEL_START_SPEED", "ACC_STRT", nullptr, 0, 0, 0, 0.0f, 200.0f, 1.0f, 0, CK_FLT },
-  { &ACCEL_TARGET_SPEED, "ACCEL_TARGET_SPEED", "ACC_TGT", nullptr, 0, 0, 0, 1.0f, 400.0f, 50.0f, 0, CK_FLT },
-  { &ACCEL_MAX_TIME, "ACCEL_MAX_TIME", "ACC_MAX_T", nullptr, 0, 0, 0, 0.1f, 999.99f, 9.99f, 0, CK_FLT },
-  { &ACCEL_BADGE_LINE1, "ACCEL_BADGE_LINE1", "ACC_BDG_1", "0-50", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(ACCEL_BADGE_LINE1), CK_STR },
-  { &ACCEL_BADGE_LINE2, "ACCEL_BADGE_LINE2", "ACC_BDG_2", "km/h", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(ACCEL_BADGE_LINE2), CK_STR },
-  { &BIG_CENTER_X, "BIG_CENTER_X", "BCX", nullptr, 0, 4095, 240, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &BIG_CENTER_Y, "BIG_CENTER_Y", "BCY", nullptr, 0, 4095, 160, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_TIME_X, "OFFSET_BIG_TIME_X", "O_BTIME_X", nullptr, -4096, 4096, 107, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_TIME_Y, "OFFSET_BIG_TIME_Y", "O_BTIME_Y", nullptr, -4096, 4096, -91, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_DATE_X, "OFFSET_BIG_DATE_X", "O_BDATE_X", nullptr, -4096, 4096, -131, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_DATE_Y, "OFFSET_BIG_DATE_Y", "O_BDATE_Y", nullptr, -4096, 4096, -91, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_SIGNATURE_X, "OFFSET_BIG_SIGNATURE_X", "O_BSIG_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_SIGNATURE_Y, "OFFSET_BIG_SIGNATURE_Y", "O_BSIG_Y", nullptr, -4096, 4096, -75, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_SPEED_NUM_X, "OFFSET_BIG_SPEED_NUM_X", "O_BSN_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_SPEED_NUM_Y, "OFFSET_BIG_SPEED_NUM_Y", "O_BSN_Y", nullptr, -4096, 4096, -3, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_SPEED_UNIT_X, "OFFSET_BIG_SPEED_UNIT_X", "O_BSU_X", nullptr, -4096, 4096, 106, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_SPEED_UNIT_Y, "OFFSET_BIG_SPEED_UNIT_Y", "O_BSU_Y", nullptr, -4096, 4096, 56, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_ODO_X, "OFFSET_BIG_ODO_X", "O_BODO_X", nullptr, -4096, 4096, 22, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_ODO_Y, "OFFSET_BIG_ODO_Y", "O_BODO_Y", nullptr, -4096, 4096, 126, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_SAT_X, "OFFSET_BIG_SAT_X", "O_BSAT_X", nullptr, -4096, 4096, 179, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_SAT_Y, "OFFSET_BIG_SAT_Y", "O_BSAT_Y", nullptr, -4096, 4096, -114, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_TMR_X, "OFFSET_BIG_TMR_X", "O_BTMR_X", nullptr, -4096, 4096, -53, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_TMR_Y, "OFFSET_BIG_TMR_Y", "O_BTMR_Y", nullptr, -4096, 4096, -46, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_BAT_X, "OFFSET_BIG_BAT_X", "O_BBAT_X", nullptr, -4096, 4096, -112, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_BAT_Y, "OFFSET_BIG_BAT_Y", "O_BBAT_Y", nullptr, -4096, 4096, 123, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SIDEBAR_LEFT_X, "SIDEBAR_LEFT_X", "SBAR_L_X", nullptr, -4096, 4096, 10, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SIDEBAR_LEFT_Y, "SIDEBAR_LEFT_Y", "SBAR_L_Y", nullptr, -4096, 4096, 95, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SIDEBAR_RIGHT_X, "SIDEBAR_RIGHT_X", "SBAR_R_X", nullptr, -4096, 4096, 462, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SIDEBAR_RIGHT_Y, "SIDEBAR_RIGHT_Y", "SBAR_R_Y", nullptr, -4096, 4096, 95, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_HALL_ICON_X, "OFFSET_HALL_ICON_X", "O_HALL_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_HALL_ICON_Y, "OFFSET_HALL_ICON_Y", "O_HALL_Y", nullptr, -4096, 4096, -100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_WIFI_ICON_X, "OFFSET_WIFI_ICON_X", "O_WIFI_X", nullptr, -4096, 4096, 204, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_WIFI_ICON_Y, "OFFSET_WIFI_ICON_Y", "O_WIFI_Y", nullptr, -4096, 4096, -108, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_INST_KML_X, "OFFSET_INST_KML_X", "O_INST_X", nullptr, -4096, 4096, 60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_INST_KML_Y, "OFFSET_INST_KML_Y", "O_INST_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_AVG_KML_X, "OFFSET_AVG_KML_X", "O_AVG_X", nullptr, -4096, 4096, 160, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_AVG_KML_Y, "OFFSET_AVG_KML_Y", "O_AVG_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_AVG_SPEED_X, "OFFSET_AVG_SPEED_X", "O_AVG_SPD_X", nullptr, -4096, 4096, -163, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_AVG_SPEED_Y, "OFFSET_AVG_SPEED_Y", "O_AVG_SPD_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_MAX_SPEED_X, "OFFSET_MAX_SPEED_X", "O_MAX_SPD_X", nullptr, -4096, 4096, -60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_MAX_SPEED_Y, "OFFSET_MAX_SPEED_Y", "O_MAX_SPD_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_FUEL_LTRS_X, "OFFSET_FUEL_LTRS_X", "O_FLTRS_X", nullptr, -4096, 4096, 132, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_FUEL_LTRS_Y, "OFFSET_FUEL_LTRS_Y", "O_FLTRS_Y", nullptr, -4096, 4096, 123, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SIDEBAR_BAR_WIDTH, "SIDEBAR_BAR_WIDTH", "SBAR_W", nullptr, 1, 2048, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SIDEBAR_BAR_HEIGHT, "SIDEBAR_BAR_HEIGHT", "SBAR_H", nullptr, 1, 2048, 190, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SHOW_ELEMENT_BOUNDS, "SHOW_ELEMENT_BOUNDS", "SHW_BNDS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_SPEED, "SHOW_ELEMENT_SPEED", "SH_SPD", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_SPEED_UNIT, "SHOW_ELEMENT_SPEED_UNIT", "SH_SPD_UN", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_SIGNATURE, "SHOW_ELEMENT_SIGNATURE", "SH_SIG", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_SPEED_SOURCE, "SHOW_ELEMENT_SPEED_SOURCE", "SH_SPD_SRC", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_WIFI, "SHOW_ELEMENT_WIFI", "SH_WIFI", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_TIME, "SHOW_ELEMENT_TIME", "SH_TIME", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_DATE, "SHOW_ELEMENT_DATE", "SH_DATE", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_ODO, "SHOW_ELEMENT_ODO", "SH_ODO", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_SIDEBAR_TEMP, "SHOW_ELEMENT_SIDEBAR_TEMP", "SH_SB_TMP", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_SIDEBAR_FUEL, "SHOW_ELEMENT_SIDEBAR_FUEL", "SH_SB_FUL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_SAT, "SHOW_ELEMENT_SAT", "SH_SAT", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_TMR, "SHOW_ELEMENT_TMR", "SH_TMR", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_BAT, "SHOW_ELEMENT_BAT", "SH_BAT", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_INST_KML, "SHOW_ELEMENT_INST_KML", "SH_INST", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_AVG_KML, "SHOW_ELEMENT_AVG_KML", "SH_AVG", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_AVG_SPEED, "SHOW_ELEMENT_AVG_SPEED", "SH_AVG_SPD", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_MAX_SPEED, "SHOW_ELEMENT_MAX_SPEED", "SH_MAX_SPD", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_FUEL_LTRS, "SHOW_ELEMENT_FUEL_LTRS", "SH_FUL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_GHOST_DIGITS, "SHOW_GHOST_DIGITS", "SH_GHOST", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &SHOW_ELEMENT_WEATHER, "SHOW_ELEMENT_WEATHER", "SH_WEATH", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &OFFSET_WEATHER_X, "OFFSET_WEATHER_X", "O_WEATH_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_WEATHER_Y, "OFFSET_WEATHER_Y", "O_WEATH_Y", nullptr, -4096, 4096, 146, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &WEATHER_CITY, "WEATHER_CITY", "WEATH_CITY", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WEATHER_CITY), CK_STR },
-  { &WEATHER_LAT, "WEATHER_LAT", "WEATH_LAT", nullptr, 0, 0, 0, -90.0f, 90.0f, 0.0f, 0, CK_FLT },
-  { &WEATHER_LON, "WEATHER_LON", "WEATH_LON", nullptr, 0, 0, 0, -180.0f, 180.0f, 0.0f, 0, CK_FLT },
-  { &WEATHER_REFRESH_MIN, "WEATHER_REFRESH_MIN", "WEATH_RFR", nullptr, 1, 1440, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &WEATHER_LOCALE, "WEATHER_LOCALE", "WEATH_LOCALE", "it", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WEATHER_LOCALE), CK_STR },
-  { &ENABLE_POWER_SENSE, "ENABLE_POWER_SENSE", "PWR_SNS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &POWER_SENSE_OFF_MS, "POWER_SENSE_OFF_MS", "PWR_OFF_MS", nullptr, 500, 120000, 10000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &ENABLE_CIRCLE_TEST, "ENABLE_CIRCLE_TEST", "CIRC_TST", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &ENABLE_DEMO_MODE, "ENABLE_DEMO_MODE", "DEMO_MODE", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &ENABLE_ANTIALIASING, "ENABLE_ANTIALIASING", "EN_AA", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &AA_SHARPNESS, "AA_SHARPNESS", "AA_SHARP", nullptr, 0, 0, 0, 0.0f, 1.0f, 0.2f, 0, CK_FLT },
-  { &SHOW_FPS_COUNTER_DEFAULT, "SHOW_FPS_COUNTER_DEFAULT", "SHW_FPS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &GPS_DEBUG_DEFAULT, "GPS_DEBUG_DEFAULT", "GPS_DBG", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &ENABLE_DYNAMIC_CPU, "ENABLE_DYNAMIC_CPU", "DYN_CPU", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &MANUAL_CPU_FREQ, "MANUAL_CPU_FREQ", "MAN_CPU", nullptr, 80, 240, 240, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &ENABLE_CPU_THROTTLE, "ENABLE_CPU_THROTTLE", "CPU_THR_EN", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &CPU_THROTTLE_TEMP_WARN, "CPU_THROTTLE_TEMP_WARN", "CPU_THR_W", nullptr, -50, 150, 50, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &CPU_THROTTLE_TEMP_CRIT, "CPU_THROTTLE_TEMP_CRIT", "CPU_THR_C", nullptr, -50, 150, 60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &ENABLE_NIGHT_MODE, "ENABLE_NIGHT_MODE", "EN_NIGHT", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &NIGHT_MODE_START_HOUR, "NIGHT_MODE_START_HOUR", "NGHT_SRT", nullptr, 0, 23, 23, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &NIGHT_MODE_END_HOUR, "NIGHT_MODE_END_HOUR", "NGHT_END", nullptr, 0, 23, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &NIGHT_BACKLIGHT, "NIGHT_BACKLIGHT", "NGHT_BL", nullptr, 0, 100, 29, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &DISPLAY_INVERT_COLORS, "DISPLAY_INVERT_COLORS", "INV_COLORS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &OFFSET_BIG_FPS_X, "OFFSET_BIG_FPS_X", "O_FPS_X", nullptr, -4096, 4096, -9, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OFFSET_BIG_FPS_Y, "OFFSET_BIG_FPS_Y", "O_FPS_Y", nullptr, -4096, 4096, -7, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &REFRESH_SPEED_MS, "REFRESH_SPEED_MS", "R_SPD", nullptr, 10, 60000, 250, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &REFRESH_BAT_MS, "REFRESH_BAT_MS", "R_BAT", nullptr, 10, 600000, 2500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &REFRESH_INST_MS, "REFRESH_INST_MS", "R_INST", nullptr, 10, 60000, 500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &REFRESH_MAX_SPEED_MS, "REFRESH_MAX_SPEED_MS", "R_MAX_SPD", nullptr, 10, 60000, 500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &REFRESH_FUEL_MS, "REFRESH_FUEL_MS", "R_FUEL", nullptr, 10, 60000, 1000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SPEED_DIGITS, "SPEED_DIGITS", "SPD_DIG", nullptr, 1, 4, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &SAT_DIGITS, "SAT_DIGITS", "SAT_DIG", nullptr, 1, 3, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &TMR_INT_DIGITS, "TMR_INT_DIGITS", "TMR_INT", nullptr, 1, 14, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &TMR_DEC_DIGITS, "TMR_DEC_DIGITS", "TMR_DEC", nullptr, 0, 4, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &BAT_INT_DIGITS, "BAT_INT_DIGITS", "BAT_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &BAT_DEC_DIGITS, "BAT_DEC_DIGITS", "BAT_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &INST_INT_DIGITS, "INST_INT_DIGITS", "INST_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &INST_DEC_DIGITS, "INST_DEC_DIGITS", "INST_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &AVG_INT_DIGITS, "AVG_INT_DIGITS", "AVG_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &AVG_DEC_DIGITS, "AVG_DEC_DIGITS", "AVG_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &AVG_SPEED_INT_DIGITS, "AVG_SPEED_INT_DIGITS", "AVG_SPD_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &AVG_SPEED_DEC_DIGITS, "AVG_SPEED_DEC_DIGITS", "AVG_SPD_DEC", nullptr, 0, 4, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &MAX_SPEED_INT_DIGITS, "MAX_SPEED_INT_DIGITS", "MAX_SPD_INT", nullptr, 1, 14, 3, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &MAX_SPEED_DEC_DIGITS, "MAX_SPEED_DEC_DIGITS", "MAX_SPD_DEC", nullptr, 0, 4, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &FUEL_INT_DIGITS, "FUEL_INT_DIGITS", "FUEL_INT", nullptr, 1, 14, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &FUEL_DEC_DIGITS, "FUEL_DEC_DIGITS", "FUEL_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &ODO_INT_DIGITS, "ODO_INT_DIGITS", "ODO_INT", nullptr, 1, 14, 5, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &ODO_DEC_DIGITS, "ODO_DEC_DIGITS", "ODO_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &WIFI_SSID, "WIFI_SSID", "WIFI_SSID", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID), CK_STR },
-  { &WIFI_SSID_1, "WIFI_SSID_1", "WIFI_S1", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_1), CK_STR },
-  { &WIFI_SSID_2, "WIFI_SSID_2", "WIFI_S2", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_2), CK_STR },
-  { &WIFI_SSID_3, "WIFI_SSID_3", "WIFI_S3", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_3), CK_STR },
-  { &WIFI_SSID_4, "WIFI_SSID_4", "WIFI_S4", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_4), CK_STR },
-  { &AP_PASSWORD, "AP_PASSWORD", "AP_PWD", AP_PASSWORD_DEFAULT, 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(AP_PASSWORD), CK_STR },
-  { &WIFI_ATTEMPT_SECONDS, "WIFI_ATTEMPT_SECONDS", "WIFI_ATTEM_S", nullptr, 5, 60, 12, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &NTP_ENABLED, "NTP_ENABLED", "NTP_EN", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &NTP_SERVER, "NTP_SERVER", "NTP_SRV", "pool.ntp.org", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(NTP_SERVER), CK_STR },
-  { &TZ_OFFSET_HOURS, "TZ_OFFSET_HOURS", "TZ_OFFSET", nullptr, -14, 14, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &TZ_DST_ENABLED, "TZ_DST_ENABLED", "TZ_DST", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &TZ_DST_RULE, "TZ_DST_RULE", "TZ_RULE", nullptr, 0, 2, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-  { &OTA_PULL_ENABLED, "OTA_PULL_ENABLED", "OTA_PULL_EN", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
-  { &OTA_PULL_URL, "OTA_PULL_URL", "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(OTA_PULL_URL), CK_STR },
-  { &VERSION_OVERRIDE, "VERSION_OVERRIDE", "VER_OVR", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(VERSION_OVERRIDE), CK_STR },
-  { &WIFI_PASSWORD, "WIFI_PASSWORD", "WIFI_PWD", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD), CK_SECRET },
-  { &WIFI_PASSWORD_1, "WIFI_PASSWORD_1", "WIFI_P1", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_1), CK_SECRET },
-  { &WIFI_PASSWORD_2, "WIFI_PASSWORD_2", "WIFI_P2", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_2), CK_SECRET },
-  { &WIFI_PASSWORD_3, "WIFI_PASSWORD_3", "WIFI_P3", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_3), CK_SECRET },
+  { &DISPLAY_ROTATION, "DISPLAY_ROTATION", "DISP_ROT", nullptr, 0, 3, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &UNITS_IMPERIAL, "UNITS_IMPERIAL", "UNITS_IMP", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &ADV_MODE, "ADV_MODE", "ADV_MODE", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SPI_BUS_SPEED, "SPI_BUS_SPEED", "SPI_FREQ", nullptr, SPI_SPEED_MIN_HZ, SPI_SPEED_MAX_HZ, 60000000, 0.0f, 0.0f, 0.0f, 0, CK_UINT },
+
+  { &DISPLAY_WIDTH, "DISPLAY_WIDTH", "DISP_W", nullptr, 16, 2048, 480, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &DISPLAY_HEIGHT, "DISPLAY_HEIGHT", "DISP_H", nullptr, 16, 2048, 320, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &TARGET_FPS, "TARGET_FPS", "TGT_FPS", nullptr, 5, 120, 60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &BACKLIGHT_BRIGHTNESS, "BACKLIGHT_BRIGHTNESS", "BL_BRIGHT", nullptr, 0, 100, 100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &ENABLE_AUTO_BRIGHTNESS, "ENABLE_AUTO_BRIGHTNESS", "EN_AUTO_BL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &LIGHT_SENSOR_DARK_VAL, "LIGHT_SENSOR_DARK_VAL", "LIGHT_DARK", nullptr, 0, 4095, 432, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &LIGHT_SENSOR_BRIGHT_VAL, "LIGHT_SENSOR_BRIGHT_VAL", "LIGHT_BRIGHT", nullptr, 0, 4095, 2851, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &AUTO_BRIGHT_DARK, "AUTO_BRIGHT_DARK", "AB_DARK", nullptr, 0, 100, 13, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &AUTO_BRIGHT_LIGHT, "AUTO_BRIGHT_LIGHT", "AB_LIGHT", nullptr, 0, 100, 100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &AUTO_BRIGHT_FADE_MS, "AUTO_BRIGHT_FADE_MS", "AB_FADE", nullptr, 0, 60000, 4000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &FADE_DURATION_MS, "FADE_DURATION_MS", "FADE_DUR", nullptr, 0, 10000, 700, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SPLASH_SIGNATURE, "SPLASH_SIGNATURE", "SPLASH_SIG", "by @ale.finot", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(SPLASH_SIGNATURE), CK_STR },
+
+  { &REBOOT_SIGNATURE, "REBOOT_SIGNATURE", "REBOOT_SIG", "Dashboard++ by @ale.finot", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(REBOOT_SIGNATURE), CK_STR },
+
+  { &DASHBOARD_SIGNATURE, "DASHBOARD_SIGNATURE", "DASH_SIG", "<<<<<<    Dashboard++ by @ale.finot    >>>>>>", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(DASHBOARD_SIGNATURE), CK_STR },
+
+  { &TEMP_BAR_MIN, "TEMP_BAR_MIN", "TMP_BAR_MIN", nullptr, -40, 300, 10, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &TEMP_BAR_MAX, "TEMP_BAR_MAX", "TMP_BAR_MAX", nullptr, -40, 300, 110, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &TEMP_WARN_RED, "TEMP_WARN_RED", "TMP_WRN_R", nullptr, -40, 300, 90, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &TEMP_WARN_YEL, "TEMP_WARN_YEL", "TMP_WRN_Y", nullptr, -40, 300, 45, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &TEMP_WARN_LOW, "TEMP_WARN_LOW", "TMP_WRN_L", nullptr, -40, 300, 20, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &FUEL_WARN_RED, "FUEL_WARN_RED", "FUL_WRN_R", nullptr, 0, 100, 20, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &FUEL_WARN_YEL, "FUEL_WARN_YEL", "FUL_WRN_Y", nullptr, 0, 100, 45, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &COLOR_TEMP_NORM, "COLOR_TEMP_NORM", "C_TMP_N", "#00ff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_TEMP_NORM), CK_STR },
+
+  { &COLOR_TEMP_WARN, "COLOR_TEMP_WARN", "C_TMP_W", "#ffff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_TEMP_WARN), CK_STR },
+
+  { &COLOR_TEMP_CRIT, "COLOR_TEMP_CRIT", "C_TMP_C", "#ff0000", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_TEMP_CRIT), CK_STR },
+
+  { &COLOR_FUEL_NORM, "COLOR_FUEL_NORM", "C_FUL_N", "#00ff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_FUEL_NORM), CK_STR },
+
+  { &COLOR_FUEL_WARN, "COLOR_FUEL_WARN", "C_FUL_W", "#ffff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_FUEL_WARN), CK_STR },
+
+  { &COLOR_FUEL_CRIT, "COLOR_FUEL_CRIT", "C_FUL_C", "#ff0000", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_FUEL_CRIT), CK_STR },
+
+  { &GHOST_COLOR_STR, "GHOST_COLOR_STR", "GHOST_C", "#474747", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(GHOST_COLOR_STR), CK_STR },
+
+  { &WHEEL_CIRCUMFERENCE_MM, "WHEEL_CIRCUMFERENCE_MM", "WHL_CIRC", nullptr, 0, 0, 0, 50.0f, 10000.0f, 1650.0f, 0, CK_FLT },
+
+  { &FUEL_FILTER_ALPHA, "FUEL_FILTER_ALPHA", "FUEL_FILT", nullptr, 0, 0, 0, 0.001f, 1.0f, 0.08f, 0, CK_FLT },
+
+  { &TRIP_RESET_HOLD_MS, "TRIP_RESET_HOLD_MS", "TRP_RST_H", nullptr, 200, 10000, 1500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &FUEL_TOUCH_POINTS, "FUEL_TOUCH_POINTS", "FTL_PTS", nullptr, 2, 20, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &FUEL_INPUT_ENABLED, "FUEL_INPUT_ENABLED", "FUEL_EN", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &FUEL_EXC_RES_OHM, "FUEL_EXC_RES_OHM", "FUEL_EXR", nullptr, 10, 100000, 220, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &FUEL_ADC_VREF, "FUEL_ADC_VREF", "FUEL_VRF", nullptr, 0, 0, 0, 2.5f, 4.2f, 3.30f, 0, CK_FLT },
+
+  { &FUEL_OHM_EMPTY, "FUEL_OHM_EMPTY", "FUEL_OE", nullptr, 0, 0, 0, 0.0f, 100000.0f, 10.0f, 0, CK_FLT },
+
+  { &FUEL_OHM_FULL, "FUEL_OHM_FULL", "FUEL_OF", nullptr, 0, 0, 0, 0.0f, 100000.0f, 180.0f, 0, CK_FLT },
+
+  { &FUEL_OVERSAMPLE, "FUEL_OVERSAMPLE", "FUEL_OSM", nullptr, 1, 64, 16, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &BATTERY_SCALE, "BATTERY_SCALE", "BAT_SCALE", nullptr, 0, 0, 0, 0.01f, 1000.0f, 5.7f, 0, CK_FLT },
+
+  { &BATTERY_OFFSET, "BATTERY_OFFSET", "BAT_OFFS", nullptr, 0, 0, 0, -50.0f, 50.0f, 0.2f, 0, CK_FLT },
+
+  { &NTC_R_BALANCE, "NTC_R_BALANCE", "NTC_BAL", nullptr, 0, 0, 0, 100.0f, 10000000.0f, 10000.0f, 0, CK_FLT },
+
+  { &NTC_R25, "NTC_R25", "NTC_R25", nullptr, 0, 0, 0, 100.0f, 10000000.0f, 10000.0f, 0, CK_FLT },
+
+  { &NTC_BETA, "NTC_BETA", "NTC_BETA", nullptr, 0, 0, 0, 1000.0f, 20000.0f, 3950.0f, 0, CK_FLT },
+
+  { &NTC_TEMP_OFFSET, "NTC_TEMP_OFFSET", "NTC_OFFS", nullptr, 0, 0, 0, -50.0f, 50.0f, 0.0f, 0, CK_FLT },
+
+  { &GPS_BAUD, "GPS_BAUD", "GPS_BAUD", nullptr, 1200, 921600, 115200, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &MIN_SATELLITES, "MIN_SATELLITES", "MIN_SAT", nullptr, 1, 32, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OPTIMAL_SATELLITES, "OPTIMAL_SATELLITES", "OPT_SAT", nullptr, 1, 32, 12, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &MAX_SPEED_DELTA_KMH, "MAX_SPEED_DELTA_KMH", "MAX_SPD_DELT", nullptr, 0, 0, 0, 0.01f, 100.0f, 5.0f, 0, CK_FLT },
+
+  { &MIN_SPEED_THRESHOLD, "MIN_SPEED_THRESHOLD", "MIN_SPD_THR", nullptr, 0, 0, 0, 0.0f, 50.0f, 1.0f, 0, CK_FLT },
+
+  { &GPS_START_KMH, "GPS_START_KMH", "GPS_START", nullptr, 0, 0, 0, 0.0f, 200.0f, 3.0f, 0, CK_FLT },
+
+  { &GPS_STOP_SETTLE_MS, "GPS_STOP_SETTLE_MS", "GPS_STL_MS", nullptr, 0, 60000, 1500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &GPS_MIN_DEV_KMH, "GPS_MIN_DEV_KMH", "GPS_MIN_DV", nullptr, 0, 0, 0, 0.0f, 50.0f, 1.0f, 0, CK_FLT },
+
+  { &SPEED_SOURCE_MODE, "SPEED_SOURCE_MODE", "SPD_SRC_MODE", nullptr, 0, 2, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SPEED_SOURCE_HOLD_MS, "SPEED_SOURCE_HOLD_MS", "SPD_SRC_HOLD", nullptr, 0, 10000, 500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &HALL_MEDIAN_SAMPLES, "HALL_MEDIAN_SAMPLES", "HALL_MED_N", nullptr, 1, 31, 3, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &HALL_PERIOD_GUARD, "HALL_PERIOD_GUARD", "HALL_PRD_GRD", nullptr, 1, 100, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &HALL_PULSE_MIN_US, "HALL_PULSE_MIN_US", "HALL_PL_MIN", nullptr, 10, 1000, 150, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &ACCEL_START_SPEED, "ACCEL_START_SPEED", "ACC_STRT", nullptr, 0, 0, 0, 0.0f, 200.0f, 1.0f, 0, CK_FLT },
+
+  { &ACCEL_TARGET_SPEED, "ACCEL_TARGET_SPEED", "ACC_TGT", nullptr, 0, 0, 0, 1.0f, 400.0f, 50.0f, 0, CK_FLT },
+
+  { &ACCEL_MAX_TIME, "ACCEL_MAX_TIME", "ACC_MAX_T", nullptr, 0, 0, 0, 0.1f, 999.99f, 9.99f, 0, CK_FLT },
+
+  { &ACCEL_BADGE_LINE1, "ACCEL_BADGE_LINE1", "ACC_BDG_1", "0-50", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(ACCEL_BADGE_LINE1), CK_STR },
+
+  { &ACCEL_BADGE_LINE2, "ACCEL_BADGE_LINE2", "ACC_BDG_2", "km/h", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(ACCEL_BADGE_LINE2), CK_STR },
+
+  { &BIG_CENTER_X, "BIG_CENTER_X", "BCX", nullptr, 0, 4095, 240, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &BIG_CENTER_Y, "BIG_CENTER_Y", "BCY", nullptr, 0, 4095, 160, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_TIME_X, "OFFSET_BIG_TIME_X", "O_BTIME_X", nullptr, -4096, 4096, 107, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_TIME_Y, "OFFSET_BIG_TIME_Y", "O_BTIME_Y", nullptr, -4096, 4096, -91, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_DATE_X, "OFFSET_BIG_DATE_X", "O_BDATE_X", nullptr, -4096, 4096, -131, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_DATE_Y, "OFFSET_BIG_DATE_Y", "O_BDATE_Y", nullptr, -4096, 4096, -91, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_SIGNATURE_X, "OFFSET_BIG_SIGNATURE_X", "O_BSIG_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_SIGNATURE_Y, "OFFSET_BIG_SIGNATURE_Y", "O_BSIG_Y", nullptr, -4096, 4096, -75, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_SPEED_NUM_X, "OFFSET_BIG_SPEED_NUM_X", "O_BSN_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_SPEED_NUM_Y, "OFFSET_BIG_SPEED_NUM_Y", "O_BSN_Y", nullptr, -4096, 4096, -3, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_SPEED_UNIT_X, "OFFSET_BIG_SPEED_UNIT_X", "O_BSU_X", nullptr, -4096, 4096, 106, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_SPEED_UNIT_Y, "OFFSET_BIG_SPEED_UNIT_Y", "O_BSU_Y", nullptr, -4096, 4096, 56, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_ODO_X, "OFFSET_BIG_ODO_X", "O_BODO_X", nullptr, -4096, 4096, 22, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_ODO_Y, "OFFSET_BIG_ODO_Y", "O_BODO_Y", nullptr, -4096, 4096, 126, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_SAT_X, "OFFSET_BIG_SAT_X", "O_BSAT_X", nullptr, -4096, 4096, 179, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_SAT_Y, "OFFSET_BIG_SAT_Y", "O_BSAT_Y", nullptr, -4096, 4096, -114, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_TMR_X, "OFFSET_BIG_TMR_X", "O_BTMR_X", nullptr, -4096, 4096, -53, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_TMR_Y, "OFFSET_BIG_TMR_Y", "O_BTMR_Y", nullptr, -4096, 4096, -46, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_BAT_X, "OFFSET_BIG_BAT_X", "O_BBAT_X", nullptr, -4096, 4096, -112, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_BAT_Y, "OFFSET_BIG_BAT_Y", "O_BBAT_Y", nullptr, -4096, 4096, 123, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SIDEBAR_LEFT_X, "SIDEBAR_LEFT_X", "SBAR_L_X", nullptr, -4096, 4096, 10, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SIDEBAR_LEFT_Y, "SIDEBAR_LEFT_Y", "SBAR_L_Y", nullptr, -4096, 4096, 95, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SIDEBAR_RIGHT_X, "SIDEBAR_RIGHT_X", "SBAR_R_X", nullptr, -4096, 4096, 462, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SIDEBAR_RIGHT_Y, "SIDEBAR_RIGHT_Y", "SBAR_R_Y", nullptr, -4096, 4096, 95, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_HALL_ICON_X, "OFFSET_HALL_ICON_X", "O_HALL_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_HALL_ICON_Y, "OFFSET_HALL_ICON_Y", "O_HALL_Y", nullptr, -4096, 4096, -100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_WIFI_ICON_X, "OFFSET_WIFI_ICON_X", "O_WIFI_X", nullptr, -4096, 4096, 204, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_WIFI_ICON_Y, "OFFSET_WIFI_ICON_Y", "O_WIFI_Y", nullptr, -4096, 4096, -108, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_INST_KML_X, "OFFSET_INST_KML_X", "O_INST_X", nullptr, -4096, 4096, 60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_INST_KML_Y, "OFFSET_INST_KML_Y", "O_INST_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_AVG_KML_X, "OFFSET_AVG_KML_X", "O_AVG_X", nullptr, -4096, 4096, 160, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_AVG_KML_Y, "OFFSET_AVG_KML_Y", "O_AVG_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_AVG_SPEED_X, "OFFSET_AVG_SPEED_X", "O_AVG_SPD_X", nullptr, -4096, 4096, -163, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_AVG_SPEED_Y, "OFFSET_AVG_SPEED_Y", "O_AVG_SPD_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_MAX_SPEED_X, "OFFSET_MAX_SPEED_X", "O_MAX_SPD_X", nullptr, -4096, 4096, -60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_MAX_SPEED_Y, "OFFSET_MAX_SPEED_Y", "O_MAX_SPD_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_FUEL_LTRS_X, "OFFSET_FUEL_LTRS_X", "O_FLTRS_X", nullptr, -4096, 4096, 132, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_FUEL_LTRS_Y, "OFFSET_FUEL_LTRS_Y", "O_FLTRS_Y", nullptr, -4096, 4096, 123, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SIDEBAR_BAR_WIDTH, "SIDEBAR_BAR_WIDTH", "SBAR_W", nullptr, 1, 2048, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SIDEBAR_BAR_HEIGHT, "SIDEBAR_BAR_HEIGHT", "SBAR_H", nullptr, 1, 2048, 190, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SHOW_ELEMENT_BOUNDS, "SHOW_ELEMENT_BOUNDS", "SHW_BNDS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_SPEED, "SHOW_ELEMENT_SPEED", "SH_SPD", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_SPEED_UNIT, "SHOW_ELEMENT_SPEED_UNIT", "SH_SPD_UN", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_SIGNATURE, "SHOW_ELEMENT_SIGNATURE", "SH_SIG", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_SPEED_SOURCE, "SHOW_ELEMENT_SPEED_SOURCE", "SH_SPD_SRC", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_WIFI, "SHOW_ELEMENT_WIFI", "SH_WIFI", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_TIME, "SHOW_ELEMENT_TIME", "SH_TIME", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_DATE, "SHOW_ELEMENT_DATE", "SH_DATE", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_ODO, "SHOW_ELEMENT_ODO", "SH_ODO", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_SIDEBAR_TEMP, "SHOW_ELEMENT_SIDEBAR_TEMP", "SH_SB_TMP", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_SIDEBAR_FUEL, "SHOW_ELEMENT_SIDEBAR_FUEL", "SH_SB_FUL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_SAT, "SHOW_ELEMENT_SAT", "SH_SAT", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_TMR, "SHOW_ELEMENT_TMR", "SH_TMR", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_BAT, "SHOW_ELEMENT_BAT", "SH_BAT", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_INST_KML, "SHOW_ELEMENT_INST_KML", "SH_INST", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_AVG_KML, "SHOW_ELEMENT_AVG_KML", "SH_AVG", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_AVG_SPEED, "SHOW_ELEMENT_AVG_SPEED", "SH_AVG_SPD", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_MAX_SPEED, "SHOW_ELEMENT_MAX_SPEED", "SH_MAX_SPD", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_FUEL_LTRS, "SHOW_ELEMENT_FUEL_LTRS", "SH_FUL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_GHOST_DIGITS, "SHOW_GHOST_DIGITS", "SH_GHOST", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &SHOW_ELEMENT_WEATHER, "SHOW_ELEMENT_WEATHER", "SH_WEATH", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &OFFSET_WEATHER_X, "OFFSET_WEATHER_X", "O_WEATH_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_WEATHER_Y, "OFFSET_WEATHER_Y", "O_WEATH_Y", nullptr, -4096, 4096, 146, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &WEATHER_CITY, "WEATHER_CITY", "WEATH_CITY", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WEATHER_CITY), CK_STR },
+
+  { &WEATHER_LAT, "WEATHER_LAT", "WEATH_LAT", nullptr, 0, 0, 0, -90.0f, 90.0f, 0.0f, 0, CK_FLT },
+
+  { &WEATHER_LON, "WEATHER_LON", "WEATH_LON", nullptr, 0, 0, 0, -180.0f, 180.0f, 0.0f, 0, CK_FLT },
+
+  { &WEATHER_REFRESH_MIN, "WEATHER_REFRESH_MIN", "WEATH_RFR", nullptr, 1, 1440, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &WEATHER_LOCALE, "WEATHER_LOCALE", "WEATH_LOCALE", "it", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WEATHER_LOCALE), CK_STR },
+
+  { &ENABLE_POWER_SENSE, "ENABLE_POWER_SENSE", "PWR_SNS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &POWER_SENSE_OFF_MS, "POWER_SENSE_OFF_MS", "PWR_OFF_MS", nullptr, 500, 120000, 10000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &ENABLE_CIRCLE_TEST, "ENABLE_CIRCLE_TEST", "CIRC_TST", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &ENABLE_DEMO_MODE, "ENABLE_DEMO_MODE", "DEMO_MODE", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &ENABLE_ANTIALIASING, "ENABLE_ANTIALIASING", "EN_AA", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &AA_SHARPNESS, "AA_SHARPNESS", "AA_SHARP", nullptr, 0, 0, 0, 0.0f, 1.0f, 0.2f, 0, CK_FLT },
+
+  { &SHOW_FPS_COUNTER_DEFAULT, "SHOW_FPS_COUNTER_DEFAULT", "SHW_FPS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &GPS_DEBUG_DEFAULT, "GPS_DEBUG_DEFAULT", "GPS_DBG", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &ENABLE_DYNAMIC_CPU, "ENABLE_DYNAMIC_CPU", "DYN_CPU", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &MANUAL_CPU_FREQ, "MANUAL_CPU_FREQ", "MAN_CPU", nullptr, 80, 240, 240, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &ENABLE_CPU_THROTTLE, "ENABLE_CPU_THROTTLE", "CPU_THR_EN", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &CPU_THROTTLE_TEMP_WARN, "CPU_THROTTLE_TEMP_WARN", "CPU_THR_W", nullptr, -50, 150, 50, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &CPU_THROTTLE_TEMP_CRIT, "CPU_THROTTLE_TEMP_CRIT", "CPU_THR_C", nullptr, -50, 150, 60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &ENABLE_NIGHT_MODE, "ENABLE_NIGHT_MODE", "EN_NIGHT", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &NIGHT_MODE_START_HOUR, "NIGHT_MODE_START_HOUR", "NGHT_SRT", nullptr, 0, 23, 23, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &NIGHT_MODE_END_HOUR, "NIGHT_MODE_END_HOUR", "NGHT_END", nullptr, 0, 23, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &NIGHT_BACKLIGHT, "NIGHT_BACKLIGHT", "NGHT_BL", nullptr, 0, 100, 29, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &DISPLAY_INVERT_COLORS, "DISPLAY_INVERT_COLORS", "INV_COLORS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &OFFSET_BIG_FPS_X, "OFFSET_BIG_FPS_X", "O_FPS_X", nullptr, -4096, 4096, -9, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OFFSET_BIG_FPS_Y, "OFFSET_BIG_FPS_Y", "O_FPS_Y", nullptr, -4096, 4096, -7, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &REFRESH_SPEED_MS, "REFRESH_SPEED_MS", "R_SPD", nullptr, 10, 60000, 250, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &REFRESH_BAT_MS, "REFRESH_BAT_MS", "R_BAT", nullptr, 10, 600000, 2500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &REFRESH_INST_MS, "REFRESH_INST_MS", "R_INST", nullptr, 10, 60000, 500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &REFRESH_MAX_SPEED_MS, "REFRESH_MAX_SPEED_MS", "R_MAX_SPD", nullptr, 10, 60000, 500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &REFRESH_FUEL_MS, "REFRESH_FUEL_MS", "R_FUEL", nullptr, 10, 60000, 1000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SPEED_DIGITS, "SPEED_DIGITS", "SPD_DIG", nullptr, 1, 4, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &SAT_DIGITS, "SAT_DIGITS", "SAT_DIG", nullptr, 1, 3, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &TMR_INT_DIGITS, "TMR_INT_DIGITS", "TMR_INT", nullptr, 1, 14, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &TMR_DEC_DIGITS, "TMR_DEC_DIGITS", "TMR_DEC", nullptr, 0, 4, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &BAT_INT_DIGITS, "BAT_INT_DIGITS", "BAT_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &BAT_DEC_DIGITS, "BAT_DEC_DIGITS", "BAT_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &INST_INT_DIGITS, "INST_INT_DIGITS", "INST_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &INST_DEC_DIGITS, "INST_DEC_DIGITS", "INST_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &AVG_INT_DIGITS, "AVG_INT_DIGITS", "AVG_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &AVG_DEC_DIGITS, "AVG_DEC_DIGITS", "AVG_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &AVG_SPEED_INT_DIGITS, "AVG_SPEED_INT_DIGITS", "AVG_SPD_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &AVG_SPEED_DEC_DIGITS, "AVG_SPEED_DEC_DIGITS", "AVG_SPD_DEC", nullptr, 0, 4, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &MAX_SPEED_INT_DIGITS, "MAX_SPEED_INT_DIGITS", "MAX_SPD_INT", nullptr, 1, 14, 3, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &MAX_SPEED_DEC_DIGITS, "MAX_SPEED_DEC_DIGITS", "MAX_SPD_DEC", nullptr, 0, 4, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &FUEL_INT_DIGITS, "FUEL_INT_DIGITS", "FUEL_INT", nullptr, 1, 14, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &FUEL_DEC_DIGITS, "FUEL_DEC_DIGITS", "FUEL_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &ODO_INT_DIGITS, "ODO_INT_DIGITS", "ODO_INT", nullptr, 1, 14, 5, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &ODO_DEC_DIGITS, "ODO_DEC_DIGITS", "ODO_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &WIFI_SSID, "WIFI_SSID", "WIFI_SSID", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID), CK_STR },
+
+  { &WIFI_SSID_1, "WIFI_SSID_1", "WIFI_S1", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_1), CK_STR },
+
+  { &WIFI_SSID_2, "WIFI_SSID_2", "WIFI_S2", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_2), CK_STR },
+
+  { &WIFI_SSID_3, "WIFI_SSID_3", "WIFI_S3", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_3), CK_STR },
+
+  { &WIFI_SSID_4, "WIFI_SSID_4", "WIFI_S4", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_4), CK_STR },
+
+  { &AP_PASSWORD, "AP_PASSWORD", "AP_PWD", AP_PASSWORD_DEFAULT, 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(AP_PASSWORD), CK_STR },
+
+  { &WIFI_ATTEMPT_SECONDS, "WIFI_ATTEMPT_SECONDS", "WIFI_ATTEM_S", nullptr, 5, 60, 12, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &NTP_ENABLED, "NTP_ENABLED", "NTP_EN", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &NTP_SERVER, "NTP_SERVER", "NTP_SRV", "pool.ntp.org", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(NTP_SERVER), CK_STR },
+
+  { &TZ_OFFSET_HOURS, "TZ_OFFSET_HOURS", "TZ_OFFSET", nullptr, -14, 14, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &TZ_DST_ENABLED, "TZ_DST_ENABLED", "TZ_DST", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &TZ_DST_RULE, "TZ_DST_RULE", "TZ_RULE", nullptr, 0, 2, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &OTA_PULL_ENABLED, "OTA_PULL_ENABLED", "OTA_PULL_EN", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+
+  { &OTA_PULL_URL, "OTA_PULL_URL", "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(OTA_PULL_URL), CK_STR },
+
+  { &VERSION_OVERRIDE, "VERSION_OVERRIDE", "VER_OVR", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(VERSION_OVERRIDE), CK_STR },
+
+  { &WIFI_PASSWORD, "WIFI_PASSWORD", "WIFI_PWD", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD), CK_SECRET },
+
+  { &WIFI_PASSWORD_1, "WIFI_PASSWORD_1", "WIFI_P1", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_1), CK_SECRET },
+
+  { &WIFI_PASSWORD_2, "WIFI_PASSWORD_2", "WIFI_P2", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_2), CK_SECRET },
+
+  { &WIFI_PASSWORD_3, "WIFI_PASSWORD_3", "WIFI_P3", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_3), CK_SECRET },
+
   { &WIFI_PASSWORD_4, "WIFI_PASSWORD_4", "WIFI_P4", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_4), CK_SECRET },
 };
 
@@ -1264,244 +1460,112 @@ void processConfig(int mode, JsonDocument *doc) {
 }
 
 // ----------------------------------------------------------------------------
-// Factory default configuration (dashboard_backup.json)
+// Factory default configuration
 // ----------------------------------------------------------------------------
-// The reference backup export of the standard configuration. Seeded into NVS
-// on first boot (and once for units still on the pre-factory-defaults
-// config), so every unit starts from exactly these values.
-// WiFi credentials are deliberately absent from this list: a factory-default
+// Seeded into NVS on first boot (and once for units still on the pre-factory-
+// defaults config), so every unit starts from the shipped defaults - the same
+// values dashboard_backup.json is meant to carry.
+//
+// This used to be a 5.6 KB JSON document of all 187 keys, pushed through the
+// same mode-2 path as a Web UI save. Every value in it was the shipped default
+// of the matching CFG_TABLE row (the two were diffed field by field before the
+// blob was deleted, and no default sits outside its own band, so the mode-2
+// clamp it went through was a no-op). The blob was a second copy of data the
+// table already holds, and the copy was the half that could drift.
+//
+// WiFi credentials are deliberately absent from the seed: a factory-default
 // seed must not strand a unit without a network - the same reason
 // factoryResetConfig() puts the SSID/password keys back after wiping NVS, and
 // the reason the password keys were already left out. Listing the SSIDs as
 // empty strings meant every boot that found CFG_VER < 5 cleared all five SSIDs
-// in RAM and NVS, and because the CFG_VER stamp was never verified (see
-// seedNVSWithFactoryDefaults) a lost stamp repeated that wipe on every boot:
-// passwords survived, SSIDs did not.
-const char FACTORY_DEFAULT_JSON[] = R"({
-  "DISPLAY_ROTATION": 1,
-  "UNITS_IMPERIAL": false,
-  "SPI_BUS_SPEED": 60000000,
-  "DISPLAY_WIDTH": 480,
-  "DISPLAY_HEIGHT": 320,
-  "TARGET_FPS": 60,
-  "BACKLIGHT_BRIGHTNESS": 100,
-  "ENABLE_AUTO_BRIGHTNESS": true,
-  "LIGHT_SENSOR_DARK_VAL": 432,
-  "LIGHT_SENSOR_BRIGHT_VAL": 2851,
-  "AUTO_BRIGHT_DARK": 13,
-  "AUTO_BRIGHT_LIGHT": 100,
-  "AUTO_BRIGHT_FADE_MS": 4000,
-  "FADE_DURATION_MS": 700,
-  "SPLASH_SIGNATURE": "by @ale.finot",
-  "REBOOT_SIGNATURE": "Dashboard++ by @ale.finot",
-  "DASHBOARD_SIGNATURE": "<<<<<<    Dashboard++ by @ale.finot    >>>>>>",
-  "TEMP_BAR_MIN": 10,
-  "TEMP_BAR_MAX": 110,
-  "TEMP_WARN_RED": 90,
-  "TEMP_WARN_YEL": 45,
-  "TEMP_WARN_LOW": 20,
-  "FUEL_WARN_RED": 20,
-  "FUEL_WARN_YEL": 45,
-  "COLOR_TEMP_NORM": "#00ff00",
-  "COLOR_TEMP_WARN": "#ffff00",
-  "COLOR_TEMP_CRIT": "#ff0000",
-  "COLOR_FUEL_NORM": "#00ff00",
-  "COLOR_FUEL_WARN": "#ffff00",
-  "COLOR_FUEL_CRIT": "#ff0000",
-  "GHOST_COLOR_STR": "#474747",
-  "WHEEL_CIRCUMFERENCE_MM": 1650,
-  "FUEL_FILTER_ALPHA": 0.08,
-  "TRIP_RESET_HOLD_MS": 1500,
-  "FUEL_TOUCH_POINTS": 8,
-  "FUEL_INPUT_ENABLED": false,
-  "FUEL_EXC_RES_OHM": 220,
-  "FUEL_ADC_VREF": 3.3,
-  "FUEL_OHM_EMPTY": 10.0,
-  "FUEL_OHM_FULL": 180.0,
-  "FUEL_OVERSAMPLE": 16,
-  "BATTERY_SCALE": 5.7,
-  "BATTERY_OFFSET": 0.2,
-  "NTC_R_BALANCE": 10000,
-  "NTC_R25": 10000,
-  "NTC_BETA": 3950,
-  "NTC_TEMP_OFFSET": 0,
-  "GPS_BAUD": 115200,
-  "MIN_SATELLITES": 8,
-  "OPTIMAL_SATELLITES": 12,
-  "MAX_SPEED_DELTA_KMH": 5,
-  "MIN_SPEED_THRESHOLD": 1,
-  "GPS_START_KMH": 3,
-  "GPS_STOP_SETTLE_MS": 1500,
-  "GPS_MIN_DEV_KMH": 1,
-  "SPEED_SOURCE_MODE": 2,
-  "SPEED_SOURCE_HOLD_MS": 500,
-  "HALL_MEDIAN_SAMPLES": 3,
-  "HALL_PERIOD_GUARD": 8,
-  "HALL_PULSE_MIN_US": 150,
-  "ACCEL_START_SPEED": 1,
-  "ACCEL_TARGET_SPEED": 50,
-  "ACCEL_MAX_TIME": 9.99,
-  "ACCEL_BADGE_LINE1": "0-50",
-  "ACCEL_BADGE_LINE2": "km/h",
-  "BIG_CENTER_X": 240,
-  "BIG_CENTER_Y": 160,
-  "OFFSET_BIG_TIME_X": 107,
-  "OFFSET_BIG_TIME_Y": -91,
-  "OFFSET_BIG_DATE_X": -131,
-  "OFFSET_BIG_DATE_Y": -91,
-  "OFFSET_BIG_SIGNATURE_X": 0,
-  "OFFSET_BIG_SIGNATURE_Y": -75,
-  "OFFSET_BIG_SPEED_NUM_X": 0,
-  "OFFSET_BIG_SPEED_NUM_Y": -3,
-  "OFFSET_BIG_SPEED_UNIT_X": 106,
-  "OFFSET_BIG_SPEED_UNIT_Y": 56,
-  "OFFSET_BIG_ODO_X": 22,
-  "OFFSET_BIG_ODO_Y": 126,
-  "OFFSET_BIG_SAT_X": 179,
-  "OFFSET_BIG_SAT_Y": -114,
-  "OFFSET_BIG_TMR_X": -53,
-  "OFFSET_BIG_TMR_Y": -46,
-  "OFFSET_BIG_BAT_X": -112,
-  "OFFSET_BIG_BAT_Y": 123,
-  "SIDEBAR_LEFT_X": 10,
-  "SIDEBAR_LEFT_Y": 95,
-  "SIDEBAR_RIGHT_X": 462,
-  "SIDEBAR_RIGHT_Y": 95,
-  "OFFSET_HALL_ICON_X": 0,
-  "OFFSET_HALL_ICON_Y": -100,
-  "OFFSET_WIFI_ICON_X": 204,
-  "OFFSET_WIFI_ICON_Y": -108,
-  "OFFSET_INST_KML_X": 60,
-  "OFFSET_INST_KML_Y": -25,
-  "OFFSET_AVG_KML_X": 160,
-  "OFFSET_AVG_KML_Y": -25,
-  "OFFSET_AVG_SPEED_X": -163,
-  "OFFSET_AVG_SPEED_Y": -25,
-  "OFFSET_MAX_SPEED_X": -60,
-  "OFFSET_MAX_SPEED_Y": -25,
-  "OFFSET_FUEL_LTRS_X": 132,
-  "OFFSET_FUEL_LTRS_Y": 123,
-  "SIDEBAR_BAR_WIDTH": 8,
-  "SIDEBAR_BAR_HEIGHT": 190,
-  "SHOW_ELEMENT_BOUNDS": false,
-  "SHOW_ELEMENT_SPEED": true,
-  "SHOW_ELEMENT_SPEED_UNIT": true,
-  "SHOW_ELEMENT_SIGNATURE": true,
-  "SHOW_ELEMENT_SPEED_SOURCE": true,
-  "SHOW_ELEMENT_WIFI": true,
-  "SHOW_ELEMENT_TIME": true,
-  "SHOW_ELEMENT_DATE": true,
-  "SHOW_ELEMENT_ODO": true,
-  "SHOW_ELEMENT_SIDEBAR_TEMP": true,
-  "SHOW_ELEMENT_SIDEBAR_FUEL": true,
-  "SHOW_ELEMENT_SAT": true,
-  "SHOW_ELEMENT_TMR": true,
-  "SHOW_ELEMENT_BAT": true,
-  "SHOW_ELEMENT_INST_KML": true,
-  "SHOW_ELEMENT_AVG_KML": true,
-  "SHOW_ELEMENT_AVG_SPEED": true,
-  "SHOW_ELEMENT_MAX_SPEED": true,
-  "SHOW_ELEMENT_FUEL_LTRS": true,
-  "SHOW_GHOST_DIGITS": true,
-  "SHOW_ELEMENT_WEATHER": true,
-  "OFFSET_WEATHER_X": 0,
-  "OFFSET_WEATHER_Y": 146,
-  "WEATHER_CITY": "",
-  "WEATHER_LAT": 0,
-  "WEATHER_LON": 0,
-  "WEATHER_REFRESH_MIN": 1,
-  "WEATHER_LOCALE": "it",
-  "ENABLE_POWER_SENSE": false,
-  "POWER_SENSE_OFF_MS": 10000,
-  "ENABLE_CIRCLE_TEST": false,
-  "ENABLE_DEMO_MODE": false,
-  "ADV_MODE": false,
-  "ENABLE_ANTIALIASING": true,
-  "AA_SHARPNESS": 0.2,
-  "SHOW_FPS_COUNTER_DEFAULT": false,
-  "GPS_DEBUG_DEFAULT": false,
-  "ENABLE_DYNAMIC_CPU": false,
-  "MANUAL_CPU_FREQ": 240,
-  "ENABLE_CPU_THROTTLE": false,
-  "CPU_THROTTLE_TEMP_WARN": 50,
-  "CPU_THROTTLE_TEMP_CRIT": 60,
-  "ENABLE_NIGHT_MODE": false,
-  "NIGHT_MODE_START_HOUR": 23,
-  "NIGHT_MODE_END_HOUR": 0,
-  "NIGHT_BACKLIGHT": 29,
-  "DISPLAY_INVERT_COLORS": false,
-  "OFFSET_BIG_FPS_X": -9,
-  "OFFSET_BIG_FPS_Y": -7,
-  "REFRESH_SPEED_MS": 250,
-  "REFRESH_BAT_MS": 2500,
-  "REFRESH_INST_MS": 500,
-  "REFRESH_MAX_SPEED_MS": 500,
-  "REFRESH_FUEL_MS": 1000,
-  "SPEED_DIGITS": 2,
-  "SAT_DIGITS": 2,
-  "TMR_INT_DIGITS": 1,
-  "TMR_DEC_DIGITS": 2,
-  "BAT_INT_DIGITS": 2,
-  "BAT_DEC_DIGITS": 1,
-  "INST_INT_DIGITS": 2,
-  "INST_DEC_DIGITS": 1,
-  "AVG_INT_DIGITS": 2,
-  "AVG_DEC_DIGITS": 1,
-  "AVG_SPEED_INT_DIGITS": 2,
-  "AVG_SPEED_DEC_DIGITS": 0,
-  "MAX_SPEED_INT_DIGITS": 3,
-  "MAX_SPEED_DEC_DIGITS": 0,
-  "FUEL_INT_DIGITS": 1,
-  "FUEL_DEC_DIGITS": 1,
-  "ODO_INT_DIGITS": 5,
-  "ODO_DEC_DIGITS": 1,
-  "WIFI_ATTEMPT_SECONDS": 12,
-  "NTP_ENABLED": true,
-  "NTP_SERVER": "pool.ntp.org",
-  "TZ_OFFSET_HOURS": 1,
-  "TZ_DST_ENABLED": true,
-  "TZ_DST_RULE": 1,
-  "OTA_PULL_ENABLED": false,
-  "OTA_PULL_URL": "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
-  "VERSION_OVERRIDE": "",
-  "fuelCalOhms": [
-    10.0,
-    34.3,
-    58.6,
-    82.9,
-    107.1,
-    131.4,
-    155.7,
-    180.0
-  ]
-})";
+// in RAM and NVS, and because the CFG_VER stamp was never verified a lost stamp
+// repeated that wipe on every boot: passwords survived, SSIDs did not.
+static const char *const CFG_NO_SEED[] = {
+    "WIFI_SSID", "WIFI_SSID_1", "WIFI_SSID_2", "WIFI_SSID_3", "WIFI_SSID_4",
+    "AP_PASSWORD"};
 
-// Write the factory defaults above into NVS (and RAM). WiFi passwords are
-// deliberately not part of the seed: they stay whatever is already stored.
+static bool cfgNoSeed(const char *name) {
+  for (const char *k : CFG_NO_SEED)
+    if (strcmp(k, name) == 0) return true;
+  return false;
+}
+
+// Defaults go to RAM as well as NVS: the seed runs after the boot load, and a
+// unit that had lost its CFG_VER stamp used to come back up with factory values
+// in this boot too, not only in the next one.
+static void cfgSeedDefaults(Preferences &pref) {
+  for (const CfgParam &p : CFG_TABLE) {
+    if (p.kind == CK_SECRET || cfgNoSeed(p.name)) continue;
+    bool failed = false;
+    switch (p.kind) {
+    case CK_INT:
+      *static_cast<int *>(p.ptr) = p.di;
+      failed = nvsWriteFailed(p.nvsKey, pref.putInt(p.nvsKey, p.di));
+      break;
+    case CK_UINT:
+      *static_cast<uint32_t *>(p.ptr) = static_cast<uint32_t>(p.di);
+      failed = nvsWriteFailed(p.nvsKey, pref.putInt(p.nvsKey, p.di));
+      break;
+    case CK_FLT:
+      *static_cast<float *>(p.ptr) = p.df;
+      failed = nvsWriteFailed(p.nvsKey, pref.putFloat(p.nvsKey, p.df));
+      break;
+    case CK_BOOL:
+      *static_cast<bool *>(p.ptr) = (p.di != 0);
+      failed = nvsWriteFailed(p.nvsKey, pref.putBool(p.nvsKey, p.di != 0));
+      break;
+    case CK_STR:
+      snprintf(static_cast<char *>(p.ptr), p.size, "%s", p.dstr);
+      failed = nvsStringWriteFailed(p.nvsKey, p.dstr,
+                                    pref.putString(p.nvsKey, p.dstr));
+      break;
+    case CK_SECRET:
+      break;  // unreachable: filtered above, kept so the switch stays total
+    }
+    if (failed) cfgNvsWriteErrors++;
+  }
+}
+
+// Write the shipped defaults into NVS (and RAM), stamp the config version, and
+// make sure every fuel-calibration key exists. WiFi passwords are deliberately
+// not part of the seed: they stay whatever is already stored.
 void seedNVSWithFactoryDefaults() {
-  JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, FACTORY_DEFAULT_JSON);
-  if (err) {
-    logPrintf("Config seed: factory defaults JSON parse error: %s\n", err.c_str());
+  cfgNvsWriteErrors = 0;
+  NvsSession session("cfg", false);
+  if (!session.opened()) {
+    // Seeding without NVS would put the RAM globals out of step with storage.
+    logPrintf("Config seed: NVS unavailable - factory defaults not applied\n");
     return;
   }
-  processConfig(2, &doc);
-  NvsSession session("cfg", false);
-  if (session.opened()) {
-    // The stamp is what keeps this a one-shot. A lost stamp used to re-seed the
-    // whole config on every boot; the WiFi credentials are no longer part of the
-    // seed, but a repeated seed would still undo every other setting.
-    if (nvsWriteFailed("CFG_VER", session.nvs.putInt("CFG_VER", 5)))
-      logPrintf("Config: CFG_VER not stored - the factory seed will run again at next boot\n");
-    // Seed every calibration key so FUEL_TOUCH_POINTS can be raised above 8
-    // without missing NVS entries (a missing key loads as 0).
-    char key[10];  // "FCO_" + 2 digits + NUL: room the compiler can prove
-    for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
-      snprintf(key, sizeof(key), "FCO_%u", (unsigned)(uint8_t)i);
-      if (nvsWriteFailed(key, session.nvs.putFloat(key, fuelCalOhms[i])))
-        cfgNvsWriteErrors++;
-    }
+  cfgSeedDefaults(session.nvs);
+  // The stamp is what keeps this a one-shot. A lost stamp used to re-seed the
+  // whole config on every boot; the WiFi credentials are no longer part of the
+  // seed, but a repeated seed would still undo every other setting.
+  if (nvsWriteFailed("CFG_VER", session.nvs.putInt("CFG_VER", 5)))
+    logPrintf("Config: CFG_VER not stored - the factory seed will run again at next boot\n");
+  // The fuel table is not a CFG_TABLE row, and the old mode-2 seed did put it
+  // back: the factory ramp, rebuilt from the seeded empty/full ohms. On a fresh
+  // unit the compiled table already starts at FUEL_OHM_EMPTY and ends at
+  // FUEL_OHM_FULL, so nothing is rebuilt and nothing is logged; only a unit that
+  // had a real calibration in NVS gets the ramp (and the log line).
+  const int nf = constrain(FUEL_TOUCH_POINTS, 2, MAX_TOUCH_POINTS);
+  if (fuelCalOhms[0] != FUEL_OHM_EMPTY || fuelCalOhms[nf - 1] != FUEL_OHM_FULL)
+    fillFuelTableFromOhms("factory seed");
+  // Seed every calibration key so FUEL_TOUCH_POINTS can be raised above 8
+  // without missing NVS entries (a missing key loads as 0).
+  char key[10];  // "FCO_" + 2 digits + NUL: room the compiler can prove
+  for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
+    snprintf(key, sizeof(key), "FCO_%u", (unsigned)(uint8_t)i);
+    if (nvsWriteFailed(key, session.nvs.putFloat(key, fuelCalOhms[i])))
+      cfgNvsWriteErrors++;
   }
+  // The mode-2 path this replaces ended inside processConfig() with the
+  // cross-parameter checks and the colour parse. The seeded values pass them,
+  // but a shipped default that ever stops passing one should be caught here,
+  // not at the next boot.
+  sanitizeDigitCounts();
+  sanitizeConfigPairs();
+  applyColors();
   if (cfgNvsWriteErrors)
     logPrintf("Config v5 seed: %d write(s) failed - see the NVS lines above\n", cfgNvsWriteErrors);
   else
