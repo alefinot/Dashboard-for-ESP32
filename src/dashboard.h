@@ -826,6 +826,13 @@ void ensureSpeedSprite();
 bool speedSpriteValid();
 bool isSpeedFallback();
 extern volatile unsigned long webLoopCount;
+// How long the web task's serve step (handleClient + OTA handle) actually
+// costs, and how many of its iterations ran long. The WebUI prints these next
+// to its own round-trip measurement, so "it skipped a second" becomes a
+// number from both ends instead of a report.
+extern volatile unsigned long webServeMsMax;
+extern volatile unsigned long webServeMsLast;
+extern volatile unsigned long webSlowIterCount;
 void factoryResetConfig();
 
 // ----------------------------------------------------------------------------

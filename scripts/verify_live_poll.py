@@ -335,6 +335,30 @@ def check_webui():
     return [name for name, cond in checks if not cond]
 
 
+def check_counters():
+    """Task 3 gate: the web task's own timing is observable from /api/perf, so
+    a reported "it skipped a second" can be read from both ends."""
+    problems = []
+    try:
+        hdr = open("src/dashboard.h", encoding="utf-8").read()
+        src = open(WEBSRC, encoding="utf-8").read()
+    except OSError as exc:
+        return [f"cannot read sources: {exc}"]
+    for name in ("webServeMsMax", "webServeMsLast", "webSlowIterCount"):
+        if f"extern volatile unsigned long {name};" not in hdr:
+            problems.append(f"dashboard.h does not declare extern {name}")
+        if f"volatile unsigned long {name} = 0;" not in src:
+            problems.append(f"web.cpp does not define {name}")
+    for field in ("web_serve_ms_max", "web_serve_ms_last", "web_slow_iters"):
+        if f'doc["{field}"]' not in src:
+            problems.append(f"/api/perf does not publish {field}")
+    if "webServeMsLast = serveMs" not in src:
+        problems.append("the web loop does not record serveMs into webServeMsLast")
+    if src.count("webSlowIterCount = webSlowIterCount + 1") < 1:
+        problems.append("the WEB SLOW branch does not count slow iterations")
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--serve-ms", type=int, default=0,
@@ -345,6 +369,7 @@ def main():
     ap.add_argument("--ticks", type=int, default=12)
     ap.add_argument("--port", type=int, default=8137)
     ap.add_argument("--shape-only", action="store_true")
+    ap.add_argument("--counters-only", action="store_true")
     ap.add_argument("--webui-only", action="store_true")
     args = ap.parse_args()
 
@@ -353,6 +378,14 @@ def main():
         for p in problems:
             print("FAIL shape:", p)
         print("PASS shape" if not problems else "FAIL shape: %d problem(s)" % len(problems))
+        return 1 if problems else 0
+
+    if args.counters_only:
+        problems = check_counters()
+        for p in problems:
+            print("FAIL counters:", p)
+        print("PASS counters" if not problems
+              else "FAIL counters: %d problem(s)" % len(problems))
         return 1 if problems else 0
 
     if args.webui_only:

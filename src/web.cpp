@@ -19,6 +19,13 @@ WebServer server(80);
 // and reboots the device if the web server stalls (e.g. a handler hangs).
 volatile unsigned long webLoopCount = 0;
 
+// Serve-time diagnostics for the web task (published on /api/perf). Cheap:
+// three counters, no allocation, no extra millis() calls beyond the serveMs
+// the loop already measures.
+volatile unsigned long webServeMsMax = 0;
+volatile unsigned long webServeMsLast = 0;
+volatile unsigned long webSlowIterCount = 0;
+
 // SAFE MODE (Phase 2 loop-breaker): when memory-saver cannot hold free heap
 // above ~16KB we stay UP in the most-frugal state instead of rebooting. This
 // is what breaks the heap-critical boot loop: the device keeps serving /api
@@ -2279,6 +2286,12 @@ static void perfGetHandler() {
   doc["fps_target"] = TARGET_FPS;
   doc["refresh_ms"] = (unsigned long)DISPLAY_REFRESH_MS;
   doc["spi_speed"] = SPI_BUS_SPEED;
+  // Web-task serve time: what one handleClient() pass costs this device, and
+  // how often its loop iteration ran long. Read alongside the browser's own
+  // round-trip number in the Performance Monitor's "Live Poll" row.
+  doc["web_serve_ms_last"] = (unsigned long)webServeMsLast;
+  doc["web_serve_ms_max"] = (unsigned long)webServeMsMax;
+  doc["web_slow_iters"] = (unsigned long)webSlowIterCount;
   doc["wifi_clients"] = WiFi.softAPgetStationNum();
   String lanIp = "";
   if (WiFi.status() == WL_CONNECTED) {
@@ -2549,6 +2562,8 @@ void webServerTask(void *pvParameters) {
       server.handleClient();
       ArduinoOTA.handle();
       unsigned long serveMs = millis() - serveStart;
+      webServeMsLast = serveMs;
+      if (serveMs > webServeMsMax) webServeMsMax = serveMs;
       // Self-heal a hung listener: the loop thread is alive but handleClient
       // never completes a request (e.g. a poisoned listen socket after a
       // half-open TCP flood). Rebinding the listener clears that state without
@@ -2999,9 +3014,11 @@ void webServerTask(void *pvParameters) {
       static unsigned long webIterLast = 0;
       unsigned long webIterMs = millis() - webIterLast;
       webIterLast = millis();
-      if (webIterMs > 100)
+      if (webIterMs > 100) {
+        webSlowIterCount = webSlowIterCount + 1;
         logPrintf("WEB SLOW: iteration %lums heap=%lu\n",
                   (unsigned long)webIterMs, (unsigned long)ESP.getFreeHeap());
+      }
     }
 
     vTaskDelay(pdMS_TO_TICKS(10));
