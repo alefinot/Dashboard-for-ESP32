@@ -761,7 +761,7 @@ In Demo Mode:
 
 ## Changelog
 
-### Unreleased — live readings that never skip a second (firmware + Web UI)
+### V1.4.2 — live readings that never skip a second (firmware + Web UI)
 
 The settings page's live cells (ambient light, odometer, fuel ohms/state, coolant temp, battery volts) used to advance every 1 s on a good moment and every 2 s on a tired one. They now come from one request per second and cannot miss a tick.
 
@@ -775,7 +775,7 @@ The settings page's live cells (ambient light, odometer, fuel ohms/state, coolan
 
 ---
 
-### Unreleased — the launcher icon redrawn around one bold dial (Android app only)
+#### Android app — the launcher icon redrawn around one bold dial
 
 Nothing in the firmware: the app's icon, the script that generates it, and a debug APK with `versionCode` 6 → 7 (1e85ea5).
 
