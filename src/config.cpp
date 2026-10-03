@@ -473,77 +473,345 @@ static bool cfgPutFloat(Preferences &pref, const char *key, float v) {
   return pref.putFloat(key, v);
 }
 
-#define CFG_INT(var, nvsKey, defVal, lo, hi)                                   \
-  if (mode == 0) {                                                             \
-    var = pref.getInt(nvsKey, defVal);                                         \
-    clampCfgInt(#var, &var, lo, hi);                                           \
-  } else if (mode == 1) {                                                      \
-    (*doc)[#var] = var;                                                        \
-  } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
-    var = (*doc)[#var].as<int>();                                              \
-    clampCfgInt(#var, &var, lo, hi);                                           \
-    if (cfgIntChanged(pref, nvsKey, var) &&                                    \
-        nvsWriteFailed(nvsKey, pref.putInt(nvsKey, var))) cfgNvsWriteErrors++;  \
-  }
+// ----------------------------------------------------------------------------
+// The parameter table
+// ----------------------------------------------------------------------------
+// The same three operations run over every parameter: mode 0 loads it from NVS
+// at boot, mode 1 serializes it into GET /api/config, mode 2 applies a posted
+// value (POST /api/config, a backup restore, the factory defaults) and writes it
+// back to NVS only when it really changed. Each parameter used to be written out
+// inline as a CFG_INT/CFG_FLT/CFG_STR/CFG_BOOL line - 197 of them, three modes
+// and a clamp per line, ~39 KB of .text for what is one switch. The rules are
+// unchanged: bands enforced on both the load path and the save path, non-finite
+// floats fall back to the shipped default, unsigned values are validated through
+// a signed window, and a value that already matches NVS is never rewritten.
+enum CfgKind : uint8_t {
+  CK_INT,
+  CK_UINT,
+  CK_FLT,
+  CK_BOOL,
+  CK_STR,
+  CK_SECRET,  // WiFi passphrases: mode 1 sends an empty string so they never
+              // leave the device, and a blank posted value means "keep what is
+              // stored" instead of "erase it".
+};
 
-#define CFG_UINT(var, nvsKey, defVal, lo, hi)                                   \
-  if (mode == 0) {                                                             \
-    var = clampCfgUnsigned(#var, pref.getInt(nvsKey, defVal), lo, hi);          \
-  } else if (mode == 1) {                                                      \
-    (*doc)[#var] = var;                                                        \
-  } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
-    var = clampCfgUnsigned(#var, (*doc)[#var].as<long long>(), lo, hi);         \
-    if (cfgIntChanged(pref, nvsKey, (int)var) &&                               \
-        nvsWriteFailed(nvsKey, pref.putInt(nvsKey, (int)var))) cfgNvsWriteErrors++; \
-  }
+struct CfgParam {
+  void       *ptr;      // storage of the global
+  const char *name;     // JSON key, == the C++ identifier; also the log name
+  const char *nvsKey;   // key inside the "cfg" NVS namespace
+  const char *dstr;     // default for CK_STR / CK_SECRET
+  int32_t     lo, hi;   // band for CK_INT / CK_UINT
+  int32_t     di;       // default for CK_INT / CK_UINT / CK_BOOL
+  float       flo, fhi; // band for CK_FLT
+  float       df;       // default for CK_FLT
+  uint16_t    size;     // buffer size for CK_STR / CK_SECRET (0 otherwise)
+  uint8_t     kind;     // CfgKind
+};
 
-#define CFG_FLT(var, nvsKey, defVal, lo, hi)                                   \
-  if (mode == 0) {                                                             \
-    var = pref.getFloat(nvsKey, defVal);                                       \
-    clampCfgFloat(#var, &var, lo, hi, (float)defVal);                          \
-  } else if (mode == 1) {                                                      \
-    (*doc)[#var] = var;                                                        \
-  } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
-    var = (*doc)[#var].as<float>();                                            \
-    clampCfgFloat(#var, &var, lo, hi, (float)defVal);                          \
-    if (cfgFloatChanged(pref, nvsKey, var) &&                                  \
-        nvsWriteFailed(nvsKey, pref.putFloat(nvsKey, var))) cfgNvsWriteErrors++; \
-  }
+// Row order is the order the old CFG_* calls ran in: it decides the order of the
+// NVS reads and writes, the order of the clamp log lines, and the order of the
+// keys in the JSON the WebUI receives. The rows were generated from that call
+// list and both lists were diffed field by field (global, NVS key, default,
+// band) before the macros were removed - see scripts/cfg_table_migration.py.
+static const CfgParam CFG_TABLE[] = {
+  { &DISPLAY_ROTATION, "DISPLAY_ROTATION", "DISP_ROT", nullptr, 0, 3, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &UNITS_IMPERIAL, "UNITS_IMPERIAL", "UNITS_IMP", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &ADV_MODE, "ADV_MODE", "ADV_MODE", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SPI_BUS_SPEED, "SPI_BUS_SPEED", "SPI_FREQ", nullptr, SPI_SPEED_MIN_HZ, SPI_SPEED_MAX_HZ, 60000000, 0.0f, 0.0f, 0.0f, 0, CK_UINT },
+  { &DISPLAY_WIDTH, "DISPLAY_WIDTH", "DISP_W", nullptr, 16, 2048, 480, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &DISPLAY_HEIGHT, "DISPLAY_HEIGHT", "DISP_H", nullptr, 16, 2048, 320, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &TARGET_FPS, "TARGET_FPS", "TGT_FPS", nullptr, 5, 120, 60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &BACKLIGHT_BRIGHTNESS, "BACKLIGHT_BRIGHTNESS", "BL_BRIGHT", nullptr, 0, 100, 100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &ENABLE_AUTO_BRIGHTNESS, "ENABLE_AUTO_BRIGHTNESS", "EN_AUTO_BL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &LIGHT_SENSOR_DARK_VAL, "LIGHT_SENSOR_DARK_VAL", "LIGHT_DARK", nullptr, 0, 4095, 432, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &LIGHT_SENSOR_BRIGHT_VAL, "LIGHT_SENSOR_BRIGHT_VAL", "LIGHT_BRIGHT", nullptr, 0, 4095, 2851, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &AUTO_BRIGHT_DARK, "AUTO_BRIGHT_DARK", "AB_DARK", nullptr, 0, 100, 13, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &AUTO_BRIGHT_LIGHT, "AUTO_BRIGHT_LIGHT", "AB_LIGHT", nullptr, 0, 100, 100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &AUTO_BRIGHT_FADE_MS, "AUTO_BRIGHT_FADE_MS", "AB_FADE", nullptr, 0, 60000, 4000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &FADE_DURATION_MS, "FADE_DURATION_MS", "FADE_DUR", nullptr, 0, 10000, 700, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SPLASH_SIGNATURE, "SPLASH_SIGNATURE", "SPLASH_SIG", "by @ale.finot", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(SPLASH_SIGNATURE), CK_STR },
+  { &REBOOT_SIGNATURE, "REBOOT_SIGNATURE", "REBOOT_SIG", "Dashboard++ by @ale.finot", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(REBOOT_SIGNATURE), CK_STR },
+  { &DASHBOARD_SIGNATURE, "DASHBOARD_SIGNATURE", "DASH_SIG", "<<<<<<    Dashboard++ by @ale.finot    >>>>>>", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(DASHBOARD_SIGNATURE), CK_STR },
+  { &TEMP_BAR_MIN, "TEMP_BAR_MIN", "TMP_BAR_MIN", nullptr, -40, 300, 10, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &TEMP_BAR_MAX, "TEMP_BAR_MAX", "TMP_BAR_MAX", nullptr, -40, 300, 110, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &TEMP_WARN_RED, "TEMP_WARN_RED", "TMP_WRN_R", nullptr, -40, 300, 90, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &TEMP_WARN_YEL, "TEMP_WARN_YEL", "TMP_WRN_Y", nullptr, -40, 300, 45, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &TEMP_WARN_LOW, "TEMP_WARN_LOW", "TMP_WRN_L", nullptr, -40, 300, 20, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &FUEL_WARN_RED, "FUEL_WARN_RED", "FUL_WRN_R", nullptr, 0, 100, 20, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &FUEL_WARN_YEL, "FUEL_WARN_YEL", "FUL_WRN_Y", nullptr, 0, 100, 45, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &COLOR_TEMP_NORM, "COLOR_TEMP_NORM", "C_TMP_N", "#00ff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_TEMP_NORM), CK_STR },
+  { &COLOR_TEMP_WARN, "COLOR_TEMP_WARN", "C_TMP_W", "#ffff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_TEMP_WARN), CK_STR },
+  { &COLOR_TEMP_CRIT, "COLOR_TEMP_CRIT", "C_TMP_C", "#ff0000", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_TEMP_CRIT), CK_STR },
+  { &COLOR_FUEL_NORM, "COLOR_FUEL_NORM", "C_FUL_N", "#00ff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_FUEL_NORM), CK_STR },
+  { &COLOR_FUEL_WARN, "COLOR_FUEL_WARN", "C_FUL_W", "#ffff00", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_FUEL_WARN), CK_STR },
+  { &COLOR_FUEL_CRIT, "COLOR_FUEL_CRIT", "C_FUL_C", "#ff0000", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(COLOR_FUEL_CRIT), CK_STR },
+  { &GHOST_COLOR_STR, "GHOST_COLOR_STR", "GHOST_C", "#474747", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(GHOST_COLOR_STR), CK_STR },
+  { &WHEEL_CIRCUMFERENCE_MM, "WHEEL_CIRCUMFERENCE_MM", "WHL_CIRC", nullptr, 0, 0, 0, 50.0f, 10000.0f, 1650.0f, 0, CK_FLT },
+  { &FUEL_FILTER_ALPHA, "FUEL_FILTER_ALPHA", "FUEL_FILT", nullptr, 0, 0, 0, 0.001f, 1.0f, 0.08f, 0, CK_FLT },
+  { &TRIP_RESET_HOLD_MS, "TRIP_RESET_HOLD_MS", "TRP_RST_H", nullptr, 200, 10000, 1500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &FUEL_TOUCH_POINTS, "FUEL_TOUCH_POINTS", "FTL_PTS", nullptr, 2, 20, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &FUEL_INPUT_ENABLED, "FUEL_INPUT_ENABLED", "FUEL_EN", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &FUEL_EXC_RES_OHM, "FUEL_EXC_RES_OHM", "FUEL_EXR", nullptr, 10, 100000, 220, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &FUEL_ADC_VREF, "FUEL_ADC_VREF", "FUEL_VRF", nullptr, 0, 0, 0, 2.5f, 4.2f, 3.30f, 0, CK_FLT },
+  { &FUEL_OHM_EMPTY, "FUEL_OHM_EMPTY", "FUEL_OE", nullptr, 0, 0, 0, 0.0f, 100000.0f, 10.0f, 0, CK_FLT },
+  { &FUEL_OHM_FULL, "FUEL_OHM_FULL", "FUEL_OF", nullptr, 0, 0, 0, 0.0f, 100000.0f, 180.0f, 0, CK_FLT },
+  { &FUEL_OVERSAMPLE, "FUEL_OVERSAMPLE", "FUEL_OSM", nullptr, 1, 64, 16, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &BATTERY_SCALE, "BATTERY_SCALE", "BAT_SCALE", nullptr, 0, 0, 0, 0.01f, 1000.0f, 5.7f, 0, CK_FLT },
+  { &BATTERY_OFFSET, "BATTERY_OFFSET", "BAT_OFFS", nullptr, 0, 0, 0, -50.0f, 50.0f, 0.2f, 0, CK_FLT },
+  { &NTC_R_BALANCE, "NTC_R_BALANCE", "NTC_BAL", nullptr, 0, 0, 0, 100.0f, 10000000.0f, 10000.0f, 0, CK_FLT },
+  { &NTC_R25, "NTC_R25", "NTC_R25", nullptr, 0, 0, 0, 100.0f, 10000000.0f, 10000.0f, 0, CK_FLT },
+  { &NTC_BETA, "NTC_BETA", "NTC_BETA", nullptr, 0, 0, 0, 1000.0f, 20000.0f, 3950.0f, 0, CK_FLT },
+  { &NTC_TEMP_OFFSET, "NTC_TEMP_OFFSET", "NTC_OFFS", nullptr, 0, 0, 0, -50.0f, 50.0f, 0.0f, 0, CK_FLT },
+  { &GPS_BAUD, "GPS_BAUD", "GPS_BAUD", nullptr, 1200, 921600, 115200, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &MIN_SATELLITES, "MIN_SATELLITES", "MIN_SAT", nullptr, 1, 32, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OPTIMAL_SATELLITES, "OPTIMAL_SATELLITES", "OPT_SAT", nullptr, 1, 32, 12, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &MAX_SPEED_DELTA_KMH, "MAX_SPEED_DELTA_KMH", "MAX_SPD_DELT", nullptr, 0, 0, 0, 0.01f, 100.0f, 5.0f, 0, CK_FLT },
+  { &MIN_SPEED_THRESHOLD, "MIN_SPEED_THRESHOLD", "MIN_SPD_THR", nullptr, 0, 0, 0, 0.0f, 50.0f, 1.0f, 0, CK_FLT },
+  { &GPS_START_KMH, "GPS_START_KMH", "GPS_START", nullptr, 0, 0, 0, 0.0f, 200.0f, 3.0f, 0, CK_FLT },
+  { &GPS_STOP_SETTLE_MS, "GPS_STOP_SETTLE_MS", "GPS_STL_MS", nullptr, 0, 60000, 1500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &GPS_MIN_DEV_KMH, "GPS_MIN_DEV_KMH", "GPS_MIN_DV", nullptr, 0, 0, 0, 0.0f, 50.0f, 1.0f, 0, CK_FLT },
+  { &SPEED_SOURCE_MODE, "SPEED_SOURCE_MODE", "SPD_SRC_MODE", nullptr, 0, 2, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SPEED_SOURCE_HOLD_MS, "SPEED_SOURCE_HOLD_MS", "SPD_SRC_HOLD", nullptr, 0, 10000, 500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &HALL_MEDIAN_SAMPLES, "HALL_MEDIAN_SAMPLES", "HALL_MED_N", nullptr, 1, 31, 3, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &HALL_PERIOD_GUARD, "HALL_PERIOD_GUARD", "HALL_PRD_GRD", nullptr, 1, 100, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &HALL_PULSE_MIN_US, "HALL_PULSE_MIN_US", "HALL_PL_MIN", nullptr, 10, 1000, 150, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &ACCEL_START_SPEED, "ACCEL_START_SPEED", "ACC_STRT", nullptr, 0, 0, 0, 0.0f, 200.0f, 1.0f, 0, CK_FLT },
+  { &ACCEL_TARGET_SPEED, "ACCEL_TARGET_SPEED", "ACC_TGT", nullptr, 0, 0, 0, 1.0f, 400.0f, 50.0f, 0, CK_FLT },
+  { &ACCEL_MAX_TIME, "ACCEL_MAX_TIME", "ACC_MAX_T", nullptr, 0, 0, 0, 0.1f, 999.99f, 9.99f, 0, CK_FLT },
+  { &ACCEL_BADGE_LINE1, "ACCEL_BADGE_LINE1", "ACC_BDG_1", "0-50", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(ACCEL_BADGE_LINE1), CK_STR },
+  { &ACCEL_BADGE_LINE2, "ACCEL_BADGE_LINE2", "ACC_BDG_2", "km/h", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(ACCEL_BADGE_LINE2), CK_STR },
+  { &BIG_CENTER_X, "BIG_CENTER_X", "BCX", nullptr, 0, 4095, 240, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &BIG_CENTER_Y, "BIG_CENTER_Y", "BCY", nullptr, 0, 4095, 160, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_TIME_X, "OFFSET_BIG_TIME_X", "O_BTIME_X", nullptr, -4096, 4096, 107, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_TIME_Y, "OFFSET_BIG_TIME_Y", "O_BTIME_Y", nullptr, -4096, 4096, -91, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_DATE_X, "OFFSET_BIG_DATE_X", "O_BDATE_X", nullptr, -4096, 4096, -131, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_DATE_Y, "OFFSET_BIG_DATE_Y", "O_BDATE_Y", nullptr, -4096, 4096, -91, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_SIGNATURE_X, "OFFSET_BIG_SIGNATURE_X", "O_BSIG_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_SIGNATURE_Y, "OFFSET_BIG_SIGNATURE_Y", "O_BSIG_Y", nullptr, -4096, 4096, -75, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_SPEED_NUM_X, "OFFSET_BIG_SPEED_NUM_X", "O_BSN_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_SPEED_NUM_Y, "OFFSET_BIG_SPEED_NUM_Y", "O_BSN_Y", nullptr, -4096, 4096, -3, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_SPEED_UNIT_X, "OFFSET_BIG_SPEED_UNIT_X", "O_BSU_X", nullptr, -4096, 4096, 106, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_SPEED_UNIT_Y, "OFFSET_BIG_SPEED_UNIT_Y", "O_BSU_Y", nullptr, -4096, 4096, 56, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_ODO_X, "OFFSET_BIG_ODO_X", "O_BODO_X", nullptr, -4096, 4096, 22, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_ODO_Y, "OFFSET_BIG_ODO_Y", "O_BODO_Y", nullptr, -4096, 4096, 126, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_SAT_X, "OFFSET_BIG_SAT_X", "O_BSAT_X", nullptr, -4096, 4096, 179, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_SAT_Y, "OFFSET_BIG_SAT_Y", "O_BSAT_Y", nullptr, -4096, 4096, -114, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_TMR_X, "OFFSET_BIG_TMR_X", "O_BTMR_X", nullptr, -4096, 4096, -53, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_TMR_Y, "OFFSET_BIG_TMR_Y", "O_BTMR_Y", nullptr, -4096, 4096, -46, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_BAT_X, "OFFSET_BIG_BAT_X", "O_BBAT_X", nullptr, -4096, 4096, -112, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_BAT_Y, "OFFSET_BIG_BAT_Y", "O_BBAT_Y", nullptr, -4096, 4096, 123, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SIDEBAR_LEFT_X, "SIDEBAR_LEFT_X", "SBAR_L_X", nullptr, -4096, 4096, 10, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SIDEBAR_LEFT_Y, "SIDEBAR_LEFT_Y", "SBAR_L_Y", nullptr, -4096, 4096, 95, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SIDEBAR_RIGHT_X, "SIDEBAR_RIGHT_X", "SBAR_R_X", nullptr, -4096, 4096, 462, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SIDEBAR_RIGHT_Y, "SIDEBAR_RIGHT_Y", "SBAR_R_Y", nullptr, -4096, 4096, 95, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_HALL_ICON_X, "OFFSET_HALL_ICON_X", "O_HALL_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_HALL_ICON_Y, "OFFSET_HALL_ICON_Y", "O_HALL_Y", nullptr, -4096, 4096, -100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_WIFI_ICON_X, "OFFSET_WIFI_ICON_X", "O_WIFI_X", nullptr, -4096, 4096, 204, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_WIFI_ICON_Y, "OFFSET_WIFI_ICON_Y", "O_WIFI_Y", nullptr, -4096, 4096, -108, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_INST_KML_X, "OFFSET_INST_KML_X", "O_INST_X", nullptr, -4096, 4096, 60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_INST_KML_Y, "OFFSET_INST_KML_Y", "O_INST_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_AVG_KML_X, "OFFSET_AVG_KML_X", "O_AVG_X", nullptr, -4096, 4096, 160, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_AVG_KML_Y, "OFFSET_AVG_KML_Y", "O_AVG_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_AVG_SPEED_X, "OFFSET_AVG_SPEED_X", "O_AVG_SPD_X", nullptr, -4096, 4096, -163, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_AVG_SPEED_Y, "OFFSET_AVG_SPEED_Y", "O_AVG_SPD_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_MAX_SPEED_X, "OFFSET_MAX_SPEED_X", "O_MAX_SPD_X", nullptr, -4096, 4096, -60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_MAX_SPEED_Y, "OFFSET_MAX_SPEED_Y", "O_MAX_SPD_Y", nullptr, -4096, 4096, -25, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_FUEL_LTRS_X, "OFFSET_FUEL_LTRS_X", "O_FLTRS_X", nullptr, -4096, 4096, 132, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_FUEL_LTRS_Y, "OFFSET_FUEL_LTRS_Y", "O_FLTRS_Y", nullptr, -4096, 4096, 123, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SIDEBAR_BAR_WIDTH, "SIDEBAR_BAR_WIDTH", "SBAR_W", nullptr, 1, 2048, 8, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SIDEBAR_BAR_HEIGHT, "SIDEBAR_BAR_HEIGHT", "SBAR_H", nullptr, 1, 2048, 190, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SHOW_ELEMENT_BOUNDS, "SHOW_ELEMENT_BOUNDS", "SHW_BNDS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_SPEED, "SHOW_ELEMENT_SPEED", "SH_SPD", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_SPEED_UNIT, "SHOW_ELEMENT_SPEED_UNIT", "SH_SPD_UN", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_SIGNATURE, "SHOW_ELEMENT_SIGNATURE", "SH_SIG", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_SPEED_SOURCE, "SHOW_ELEMENT_SPEED_SOURCE", "SH_SPD_SRC", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_WIFI, "SHOW_ELEMENT_WIFI", "SH_WIFI", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_TIME, "SHOW_ELEMENT_TIME", "SH_TIME", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_DATE, "SHOW_ELEMENT_DATE", "SH_DATE", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_ODO, "SHOW_ELEMENT_ODO", "SH_ODO", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_SIDEBAR_TEMP, "SHOW_ELEMENT_SIDEBAR_TEMP", "SH_SB_TMP", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_SIDEBAR_FUEL, "SHOW_ELEMENT_SIDEBAR_FUEL", "SH_SB_FUL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_SAT, "SHOW_ELEMENT_SAT", "SH_SAT", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_TMR, "SHOW_ELEMENT_TMR", "SH_TMR", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_BAT, "SHOW_ELEMENT_BAT", "SH_BAT", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_INST_KML, "SHOW_ELEMENT_INST_KML", "SH_INST", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_AVG_KML, "SHOW_ELEMENT_AVG_KML", "SH_AVG", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_AVG_SPEED, "SHOW_ELEMENT_AVG_SPEED", "SH_AVG_SPD", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_MAX_SPEED, "SHOW_ELEMENT_MAX_SPEED", "SH_MAX_SPD", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_FUEL_LTRS, "SHOW_ELEMENT_FUEL_LTRS", "SH_FUL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_GHOST_DIGITS, "SHOW_GHOST_DIGITS", "SH_GHOST", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &SHOW_ELEMENT_WEATHER, "SHOW_ELEMENT_WEATHER", "SH_WEATH", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &OFFSET_WEATHER_X, "OFFSET_WEATHER_X", "O_WEATH_X", nullptr, -4096, 4096, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_WEATHER_Y, "OFFSET_WEATHER_Y", "O_WEATH_Y", nullptr, -4096, 4096, 146, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &WEATHER_CITY, "WEATHER_CITY", "WEATH_CITY", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WEATHER_CITY), CK_STR },
+  { &WEATHER_LAT, "WEATHER_LAT", "WEATH_LAT", nullptr, 0, 0, 0, -90.0f, 90.0f, 0.0f, 0, CK_FLT },
+  { &WEATHER_LON, "WEATHER_LON", "WEATH_LON", nullptr, 0, 0, 0, -180.0f, 180.0f, 0.0f, 0, CK_FLT },
+  { &WEATHER_REFRESH_MIN, "WEATHER_REFRESH_MIN", "WEATH_RFR", nullptr, 1, 1440, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &WEATHER_LOCALE, "WEATHER_LOCALE", "WEATH_LOCALE", "it", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WEATHER_LOCALE), CK_STR },
+  { &ENABLE_POWER_SENSE, "ENABLE_POWER_SENSE", "PWR_SNS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &POWER_SENSE_OFF_MS, "POWER_SENSE_OFF_MS", "PWR_OFF_MS", nullptr, 500, 120000, 10000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &ENABLE_CIRCLE_TEST, "ENABLE_CIRCLE_TEST", "CIRC_TST", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &ENABLE_DEMO_MODE, "ENABLE_DEMO_MODE", "DEMO_MODE", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &ENABLE_ANTIALIASING, "ENABLE_ANTIALIASING", "EN_AA", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &AA_SHARPNESS, "AA_SHARPNESS", "AA_SHARP", nullptr, 0, 0, 0, 0.0f, 1.0f, 0.2f, 0, CK_FLT },
+  { &SHOW_FPS_COUNTER_DEFAULT, "SHOW_FPS_COUNTER_DEFAULT", "SHW_FPS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &GPS_DEBUG_DEFAULT, "GPS_DEBUG_DEFAULT", "GPS_DBG", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &ENABLE_DYNAMIC_CPU, "ENABLE_DYNAMIC_CPU", "DYN_CPU", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &MANUAL_CPU_FREQ, "MANUAL_CPU_FREQ", "MAN_CPU", nullptr, 80, 240, 240, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &ENABLE_CPU_THROTTLE, "ENABLE_CPU_THROTTLE", "CPU_THR_EN", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &CPU_THROTTLE_TEMP_WARN, "CPU_THROTTLE_TEMP_WARN", "CPU_THR_W", nullptr, -50, 150, 50, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &CPU_THROTTLE_TEMP_CRIT, "CPU_THROTTLE_TEMP_CRIT", "CPU_THR_C", nullptr, -50, 150, 60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &ENABLE_NIGHT_MODE, "ENABLE_NIGHT_MODE", "EN_NIGHT", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &NIGHT_MODE_START_HOUR, "NIGHT_MODE_START_HOUR", "NGHT_SRT", nullptr, 0, 23, 23, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &NIGHT_MODE_END_HOUR, "NIGHT_MODE_END_HOUR", "NGHT_END", nullptr, 0, 23, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &NIGHT_BACKLIGHT, "NIGHT_BACKLIGHT", "NGHT_BL", nullptr, 0, 100, 29, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &DISPLAY_INVERT_COLORS, "DISPLAY_INVERT_COLORS", "INV_COLORS", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &OFFSET_BIG_FPS_X, "OFFSET_BIG_FPS_X", "O_FPS_X", nullptr, -4096, 4096, -9, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OFFSET_BIG_FPS_Y, "OFFSET_BIG_FPS_Y", "O_FPS_Y", nullptr, -4096, 4096, -7, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &REFRESH_SPEED_MS, "REFRESH_SPEED_MS", "R_SPD", nullptr, 10, 60000, 250, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &REFRESH_BAT_MS, "REFRESH_BAT_MS", "R_BAT", nullptr, 10, 600000, 2500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &REFRESH_INST_MS, "REFRESH_INST_MS", "R_INST", nullptr, 10, 60000, 500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &REFRESH_MAX_SPEED_MS, "REFRESH_MAX_SPEED_MS", "R_MAX_SPD", nullptr, 10, 60000, 500, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &REFRESH_FUEL_MS, "REFRESH_FUEL_MS", "R_FUEL", nullptr, 10, 60000, 1000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SPEED_DIGITS, "SPEED_DIGITS", "SPD_DIG", nullptr, 1, 4, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &SAT_DIGITS, "SAT_DIGITS", "SAT_DIG", nullptr, 1, 3, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &TMR_INT_DIGITS, "TMR_INT_DIGITS", "TMR_INT", nullptr, 1, 14, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &TMR_DEC_DIGITS, "TMR_DEC_DIGITS", "TMR_DEC", nullptr, 0, 4, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &BAT_INT_DIGITS, "BAT_INT_DIGITS", "BAT_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &BAT_DEC_DIGITS, "BAT_DEC_DIGITS", "BAT_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &INST_INT_DIGITS, "INST_INT_DIGITS", "INST_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &INST_DEC_DIGITS, "INST_DEC_DIGITS", "INST_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &AVG_INT_DIGITS, "AVG_INT_DIGITS", "AVG_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &AVG_DEC_DIGITS, "AVG_DEC_DIGITS", "AVG_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &AVG_SPEED_INT_DIGITS, "AVG_SPEED_INT_DIGITS", "AVG_SPD_INT", nullptr, 1, 14, 2, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &AVG_SPEED_DEC_DIGITS, "AVG_SPEED_DEC_DIGITS", "AVG_SPD_DEC", nullptr, 0, 4, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &MAX_SPEED_INT_DIGITS, "MAX_SPEED_INT_DIGITS", "MAX_SPD_INT", nullptr, 1, 14, 3, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &MAX_SPEED_DEC_DIGITS, "MAX_SPEED_DEC_DIGITS", "MAX_SPD_DEC", nullptr, 0, 4, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &FUEL_INT_DIGITS, "FUEL_INT_DIGITS", "FUEL_INT", nullptr, 1, 14, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &FUEL_DEC_DIGITS, "FUEL_DEC_DIGITS", "FUEL_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &ODO_INT_DIGITS, "ODO_INT_DIGITS", "ODO_INT", nullptr, 1, 14, 5, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &ODO_DEC_DIGITS, "ODO_DEC_DIGITS", "ODO_DEC", nullptr, 0, 4, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &WIFI_SSID, "WIFI_SSID", "WIFI_SSID", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID), CK_STR },
+  { &WIFI_SSID_1, "WIFI_SSID_1", "WIFI_S1", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_1), CK_STR },
+  { &WIFI_SSID_2, "WIFI_SSID_2", "WIFI_S2", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_2), CK_STR },
+  { &WIFI_SSID_3, "WIFI_SSID_3", "WIFI_S3", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_3), CK_STR },
+  { &WIFI_SSID_4, "WIFI_SSID_4", "WIFI_S4", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_SSID_4), CK_STR },
+  { &AP_PASSWORD, "AP_PASSWORD", "AP_PWD", AP_PASSWORD_DEFAULT, 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(AP_PASSWORD), CK_STR },
+  { &WIFI_ATTEMPT_SECONDS, "WIFI_ATTEMPT_SECONDS", "WIFI_ATTEM_S", nullptr, 5, 60, 12, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &NTP_ENABLED, "NTP_ENABLED", "NTP_EN", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &NTP_SERVER, "NTP_SERVER", "NTP_SRV", "pool.ntp.org", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(NTP_SERVER), CK_STR },
+  { &TZ_OFFSET_HOURS, "TZ_OFFSET_HOURS", "TZ_OFFSET", nullptr, -14, 14, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &TZ_DST_ENABLED, "TZ_DST_ENABLED", "TZ_DST", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &TZ_DST_RULE, "TZ_DST_RULE", "TZ_RULE", nullptr, 0, 2, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+  { &OTA_PULL_ENABLED, "OTA_PULL_ENABLED", "OTA_PULL_EN", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
+  { &OTA_PULL_URL, "OTA_PULL_URL", "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(OTA_PULL_URL), CK_STR },
+  { &VERSION_OVERRIDE, "VERSION_OVERRIDE", "VER_OVR", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(VERSION_OVERRIDE), CK_STR },
+  { &WIFI_PASSWORD, "WIFI_PASSWORD", "WIFI_PWD", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD), CK_SECRET },
+  { &WIFI_PASSWORD_1, "WIFI_PASSWORD_1", "WIFI_P1", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_1), CK_SECRET },
+  { &WIFI_PASSWORD_2, "WIFI_PASSWORD_2", "WIFI_P2", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_2), CK_SECRET },
+  { &WIFI_PASSWORD_3, "WIFI_PASSWORD_3", "WIFI_P3", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_3), CK_SECRET },
+  { &WIFI_PASSWORD_4, "WIFI_PASSWORD_4", "WIFI_P4", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_4), CK_SECRET },
+};
 
-// String config values live in fixed char[] buffers (no String objects, no
-// per-request heap allocations in the save/load path). mode 1 serializes the
-// buffer, mode 2 writes the posted value in place. The load in mode 0 uses
-// the getString(key, char*, maxLen) buffer overload (nvs_get_str): getBytes
-// reads via nvs_get_blob, which returns TYPE_MISMATCH for values stored with
-// putString (nvs_set_str), silently falling back to the default on every
-// boot and making saved settings appear to vanish.
-#define CFG_STR(var, nvsKey, defVal)                                           \
-  if (mode == 0) {                                                             \
-    size_t cfgLen = pref.getString(nvsKey, var, sizeof(var));                  \
-    if (cfgLen == 0) {                                                         \
-      strncpy(var, defVal, sizeof(var) - 1);                                   \
-      var[sizeof(var) - 1] = 0;                                                \
-    } else {                                                                   \
-      var[sizeof(var) - 1] = 0;                                                \
-    }                                                                          \
-  } else if (mode == 1) {                                                      \
-    (*doc)[#var] = var;                                                        \
-  } else if (mode == 2 && (*doc)[#var].is<const char *>()) {                   \
-    snprintf(var, sizeof(var), "%s", (*doc)[#var].as<const char *>());         \
-    if (cfgStrChanged(pref, nvsKey, var) &&                                    \
-        nvsStringWriteFailed(nvsKey, var, pref.putString(nvsKey, var))) cfgNvsWriteErrors++; \
+static void cfgApply(int mode, Preferences &pref, JsonDocument *doc) {
+  for (const CfgParam &p : CFG_TABLE) {
+    switch (p.kind) {
+    case CK_INT: {
+      int *v = static_cast<int *>(p.ptr);
+      if (mode == 0) {
+        *v = pref.getInt(p.nvsKey, p.di);
+        clampCfgInt(p.name, v, p.lo, p.hi);
+      } else if (mode == 1) {
+        (*doc)[p.name] = *v;
+      } else if (!(*doc)[p.name].isNull()) {
+        *v = (*doc)[p.name].as<int>();
+        clampCfgInt(p.name, v, p.lo, p.hi);
+        if (cfgIntChanged(pref, p.nvsKey, *v) &&
+            nvsWriteFailed(p.nvsKey, pref.putInt(p.nvsKey, *v)))
+          cfgNvsWriteErrors++;
+      }
+      break;
+    }
+    case CK_UINT: {
+      uint32_t *v = static_cast<uint32_t *>(p.ptr);
+      if (mode == 0) {
+        *v = clampCfgUnsigned(p.name, pref.getInt(p.nvsKey, p.di), p.lo, p.hi);
+      } else if (mode == 1) {
+        (*doc)[p.name] = *v;
+      } else if (!(*doc)[p.name].isNull()) {
+        *v = clampCfgUnsigned(p.name, (*doc)[p.name].as<long long>(), p.lo,
+                              p.hi);
+        if (cfgIntChanged(pref, p.nvsKey, (int)*v) &&
+            nvsWriteFailed(p.nvsKey, pref.putInt(p.nvsKey, (int)*v)))
+          cfgNvsWriteErrors++;
+      }
+      break;
+    }
+    case CK_FLT: {
+      float *v = static_cast<float *>(p.ptr);
+      if (mode == 0) {
+        *v = pref.getFloat(p.nvsKey, p.df);
+        clampCfgFloat(p.name, v, p.flo, p.fhi, p.df);
+      } else if (mode == 1) {
+        (*doc)[p.name] = *v;
+      } else if (!(*doc)[p.name].isNull()) {
+        *v = (*doc)[p.name].as<float>();
+        clampCfgFloat(p.name, v, p.flo, p.fhi, p.df);
+        if (cfgFloatChanged(pref, p.nvsKey, *v) &&
+            nvsWriteFailed(p.nvsKey, pref.putFloat(p.nvsKey, *v)))
+          cfgNvsWriteErrors++;
+      }
+      break;
+    }
+    case CK_BOOL: {
+      bool *v = static_cast<bool *>(p.ptr);
+      if (mode == 0) {
+        *v = pref.getBool(p.nvsKey, p.di != 0);
+      } else if (mode == 1) {
+        (*doc)[p.name] = *v;
+      } else if (!(*doc)[p.name].isNull()) {
+        *v = (*doc)[p.name].as<bool>();
+        if (cfgBoolChanged(pref, p.nvsKey, *v) &&
+            nvsWriteFailed(p.nvsKey, pref.putBool(p.nvsKey, *v)))
+          cfgNvsWriteErrors++;
+      }
+      break;
+    }
+    case CK_STR:
+    case CK_SECRET: {
+      char *buf = static_cast<char *>(p.ptr);
+      if (mode == 0) {
+        // getString(key, char*, maxLen) - the nvs_get_str path. getBytes goes
+        // through nvs_get_blob, which reports TYPE_MISMATCH for values stored
+        // with putString and would silently fall back to the default on every
+        // boot (saved settings appearing to vanish).
+        size_t n = pref.getString(p.nvsKey, buf, p.size);
+        if (n == 0) {
+          strncpy(buf, p.dstr, p.size - 1);
+          buf[p.size - 1] = 0;
+        } else {
+          buf[p.size - 1] = 0;
+        }
+      } else if (mode == 1) {
+        if (p.kind == CK_SECRET) (*doc)[p.name] = "";
+        else (*doc)[p.name] = buf;
+      } else if ((*doc)[p.name].is<const char *>()) {
+        const char *v = (*doc)[p.name].as<const char *>();
+        if (p.kind == CK_SECRET && (v == nullptr || v[0] == 0)) continue;
+        snprintf(buf, p.size, "%s", v);
+        // Unchanged strings are not re-stored: they are the longest items in
+        // the namespace, and rewriting them on every save is what used to fill
+        // the partition with stranded pages.
+        if (cfgStrChanged(pref, p.nvsKey, buf) &&
+            nvsStringWriteFailed(p.nvsKey, buf, pref.putString(p.nvsKey, buf)))
+          cfgNvsWriteErrors++;
+      }
+      break;
+    }
+    }
   }
-
-#define CFG_BOOL(var, nvsKey, defVal)                                          \
-  if (mode == 0) {                                                             \
-    var = pref.getBool(nvsKey, defVal);                                        \
-  } else if (mode == 1) {                                                      \
-    (*doc)[#var] = var;                                                        \
-  } else if (mode == 2 && !(*doc)[#var].isNull()) {                            \
-    var = (*doc)[#var].as<bool>();                                             \
-    if (cfgBoolChanged(pref, nvsKey, var) &&                                   \
-        nvsWriteFailed(nvsKey, pref.putBool(nvsKey, var))) cfgNvsWriteErrors++; \
-  }
+}
 
 // The version this unit reports: the user override when one is set, otherwise
 // the compiled-in build identity. Display paths and the update check both read
@@ -872,252 +1140,11 @@ void processConfig(int mode, JsonDocument *doc) {
   // count is only known after the CFG_* block below has run.
   const int prevFuelPoints = FUEL_TOUCH_POINTS;
 
-  CFG_INT(DISPLAY_ROTATION, "DISP_ROT", 1, 0, 3);
-  CFG_BOOL(UNITS_IMPERIAL, "UNITS_IMP", false);
-  CFG_BOOL(ADV_MODE, "ADV_MODE", false);
-  CFG_UINT(SPI_BUS_SPEED, "SPI_FREQ", 60000000, SPI_SPEED_MIN_HZ,
-           SPI_SPEED_MAX_HZ);
-  CFG_INT(DISPLAY_WIDTH, "DISP_W", 480, 16, 2048);
-  CFG_INT(DISPLAY_HEIGHT, "DISP_H", 320, 16, 2048);
-  CFG_INT(TARGET_FPS, "TGT_FPS", 60, 5, 120);
-  CFG_INT(BACKLIGHT_BRIGHTNESS, "BL_BRIGHT", 100, 0, 100);
-  CFG_BOOL(ENABLE_AUTO_BRIGHTNESS, "EN_AUTO_BL", true);
-  CFG_INT(LIGHT_SENSOR_DARK_VAL, "LIGHT_DARK", 432, 0, 4095);
-  CFG_INT(LIGHT_SENSOR_BRIGHT_VAL, "LIGHT_BRIGHT", 2851, 0, 4095);
-  CFG_INT(AUTO_BRIGHT_DARK, "AB_DARK", 13, 0, 100);
-  CFG_INT(AUTO_BRIGHT_LIGHT, "AB_LIGHT", 100, 0, 100);
-  CFG_INT(AUTO_BRIGHT_FADE_MS, "AB_FADE", 4000, 0, 60000);
-  CFG_INT(FADE_DURATION_MS, "FADE_DUR", 700, 0, 10000);
-  CFG_STR(SPLASH_SIGNATURE, "SPLASH_SIG", "by @ale.finot");
-  CFG_STR(REBOOT_SIGNATURE, "REBOOT_SIG", "Dashboard++ by @ale.finot");
-  CFG_STR(DASHBOARD_SIGNATURE, "DASH_SIG",
-          "<<<<<<    Dashboard++ by @ale.finot    >>>>>>");
+  // Every scalar parameter, in the order the CFG_* calls used to run.
+  cfgApply(mode, pref, doc);
 
-  CFG_INT(TEMP_BAR_MIN, "TMP_BAR_MIN", 10, -40, 300);
-  CFG_INT(TEMP_BAR_MAX, "TMP_BAR_MAX", 110, -40, 300);
-  CFG_INT(TEMP_WARN_RED, "TMP_WRN_R", 90, -40, 300);
-  CFG_INT(TEMP_WARN_YEL, "TMP_WRN_Y", 45, -40, 300);
-  CFG_INT(TEMP_WARN_LOW, "TMP_WRN_L", 20, -40, 300);
-  CFG_INT(FUEL_WARN_RED, "FUL_WRN_R", 20, 0, 100);
-  CFG_INT(FUEL_WARN_YEL, "FUL_WRN_Y", 45, 0, 100);
-
-  CFG_STR(COLOR_TEMP_NORM, "C_TMP_N", "#00ff00");
-  CFG_STR(COLOR_TEMP_WARN, "C_TMP_W", "#ffff00");
-  CFG_STR(COLOR_TEMP_CRIT, "C_TMP_C", "#ff0000");
-  CFG_STR(COLOR_FUEL_NORM, "C_FUL_N", "#00ff00");
-  CFG_STR(COLOR_FUEL_WARN, "C_FUL_W", "#ffff00");
-  CFG_STR(COLOR_FUEL_CRIT, "C_FUL_C", "#ff0000");
-  CFG_STR(GHOST_COLOR_STR, "GHOST_C", "#474747");
-
-  CFG_FLT(WHEEL_CIRCUMFERENCE_MM, "WHL_CIRC", 1650.0f, 50.0f, 10000.0f);
-  CFG_FLT(FUEL_FILTER_ALPHA, "FUEL_FILT", 0.08f, 0.001f, 1.0f);
-  CFG_INT(TRIP_RESET_HOLD_MS, "TRP_RST_H", 1500, 200, 10000);
-  CFG_INT(FUEL_TOUCH_POINTS, "FTL_PTS", 8, 2, 20);
-  CFG_BOOL(FUEL_INPUT_ENABLED, "FUEL_EN", false);
-  CFG_INT(FUEL_EXC_RES_OHM, "FUEL_EXR", 220, 10, 100000);
-  CFG_FLT(FUEL_ADC_VREF, "FUEL_VRF", 3.30f, 2.5f, 4.2f);
-  CFG_FLT(FUEL_OHM_EMPTY, "FUEL_OE", 10.0f, 0.0f, 100000.0f);
-  CFG_FLT(FUEL_OHM_FULL, "FUEL_OF", 180.0f, 0.0f, 100000.0f);
-  CFG_INT(FUEL_OVERSAMPLE, "FUEL_OSM", 16, 1, 64);
-  CFG_FLT(BATTERY_SCALE, "BAT_SCALE", 5.7f, 0.01f, 1000.0f);
-  CFG_FLT(BATTERY_OFFSET, "BAT_OFFS", 0.2f, -50.0f, 50.0f);
-  CFG_FLT(NTC_R_BALANCE, "NTC_BAL", 10000.0f, 100.0f, 10000000.0f);
-  CFG_FLT(NTC_R25, "NTC_R25", 10000.0f, 100.0f, 10000000.0f);
-  CFG_FLT(NTC_BETA, "NTC_BETA", 3950.0f, 1000.0f, 20000.0f);
-  CFG_FLT(NTC_TEMP_OFFSET, "NTC_OFFS", 0.0f, -50.0f, 50.0f);
-  CFG_INT(GPS_BAUD, "GPS_BAUD", 115200, 1200, 921600);
-  CFG_INT(MIN_SATELLITES, "MIN_SAT", 8, 1, 32);
-  CFG_INT(OPTIMAL_SATELLITES, "OPT_SAT", 12, 1, 32);
-  CFG_FLT(MAX_SPEED_DELTA_KMH, "MAX_SPD_DELT", 5.0f, 0.01f, 100.0f);
-  CFG_FLT(MIN_SPEED_THRESHOLD, "MIN_SPD_THR", 1.0f, 0.0f, 50.0f);
-  CFG_FLT(GPS_START_KMH, "GPS_START", 3.0f, 0.0f, 200.0f);
-  CFG_INT(GPS_STOP_SETTLE_MS, "GPS_STL_MS", 1500, 0, 60000);
-  CFG_FLT(GPS_MIN_DEV_KMH, "GPS_MIN_DV", 1.0f, 0.0f, 50.0f);
-  CFG_INT(SPEED_SOURCE_MODE, "SPD_SRC_MODE", 2, 0, 2);
-  CFG_INT(SPEED_SOURCE_HOLD_MS, "SPD_SRC_HOLD", 500, 0, 10000);
-  CFG_INT(HALL_MEDIAN_SAMPLES, "HALL_MED_N", 3, 1, 31);
-  CFG_INT(HALL_PERIOD_GUARD, "HALL_PRD_GRD", 8, 1, 100);
-  CFG_INT(HALL_PULSE_MIN_US, "HALL_PL_MIN", 150, 10, 1000);
-  CFG_FLT(ACCEL_START_SPEED, "ACC_STRT", 1.0f, 0.0f, 200.0f);
-  CFG_FLT(ACCEL_TARGET_SPEED, "ACC_TGT", 50.0f, 1.0f, 400.0f);
-  CFG_FLT(ACCEL_MAX_TIME, "ACC_MAX_T", 9.99f, 0.1f, 999.99f);
-
-  CFG_STR(ACCEL_BADGE_LINE1, "ACC_BDG_1", "0-50");
-  CFG_STR(ACCEL_BADGE_LINE2, "ACC_BDG_2", "km/h");
-
-  CFG_INT(BIG_CENTER_X, "BCX", 240, 0, 4095);
-  CFG_INT(BIG_CENTER_Y, "BCY", 160, 0, 4095);
-
-  CFG_INT(OFFSET_BIG_TIME_X, "O_BTIME_X", 107, -4096, 4096);
-  CFG_INT(OFFSET_BIG_TIME_Y, "O_BTIME_Y", -91, -4096, 4096);
-  CFG_INT(OFFSET_BIG_DATE_X, "O_BDATE_X", -131, -4096, 4096);
-  CFG_INT(OFFSET_BIG_DATE_Y, "O_BDATE_Y", -91, -4096, 4096);
-  CFG_INT(OFFSET_BIG_SIGNATURE_X, "O_BSIG_X", 0, -4096, 4096);
-  CFG_INT(OFFSET_BIG_SIGNATURE_Y, "O_BSIG_Y", -75, -4096, 4096);
-  CFG_INT(OFFSET_BIG_SPEED_NUM_X, "O_BSN_X", 0, -4096, 4096);
-  CFG_INT(OFFSET_BIG_SPEED_NUM_Y, "O_BSN_Y", -3, -4096, 4096);
-  CFG_INT(OFFSET_BIG_SPEED_UNIT_X, "O_BSU_X", 106, -4096, 4096);
-  CFG_INT(OFFSET_BIG_SPEED_UNIT_Y, "O_BSU_Y", 56, -4096, 4096);
-  CFG_INT(OFFSET_BIG_ODO_X, "O_BODO_X", 22, -4096, 4096);
-  CFG_INT(OFFSET_BIG_ODO_Y, "O_BODO_Y", 126, -4096, 4096);
-  CFG_INT(OFFSET_BIG_SAT_X, "O_BSAT_X", 179, -4096, 4096);
-  CFG_INT(OFFSET_BIG_SAT_Y, "O_BSAT_Y", -114, -4096, 4096);
-  CFG_INT(OFFSET_BIG_TMR_X, "O_BTMR_X", -53, -4096, 4096);
-  CFG_INT(OFFSET_BIG_TMR_Y, "O_BTMR_Y", -46, -4096, 4096);
-  CFG_INT(OFFSET_BIG_BAT_X, "O_BBAT_X", -112, -4096, 4096);
-  CFG_INT(OFFSET_BIG_BAT_Y, "O_BBAT_Y", 123, -4096, 4096);
-  CFG_INT(SIDEBAR_LEFT_X, "SBAR_L_X", 10, -4096, 4096);
-  CFG_INT(SIDEBAR_LEFT_Y, "SBAR_L_Y", 95, -4096, 4096);
-  CFG_INT(SIDEBAR_RIGHT_X, "SBAR_R_X", 462, -4096, 4096);
-  CFG_INT(SIDEBAR_RIGHT_Y, "SBAR_R_Y", 95, -4096, 4096);
-  CFG_INT(OFFSET_HALL_ICON_X, "O_HALL_X", 0, -4096, 4096);
-  CFG_INT(OFFSET_HALL_ICON_Y, "O_HALL_Y", -100, -4096, 4096);
-  CFG_INT(OFFSET_WIFI_ICON_X, "O_WIFI_X", 204, -4096, 4096);
-  CFG_INT(OFFSET_WIFI_ICON_Y, "O_WIFI_Y", -108, -4096, 4096);
-  CFG_INT(OFFSET_INST_KML_X, "O_INST_X", 60, -4096, 4096);
-  CFG_INT(OFFSET_INST_KML_Y, "O_INST_Y", -25, -4096, 4096);
-  CFG_INT(OFFSET_AVG_KML_X, "O_AVG_X", 160, -4096, 4096);
-  CFG_INT(OFFSET_AVG_KML_Y, "O_AVG_Y", -25, -4096, 4096);
-  CFG_INT(OFFSET_AVG_SPEED_X, "O_AVG_SPD_X", -163, -4096, 4096);
-  CFG_INT(OFFSET_AVG_SPEED_Y, "O_AVG_SPD_Y", -25, -4096, 4096);
-  CFG_INT(OFFSET_MAX_SPEED_X, "O_MAX_SPD_X", -60, -4096, 4096);
-  CFG_INT(OFFSET_MAX_SPEED_Y, "O_MAX_SPD_Y", -25, -4096, 4096);
-  CFG_INT(OFFSET_FUEL_LTRS_X, "O_FLTRS_X", 132, -4096, 4096);
-  CFG_INT(OFFSET_FUEL_LTRS_Y, "O_FLTRS_Y", 123, -4096, 4096);
-
-  CFG_INT(SIDEBAR_BAR_WIDTH, "SBAR_W", 8, 1, 2048);
-  CFG_INT(SIDEBAR_BAR_HEIGHT, "SBAR_H", 190, 1, 2048);
-  CFG_BOOL(SHOW_ELEMENT_BOUNDS, "SHW_BNDS", false);
-  CFG_BOOL(SHOW_ELEMENT_SPEED, "SH_SPD", true);
-  CFG_BOOL(SHOW_ELEMENT_SPEED_UNIT, "SH_SPD_UN", true);
-  CFG_BOOL(SHOW_ELEMENT_SIGNATURE, "SH_SIG", true);
-  CFG_BOOL(SHOW_ELEMENT_SPEED_SOURCE, "SH_SPD_SRC", true);
-  CFG_BOOL(SHOW_ELEMENT_WIFI, "SH_WIFI", true);
-  CFG_BOOL(SHOW_ELEMENT_TIME, "SH_TIME", true);
-  CFG_BOOL(SHOW_ELEMENT_DATE, "SH_DATE", true);
-  CFG_BOOL(SHOW_ELEMENT_ODO, "SH_ODO", true);
-  CFG_BOOL(SHOW_ELEMENT_SIDEBAR_TEMP, "SH_SB_TMP", true);
-  CFG_BOOL(SHOW_ELEMENT_SIDEBAR_FUEL, "SH_SB_FUL", true);
-  CFG_BOOL(SHOW_ELEMENT_SAT, "SH_SAT", true);
-  CFG_BOOL(SHOW_ELEMENT_TMR, "SH_TMR", true);
-  CFG_BOOL(SHOW_ELEMENT_BAT, "SH_BAT", true);
-  CFG_BOOL(SHOW_ELEMENT_INST_KML, "SH_INST", true);
-  CFG_BOOL(SHOW_ELEMENT_AVG_KML, "SH_AVG", true);
-  CFG_BOOL(SHOW_ELEMENT_AVG_SPEED, "SH_AVG_SPD", true);
-  CFG_BOOL(SHOW_ELEMENT_MAX_SPEED, "SH_MAX_SPD", true);
-  CFG_BOOL(SHOW_ELEMENT_FUEL_LTRS, "SH_FUL", true);
-  CFG_BOOL(SHOW_GHOST_DIGITS, "SH_GHOST", true);
-  CFG_BOOL(SHOW_ELEMENT_WEATHER, "SH_WEATH", true);
-  CFG_INT(OFFSET_WEATHER_X, "O_WEATH_X", 0, -4096, 4096);
-  CFG_INT(OFFSET_WEATHER_Y, "O_WEATH_Y", 146, -4096, 4096);
-  CFG_STR(WEATHER_CITY, "WEATH_CITY", "");
-  CFG_FLT(WEATHER_LAT, "WEATH_LAT", 0.0f, -90.0f, 90.0f);
-  CFG_FLT(WEATHER_LON, "WEATH_LON", 0.0f, -180.0f, 180.0f);
-  CFG_INT(WEATHER_REFRESH_MIN, "WEATH_RFR", 1, 1, 1440);
-  CFG_STR(WEATHER_LOCALE, "WEATH_LOCALE", "it");
-  CFG_BOOL(ENABLE_POWER_SENSE, "PWR_SNS", false);
-  CFG_INT(POWER_SENSE_OFF_MS, "PWR_OFF_MS", 10000, 500, 120000);
-  CFG_BOOL(ENABLE_CIRCLE_TEST, "CIRC_TST", false);
-  CFG_BOOL(ENABLE_DEMO_MODE, "DEMO_MODE", false);
-  CFG_BOOL(ENABLE_ANTIALIASING, "EN_AA", true);
-  CFG_FLT(AA_SHARPNESS, "AA_SHARP", 0.2f, 0.0f, 1.0f);
-  CFG_BOOL(SHOW_FPS_COUNTER_DEFAULT, "SHW_FPS", false);
-  CFG_BOOL(GPS_DEBUG_DEFAULT, "GPS_DBG", false);
-  CFG_BOOL(ENABLE_DYNAMIC_CPU, "DYN_CPU", false);
-  CFG_INT(MANUAL_CPU_FREQ, "MAN_CPU", 240, 80, 240);
-  CFG_BOOL(ENABLE_CPU_THROTTLE, "CPU_THR_EN", false);
-  CFG_INT(CPU_THROTTLE_TEMP_WARN, "CPU_THR_W", 50, -50, 150);
-  CFG_INT(CPU_THROTTLE_TEMP_CRIT, "CPU_THR_C", 60, -50, 150);
-  CFG_BOOL(ENABLE_NIGHT_MODE, "EN_NIGHT", false);
-  CFG_INT(NIGHT_MODE_START_HOUR, "NGHT_SRT", 23, 0, 23);
-  CFG_INT(NIGHT_MODE_END_HOUR, "NGHT_END", 0, 0, 23);
-  CFG_INT(NIGHT_BACKLIGHT, "NGHT_BL", 29, 0, 100);
-  CFG_BOOL(DISPLAY_INVERT_COLORS, "INV_COLORS", false);
-  CFG_INT(OFFSET_BIG_FPS_X, "O_FPS_X", -9, -4096, 4096);
-  CFG_INT(OFFSET_BIG_FPS_Y, "O_FPS_Y", -7, -4096, 4096);
-
-  CFG_INT(REFRESH_SPEED_MS, "R_SPD", 250, 10, 60000);
-  CFG_INT(REFRESH_BAT_MS, "R_BAT", 2500, 10, 600000);
-  CFG_INT(REFRESH_INST_MS, "R_INST", 500, 10, 60000);
-  CFG_INT(REFRESH_MAX_SPEED_MS, "R_MAX_SPD", 500, 10, 60000);
-  CFG_INT(REFRESH_FUEL_MS, "R_FUEL", 1000, 10, 60000);
-
-  CFG_INT(SPEED_DIGITS, "SPD_DIG", 2, 1, 4);
-  CFG_INT(SAT_DIGITS, "SAT_DIG", 2, 1, 3);
-  CFG_INT(TMR_INT_DIGITS, "TMR_INT", 1, 1, 14);
-  CFG_INT(TMR_DEC_DIGITS, "TMR_DEC", 2, 0, 4);
-  CFG_INT(BAT_INT_DIGITS, "BAT_INT", 2, 1, 14);
-  CFG_INT(BAT_DEC_DIGITS, "BAT_DEC", 1, 0, 4);
-  CFG_INT(INST_INT_DIGITS, "INST_INT", 2, 1, 14);
-  CFG_INT(INST_DEC_DIGITS, "INST_DEC", 1, 0, 4);
-  CFG_INT(AVG_INT_DIGITS, "AVG_INT", 2, 1, 14);
-  CFG_INT(AVG_DEC_DIGITS, "AVG_DEC", 1, 0, 4);
-  CFG_INT(AVG_SPEED_INT_DIGITS, "AVG_SPD_INT", 2, 1, 14);
-  CFG_INT(AVG_SPEED_DEC_DIGITS, "AVG_SPD_DEC", 0, 0, 4);
-  CFG_INT(MAX_SPEED_INT_DIGITS, "MAX_SPD_INT", 3, 1, 14);
-  CFG_INT(MAX_SPEED_DEC_DIGITS, "MAX_SPD_DEC", 0, 0, 4);
-  CFG_INT(FUEL_INT_DIGITS, "FUEL_INT", 1, 1, 14);
-  CFG_INT(FUEL_DEC_DIGITS, "FUEL_DEC", 1, 0, 4);
-  CFG_INT(ODO_INT_DIGITS, "ODO_INT", 5, 1, 14);
-  CFG_INT(ODO_DEC_DIGITS, "ODO_DEC", 1, 0, 4);
-
-  CFG_STR(WIFI_SSID, "WIFI_SSID", "");
-  // WiFi passwords are handled manually (below): never serialized back to the
-  // web API, and an empty posted value means "keep the stored one".
-  CFG_STR(WIFI_SSID_1, "WIFI_S1", "");
-  CFG_STR(WIFI_SSID_2, "WIFI_S2", "");
-  CFG_STR(WIFI_SSID_3, "WIFI_S3", "");
-  CFG_STR(WIFI_SSID_4, "WIFI_S4", "");
-  CFG_STR(AP_PASSWORD, "AP_PWD", AP_PASSWORD_DEFAULT);
-  CFG_INT(WIFI_ATTEMPT_SECONDS, "WIFI_ATTEM_S", 12, 5, 60);
-  CFG_BOOL(NTP_ENABLED, "NTP_EN", true);
-  CFG_STR(NTP_SERVER, "NTP_SRV", "pool.ntp.org");
-  CFG_INT(TZ_OFFSET_HOURS, "TZ_OFFSET", 1, -14, 14);
-  CFG_BOOL(TZ_DST_ENABLED, "TZ_DST", true);
-  CFG_INT(TZ_DST_RULE, "TZ_RULE", 1, 0, 2);  // 1 = TZ_DST_RULE_EU
-
-  CFG_BOOL(OTA_PULL_ENABLED, "OTA_PULL_EN", false);
-  CFG_STR(OTA_PULL_URL, "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest");
-  CFG_STR(VERSION_OVERRIDE, "VER_OVR", "");
-
-  // WiFi passwords: mode 1 sends empty strings so they never leave the device,
-  // mode 2 keeps the stored value when the posted password is empty.
-  {
-    char *pwds[5] = { WIFI_PASSWORD, WIFI_PASSWORD_1, WIFI_PASSWORD_2,
-                      WIFI_PASSWORD_3, WIFI_PASSWORD_4 };
-    const char *keys[5] = { "WIFI_PASSWORD", "WIFI_PASSWORD_1",
-                            "WIFI_PASSWORD_2", "WIFI_PASSWORD_3",
-                            "WIFI_PASSWORD_4" };
-    const char *nvs[5] = { "WIFI_PWD", "WIFI_P1", "WIFI_P2", "WIFI_P3",
-                           "WIFI_P4" };
-    const char *defs[5] = { "", "", "", "", "" };
-    for (int i = 0; i < 5; i++) {
-      if (mode == 0) {
-        size_t cb = pref.getString(nvs[i], pwds[i], 64);
-        pwds[i][63] = 0;
-        if (cb == 0) {
-          strncpy(pwds[i], defs[i], 63);
-          pwds[i][63] = 0;
-        }
-      } else if (mode == 1) {
-        (*doc)[keys[i]] = "";
-      } else if (mode == 2 && (*doc)[keys[i]].is<const char *>()) {
-        const char *v = (*doc)[keys[i]].as<const char *>();
-        if (v && strlen(v) > 0) {
-          strncpy(pwds[i], v, 63);
-          pwds[i][63] = 0;
-          // Checked like every other write: a password that never reached flash
-          // used to be invisible, and the network then fails to join after a
-          // reboot with nothing in the log to point at it. Unchanged passwords
-          // are not re-stored - they are the longest strings in the namespace
-          // and rewriting them on every save was the churn that filled it.
-          if (cfgStrChanged(pref, nvs[i], pwds[i]) &&
-              nvsWriteFailed(nvs[i], pref.putString(nvs[i], pwds[i])))
-            cfgNvsWriteErrors++;
-        }
-      }
-    }
-  }
+  // The five Wi-Fi passphrases are CK_SECRET rows at the end of CFG_TABLE:
+  // never serialized back, and a blank posted value keeps the stored one.
 
   if (mode == 0 || mode == 2) {
     sanitizeDigitCounts();
