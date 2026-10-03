@@ -314,7 +314,7 @@ $$T_{\text{Celsius}} = T_{\text{Kelvin}} - 273.15$$
 where $R_{\text{room}} =$ `NTC_R25` (default=10,000 $\Omega$), $T_{\text{room}} = 298.15\text{ K}$ ($25^\circ\text{C}$), and $\beta =$ `NTC_BETA` (default=3950). A fixed `NTC_TEMP_OFFSET` (°C, default=0.0) is added to the result to correct a systematic reading bias.
 
 #### WebUI Sensor Calibration
-The **Sensors Tuning** WebUI card calibrates the two analog sensors against a reference, using the live `/api/sensors` reading (no raw-ADC conversion needed):
+The **Sensors Tuning** WebUI card calibrates the two analog sensors against a reference, using the live `/api/live` snapshot the page polls once per second (no raw-ADC conversion needed):
 - **Fuel level Sensor** — the live sender resistance (Ω) is shown next to a fault state (`open` / `shorted` / `out of range` / `no sender`). Two ways to build the table (`fuelCalOhms`): **Fill from empty/full ohm** pre-fills a linear ramp from `FUEL_OHM_EMPTY` to `FUEL_OHM_FULL` (a good start, no driving needed), or drive the tank through its levels and **Capture** the live reading into each slot — slot `0` = empty, slot `N-1` = full. Changing the point count regenerates the ramp. The card is titled without the pin number (issue #55), and the excitation-resistor suggestion is computed from the empty/full ohms on the page plus the fixed 3.3 V rail.
 - **Speedometer** — `SPEED_SOURCE_MODE`, `SPEED_SOURCE_HOLD_MS`, the two hall-vs-GPS deviation bands (`GPS_MIN_DEV_KMH`, `MAX_SPEED_DELTA_KMH`), the GPS start/stop pair (`GPS_START_KMH`, `GPS_STOP_SETTLE_MS`) and the wheel-signal filters (`HALL_MEDIAN_SAMPLES`, `HALL_PERIOD_GUARD`, `HALL_PULSE_MIN_US`), in that order (issue #56). The GNSS hardware rows (baud, satellite counts) stay in the GPS block.
 - **Engine Temperature** — the live reading is shown; type a reference temperature and press **Apply** to set `NTC_TEMP_OFFSET`. `NTC_R25`, `NTC_R_BALANCE` and `NTC_BETA` are under **Advanced**.
@@ -446,13 +446,14 @@ The management portal features a modern grouped card-based layout:
 | `/api/ambient` | `GET` | Reads raw ambient light sensor value | None | `application/json` |
 | `/api/sensors` | `GET` | Reads calibrated battery voltage (`v`) and coolant temperature (`t`) | None | `application/json` |
 | `/api/fuel` | `GET` | Reads the fuel input: `raw` averaged ADC code, `liters`, `pct`, `ohm` sender resistance, `st` input state (0 = disabled, 1 = ok, 2 = open circuit, 3 = shorted) | None | `application/json` |
+| `/api/live` | `GET` | Single 1 Hz snapshot for the Web UI's live readings: `ambient`, `odo` (km), `fuel_raw`, `fuel_ohm`, `fuel_st`, `volts`, `temp`. One response feeds all five cells, so they always show the same instant | None | `application/json` |
 | `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `application/json` (`{"status":"ok"\|"saved-ram-only","value":N}` — `saved-ram-only` means the value is applied but the NVS write failed) |
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `application/json` (same shape as `cal-dark`) |
 | `/api/ota` | `POST` | Over-The-Air firmware binary upload | Binary `.bin` payload | `multipart/form-data` |
 | `/api/ota/pull` | `POST` | Triggers cloud OTA pull (checks `OTA_PULL_URL`) | None | `text/plain` |
 | `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled`, `url`, `current_version`, `build_version`, `version_override`, `previous_version`, `status`) | None | `application/json` |
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
-| `/api/perf` | `GET` | Live telemetry (CPU, Heap, task stack headroom, FPS, WiFi, partitions) | None | `application/json` |
+| `/api/perf` | `GET` | Live telemetry (CPU, Heap, task stack headroom, FPS, WiFi, partitions), plus the web task's own timing: `web_serve_ms_last` / `web_serve_ms_max` (what one `handleClient()` pass costs) and `web_slow_iters` (loop iterations over 100 ms) | None | `application/json` |
 | `/api/health` | `GET` | Health probe: heap, FPS, partition layout and the NVS entry budget (`nvs_bytes`, `nvs_entries_used` / `_available` / `_total`) | None | `application/json` |
 | `/api/boot` | `GET` | Boot/reboot forensics (reset reason, storm, last-reboot tag, heap watermark). `reset_reason` covers the whole core enum — `POWERON`, `EXT`, `SW (clean restart)`, `PANIC (crash/abort)`, `INT_WDT`, `TASK_WDT`, `WDT (other)`, `DEEP_SLEEP_WAKE`, `BROWNOUT`, `SDIO`, `USB`, `JTAG`, `EFUSE_ERR`, `PWR_GLITCH`, `CPU_LOCKUP`, `UNKNOWN`; anything unmapped prints `RST_<n>` (issue #42) | None | `application/json` |
 
@@ -759,6 +760,19 @@ In Demo Mode:
 ---
 
 ## Changelog
+
+### Unreleased — live readings that never skip a second (firmware + Web UI)
+
+The settings page's live cells (ambient light, odometer, fuel ohms/state, coolant temp, battery volts) used to advance every 1 s on a good moment and every 2 s on a tired one. They now come from one request per second and cannot miss a tick.
+
+**The mechanism** — the core's `WebServer` serves **one client at a time** (`WebServer.cpp`: "Supports only one simultaneous client"; `NetworkServer` listens with a backlog of 4; every reply is `Connection: close`, so each poll costs a fresh TCP handshake), and the web task calls `handleClient()` once per ~10 ms. The page was firing **four simultaneous fetches every 1000 ms** (`/api/ambient`, `/api/odo`, `/api/fuel`, `/api/sensors`). When a batch outlived the tick, the next batch met a full backlog and its sockets were refused — and every poller swallowed the failure with `.catch(() => {})`, so the symptom was "that cell didn't change", not an error. `scripts/verify_live_poll.py` re-creates those server constraints on the host and measures both patterns: at a 300 ms per-request cost the four-parallel pattern misses 11-14 of 12 ticks with the worst median interval at 1235-1399 ms (at 400 ms it is 2031 ms — the reported "every 2 seconds"), while the single-lane pattern is 0 missed ticks at exactly 1000 ms.
+
+- **`GET /api/live`** — one atomic snapshot of all five live readings, allocation-free like `/api/health` (fixed `char[176]`, one `snprintf`, one `g_stateMutex` take). The four single-value endpoints stay registered and unchanged for other consumers.
+- **One request lane in the page** — `laneFetch()` keeps at most one request in flight for every periodic read (live values, Performance Monitor, serial monitor) and aborts it at `LIVE_ABORT_MS = 900`, under the 1000 ms tick and far under the server's `HTTP_MAX_DATA_WAIT` = 5 s. A slow device loses that sample instead of stacking sockets on top of itself; returning to a foregrounded tab polls straight away instead of waiting for the next tick.
+- **Both ends are measurable now** — `/api/perf` gained `web_serve_ms_last`, `web_serve_ms_max` and `web_slow_iters` from the web task's own loop, and the Performance Monitor gained a **Live Poll** row showing the browser round trip with `N ok / N missed` beside the device's serve time. Polls stopped being invisible, which is what made this bug last.
+- `scripts/verify_live_poll.py` is the regression gate: `python scripts/verify_live_poll.py --serve-ms 300 --ticks 12` must stay green (lane clean, parallel demonstrably degraded), with `--shape-only` pinning the endpoint contract and the four legacy GETs still registered, `--counters-only` pinning the perf fields, and `--webui-only` pinning the page structure (one `setInterval(liveTick, 1000)`, no fan-out, no periodic read of the single-value endpoints).
+
+---
 
 ### Unreleased — the launcher icon redrawn around one bold dial (Android app only)
 
