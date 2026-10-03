@@ -143,11 +143,11 @@ const char *bootinfo_previous_version() { return s_prevVersion; }
 String bootinfo_json() {
   char buf[320];
   snprintf(buf, sizeof(buf),
-           "{\"reset\":\"%s\",\"bootCount\":%u,\"storm\":%d,"
+           "{\"reset\":\"%s\",\"bootCount\":%lu,\"storm\":%d,"
            "\"lastRebootTag\":\"%s\",\"heapAtLastReboot\":%lu,"
            "\"minHeapLastBoot\":%lu,\"minHeapSinceBoot\":%lu,"
            "\"maxAllocHeap\":%lu,\"freeHeap\":%lu}",
-           s_resetReason, s_bootCountNow, (int)s_stormActive, s_lastRebootTag,
+           s_resetReason, (unsigned long)s_bootCountNow, (int)s_stormActive, s_lastRebootTag,
            (unsigned long)s_lastRebootHeap, (unsigned long)s_lastMinHeap,
            (unsigned long)ESP.getMinFreeHeap(),
            (unsigned long)ESP.getMaxAllocHeap(),

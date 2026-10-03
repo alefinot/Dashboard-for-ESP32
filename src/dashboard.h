@@ -8,7 +8,6 @@
 #include <SPI.h>
 #include <algorithm>
 #include <utility>
-#include <vector>
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>

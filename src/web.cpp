@@ -28,8 +28,6 @@ volatile unsigned long webLoopCount = 0;
 // reason then reads PANIC (crash), not a clean SW loop.
 static volatile bool safeModeActive = false;
 
-bool isSafeModeActive() { return safeModeActive; }
-
 // Wipes the configuration NVS namespaces. Used by /api/reset and by the
 // physical recovery gesture (hold BOOT 4 s, release, hold 4 s again).
 //
@@ -2480,7 +2478,7 @@ void webServerTask(void *pvParameters) {
         server.begin();
         forceFullRedraw = true;
       }
-      webLoopCount++;
+      webLoopCount = webLoopCount + 1;
     }
     // While an OTA pull streams the firmware, stop serving the browser: fast
     // polls RAID the lwIP TX pbuf pool (errno 11 "No more processes" spam),
@@ -2488,7 +2486,7 @@ void webServerTask(void *pvParameters) {
     // below what the next mbedTLS handshake needs (SSL -32512). The display
     // shows the progress; the pollers just see the connection stall until the
     // flash write ends.
-    else { webLoopCount++; vTaskDelay(pdMS_TO_TICKS(20)); }
+    else { webLoopCount = webLoopCount + 1; vTaskDelay(pdMS_TO_TICKS(20)); }
 
     // ---------------------------------------------------------------------
     // Wi-Fi scan runner. Deliberately here rather than in the request handler:

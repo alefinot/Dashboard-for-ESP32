@@ -71,7 +71,7 @@ static volatile uint32_t cpuProbeTicks[2] = {0, 0};
 static void cpuProbeTask(void *pv) {
   int core = (int)(intptr_t)pv;
   for (;;) {
-    cpuProbeTicks[core]++;
+    cpuProbeTicks[core] = cpuProbeTicks[core] + 1;
     vTaskDelay(1);
   }
 }
@@ -94,7 +94,7 @@ void logPrintf(const char *fmt, ...) {
       if (logHead == logTail)
         logTail = (logTail + 1) % LOG_BUF_SIZE;
     }
-    logSequence++;
+    logSequence = logSequence + 1;
     portEXIT_CRITICAL(&logMux);
     Serial.print(tmp);
   }
@@ -595,7 +595,7 @@ void loop() {
     if (frameDeltaMs > 0) {
       lastFrameTime = now;
       if (frameDeltaMs > g_diagMaxFrameMs) g_diagMaxFrameMs = frameDeltaMs;
-      if (frameDeltaMs > 24) g_diagOver24Ms++;
+      if (frameDeltaMs > 24) g_diagOver24Ms = g_diagOver24Ms + 1;
       filteredFrameTimeMs =
           (filteredFrameTimeMs * 0.95f) + ((float)frameDeltaMs * 0.05f);
       if (filteredFrameTimeMs > 0.0f)
@@ -613,11 +613,11 @@ void loop() {
         fpsSum += fpsHistory[i];
       currentAverageFps = fpsSum / (float)fpsHistoryCount;
     }
-    lastDisplayUpdate += DISPLAY_REFRESH_MS;
-    if (now - lastDisplayUpdate > DISPLAY_REFRESH_MS)
-      lastDisplayUpdate = now; else {
-      lastDisplayUpdate = now;
-    }
+    // Cadence restarts from this frame's tick. The old form did
+    // `lastDisplayUpdate += DISPLAY_REFRESH_MS` and then assigned `now` in BOTH
+    // arms of the if/else, so the += could never survive: same behaviour, one
+    // statement.
+    lastDisplayUpdate = now;
 
     if (pendingOtaScreen) {
       pendingOtaScreen = false;
@@ -677,60 +677,6 @@ void loop() {
                 (int)otaMemReleaseRequested, (int)memSaverActive);
   }
 
-  // NOTE: periodic [RAW]/[VAL]/[ESP] telemetry temporarily disabled for a
-  // clean serial monitor during GNSS debugging. Re-enable by flipping to #if 1.
-#if 0
-  static unsigned long lastTelemetryUpdate = 0;
-  if (now - lastTelemetryUpdate >= TELEMETRY_REFRESH_MS) {
-    lastTelemetryUpdate = now;
-
-    unsigned long hallIntUs, hallCnt;
-    portENTER_CRITICAL(&hallMux);
-    hallIntUs = hallPulseIntervalUs;
-    hallCnt = hallPulseCount;
-    portEXIT_CRITICAL(&hallMux);
-
-    const char *speedSrc =
-        (snap.speedSourceMode == 1) ? "GPS" :
-        (snap.speedSourceMode == 2) ? "G+H" : "HALL";
-    // Snapshot reads only: the TinyGPS++ objects are owned by gpsTask on core 0
-    // and their accessors are single-consumer (issue #9).
-    GpsFixSnapshot fix;
-    gpsSnapshotCopy(fix);
-    double valLat = fix.lat, valLon = fix.lon;
-    float gpsSpeed = fix.speedValid ? fix.speedKmh : 0.0f;
-    float hdop = fix.hdopValid ? fix.hdop : 0.0f;
-    float altitude = fix.altValid ? fix.altitudeM : 0.0f;
-
-    logPrintf("[RAW] hallInt=%.1fms hallCnt=%lu fuelADC=%d fuelFlt=%.1f "
-              "lightADC=%d batADC=%d tempADC=%d\n",
-              hallIntUs / 1000.0f, hallCnt,
-              rawFuelADC, filteredReading, rawLightADC,
-              rawBatteryADC, rawTempADC);
-
-    logPrintf("[VAL] spd=%.1fkmh src=%s bat=%.1fV engT=%.1fC fuel=%.1fL(%d%%) "
-              "sat=%d hdop=%.1f alt=%.0fm lat=%.6f lon=%.6f gpsSpd=%.1f "
-              "odo=%.1fkm trip=%.2fkm avg=%.1fkmh avgKml=%.1f "
-              "instKml=%.1f accel=%.2fs\n",
-              snap.currentSpeed, speedSrc, snap.batteryVoltage,
-              snap.engineTemperature, snap.fuelLiters, snap.fuelPercentage,
-              snap.satellites, hdop, altitude,
-              valLat, valLon, gpsSpeed,
-              snap.totalDistanceKm, tripDistanceKm,
-              snap.averageSpeed, snap.averageKml, snap.instantKml,
-              snap.accelResultTime);
-
-    logPrintf("[ESP] cpu=%uMHz apb=%uMHz xtal=%uMHz usage=%.1f%% "
-              "dieTemp=%.1fC heap=%luB minHeap=%luB maxAlloc=%luB "
-              "psram=%luB up=%lus fps=%.1f avgFps=%.1f chip=%s rev=%d\n",
-              getCpuFrequencyMhz(), getApbFrequency() / 1000000UL, getXtalFrequencyMhz(),
-              cpuUsagePct, temperatureRead(),
-              ESP.getFreeHeap(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap(),
-              ESP.getFreePsram(), millis() / 1000UL,
-              currentMeasuredFps, currentAverageFps,
-              ESP.getChipModel(), ESP.getChipRevision());
-  }
-#endif // telemetry disabled
   static unsigned long lastCpuScaleCheck = 0;
   // CPU busy: probe tasks (one per core) tick once per 1 ms slot in which
   // their core ran nothing higher-priority, so busy = 1 - ticks/elapsed.

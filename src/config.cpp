@@ -1155,9 +1155,9 @@ void processConfig(int mode, JsonDocument *doc) {
   // cannot re-inject ADC counts either: it carries "touchTable", which this code
   // ignores.
   if (mode == 0) {
-    char key[8];
+    char key[10];  // "FCO_" + 2 digits + NUL: room the compiler can prove
     for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
-      snprintf(key, sizeof(key), "FCO_%d", i);
+      snprintf(key, sizeof(key), "FCO_%u", (unsigned)(uint8_t)i);
       float v = pref.getFloat(key, fuelCalOhms[i]);
       fuelCalOhms[i] = constrain(v, 0.0f, 100000.0f);
     }
@@ -1166,7 +1166,7 @@ void processConfig(int mode, JsonDocument *doc) {
     for (int i = 0; i < FUEL_TOUCH_POINTS; i++)
       arr.add(roundf(fuelCalOhms[i] * 10.0f) / 10.0f);
   } else if (mode == 2) {
-    char key[8];
+    char key[10];  // "FCO_" + 2 digits + NUL: room the compiler can prove
     int written = 0;
     if (!(*doc)["fuelCalOhms"].isNull()) {
       JsonArray arr = (*doc)["fuelCalOhms"].as<JsonArray>();
@@ -1179,7 +1179,7 @@ void processConfig(int mode, JsonDocument *doc) {
         float v = (*doc)["fuelCalOhms"][i].as<float>();
         if (!(v >= 0.0f)) v = 0.0f;  // also catches NaN
         fuelCalOhms[i] = constrain(v, 0.0f, 100000.0f);
-        snprintf(key, sizeof(key), "FCO_%d", i);
+        snprintf(key, sizeof(key), "FCO_%u", (unsigned)(uint8_t)i);
         if (nvsWriteFailed(key, cfgPutFloat(pref, key, fuelCalOhms[i])))
           cfgNvsWriteErrors++;
       }
@@ -1189,7 +1189,7 @@ void processConfig(int mode, JsonDocument *doc) {
     // array length never leaves missing keys (a missing key loads as 0
     // and breaks the fuel gauge).
     for (int i = written; i < FUEL_TOUCH_POINTS; i++) {
-      snprintf(key, sizeof(key), "FCO_%d", i);
+      snprintf(key, sizeof(key), "FCO_%u", (unsigned)(uint8_t)i);
       if (nvsWriteFailed(key, cfgPutFloat(pref, key, fuelCalOhms[i])))
         cfgNvsWriteErrors++;
     }
@@ -1202,9 +1202,9 @@ void processConfig(int mode, JsonDocument *doc) {
   // regenerating there would wipe a calibration the user already did.
   if (mode == 2 && FUEL_TOUCH_POINTS != prevFuelPoints) {
     fillFuelTableFromOhms("point count changed");
-    char key[8];
+    char key[10];  // "FCO_" + 2 digits + NUL: room the compiler can prove
     for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
-      snprintf(key, sizeof(key), "FCO_%d", i);
+      snprintf(key, sizeof(key), "FCO_%u", (unsigned)(uint8_t)i);
       if (nvsWriteFailed(key, cfgPutFloat(pref, key, fuelCalOhms[i])))
         cfgNvsWriteErrors++;
     }
@@ -1216,9 +1216,9 @@ void processConfig(int mode, JsonDocument *doc) {
   if (mode == 0 || mode == 2) {
     if (repairFuelTable(mode == 0 ? "loaded from NVS at boot"
                                   : "uploaded through the Web UI")) {
-      char key[8];
+      char key[10];  // "FCO_" + 2 digits + NUL: room the compiler can prove
       for (int i = 0; i < FUEL_TOUCH_POINTS; i++) {
-        snprintf(key, sizeof(key), "FCO_%d", i);
+        snprintf(key, sizeof(key), "FCO_%u", (unsigned)(uint8_t)i);
         if (nvsWriteFailed(key, cfgPutFloat(pref, key, fuelCalOhms[i])))
           cfgNvsWriteErrors++;
       }
@@ -1468,9 +1468,9 @@ void seedNVSWithFactoryDefaults() {
       logPrintf("Config: CFG_VER not stored - the factory seed will run again at next boot\n");
     // Seed every calibration key so FUEL_TOUCH_POINTS can be raised above 8
     // without missing NVS entries (a missing key loads as 0).
-    char key[8];
+    char key[10];  // "FCO_" + 2 digits + NUL: room the compiler can prove
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) {
-      snprintf(key, sizeof(key), "FCO_%d", i);
+      snprintf(key, sizeof(key), "FCO_%u", (unsigned)(uint8_t)i);
       if (nvsWriteFailed(key, session.nvs.putFloat(key, fuelCalOhms[i])))
         cfgNvsWriteErrors++;
     }

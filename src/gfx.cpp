@@ -1,6 +1,5 @@
 #include "dashboard.h"
 #include "bootinfo.h"
-#include <vector>
 #include <new>
 #include <esp_heap_caps.h>
 

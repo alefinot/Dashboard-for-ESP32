@@ -155,7 +155,7 @@ void simulateRawSensors() {
     hallIntervalHist[hallHistWriteIdx] = intervalUs;
     hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
     if (pulses > 0) hallPulseCount += (unsigned long)pulses;
-    hallDbgAccepted++;
+    hallDbgAccepted = hallDbgAccepted + 1;
     portEXIT_CRITICAL(&hallMux);
   }
   lastSimTickMs = now;
@@ -248,7 +248,6 @@ static bool gpsWaitForSync(unsigned long ms, bool &isUbx) {
   unsigned long start = millis();
   int state = 0; // 0=idle, 1=seen '$', 2=seen 0xB5
   int hits = 0;
-  bool ubxHit = false;
   while (millis() - start < ms) {
     if (gpsSerial.available() > 0) {
       uint8_t b = gpsSerial.read();
@@ -264,7 +263,6 @@ static bool gpsWaitForSync(unsigned long ms, bool &isUbx) {
         }
       } else {
         if (b == 0x62) {
-          ubxHit = true;
           if (++hits >= 2) { isUbx = true; return true; }
           state = 0;
         } else {
@@ -616,12 +614,12 @@ volatile unsigned long g_sensorLastTickMs = 0;
 // the sensor task. The ISR keeps only what must happen at interrupt time: read
 // the pin level to tag the transition, timestamp it, publish it.
 void IRAM_ATTR hallSensorISR() {
-  hallDbgEdges++;
+  hallDbgEdges = hallDbgEdges + 1;
   unsigned int w = hallEdgeWrite;
   // Full? Drop the incoming edge; the consumer's read index stays untouched so
   // the task never sees a reordered or half-written sequence.
   if (((w - hallEdgeRead) & HALL_EDGE_MASK) == HALL_EDGE_MASK) {
-    hallDbgRingDrop++;
+    hallDbgRingDrop = hallDbgRingDrop + 1;
     return;
   }
   // Level after the transition: LOW means a pulse started, HIGH means one ended.
@@ -662,7 +660,7 @@ void processHallEdges() {
         // Two falling edges with no rising between: the older pulse never
         // closed (line stuck low, or noise on the way back up). Keep the newer
         // edge as the pulse start.
-        hallDbgL1Reject++;
+        hallDbgL1Reject = hallDbgL1Reject + 1;
       }
       hallOpenPulseUs = ts;
       hallOpenPulse = true;
@@ -675,7 +673,7 @@ void processHallEdges() {
     unsigned long widthUs = ts - hallOpenPulseUs;
     hallOpenPulse = false;
     if (widthUs < (unsigned long)pulseMinUs) {
-      hallDbgL1Reject++;
+      hallDbgL1Reject = hallDbgL1Reject + 1;
       continue;
     }
 
@@ -692,7 +690,7 @@ void processHallEdges() {
     // distance, and completely purge the history ring buffer so no stale
     // cruising speeds poison the speed calculation when moving off from a stop.
     if (gap > STANDSTILL_TIMEOUT_US) {
-      hallDbgL3Purge++;
+      hallDbgL3Purge = hallDbgL3Purge + 1;
       portENTER_CRITICAL(&hallMux);
       lastHallPulseTimeUs = now;
       hallPulseIntervalUs = 0;
@@ -716,7 +714,7 @@ void processHallEdges() {
     // Fast-edge hardware debounce: reject sub-12ms contact bounce or HF noise
     // (12 ms = 495 km/h on 1650 mm wheel).
     if (gap < DEBOUNCE_US) {
-      hallDbgDebounce++;
+      hallDbgDebounce = hallDbgDebounce + 1;
       continue;
     }
 
@@ -733,7 +731,7 @@ void processHallEdges() {
     // cruising.
     if (hallRolling && last != 0 &&
         (unsigned long long)gap * 2ULL < (unsigned long long)last) {
-      hallDbgL2Reject++;
+      hallDbgL2Reject = hallDbgL2Reject + 1;
       portEXIT_CRITICAL(&hallMux);
       continue;
     }
@@ -749,7 +747,7 @@ void processHallEdges() {
         (unsigned long long)gap >
             (unsigned long long)last *
                 (unsigned long long)(unsigned int)HALL_PERIOD_GUARD) {
-      hallDbgGuardReject++;
+      hallDbgGuardReject = hallDbgGuardReject + 1;
       portEXIT_CRITICAL(&hallMux);
       continue;
     }
@@ -763,7 +761,7 @@ void processHallEdges() {
                     (unsigned long long)hallCandIntervalUs * 2ULL >=
                         (unsigned long long)gap;
       if (agrees) {
-        hallCandRun++;
+        hallCandRun = hallCandRun + 1;
         if (hallCandRun >= HALL_CONFIRM_REVS)
           hallSpeedConfirmed = true;
       } else {
@@ -771,7 +769,7 @@ void processHallEdges() {
       }
       hallCandIntervalUs = gap;
       if (!hallSpeedConfirmed)
-        hallDbgUnconfirmed++;
+        hallDbgUnconfirmed = hallDbgUnconfirmed + 1;
     }
 
     hallPulseIntervalUs = gap;
@@ -786,7 +784,7 @@ void processHallEdges() {
       hallPulseCount = hallPulseCount + 1;
     }
     hallRolling = true;
-    hallDbgAccepted++;
+    hallDbgAccepted = hallDbgAccepted + 1;
     hallIntervalHist[hallHistWriteIdx] = gap;
     hallHistWriteIdx = (hallHistWriteIdx + 1u) % HALL_MEDIAN_MAX;
     portEXIT_CRITICAL(&hallMux);
@@ -1713,7 +1711,7 @@ static void ubxNavPvtToNmea() {
   // means time-only fix (no position), so only 2/3/4 count as a position fix.
   bool hasFix = (fixType >= 2 && fixType <= 4) && (fixFlags & 0x01);
 
-  ubxFramesParsed++;
+  ubxFramesParsed = ubxFramesParsed + 1;
   ubxLastFixType = fixType;
   ubxLastNumSv = numSV;
   ubxLastLat = lat;
@@ -1748,7 +1746,7 @@ static void ubxNavPvtToNmea() {
 static void ubxParseByte(uint8_t b) {
   switch (ubxSt) {
   case 0:
-    if (b == 0xB5) { ubxSyncSeen++; ubxSt = 1; }
+    if (b == 0xB5) { ubxSyncSeen = ubxSyncSeen + 1; ubxSt = 1; }
     break;
   case 1: ubxSt = (b == 0x62) ? 2 : 0; break;
   case 2: ubxCls = b; ubxSt = 3; break;
@@ -1756,7 +1754,7 @@ static void ubxParseByte(uint8_t b) {
   case 4: ubxNeed = b; ubxSt = 5; break;
   case 5:
     ubxNeed |= (uint16_t)b << 8;
-    if (ubxNeed > 92) { ubxOversize++; ubxSt = 0; break; }
+    if (ubxNeed > 92) { ubxOversize = ubxOversize + 1; ubxSt = 0; break; }
     ubxIdx = 0;
     // Seed both accumulators by stepping the CK_A/CK_B algorithm through
     // EACH header byte (class, id, lenL, lenH) individually - seeding
@@ -1785,14 +1783,14 @@ static void ubxParseByte(uint8_t b) {
     break;
   case 7:
     if (b == ubxCkA) ubxSt = 8;
-    else { ubxCkFail++; ubxSt = 0; }
+    else { ubxCkFail = ubxCkFail + 1; ubxSt = 0; }
     break;
   case 8:
     if (b == ubxCkB) {
       if (ubxCls == 0x01 && ubxId == 0x07)
         ubxNavPvtToNmea();
     } else {
-      ubxCkFail++;
+      ubxCkFail = ubxCkFail + 1;
     }
     ubxSt = 0;
     break;
@@ -1864,7 +1862,9 @@ void gpsTask(void *pvParameters) {
   static bool rawDumpLogged = false;
   static unsigned long gpsWatchdogStart = 0;
   static uint8_t gpsRawBuf[256];
-  static uint8_t gpsRawIdx = 0;
+  // uint16_t, not uint8_t: with a uint8_t index the `gpsRawIdx < sizeof(buf)`
+  // guard below is always true (max 255 < 256) and the compiler says so.
+  static uint16_t gpsRawIdx = 0;
   for (;;) {
     // Cap GPS bytes parsed per tick. A module burst (baud mismatch, buffer
     // backlog, message dump) can otherwise keep the drain loop running for
@@ -1907,7 +1907,7 @@ void gpsTask(void *pvParameters) {
           uint8_t b = gpsBuf[j];
           if (gpsRawIdx < sizeof(gpsRawBuf))
             gpsRawBuf[gpsRawIdx++] = b;
-          gpsRxBytes++;
+          gpsRxBytes = gpsRxBytes + 1;
           int64_t t2 = esp_timer_get_time();
           gps.encode((char)b);
           ubxParseByte(b);
@@ -1971,7 +1971,7 @@ void gpsTask(void *pvParameters) {
       gpsWatchdogStart = millis();
     if (!rawDumpLogged && gpsRawIdx >= 8 && millis() - gpsWatchdogStart > 3000) {
       rawDumpLogged = true;
-      logPrintf("GNSS raw dump (%u bytes):\n", gpsRawIdx);
+      logPrintf("GNSS raw dump (%u bytes):\n", (unsigned)gpsRawIdx);
       for (uint16_t i = 0; i < gpsRawIdx; i++) {
         if (i % 16 == 0) logPrintf("%02X", gpsRawBuf[i]);
         else logPrintf(" %02X", gpsRawBuf[i]);

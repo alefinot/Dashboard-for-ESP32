@@ -1,7 +1,6 @@
 #include "dashboard.h"
-#include "Conthrax_SemiBold7pt7b.h"
-#include "Conthrax_SemiBold4pt7b.h"
-#include "Conthrax_SemiBold_16px_vlw.h"
+// Font data lives in gfx.cpp only (loadVLWFont / getVLWData120); this file
+// never touches the arrays, so the font headers are not included here.
 
 #define MAX_CELLS UI_MAX_CELLS
 
@@ -305,18 +304,24 @@ static void copyWeatherText(char *dst, size_t n, const char *src) {
   dst[len] = 0;
 }
 
+// "HH:MM" -> minutes since midnight, -1 when the string is not exactly that.
+// Hand-rolled instead of sscanf on purpose: newlib's sscanf drags the
+// float-capable __ssvfscanf_r (~8.8 KB) into an image that has no float scan
+// anywhere, so the only two scanf users in the firmware are parsed by hand.
+static int parseHHMM(const char *s) {
+  if (strlen(s) < 5) return -1;
+  if (s[0] < '0' || s[0] > '9' || s[1] < '0' || s[1] > '9' || s[2] != ':' ||
+      s[3] < '0' || s[3] > '9' || s[4] < '0' || s[4] > '9')
+    return -1;
+  int h = (s[0] - '0') * 10 + (s[1] - '0');
+  int m = (s[3] - '0') * 10 + (s[4] - '0');
+  if (h > 23 || m > 59) return -1;
+  return h * 60 + m;
+}
+
 static bool weatherIsNight(const SensorSnapshot &snap) {
-  int sunriseMin = -1, sunsetMin = -1;
-  if (strlen(g_weatherData.sunriseTime) >= 5) {
-    int h, m;
-    if (sscanf(g_weatherData.sunriseTime, "%d:%d", &h, &m) == 2)
-      sunriseMin = h * 60 + m;
-  }
-  if (strlen(g_weatherData.sunsetTime) >= 5) {
-    int h, m;
-    if (sscanf(g_weatherData.sunsetTime, "%d:%d", &h, &m) == 2)
-      sunsetMin = h * 60 + m;
-  }
+  int sunriseMin = parseHHMM(g_weatherData.sunriseTime);
+  int sunsetMin = parseHHMM(g_weatherData.sunsetTime);
   if (sunriseMin >= 0 && sunsetMin >= 0) {
     int nowMin = snap.localHour * 60 + snap.minute;
     return (nowMin >= sunsetMin || nowMin < sunriseMin);
