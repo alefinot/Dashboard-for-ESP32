@@ -1,6 +1,9 @@
 """Top-view placement map of the carrier board (PNG, drawn with PIL).
 
-  python placementmap.py [board] [out.png]
+  python placementmap.py [board] [out.png] [--underlay]
+
+--underlay draws a clean drawing sheet (5 mm grid, courtyards as outlines,
+no rats, no legend) for tracing a proposed placement in another CAD tool.
 
 Shows the board outline with a mm grid, every part's courtyard + reference,
 its pads, and the ratsnest of each net drawn as the minimum spanning tree of
@@ -18,9 +21,13 @@ from PIL import Image, ImageDraw, ImageFont
 import kicadfmt as kf
 import make_pcb as mp
 
-BOARD = sys.argv[1] if len(sys.argv) > 1 else mp.OUT
-OUTPNG = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
-    os.path.dirname(os.path.abspath(mp.OUT)), "out", "placement-map.png")
+FLAGS = [a for a in sys.argv[1:] if a.startswith("--")]
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+UNDERLAY = "--underlay" in FLAGS
+BOARD = ARGS[0] if ARGS else mp.OUT
+OUTPNG = ARGS[1] if len(ARGS) > 1 else os.path.join(
+    os.path.dirname(os.path.abspath(mp.OUT)), "out",
+    "placement-underlay.png" if UNDERLAY else "placement-map.png")
 
 SCALE = 14                 # px per mm
 MARGIN = 46                # px reserved for the grid labels
@@ -117,15 +124,22 @@ def main():
         return (int(round(MARGIN + (x - x0) * SCALE)),
                 int(round(MARGIN + (y - y0) * SCALE)))
 
-    # grid
-    for gx in range(int(x0) - int(x0) % 10, int(x1) + 1, 10):
-        d.line([P(gx, y0 - 2), P(gx, y1 + 2)], fill=(225, 225, 225))
-        d.text((P(gx, y0)[0] - 6, MARGIN - 20), str(gx), fill=(120, 120, 120),
-               font=f)
-    for gy in range(int(y0) - int(y0) % 10, int(y1) + 1, 10):
-        d.line([P(x0 - 2, gy), P(x1 + 2, gy)], fill=(225, 225, 225))
-        d.text((MARGIN - 32, P(x0, gy)[1] - 7), str(gy), fill=(120, 120, 120),
-               font=f)
+    # grid (5 mm squares in underlay mode, 10 mm otherwise)
+    step = 5 if UNDERLAY else 10
+    for gx in range(int(x0) - int(x0) % step, int(x1) + 1, step):
+        major = gx % 10 == 0
+        d.line([P(gx, y0 - 2), P(gx, y1 + 2)],
+               fill=(205, 205, 205) if major else (232, 232, 232))
+        if major:
+            d.text((P(gx, y0)[0] - 6, MARGIN - 20), str(gx),
+                   fill=(120, 120, 120), font=f)
+    for gy in range(int(y0) - int(y0) % step, int(y1) + 1, step):
+        major = gy % 10 == 0
+        d.line([P(x0 - 2, gy), P(x1 + 2, gy)],
+               fill=(205, 205, 205) if major else (232, 232, 232))
+        if major:
+            d.text((MARGIN - 32, P(x0, gy)[1] - 7), str(gy),
+                   fill=(120, 120, 120), font=f)
     # DevKit body hanging under the carrier, and the antenna keep-out
     ex0, ey0, ex1, ey1 = mp.ESP_BODY
     d.rectangle([P(ex0, ey0), P(ex1, ey1)], outline=(120, 0, 160), width=2)
@@ -155,11 +169,12 @@ def main():
                 bynet[net].append((x, y))
     ranked = sorted(bynet, key=lambda n: -sum(
         math.dist(bynet[n][a], bynet[n][b]) for a, b in mst_edges(bynet[n])))
-    for k, net in enumerate(ranked):
-        pts = bynet[net]
-        c = colour(k)
-        for a, b in mst_edges(pts):
-            d.line([P(*pts[a]), P(*pts[b])], fill=c, width=1)
+    if not UNDERLAY:
+        for k, net in enumerate(ranked):
+            pts = bynet[net]
+            c = colour(k)
+            for a, b in mst_edges(pts):
+                d.line([P(*pts[a]), P(*pts[b])], fill=c, width=1)
 
     # parts
     for p in parts:
@@ -170,9 +185,13 @@ def main():
             cy0 = min(q[1] for q in pts)
             cx1 = max(q[0] for q in pts)
             cy1 = max(q[1] for q in pts)
-            d.rectangle([P(cx0, cy0), P(cx1, cy1)],
-                        fill=(245, 235, 225) if bottom else (235, 240, 250),
-                        outline=(150, 90, 0) if bottom else (40, 80, 160))
+            if UNDERLAY:
+                d.rectangle([P(cx0, cy0), P(cx1, cy1)], fill=(255, 255, 255),
+                            outline=(170, 90, 20) if bottom else (90, 90, 90))
+            else:
+                d.rectangle([P(cx0, cy0), P(cx1, cy1)],
+                            fill=(245, 235, 225) if bottom else (235, 240, 250),
+                            outline=(150, 90, 0) if bottom else (40, 80, 160))
         for (x, y, _net, shp) in p["pads"]:
             r = 2.2
             if shp == "round":
@@ -188,9 +207,19 @@ def main():
 
     # legend: nets ranked by wiring cost
     lx = MARGIN + (x1 - x0) * SCALE + 30
-    d.text((lx, 12), "rats, most expensive first", fill=(0, 0, 0), font=fb)
-    yy = 34
-    for k, net in enumerate(ranked):
+    if UNDERLAY:
+        d.text((lx, 12), "UNDERLAY - draw your placement over this", fill=(0, 0, 0),
+               font=fb)
+        d.text((lx, 34), "grid squares = 5 mm\nx/y numbers = KiCad mm\n"
+               "board 85 x 55 mm\nhatched = antenna keep-out\n"
+               "purple = DevKit body (under)\nbrown outline = bottom side",
+               fill=(60, 60, 60), font=f)
+        d.text((MARGIN, 12), "placement underlay", fill=(0, 0, 0), font=fb)
+        yy = 34
+    else:
+      d.text((lx, 12), "rats, most expensive first", fill=(0, 0, 0), font=fb)
+      yy = 34
+      for k, net in enumerate(ranked):
         c = colour(k)
         d.rectangle([lx, yy, lx + 14, yy + 10], fill=c)
         cost = sum(math.dist(bynet[net][a], bynet[net][b])
@@ -199,8 +228,8 @@ def main():
                                                           len(bynet[net])),
                fill=(0, 0, 0), font=f)
         yy += 17
-    d.text((lx, yy + 6), "orange courtyard = bottom side", fill=(120, 60, 0),
-           font=f)
+      d.text((lx, yy + 6), "orange courtyard = bottom side", fill=(120, 60, 0),
+             font=f)
 
     os.makedirs(os.path.dirname(OUTPNG), exist_ok=True)
     img.save(OUTPNG)
