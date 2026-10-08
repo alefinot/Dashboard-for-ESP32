@@ -32,3 +32,4 @@ icon-*-preview.png
 # KiCad fabrication outputs + DRC reports (regenerate with scripts/make_pcb.py)
 hardware/out/
 hardware/scripts/drc-*.txt
+hardware/nets-report.md
