@@ -127,12 +127,39 @@ def get_module(fp_id):
     return _mod_cache[fp_id]
 
 
+# Everything we drop is bookkeeping that pcbnew re-creates (ids, timestamps);
+# 3D models and the library's own Reference/Value text blocks are KEPT so the
+# board footprint still matches its library copy (DRC "lib_footprint_mismatch")
+# and the 3D viewer stays populated.
 DROP_TOKENS = {"version", "generator", "generator_version", "layer", "tedit",
-               "tstamp", "uuid", "property", "embedded_fonts", "model"}
+               "tstamp", "uuid", "embedded_fonts"}
+
+# Nickname of the project-local footprint library (footprints/<lib>.pretty)
+# that holds the footprints this generator builds from scratch.
+LOCAL_LIB = "dpp"
+
+_local_mods = {}
+
+
+def bake_rot(group, rot):
+    """Add the footprint's orientation to a child item's own (at x y rot).
+
+    pcbnew stores every pad/text/graphic with the footprint rotation baked into
+    its own angle; if we leave them at 0 while the footprint is rotated, KiCad's
+    "footprint matches its library copy" check fails for every rotated part.
+    """
+    if not rot:
+        return group
+
+    def sub(m):
+        r = (float(m.group(3) or 0) + rot) % 360.0
+        return "(at %s %s %g)" % (m.group(1), m.group(2), r)
+
+    return re.sub(r"\(at ([-\d.]+) ([-\d.]+)(?: ([-\d.]+))?\)", sub, group)
 
 
 def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
-                    silk_off=-1.3, fab_off=1.3):
+                    silk_off=-1.3, fab_off=1.3, ref_to_fab=True):
     """Expand a stock footprint file into a pcbnew (footprint ...) board entry.
 
     netmap: {pad_number: (net_number, net_name)}; pads not in the map stay unbound.
@@ -153,27 +180,73 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
                 n, name = netmap[num.group(1)]
                 k = g.find("(at ")
                 g = g[:k] + '(net %d "%s") ' % (n, name) + g[k:]
-        kept.append(g)
+        elif tok == "property":
+            m = re.match(r'\(property\s+"([^"]*)"', g)
+            what = m.group(1) if m else ""
+            g = re.sub(r'\(uuid "[^"]*"\)', '(uuid "%s")' % uid(), g)
+            if what == "Reference":
+                g = re.sub(r'(\(property "Reference" )"[^"]*"',
+                           lambda mm: mm.group(1) + '"%s"' % ref, g, count=1)
+                # print the reference on the fabrication layer, not the
+                # silkscreen: silk text at 2.54 mm pitch fails clearance DRC
+                if ref_to_fab:
+                    g = g.replace('(layer "F.SilkS")', '(layer "F.Fab")')
+            elif what == "Value":
+                g = re.sub(r'(\(property "Value" )"[^"]*"',
+                           lambda mm: mm.group(1) + '"%s"' % value, g, count=1)
+        kept.append(bake_rot(g, rot))
 
     x, y = at
     out = ['(footprint "%s"' % fp_id,
            '\t(layer "%s")' % layer,
            '\t(uuid "%s")' % uid(),
-           '\t(at %.4f %.4f %.1f)' % (x, y, rot),
-           '\t(property "Reference" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
-           ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (ref, 0.0, silk_off, rot),
-           '\t(property "Value" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
-           ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (value, 0.0, fab_off, rot),
-           '\t(property "Footprint" "" (at 0 0 0) (effects (hide yes)))',
-           '\t(property "Datasheet" "" (at 0 0 0) (effects (hide yes)))',
-           '\t(property "Description" "" (at 0 0 0) (effects (hide yes)))']
+           '\t(at %.4f %.4f %.1f)' % (x, y, rot)]
     out.extend(kept)
     return "\n".join(out) + "\n)"
 
 
+def to_local_lib(fp_id, kept):
+    """Register the (rewritten) footprint in the project-local library.
+
+    DRC compares every board footprint with its library copy; because this
+    generator rewrites footprints (real ref/value text, reference on F.Fab,
+    no library bookkeeping) it would always report 'footprint does not match
+    the library copy'.  Shipping the exact footprints we emit in
+    footprints/carrier.pretty makes the board self-contained and warning-free.
+    Returns the nickname to use on the board (LOCAL_LIB:<name>).
+    """
+    lib, name = fp_id.split(":")
+    if name not in _local_mods:
+        head = ['(footprint "%s"' % name, '\t(layer "F.Cu")',
+                '\t(tstamp "%s")' % uid()]
+        body = []
+        for g in kept:
+            g = re.sub(r'\(net \d+ "[^"]*"\)\s*', "", g)
+            m = re.match(r'\(property\s+"([^"]*)"', g)
+            what = m.group(1) if m else ""
+            if what in ("Reference", "Value"):
+                g = re.sub(r'\(uuid "[^"]*"\)', '', g)
+                g = re.sub(r'(\(property "%s" )"[^"]*"' % what,
+                           lambda mm, w=what: mm.group(1) + ('"REF**"' if w == "Reference" else '""'),
+                           g, count=1)
+            body.append(g)
+        _local_mods[name] = "\n".join(head + body) + "\n)\n"
+    return "%s:%s" % (LOCAL_LIB, name)
+
+
+def write_local_lib(pretty_dir):
+    """Write every registered footprint as a .kicad_mod under pretty_dir."""
+    os.makedirs(pretty_dir, exist_ok=True)
+    names = sorted(_local_mods)
+    for name in names:
+        open(os.path.join(pretty_dir, name + ".kicad_mod"), "w",
+             encoding="utf-8").write(_local_mods[name])
+    return names
+
+
 def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
                      outline=None, silk_off=-1.3, fab_off=1.3, courtyard=True,
-                     courtyard_box=None):
+                     courtyard_box=None, fp_name=None):
     """Build a footprint from scratch.
 
     pads: list of (number, x, y, w, h, drill, net_or_None)  -- rect/round pads.
@@ -181,6 +254,13 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
     the outline when given, otherwise computed from the pads).
     """
     x0, y0 = at
+    kept = ['	(property "Reference" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
+            ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (ref, 0.0, silk_off, rot),
+            '	(property "Value" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
+            ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (value, 0.0, fab_off, rot),
+            '	(property "Footprint" "" (at 0 0 0) (effects (hide yes)))',
+            '	(property "Datasheet" "" (at 0 0 0) (effects (hide yes)))',
+            '	(property "Description" "" (at 0 0 0) (effects (hide yes)))']
     if outline is None:
         xs = [p[1] - p[3] / 2 for p in pads] + [p[1] + p[3] / 2 for p in pads]
         ys = [p[2] - p[4] / 2 for p in pads] + [p[2] + p[4] / 2 for p in pads]
@@ -190,17 +270,6 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
         maxx = max(p[0] for p in outline)
         miny = min(p[1] for p in outline)
         maxy = max(p[1] for p in outline)
-    out = ['(footprint "custom:%s"' % ref,
-           '\t(layer "%s")' % layer,
-           '\t(uuid "%s")' % uid(),
-           '\t(at %.4f %.4f %.1f)' % (x0, y0, rot),
-           '\t(property "Reference" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
-           ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (ref, 0.0, silk_off, rot),
-           '\t(property "Value" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
-           ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (value, 0.0, fab_off, rot),
-           '\t(property "Footprint" "" (at 0 0 0) (effects (hide yes)))',
-           '\t(property "Datasheet" "" (at 0 0 0) (effects (hide yes)))',
-           '\t(property "Description" "" (at 0 0 0) (effects (hide yes)))']
     for (num, px, py, w, h, dr, net) in pads:
         s = '\t(pad "%s" smd rect (at %.3f %.3f 0) (size %.3f %.3f)' % (num, px, py, w, h)
         if dr:
@@ -210,10 +279,10 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
             n, name = net
             s += ' (net %d "%s")' % (n, name)
         s += ' (layers %s))' % ('"F.Cu" "B.Cu"' if dr else '"F.Cu" "F.Paste" "F.Mask"')
-        out.append(s)
+        kept.append(s)
     if outline:
         pts = " ".join('(xy %.3f %.3f)' % p for p in outline)
-        out.append('	(fp_poly (pts %s) (stroke (width 0.12) (type solid)) (layer "F.Fab"))' % pts)
+        kept.append('	(fp_poly (pts %s) (stroke (width 0.12) (type solid)) (layer "F.Fab"))' % pts)
     if courtyard_box:
         minx, miny, maxx, maxy = courtyard_box
     elif not courtyard:
@@ -223,8 +292,27 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
         maxx = maxy = 0.2
     for a, b in [((minx, miny), (maxx, miny)), ((maxx, miny), (maxx, maxy)),
                  ((maxx, maxy), (minx, maxy)), ((minx, maxy), (minx, miny))]:
-        out.append('\t(fp_line (start %.3f %.3f) (end %.3f %.3f) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))'
-                   % (a[0], a[1], b[0], b[1]))
+        kept.append('	(fp_line (start %.3f %.3f) (end %.3f %.3f) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))'
+                    % (a[0], a[1], b[0], b[1]))
+    name = fp_name or re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+    if name not in _local_mods:
+        # stable id so regenerating the library does not churn the file
+        head = ['(footprint "%s"' % name, '	(layer "F.Cu")',
+                '	(tstamp "%s")' % uuid.uuid5(uuid.NAMESPACE_URL, LOCAL_LIB + "/" + name)]
+        body = [re.sub(r'\(net \d+ "[^"]*"\)\s*', "", g) for g in kept]
+        for i, g in enumerate(body):
+            m = re.match(r'\(property\s+"(Reference|Value)"', g)
+            if m:
+                body[i] = re.sub(r'(\(property "%s" )"[^"]*"' % m.group(1),
+                                 lambda mm: mm.group(1) + ('"REF**"' if m.group(1) == "Reference" else '""'),
+                                 g, count=1)
+                body[i] = re.sub(r'\(uuid "[^"]*"\)', '', body[i])
+        _local_mods[name] = "\n".join(head + body) + "\n)\n"
+    out = ['(footprint "%s:%s"' % (LOCAL_LIB, name),
+           '	(layer "%s")' % layer,
+           '	(uuid "%s")' % uid(),
+           '	(at %.4f %.4f %.1f)' % (x0, y0, rot)]
+    out.extend([bake_rot(g, rot) for g in kept])
     return "\n".join(out) + "\n)"
 
 
