@@ -126,6 +126,10 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 
 ## Hardware Pinout Matrix
 
+> For the board side of the same information — which connector/plug each signal lives on,
+> with the connector pin numbers and the small-part roles — see
+> [`hardware/PINOUT.md`](hardware/PINOUT.md).
+
 | ESP32 Pin | Function Name | Peripheral Type | Signal Direction | Hardware Configuration & Notes |
 | :---: | :--- | :--- | :---: | :--- |
 | **GPIO0** | BOOT | Factory Reset | Input (Pullup) | `pinMode(0, INPUT_PULLUP)`; **hold BOOT 4 s, release, hold 4 s again** within the first 30 s after boot to wipe the config — the reliable path. The release in the middle is required because GPIO0 is shared with the serial adapter's DTR line through the auto-reset transistor: a PC that holds DTR asserted keeps GPIO0 low forever, and the old single 8 s hold wiped the config on every boot with nobody touching the board. The serial fallback (send `RESET` within the first 2 s of boot) is matched against a rolling 32-character window, so boot-log echo can no longer fill the capture and hide the command (issue #39) |
