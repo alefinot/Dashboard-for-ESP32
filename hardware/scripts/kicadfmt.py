@@ -17,7 +17,13 @@ FP_DIR = os.path.join(KICAD, "share", "kicad", "footprints")
 
 
 def uid():
-    return str(uuid.uuid4())
+    """Stable id: regenerating the board keeps the same uuids, so rerunning the
+    generator does not churn the file (and a git diff shows real changes)."""
+    _uid_seq[0] += 1
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "dpp/%d" % _uid_seq[0]))
+
+
+_uid_seq = [0]
 
 
 def _skip_sexp(text, i):
@@ -48,6 +54,8 @@ def _children(text):
             i += 1
         elif c == "(":
             j = _skip_sexp(text, i)
+            if j <= i:
+                raise ValueError("unbalanced s-expression in child list")
             out.append(text[i:j])
             i = j
         elif c == '"':
@@ -183,7 +191,6 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
         elif tok == "property":
             m = re.match(r'\(property\s+"([^"]*)"', g)
             what = m.group(1) if m else ""
-            g = re.sub(r'\(uuid "[^"]*"\)', '(uuid "%s")' % uid(), g)
             if what == "Reference":
                 g = re.sub(r'(\(property "Reference" )"[^"]*"',
                            lambda mm: mm.group(1) + '"%s"' % ref, g, count=1)
@@ -194,7 +201,10 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
             elif what == "Value":
                 g = re.sub(r'(\(property "Value" )"[^"]*"',
                            lambda mm: mm.group(1) + '"%s"' % value, g, count=1)
-        kept.append(bake_rot(g, rot))
+        # inner ids come from the library file: two instances of the same part
+        # would share them, so give every child item its own stable id
+        kept.append(bake_rot(re.sub(r'\(uuid "[^"]*"\)',
+                                    lambda mm: '(uuid "%s")' % uid(), g), rot))
 
     x, y = at
     out = ['(footprint "%s"' % fp_id,

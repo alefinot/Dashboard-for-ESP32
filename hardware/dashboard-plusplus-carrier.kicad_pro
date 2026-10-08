@@ -3,6 +3,8 @@
     "3dviewports": [],
     "design_settings": {
       "defaults": {
+        "apply_defaults_to_fp_barcodes": false,
+        "apply_defaults_to_fp_dimensions": false,
         "apply_defaults_to_fp_fields": false,
         "apply_defaults_to_fp_shapes": false,
         "apply_defaults_to_fp_text": false,
@@ -48,7 +50,23 @@
         "silk_text_thickness": 0.1,
         "silk_text_upright": false,
         "zones": {
-          "min_clearance": 0.13
+          "border_display_style": 2,
+          "border_hatch_pitch": 0.5,
+          "corner_radius": 0.0,
+          "corner_smoothing": 0,
+          "fill_mode": 0,
+          "hatch_gap": 1.5,
+          "hatch_orientation": 0.0,
+          "hatch_smoothing_level": 0,
+          "hatch_smoothing_value": 0.1,
+          "hatch_thickness": 1.0,
+          "min_clearance": 0.13,
+          "min_island_area": 10.0,
+          "min_thickness": 0.25,
+          "pad_connection": 1,
+          "remove_islands": 0,
+          "thermal_relief_gap": 0.5,
+          "thermal_relief_spoke_width": 0.5
         }
       },
       "diff_pair_dimensions": [
@@ -58,28 +76,7 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [
-        [
-          "courtyards_overlap|100221000|45955000|11659109-eea0-488c-af3a-a134aa53be7b|86b7aa3e-5fae-4956-9584-486046f4c3e7",
-          "Intentional Overlap"
-        ],
-        [
-          "courtyards_overlap|80604886|24955000|11659109-eea0-488c-af3a-a134aa53be7b|e230c5a8-92bf-4d40-a3da-f37e567e2181",
-          "Intentional Overlap"
-        ],
-        [
-          "via_dangling|130959409|65559501|438e11bc-6c89-48ba-9c13-e6b8852c4413|00000000-0000-0000-0000-000000000000",
-          "Testpoint"
-        ],
-        [
-          "via_dangling|81450000|72500000|e2e5b0e8-52ad-4f61-a2a4-78efb39d4983|00000000-0000-0000-0000-000000000000",
-          "Testpoint"
-        ],
-        [
-          "via_dangling|85848000|48520413|237baf31-d867-4bb4-bbc6-6406c5ca0a47|00000000-0000-0000-0000-000000000000",
-          "testpoint"
-        ]
-      ],
+      "drc_exclusions": [],
       "meta": {
         "version": 2
       },
@@ -98,6 +95,7 @@
         "extra_footprint": "warning",
         "footprint": "error",
         "footprint_filters_mismatch": "ignore",
+        "footprint_symbol_field_mismatch": "warning",
         "footprint_symbol_mismatch": "warning",
         "footprint_type_mismatch": "ignore",
         "hole_clearance": "error",
@@ -116,6 +114,7 @@
         "mirrored_text_on_front_layer": "warning",
         "missing_courtyard": "ignore",
         "missing_footprint": "warning",
+        "missing_tuning_profile": "warning",
         "net_conflict": "warning",
         "nonmirrored_text_on_back_layer": "warning",
         "npth_inside_courtyard": "ignore",
@@ -135,9 +134,12 @@
         "too_many_vias": "error",
         "track_angle": "error",
         "track_dangling": "warning",
+        "track_not_centered_on_via": "ignore",
+        "track_on_post_machined_layer": "error",
         "track_segment_length": "error",
         "track_width": "error",
         "tracks_crossing": "error",
+        "tuning_profile_track_geometries": "ignore",
         "unconnected_items": "error",
         "unresolved_variable": "error",
         "via_dangling": "warning",
@@ -254,19 +256,19 @@
       "zones_allow_external_fillets": false
     },
     "ipc2581": {
+      "bom_rev": "",
       "dist": "",
       "distpn": "",
       "internal_id": "",
       "mfg": "",
-      "mpn": ""
+      "mpn": "",
+      "sch_revision": ""
     },
     "layer_pairs": [],
     "layer_presets": [],
     "viewports": []
   },
-  "boards": [
-    "dashboard-plusplus-carrier.kicad_pcb"
-  ],
+  "boards": [],
   "component_class_settings": {
     "assignments": [],
     "meta": {
@@ -589,12 +591,7 @@
       "version": 5
     },
     "net_colors": {
-      "+3V3": "rgb(200, 77, 176)",
-      "+3V3_PI": "rgb(255, 173, 0)",
-      "+5V": "rgb(0, 206, 228)",
-      "/PCIe-M2/M2_3v3": "rgb(255, 173, 0)",
-      "GND": "rgb(122, 122, 122)",
-      "VBUS_USB2.0": "rgb(200, 77, 176)"
+      "GND": "rgb(122, 122, 122)"
     },
     "netclass_assignments": null,
     "netclass_patterns": [
@@ -901,6 +898,7 @@
       "sort_asc": true,
       "sort_field": "Value"
     },
+    "bus_aliases": {},
     "connection_grid_size": 50.0,
     "drawing": {
       "dashed_lines_dash_length_ratio": 12.0,
@@ -940,7 +938,14 @@
     "spice_save_all_dissipations": false,
     "spice_save_all_voltages": false,
     "subpart_first_id": 65,
-    "subpart_id_separator": 0
+    "subpart_id_separator": 0,
+    "top_level_sheets": [
+      {
+        "filename": "dashboard-plusplus-carrier.kicad_sch",
+        "name": "dashboard-plusplus-carrier",
+        "uuid": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
   },
   "sheets": [
     [
@@ -954,5 +959,11 @@
     "meta": {
       "version": 0
     }
+  },
+  "tuning_profiles": {
+    "meta": {
+      "version": 0
+    },
+    "tuning_profiles_impedance_geometric": []
   }
 }
