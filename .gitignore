@@ -28,3 +28,7 @@ keys/
 icon-preview.png
 icon-sheet*.png
 icon-*-preview.png
+
+# KiCad fabrication outputs + DRC reports (regenerate with scripts/make_pcb.py)
+hardware/out/
+hardware/scripts/drc-*.txt

@@ -160,7 +160,7 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
            '\t(layer "%s")' % layer,
            '\t(uuid "%s")' % uid(),
            '\t(at %.4f %.4f %.1f)' % (x, y, rot),
-           '\t(property "Reference" "%s" (at %.2f %.2f %.1f) (layer "F.SilkS")'
+           '\t(property "Reference" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
            ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (ref, 0.0, silk_off, rot),
            '\t(property "Value" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
            ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (value, 0.0, fab_off, rot),
@@ -172,7 +172,8 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
 
 
 def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
-                     outline=None, silk_off=-1.3, fab_off=1.3):
+                     outline=None, silk_off=-1.3, fab_off=1.3, courtyard=True,
+                     courtyard_box=None):
     """Build a footprint from scratch.
 
     pads: list of (number, x, y, w, h, drill, net_or_None)  -- rect/round pads.
@@ -193,7 +194,7 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
            '\t(layer "%s")' % layer,
            '\t(uuid "%s")' % uid(),
            '\t(at %.4f %.4f %.1f)' % (x0, y0, rot),
-           '\t(property "Reference" "%s" (at %.2f %.2f %.1f) (layer "F.SilkS")'
+           '\t(property "Reference" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
            ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (ref, 0.0, silk_off, rot),
            '\t(property "Value" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
            ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (value, 0.0, fab_off, rot),
@@ -208,11 +209,18 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
         if net:
             n, name = net
             s += ' (net %d "%s")' % (n, name)
-        s += ' (layers "F.Cu" "F.Paste" "F.Mask"))'
+        s += ' (layers %s))' % ('"F.Cu" "B.Cu"' if dr else '"F.Cu" "F.Paste" "F.Mask"')
         out.append(s)
     if outline:
         pts = " ".join('(xy %.3f %.3f)' % p for p in outline)
         out.append('	(fp_poly (pts %s) (stroke (width 0.12) (type solid)) (layer "F.Fab"))' % pts)
+    if courtyard_box:
+        minx, miny, maxx, maxy = courtyard_box
+    elif not courtyard:
+        # DRC falls back to the pad bounding box when a footprint declares no
+        # courtyard, so emit a deliberately tiny one instead of none.
+        minx = miny = -0.2
+        maxx = maxy = 0.2
     for a, b in [((minx, miny), (maxx, miny)), ((maxx, miny), (maxx, maxy)),
                  ((maxx, maxy), (minx, maxy)), ((minx, maxy), (minx, miny))]:
         out.append('\t(fp_line (start %.3f %.3f) (end %.3f %.3f) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))'
