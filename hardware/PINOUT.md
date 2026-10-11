@@ -11,7 +11,7 @@ the silkscreen; what you call each block on your drawing is up to you.
 
 | Item | Value |
 |---|---|
-| Board outline | 85.0 × 55.0 mm — KiCad coords x 10→95, y 10→65 |
+| Board outline | **95.0 × 55.0 mm** — KiCad coords x 0→95, y 10→65. The AutoCAD drawing's envelope is 85.0 × 55.0 and sits at x 10→95; the extra 10 mm is a tail at the **west** end, added so the bulk cans fit on the underside (dashed `Dwgs.User` rectangle shows the drawn envelope inside the outline) |
 | View used everywhere | top view: x grows to the right, y grows **down**. The AutoCAD drawing is mirrored onto this frame: `x = 95 − u`, `y = 10 + v` (scale 3.7368 pt/mm) — antenna end east, as built |
 | ESP32 DevKit header rows | north row y = 24.805 (`J10a`), south row y = 50.205 (`J10b`) — 25.40 mm apart (real DevKit V1 pitch), 15 pins each, pitch 2.54 |
 | Pin 1 of both rows (square pad) | x = 45.91 — that end is the DevKit's **USB end** (west); pin 15 at x = 81.47 |
@@ -19,9 +19,10 @@ the silkscreen; what you call each block on your drawing is up to you.
 | Antenna keep-out (no copper, any layer) | x 73.42→86.80, y 26.79→48.19 (the drawn zone between EN and IO23) |
 | Display socket `J3` | along the **east** edge, pin 1 (VCC) at (92.51, 18.27), socket grows south to y 57.22 |
 | DC-DC module `U4` | underside, 21.0 × 43.0 body, pads x 12.50→33.00 / y 19.39→60.89; `IN+` at (14.25, 20.64) (input pads north) |
+| Bulk cans `C1` / `C3` | underside, in the 10 mm west extension: centres (6.00, 24.50) rot 270 and (6.00, 55.50) rot 90, courtyards x 0.50→11.50. Each can's `+` pad faces the module, 5.25 mm pad-edge to pad-edge from `IN+` / `OUT+` |
 | Mounting holes (NPTH, no pads) | Ø3.2 drill, Ø5.0 copper keep-out: H1 (91.50, 13.50) · H2 (91.50, 61.50) · H3 (44.00, 62.00) · H4 (36.00, 13.00) |
 | Layer stackup (4) | `F.Cu` signals + small parts · `In1.Cu` solid GND · `In2.Cu` +12 V / +5 V rails (pours added when routing) · `B.Cu` connectors, module, DevKit rows |
-| Parts on the **underside** (`B.Cu`) | `J10a` `J10b` (DevKit sockets), `U4` (DC-DC module), `J1` (XT30), `J17` `J14` `J6` `J9` (JST-PH), `J8` (GNSS pads), `JP1` (pads) |
+| Parts on the **underside** (`B.Cu`) | `J10a` `J10b` (DevKit sockets), `U4` (DC-DC module), `J1` (XT30), `J17` `J14` `J6` `J9` (JST-PH), `J8` (GNSS pads), `JP1` (pads), `C1` `C3` (bulk electrolytics) |
 | JST-PH plugs (right-angle SMD, shells under the board) | north pair `J14` (67.00, 15.00) · `J17` (81.40, 15.00), rot 0 — south pair `J9` (67.00, 60.00) · `J6` (81.40, 60.00), rot 180. Bodies hang outside the outline; pin 1 is the west end of the north pair, the east end of the south pair (top view) |
 | GNSS / jumper pads | `J8` six bare pads, no drill, west pad at (41.35, 13.50), pitch 2.54 — `JP1` three bare pads at (54.805 / 57.345 / 59.885, 61.49) |
 | Test-point row | `TP1`…`TP5` Ø1.5 pads at y 19.50, x 38.60 + 2.50 each (shifted east to clear the fuse clip) |
@@ -136,7 +137,8 @@ Packages as placed: every `R`/`C` (except `C1`/`C3`) is **0805**, `C1`/`C3` are 
 aluminium cans 10 × 12.5 mm**, `D1` is **SOD-123**, `D2`/`D3` are **SMB**, `OK1`/`OK2`
 are **SO-4 (4.4 × 3.9)**, `Q1` is **TO-263 / D²PAK**, `F1` is a **lateral 5 × 20 clip
 holder** (THT). Everything except `F1` and `J3` is surface-mount; the `R`/`C`/`D`/`OK`/`Q1`
-group sits on the top face, the plugs and the module underneath.
+group sits on the top face, the plugs, the module and the two bulk cans `C1`/`C3`
+underneath.
 
 | label | value | between | purpose |
 |---|---|---|---|
@@ -144,9 +146,9 @@ group sits on the top face, the plugs and the module underneath.
 | `D1` | BZT52C15V (SOD-123) | `MOS_G` `DC_F` | gate zener |
 | `R1` | 10 k | `MOS_G` `DC_F` | gate pull-down |
 | `D2` | P6SMB33A (SMB) | `DC_12` `GND` | load-dump TVS |
-| `C1` | 220 µ/50 V (can 10 × 12.5) | `DC_12` `GND` | input bulk |
+| `C1` | 220 µ/50 V (can 10 × 12.5, underside at (6.00, 24.50)) | `DC_12` `GND` | input bulk |
 | `C2` | 100 n | `DC_12` `GND` | input HF |
-| `C3` | 470 µ/35 V (can 10 × 12.5) | `V5` `GND` | 5 V bulk |
+| `C3` | 470 µ/35 V (can 10 × 12.5, underside at (6.00, 55.50)) | `V5` `GND` | 5 V bulk |
 | `C4` | 100 n | `V5` `GND` | 5 V HF |
 | `R2` | 47 k | `DC_12` `BAT_DIV` | battery divider, top |
 | `R3` | 10 k | `BAT_DIV` `GND` | battery divider, bottom |

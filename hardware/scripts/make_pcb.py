@@ -28,8 +28,13 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
                    "dashboard-plusplus-carrier.kicad_pcb")
 
 # ------------------------------------------------------------- geometry ----
-BOARD_X0, BOARD_Y0 = 10.0, 10.0          # board outline corners
-BOARD_X1, BOARD_Y1 = 95.0, 65.0          # 85.0 x 55.0 mm
+# The drawing's envelope is 85.0 x 55.0 (x 10.0 -> 95.0).  BOARD_X0 is pulled
+# 10 mm further west so the two bulk electrolytics fit on B.Cu beside the
+# DC-DC module - see plan "carrier stage 3 - board extension 95x55, bulk caps
+# to B.Cu".  Every part keeps its drawn distance from the east edge (uxv()
+# maps the CAD at x = 95 - u), so the extra 10 mm is a tail at the west end.
+BOARD_X0, BOARD_Y0 = 0.0, 10.0           # board outline corners
+BOARD_X1, BOARD_Y1 = 95.0, 65.0          # 95.0 x 55.0 mm
 
 # ---------------------------------------------------------------- CAD frame --
 # Every position below comes from the CAD drawing
@@ -228,7 +233,7 @@ BODY = {}
 # Footprints that physically sit on the BOTTOM face: their courtyard only
 # clashes with other bottom-side parts, never with top-side ones.
 BOTTOM_SIDE = {"J10a", "J10b", "U4", "J1", "J14", "J17", "J6",
-               "J9", "J8", "JP1"}
+               "J9", "J8", "JP1", "C1", "C3"}
 
 
 # Edge-mounted shells may let their courtyard hang over the outline; the
@@ -419,11 +424,22 @@ def parts():
               {"1": N("MOS_G"), "2": N("DC_F")}, "10k", "F.Cu", 0))
     P.append(("C2", C805, 30.0, 38.0, 0.0,
               {"1": N("DC_12"), "2": N("GND")}, "100n", "F.Cu", 0))
-    # input / output bulk sit on F.Cu directly over the module
-    P.append(("C1", "Capacitor_SMD:CP_Elec_10x12.5", 17.5, 45.25, 0.0,
-              {"1": N("DC_12"), "2": N("GND")}, "220u/50V", "F.Cu", 0))
-    P.append(("C3", "Capacitor_SMD:CP_Elec_10x12.5", 17.5, 56.5, 0.0,
-              {"1": N("V5"), "2": N("GND")}, "470u/35V", "F.Cu", 0))
+    # Input / output bulk: the two 10 x 12.5 mm cans, moved to the BOTTOM
+    # face in the 10 mm west extension (plan "carrier stage 3").  Inside the
+    # drawn 85 x 55 envelope there is no B.Cu room for a can near the power
+    # section at all (U4 fills x 12.25..33.25, J1 fills y <= 17.09), and on
+    # F.Cu they stand 12.5 mm proud of the display side.  Under the board they
+    # cost nothing: that face already carries 17 mm of module and a 10 mm
+    # XT30.  rot 270 (C1) / rot 90 (C3) keeps the 11.0 mm courtyard width
+    # inside the 12.25 mm west strip and puts each can's + pad (1) on the
+    # module side: pad edge to pad edge 5.25 mm from IN+ (x 12.50..16.00,
+    # y 19.39..21.89) and from OUT+ (x 12.50..16.00, y 58.39..60.89), on the
+    # same copper.  C1 used to sit on top of the module body, 22.1 mm away and
+    # on the far face; C3 used to straddle OUT+ from the other side.
+    P.append(("C1", "Capacitor_SMD:CP_Elec_10x12.5", 6.0, 24.5, 270.0,
+              {"1": N("DC_12"), "2": N("GND")}, "220u/50V", "B.Cu", 0))
+    P.append(("C3", "Capacitor_SMD:CP_Elec_10x12.5", 6.0, 55.5, 90.0,
+              {"1": N("V5"), "2": N("GND")}, "470u/35V", "B.Cu", 0))
     P.append(("C4", C805, 34.5, 38.0, 0.0,
               {"1": N("V5"), "2": N("GND")}, "100n", "F.Cu", 0))
     P.append(("C13", C805, 26.5, 41.5, 0.0,
@@ -693,6 +709,11 @@ def silks():
         out += _dashrect(*JST_ZONES[ref][0])
     for z in (ZONE_SPARE_N, ZONE_SPARE_S, ZONE_SMD_MID, ZONE_SMD_WEST):
         out += _dashrect(*z)
+    # the drawing's 85 x 55 envelope, kept visible inside the extended outline
+    out += _dashrect(10.0, 10.0, 95.0, 65.0)
+    out += _txt(24.0, 8.9, "DRAWN 85 x 55 ENVELOPE - BOARD EXTENDED 10 mm WEST",
+                layer="Dwgs.User", size=1.0)
+    out += _txt(0.6, 12.6, "C1 / C3 UNDER THE BOARD", layer="Dwgs.User", size=0.7)
 
     # dev board rows: pin 1 is VIN, at the dev board's USB end
     out += _txt(44.0, 26.9, "PIN 1 = USB END", size=0.8)
@@ -761,8 +782,8 @@ def silks():
             ("TP1 IGN_SENSE  TP2 HALL  TP3 BAT_SNS  TP4 FUEL_SNS  TP5 GND", 21.0)]
     for txt, y in docs:
         out += _txt(10.5, y, txt, layer="Dwgs.User", size=1.0)
-    out += _txt(10.5, 66.4, "Dashboard++ for ESP32 carrier - CAD layout rev 1",
-                layer="Dwgs.User", size=1.2)
+    out += _txt(10.5, 66.4, "Dashboard++ for ESP32 carrier - CAD layout rev 2"
+                            " - board 95 x 55 mm", layer="Dwgs.User", size=1.2)
     return out
 
 
