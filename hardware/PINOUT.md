@@ -12,13 +12,18 @@ the silkscreen; what you call each block on your drawing is up to you.
 | Item | Value |
 |---|---|
 | Board outline | 85.0 × 55.0 mm — KiCad coords x 10→95, y 10→65 |
-| View used everywhere | top view: x grows to the right, y grows **down** |
-| ESP32 DevKit header rows | near row y = 20.00, far row y = 45.40 (25.4 mm apart), 15 pins each, pitch 2.54 |
-| Pin 1 of both rows (square pad) | x = 22.00 — that end is the DevKit's **USB end** |
-| DevKit body hanging underneath | x 13.6→67.6, y 18.6→46.8 |
-| Antenna keep-out (no copper, any layer) | x 48.96→68.2, y 22.0→43.4 |
-| Display socket | along the bottom edge, y = 61.50, pin 1 at x = 25.00 |
-| Parts on the **underside** | `J10a`, `J10b` (DevKit sockets), `U4` (LM2596 module) |
+| View used everywhere | top view: x grows to the right, y grows **down**. The AutoCAD drawing is mirrored onto this frame: `x = 95 − u`, `y = 10 + v` (scale 3.7368 pt/mm) — antenna end east, as built |
+| ESP32 DevKit header rows | north row y = 24.79 (`J10a`), south row y = 50.19 (`J10b`) — 25.40 mm apart, 15 pins each, pitch 2.54 |
+| Pin 1 of both rows (square pad) | x = 46.46 — that end is the DevKit's **USB end** (west); pin 15 at x = 82.02 |
+| DevKit body hanging underneath | x 36.20→86.20, y 23.49→51.49 (dashed outline on `Dwgs.User`) |
+| Antenna keep-out (no copper, any layer) | x 73.42→86.80, y 26.79→48.19 (the drawn zone between EN and IO23) |
+| Display socket `J3` | along the **east** edge, pin 1 (VCC) at (92.51, 18.27), socket grows south to y 57.22 |
+| DC-DC module `U4` | underside, 21.0 × 43.0 body, pads x 12.50→33.00 / y 19.39→60.89; `IN+` at (14.25, 20.64) (input pads north) |
+| Mounting holes (NPTH, no pads) | Ø3.2 drill, Ø5.0 copper keep-out: H1 (91.50, 13.50) · H2 (91.50, 61.50) · H3 (44.00, 62.00) · H4 (34.50, 13.00) |
+| Layer stackup (4) | `F.Cu` signals + small parts · `In1.Cu` solid GND · `In2.Cu` +12 V / +5 V rails (pours added when routing) · `B.Cu` connectors, module, DevKit rows |
+| Parts on the **underside** (`B.Cu`) | `J10a` `J10b` (DevKit sockets), `U4` (DC-DC module), `J1` (XT30), `J17` `J14` `J6` `J9` (JST-PH), `J8` (GNSS), `JP1` |
+| JST-PH zones (as drawn) | north strip y 10.00→17.00: `J14` x 62.18→74.19, `J17` x 74.19→86.20 — south strip y 58.01→65.00: `J9` x 62.18→74.19, `J6` x 74.19→86.20 |
+| Annotation zones (dashed, `Dwgs.User`) | spare/debug north y 10.80→23.33 and south y 51.17→63.73 (both x 37.87→81.26); small-parts mid x 37.87→81.26 / y 27.89→46.80 and west column x 10.99→37.16 / y 10.80→63.72 |
 
 ## 2. Which block is which
 
@@ -29,18 +34,16 @@ the silkscreen; what you call each block on your drawing is up to you.
 | reverse-polarity / load-dump protection (P-MOS + zener + TVS) | `Q1` `D1` `D2` `R1` `C1` `C2` |
 | DC-DC step-down module LM2596, 4 pads, **soldered underneath** | `U4` |
 | 5 V output caps by the module | `C3` `C4` |
-| ESP32 DevKit sockets (it hangs under the board) | `J10a` = top row, `J10b` = bottom row |
-| 4.0" TFT display socket, 16 pins | `J3` |
+| ESP32 DevKit sockets (it hangs under the board) | `J10a` = north row, `J10b` = south row |
+| 4.0" TFT display socket, 16 pins, east edge | `J3` |
 | GNSS / GPS module plug | `J8` |
-| debug / serial plug (TX, RX, GND, 5V) | `J13` |
-| spare GPIO plug (6) | `J15` · reset/EN plug (2) | `J16` |
-| spare 2×3 plug (5V, GND, ign, GPIO) | `J11` |
-| coolant NTC plug | `J5` |
-| fuel sender plug | `J7` |
-| light sensor (LDR) plug | `J6` |
+| debug / serial pads (TX, RX, GND, 5V) | `J13` |
+| spare GPIO pads (6) | `J15` |
+| ignition +12 **and** coolant NTC (one 4-pin JST-PH shell) | `J17` (the drawing's second label for that zone is `J5`) |
+| trip button **and** EN (one 4-pin shell) | `J14` + on-board button `SW1` (drawing label `J16` for the EN half) |
+| light sensor (LDR) **and** fuel sender (one 4-pin shell) | `J6` (drawing label `J7` for the fuel half) |
 | speed / hall sensor plug (3 pins) | `J9` |
-| ignition +12 plug | `J17` |
-| trip-reset: external plug + on-board button | `J14` + `SW1` |
+| mounting holes M3 clearance, no copper | `H1` `H2` `H3` `H4` |
 | battery voltage tap (divider) | `R2` `R3` `R4` |
 | hall supply selector jumper (5 V / 12 V) | `JP1` |
 | isolation optocouplers: ignition, speed | `OK1` `OK2` |
@@ -49,10 +52,11 @@ the silkscreen; what you call each block on your drawing is up to you.
 
 ## 3. ESP32 DevKit sockets
 
-Positions counted from the **USB end** of the dev board (pin 1 = square pad).
+Positions counted from the **USB end** of the dev board (pin 1 = square pad, carrier
+x = 46.46; the rows sit at y 24.79 / 50.19).
 Silkscreen note on the board says *CHECK SILK* — clones differ, verify against your module.
 
-**Near row (top, `J10a`)**
+**North row (`J10a`, y = 24.79)**
 
 | pos | silk | net | used for |
 |---|---|---|---|
@@ -70,9 +74,9 @@ Silkscreen note on the board says *CHECK SILK* — clones differ, verify against
 | 12 | IO34 | `LDR_SNS` | light sensor |
 | 13 | IO39 | — | **not connected** |
 | 14 | IO36 | `COOL_SNS` | coolant NTC |
-| 15 | EN | `EN` | enable / reset (also on `J16`) |
+| 15 | EN | `EN` | enable / reset (also on `J14` pin 3) |
 
-**Far row (bottom, `J10b`)**
+**South row (`J10b`, y = 50.19)**
 
 | pos | silk | net | used for |
 |---|---|---|---|
@@ -92,7 +96,10 @@ Silkscreen note on the board says *CHECK SILK* — clones differ, verify against
 | 29 | IO22 | `SPARE_D22` | spare / I2C SCL |
 | 30 | IO23 | `TFT_MOSI` | display data in |
 
-## 4. Display socket `J3` (16 pins, pin 1 = VCC, along the bottom edge)
+## 4. Display socket `J3` (16 pins, pin 1 = VCC, along the east edge, pin 1 at the north end)
+
+Pins 9–16 (touch + SD) are on the socket but not wired — the drawing's slot is only
+35 mm long, so the 1×16 socket (40.64 mm body) grows 5.6 mm into the drawn south gap.
 
 | pin | silk | net | | pin | silk | net |
 |---|---|---|---|---|---|---|
@@ -111,18 +118,14 @@ Touch and SD pads are deliberately left unconnected (no MISO in the firmware, to
 
 | label | pins (silk → net) |
 |---|---|
-| `J1` power in | 1 = `DC_IN` (+12 before fuse) · 2 = `GND` |
-| `J9` speed/hall | 1 `+V` = `HALL_VCC` · 2 `SIG` = `HALL_SIG` · 3 `G` = `GND` |
-| `J17` ignition | 1 `IGN` = `IGN_12` · 2 `GND` = `GND` |
-| `J5` coolant NTC | 1 `SIG` = `COOL_SNS` · 2 `GND` = `GND` |
-| `J7` fuel sender | 1 `SIG` = `FUEL_SNS` · 2 `GND` = `GND` |
-| `J6` light sensor | 1 `SNS` = `LDR_SNS` · 2 `GND` = `GND` (LDR solders here too) |
-| `J14` trip button | 1 `TRIP` = `TRIP_BTN` · 2 `GND` = `GND` |
+| `J1` power in (XT30) | 1 = `DC_IN` (+12 before fuse) · 2 = `GND` |
+| `J17` ignition + coolant (4-pin PH, north-east) | 1 `IGN` = `IGN_12` · 2 `GND` · 3 `COOL` = `COOL_SNS` · 4 `GND` |
+| `J14` trip + EN (4-pin PH, north-west) | 1 `TRIP` = `TRIP_BTN` · 2 `GND` · 3 `EN` = `EN` · 4 `GND` |
+| `J6` LDR + fuel (4-pin PH, south-east) | 1 `LDR` = `LDR_SNS` · 2 `GND` · 3 `FUEL` = `FUEL_SNS` · 4 `GND` (LDR also solders on the board) |
+| `J9` speed/hall (3-pin PH, south-west) | 1 `+V` = `HALL_VCC` · 2 `SIG` = `HALL_SIG` · 3 `G` = `GND` |
 | `J8` GNSS module | 1 `SDA` = `SPARE_D21` · 2 `SCL` = `SPARE_D22` · 3 `5V` = `V5` · 4 `GND` · 5 `RX` = `GPS_TX` · 6 `TX` = `GPS_RX` |
-| `J13` debug | 1 `TX` = `DBG_TX` · 2 `RX` = `DBG_RX` · 3 `GND` · 4 `5V` = `V5` |
-| `J15` spare | 1 `D26` · 2 `SDA` · 3 `SCL` · 4 `D19` · 5 `D15` · 6 `GND` |
-| `J16` reset | 1 `EN` · 2 `GND` |
-| `J11` spare 2×3 | 1 `GND` · 2 `V5` · 3 `SPARE_D26` · 4 `SPARE_D13` · 5 `IGN_12` · 6 `SPARE_D2` |
+| `J13` debug pads | 1 `TX` = `DBG_TX` · 2 `RX` = `DBG_RX` · 3 `GND` · 4 `5V` = `V5` |
+| `J15` spare pads | 1 `D26` · 2 `SDA` · 3 `SCL` · 4 `D19` · 5 `D15` · 6 `GND` |
 | `JP1` hall supply | 1 `5V` = `V5` · 2 `SEL` = `HALL_VCC` · 3 `12V` = `DC_12` (jumper picks the sensor supply) |
 
 ## 6. Small parts, what each one is for
@@ -164,3 +167,16 @@ Touch and SD pads are deliberately left unconnected (no MISO in the firmware, to
 | `SW1` | 6 mm tactile | `TRIP_BTN` `GND` | on-board trip reset |
 | `TP1`–`TP4` | — | `IGN_SENSE` `HALL` `BAT_SNS` `FUEL_SNS` | test points |
 | `TP5` | — | *(no net)* | GPIO0 free pad — the DevKit does not bring IO0 to its headers |
+
+## 7. Regenerating the board
+
+```sh
+python hardware/scripts/make_pcb.py        # writes the .kicad_pcb + footprints/dpp.pretty + drc-report.txt
+python hardware/scripts/netsreport.py      # nets-report.md (per-net pad positions / wiring span)
+python hardware/scripts/placementmap.py    # out/placement-map.png (courtyards + ratsnest MST)
+python hardware/scripts/place.py <fp_id> <body_dia> [x y]   # legal free slots for a part
+```
+
+All coordinates come from `hardware/cad/Dashboard++ PCB with dimensions.geo.json`
+(`hardware/scripts/extract_cad.py`), mirrored with `x = 95 − u`, `y = 10 + v`.
+The plan is `Implementation plans/PCB-REARRANGEMENT-FROM-CAD-2026-10-10.md` (local only).

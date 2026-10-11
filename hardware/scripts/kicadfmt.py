@@ -145,6 +145,10 @@ DROP_TOKENS = {"version", "generator", "generator_version", "layer", "tedit",
 # Nickname of the project-local footprint library (footprints/<lib>.pretty)
 # that holds the footprints this generator builds from scratch.
 LOCAL_LIB = "dpp"
+# .kicad_mod format stamp: without these lines KiCad's library reader refuses the
+# whole .pretty ("failed to load library") and every board footprint then warns
+# "library not enabled".
+MOD_VERSION, MOD_GEN, MOD_GENVER = "20241229", "make_pcb.py", "9.0"
 
 _local_mods = {}
 
@@ -201,33 +205,46 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
             elif what == "Value":
                 g = re.sub(r'(\(property "Value" )"[^"]*"',
                            lambda mm: mm.group(1) + '"%s"' % value, g, count=1)
+                # values on the fab layer too: silk text at component pitch
+                # collides everywhere (see the Reference branch above)
+                if ref_to_fab:
+                    g = g.replace('(layer "F.SilkS")', '(layer "F.Fab")')
         # inner ids come from the library file: two instances of the same part
         # would share them, so give every child item its own stable id
-        kept.append(bake_rot(re.sub(r'\(uuid "[^"]*"\)',
-                                    lambda mm: '(uuid "%s")' % uid(), g), rot))
+        kept.append(re.sub(r'\(uuid "[^"]*"\)',
+                           lambda mm: '(uuid "%s")' % uid(), g))
 
     x, y = at
-    out = ['(footprint "%s"' % fp_id,
+    # ship the rewritten copy in the project library: DRC compares the board
+    # footprint with its library copy, and we do rewrite it (nets, ref/value,
+    # reference on F.Fab, layer for bottom-mounted parts)
+    out = ['(footprint "%s"' % to_local_lib(fp_id, kept, layer),
            '\t(layer "%s")' % layer,
            '\t(uuid "%s")' % uid(),
            '\t(at %.4f %.4f %.1f)' % (x, y, rot)]
-    out.extend(kept)
+    # pcbnew saves a rotated part with the placement angle baked into every
+    # child; the library copy keeps the children local (unrotated), which is
+    # what pcbnew compares after un-rotating the board copy.
+    out.extend([bake_rot(g, rot) for g in kept])
     return "\n".join(out) + "\n)"
 
 
-def to_local_lib(fp_id, kept):
+def to_local_lib(fp_id, kept, layer="F.Cu"):
     """Register the (rewritten) footprint in the project-local library.
 
     DRC compares every board footprint with its library copy; because this
     generator rewrites footprints (real ref/value text, reference on F.Fab,
     no library bookkeeping) it would always report 'footprint does not match
     the library copy'.  Shipping the exact footprints we emit in
-    footprints/carrier.pretty makes the board self-contained and warning-free.
+    footprints/dpp.pretty makes the board self-contained and warning-free.
     Returns the nickname to use on the board (LOCAL_LIB:<name>).
     """
     lib, name = fp_id.split(":")
     if name not in _local_mods:
-        head = ['(footprint "%s"' % name, '\t(layer "F.Cu")',
+        head = ['(footprint "%s"' % name,
+                '\t(version %s)' % MOD_VERSION, '\t(generator "%s")' % MOD_GEN,
+                '\t(generator_version "%s")' % MOD_GENVER,
+                '	(layer "%s")' % layer,
                 '\t(tstamp "%s")' % uid()]
         body = []
         for g in kept:
@@ -281,6 +298,11 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
         miny = min(p[1] for p in outline)
         maxy = max(p[1] for p in outline)
     for (num, px, py, w, h, dr, net) in pads:
+        if net == "npth":            # unplated mounting hole: pad size = keep-out
+            kept.append('\t(pad "%s" np_thru_hole circle (at %.3f %.3f 0) (size %.3f %.3f)'
+                        ' (drill %.3f) (layers "F.Mask" "B.Mask"))'
+                        % (num, px, py, w, h, dr))
+            continue
         s = '\t(pad "%s" smd rect (at %.3f %.3f 0) (size %.3f %.3f)' % (num, px, py, w, h)
         if dr:
             s = ('\t(pad "%s" thru_hole rect (at %.3f %.3f 0) (size %.3f %.3f)'
@@ -292,7 +314,8 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
         kept.append(s)
     if outline:
         pts = " ".join('(xy %.3f %.3f)' % p for p in outline)
-        kept.append('	(fp_poly (pts %s) (stroke (width 0.12) (type solid)) (layer "F.Fab"))' % pts)
+        kept.append('	(fp_poly (pts %s) (stroke (width 0.12) (type solid)) (layer "%s"))'
+                    % (pts, "B.Fab" if layer == "B.Cu" else "F.Fab"))
     if courtyard_box:
         minx, miny, maxx, maxy = courtyard_box
     elif not courtyard:
@@ -300,14 +323,18 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
         # courtyard, so emit a deliberately tiny one instead of none.
         minx = miny = -0.2
         maxx = maxy = 0.2
+    crtl = "B.CrtYd" if layer == "B.Cu" else "F.CrtYd"
     for a, b in [((minx, miny), (maxx, miny)), ((maxx, miny), (maxx, maxy)),
                  ((maxx, maxy), (minx, maxy)), ((minx, maxy), (minx, miny))]:
-        kept.append('	(fp_line (start %.3f %.3f) (end %.3f %.3f) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))'
-                    % (a[0], a[1], b[0], b[1]))
+        kept.append('	(fp_line (start %.3f %.3f) (end %.3f %.3f) (stroke (width 0.05) (type solid)) (layer "%s"))'
+                    % (a[0], a[1], b[0], b[1], crtl))
     name = fp_name or re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
     if name not in _local_mods:
         # stable id so regenerating the library does not churn the file
-        head = ['(footprint "%s"' % name, '	(layer "F.Cu")',
+        head = ['(footprint "%s"' % name,
+                '	(version %s)' % MOD_VERSION, '	(generator "%s")' % MOD_GEN,
+                '	(generator_version "%s")' % MOD_GENVER,
+                '	(layer "%s")' % layer,
                 '	(tstamp "%s")' % uuid.uuid5(uuid.NAMESPACE_URL, LOCAL_LIB + "/" + name)]
         body = [re.sub(r'\(net \d+ "[^"]*"\)\s*', "", g) for g in kept]
         for i, g in enumerate(body):

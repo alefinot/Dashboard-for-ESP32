@@ -31,28 +31,88 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
 BOARD_X0, BOARD_Y0 = 10.0, 10.0          # board outline corners
 BOARD_X1, BOARD_Y1 = 95.0, 65.0          # 85.0 x 55.0 mm
 
-ESP_ROWS = {                            # ESP32 DevKit V1 clone (30 pin, 2x15)
+# ---------------------------------------------------------------- CAD frame --
+# Every position below comes from the CAD drawing
+# (hardware/screenshots/Dashboard++ PCB with dimensions.pdf), extracted as
+# vectors by hardware/scripts/extract_cad.py into
+# hardware/cad/Dashboard++ PCB with dimensions.geo.json; the reading of each
+# view is written up in hardware/cad/layout_notes.md.
+# The drawing's own frame is (u = mm right, v = mm down, origin = view outline
+# corner); it maps to KiCad as
+#       x = 95.00 - u      y = 10.00 + v
+# i.e. the whole board mirrored left-right, which puts the DevKit's antenna
+# keep-out in the east column exactly as the built board does.
+def cad(u, v):
+    """Drawing coordinates -> KiCad board coordinates."""
+    return 95.0 - u, 10.0 + v
+
+
+def cadbox(u0, v0, u1, v1):
+    a, b = cad(u0, v1), cad(u1, v0)
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1]))
+
+
+# ESP32 DevKit V1 clone (30 pin, 2x15) hanging under the carrier (B.Cu).
+# Body drawn u 8.80..58.80 x v 13.49..41.49 (50.00 x 28.00); header strips
+# 36.99 x 1.00 at v 13.81..14.80 / 40.21..41.20 - the drawing puts their
+# centre lines 26.40 apart, the real DevKit is 25.40, so the rows are
+# re-centred on the body centre line (v 27.49) -> v 14.79 / 40.19.
+ESP_ROWS = {
     "row_spacing": 25.40,               # centre-to-centre of the two header rows
     "pitch": 2.54,
     "pins": 15,
-    "y_near": 20.00,                    # rows run along X; near row is the top one
-    "x_start": 22.00,                   # pin 1 of the FAR row (3V3 end)
-    # The board is mounted flipped versus the old draft: the DevKit's USB end
-    # sits at x_start and its EN / 3V3 / antenna end sits at x_end, so the
-    # antenna keep-out lands in the free right-hand column.
-}
-ESP_ROWS["x_end"] = ESP_ROWS["x_start"] + 14 * ESP_ROWS["pitch"]   # 57.56
-ESP_ROWS["y_far"] = ESP_ROWS["y_near"] + ESP_ROWS["row_spacing"]   # 45.40
-
-# DevKit board outline under the carrier (51 x 27.9 mm body, rows inset 1.3 mm)
-ESP_BODY = (13.6, 18.6, 67.6, 46.8)
-
-TFT = {
-    "x_start": 25.00, "y": 61.50, "pitch": 2.54,   # 1x16 socket, F.Cu edge
+    "y_near": 24.79,                    # north row (J10a), pin 1 = VIN at the west
+    "x_start": 46.46,                   # pin 1 (USB end of the dev board)
+    "x_end": 46.46 + 14 * 2.54,         # pin 15 (EN) = 82.02
+    "y_far": 50.19,                     # south row (J10b), pin 16 = 3V3 at the west
 }
 
-# LM2596 module: 4 solder pads, IN pair -> OUT pair 40 mm apart, 18 mm + to -
-LM = {"x": 84.00, "y": 37.50, "span_y": 40.00, "span_x": 16.00}
+# DevKit board outline under the carrier (drawn 50.00 x 28.00)
+ESP_BODY = cadbox(8.80, 13.49, 58.80, 41.49)     # 36.20,23.49 .. 86.20,51.49
+
+# TFT display socket J3: drawn as a 1.00 x 35.00 slab standing 10.02 mm above
+# F.Cu at the board edge (u 1.99..2.99, v 7.00..42.00). The module's own
+# silkscreen is 16-way (VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS T_DIN
+# TPEN T_DO SD NC), so a 1x16 socket is used: its 40.64 body is centred on the
+# drawn slot's north end, growing 5.6 mm into the drawing's 13 mm south gap.
+TFT = {"x": 92.51, "y1": 18.27, "pitch": 2.54, "pins": 16}   # pin 1 north
+TFT["y_end"] = TFT["y1"] + (TFT["pins"] - 1) * TFT["pitch"]  # 56.37
+
+# LM2596 step-down module, soldered to the BOTTOM face.
+# Drawn 21.00 x 43.00 (u 61.75..82.75, v 8.64..51.64) with silks `in +` / `-`
+# on the u-small (north) end and `out +` / `-` on the south end, `+` on the
+# u-large side -> in KiCad: IN pair to the north, OUT pair to the south, `+`
+# pads to the west.  Pad pairs read off the silks: y 21.91 / 60.90, x 17.0 apart.
+LM = {"x": 22.75, "y": 41.405, "span_x": 17.00, "span_y": 38.99}
+LM_BODY = cadbox(61.75, 8.64, 82.75, 51.64)      # 12.25,18.64 .. 33.25,61.64
+
+# GNSS J8: drawn as a 22.99 x 7.00 "6 solder pads" zone (u 35.81..58.80,
+# v 0.00..7.00) - kept as a 6-pin 2.54 header inside it.
+GNSS_ZONE = cadbox(35.81, 0.00, 58.80, 7.00)     # 36.20,10.00 .. 59.19,17.00
+
+# Four JST-PH zones, 12.01 x 7.00 each, two designators per zone (the drawing
+# writes both); one shell per zone, two circuits each (user decision).
+JST_ZONES = {
+    "J14": (cadbox(20.81, 0.00, 32.82, 7.00), ("J14", "J16")),   # TRIP + EN
+    "J17": (cadbox(8.80, 0.00, 20.81, 7.00), ("J17", "J5")),     # IGN + coolant
+    "J6": (cadbox(8.80, 48.01, 20.81, 55.01), ("J6", "J7")),     # LDR + fuel
+    "J9": (cadbox(20.81, 48.01, 32.82, 55.01), ("J9",)),         # hall (+V SIG G)
+}
+
+# JP1 (hall +V selector): drawn 6.00 x 3.50 box, silks `JP1` / `DIP SWITCH`.
+JP1_BOX = cadbox(34.65, 49.74, 40.66, 53.24)     # 54.34,59.74 .. 60.35,63.24
+
+# Mounting holes - the drawing has none; these four clear everything drawn
+# (H1/H2 sit in the free east corners, H3/H4 sit between the module's east
+# edge and the JST / GNSS zones).
+MOUNTS = [(91.50, 13.50), (91.50, 61.50), (44.00, 62.00), (34.50, 13.00)]
+MOUNT_DRILL, MOUNT_RING = 3.2, 5.0
+
+# Annotation zones drawn dashed on the TOP view (F.Cu work areas, Dwgs.User)
+ZONE_SPARE_N = cadbox(13.74, 0.80, 57.13, 13.33)    # 37.87,10.80 .. 81.26,23.33
+ZONE_SPARE_S = cadbox(13.74, 41.17, 57.13, 53.73)   # 37.87,51.17 .. 81.26,63.73
+ZONE_SMD_MID = cadbox(13.74, 17.89, 57.13, 36.80)   # 37.87,27.89 .. 81.26,46.80
+ZONE_SMD_WEST = cadbox(57.84, 0.80, 84.01, 53.73)   # 10.99,10.80 .. 37.16,63.73
 
 # copper keep-out under the DevKit PCB antenna (between EN and IO23, all layers)
 KEEP = (ESP_ROWS["x_end"] - 8.6, ESP_ROWS["y_near"] + 2.0,
@@ -158,7 +218,8 @@ BODY = {"C1": 10.5, "C3": 10.5}
 
 # Footprints that physically sit on the BOTTOM face (the off-board DC-DC module
 # soldered to the back): their courtyard does not block top-side parts.
-BOTTOM_SIDE = {"J10a", "J10b", "U4"}
+BOTTOM_SIDE = {"J10a", "J10b", "U4", "J1", "J14", "J17", "J6",
+               "J9", "J8", "JP1"}
 
 # ------------------------------------------------------------- parts -------
 # All through-hole. Entry:
@@ -167,7 +228,9 @@ BOTTOM_SIDE = {"J10a", "J10b", "U4"}
 def parts():
     P = []
 
-    # ---- ESP32 DevKit sockets, B.Cu (the dev board hangs under the carrier)
+    # ---- ESP32 DevKit sockets, B.Cu (the dev board hangs under the carrier).
+    # Rows re-centred on the drawn body (26.40 drawn pitch is a drafting error;
+    # the real DevKit V1 is 25.40). Pin 1 = VIN at the west (USB) end.
     near = {str(i): NETMAP_ESP[i] for i in range(1, 16)}
     far = {str(i - 15): NETMAP_ESP[i] for i in range(16, 31)}
     P.append(("J10a", "Connector_PinSocket_2.54mm:PinSocket_1x15_P2.54mm_Vertical",
@@ -177,163 +240,169 @@ def parts():
               ESP_ROWS["x_start"], ESP_ROWS["y_far"], 90.0, far, "ESP32-DEVKIT-B",
               "B.Cu", 0))
 
-    # ---- TFT display socket, F.Cu along the bottom edge
+    # ---- TFT display socket J3, F.Cu, standing at the east board edge
+    # (drawn 1.00 x 35.00 slab, 10.02 mm above F.Cu; the module is 16-way).
     tft = {str(i + 1): n for i, n in enumerate(TFT_MAP)}
     P.append(("J3", "Connector_PinSocket_2.54mm:PinSocket_1x16_P2.54mm_Vertical",
-              TFT["x_start"], TFT["y"], 90.0, tft, "TFT-ILI9488", "F.Cu", 0))
+              TFT["x"], TFT["y1"], 0.0, tft, "TFT-ILI9488", "F.Cu", 0))
 
-    # ---- 12 V entry + protection (top right, next to the module pads) ----
-    # XT30 -> F1 fuse -> Q1 P-MOS high side -> module IN+;  gate zener D1.
+    # ---- DC-DC step-down module, soldered to the BOTTOM face (custom fp).
+    # Drawn 21 x 43 body, `in +`/`-` at the north end, `out +`/`-` at the south,
+    # `+` on the west side -> IN pair north, OUT pair south, `+` pads west.
+    hx, hy = LM["span_x"] / 2, LM["span_y"] / 2
+    pads = [("1", -hx, -hy, 3.5, 2.5, 1.0, (N("DC_12"), "DC_12")),      # IN +
+            ("2", hx, -hy, 3.5, 2.5, 1.0, (N("GND"), "GND")),           # IN -
+            ("3", -hx, hy, 3.5, 2.5, 1.0, (N("V5"), "V5")),             # OUT +
+            ("4", hx, hy, 3.5, 2.5, 1.0, (N("GND"), "GND")),            # OUT -
+            ]
+    bx0, by0, bx1, by1 = LM_BODY
+    cx, cy = (bx0 + bx1) / 2, (by0 + by1) / 2
+    outl = [(bx0 - cx, by0 - cy), (bx1 - cx, by0 - cy), (bx1 - cx, by1 - cy),
+            (bx0 - cx, by1 - cy), (bx0 - cx, by0 - cy)]
+    P.append(("U4", None, cx, cy, 0.0, pads, "DPP_DCDC_MODULE", "B.Cu", 0, outl))
+    LM["x"], LM["y"] = cx, cy
+
+    # ---- 12 V entry: XT30 on the BOTTOM face, in the drawn 9.99 x 5.01 zone
     P.append(("J1", "Connector_AMASS:AMASS_XT30U-M_1x02_P5.0mm_Vertical",
-              83.0, 20.0, 0.0, {"1": N("DC_IN"), "2": N("GND")}, "XT30U-M",
-              "F.Cu", 0))
+              14.75, 13.99, 0.0, {"1": N("DC_IN"), "2": N("GND")}, "XT30U-M",
+              "B.Cu", 0))
+
+    # ---- JST-PH shells, one per drawn 12.01 x 7.00 zone, two circuits each.
+    # Refs follow the drawing's first label of each zone; the second designator
+    # is printed in the silks (README/PINOUT list both).
+    PH4 = "Connector_JST:JST_PH_B4B-PH-K_1x04_P2.00mm_Vertical"
+    PH3 = "Connector_JST:JST_PH_B3B-PH-K_1x03_P2.00mm_Vertical"
+    for ref, fp, val, nm in [
+            ("J17", PH4, "IGN + COOLANT", {"1": "IGN_12", "2": "GND",
+                                           "3": "COOL_SNS", "4": "GND"}),
+            ("J14", PH4, "TRIP + EN", {"1": "TRIP_BTN", "2": "GND",
+                                       "3": "EN", "4": "GND"}),
+            ("J6", PH4, "LDR + FUEL", {"1": "LDR_SNS", "2": "GND",
+                                       "3": "FUEL_SNS", "4": "GND"}),
+            ("J9", PH3, "HALL", {"1": "HALL_VCC", "2": "HALL_SIG",
+                                 "3": "GND"})]:
+        z = JST_ZONES[ref][0]
+        n = 4 if fp is PH4 else 3
+        x = (z[0] + z[2]) / 2 - (n - 1)          # pads at 2.00 pitch
+        y = (z[1] + z[3]) / 2 - 0.55
+        P.append((ref, fp, x, y, 0.0, {k: N(v) for k, v in nm.items()}, val,
+                  "B.Cu", 0))
+
+    # ---- GNSS J8: 6-pin header inside the drawn 22.99 x 7.00 pad zone
+    P.append(("J8", "Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical",
+              40.00, 13.50, 90.0,
+              {"1": N("SPARE_D21"), "2": N("SPARE_D22"), "3": N("V5"),
+               "4": N("GND"), "5": N("GPS_TX"), "6": N("GPS_RX")}, "GPS",
+              "B.Cu", 0))
+
+    # ---- JP1: hall +V selector (5V / sel / 12V) in the drawn 6.00 x 3.50 box
+    P.append(("JP1", "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical",
+              55.50, 61.50, 90.0,
+              {"1": N("V5"), "2": N("HALL_VCC"), "3": N("DC_12")}, "HALL +V",
+              "B.Cu", 0))
+
+    # ---- mounting holes (the drawing has none; see plan section 6)
+    for i, (x, y) in enumerate(MOUNTS, 1):
+        P.append(("H%d" % i, None, x, y, 0.0,
+                  [("1", 0.0, 0.0, MOUNT_RING, MOUNT_RING, MOUNT_DRILL, "npth")],
+                  "MOUNT", "F.Cu", 0,
+                  [(-MOUNT_RING / 2, -MOUNT_RING / 2), (MOUNT_RING / 2, -MOUNT_RING / 2),
+                   (MOUNT_RING / 2, MOUNT_RING / 2), (-MOUNT_RING / 2, MOUNT_RING / 2),
+                   (-MOUNT_RING / 2, -MOUNT_RING / 2)]))
+
+    # ---- 12 V protection chain, F.Cu, in the drawn west small-parts zone
+    # (26.17 x 52.92, the column above the module that hangs below).
+    # XT30 -> F1 -> Q1 (P-MOS high side) -> module IN+; gate zener D1, R1.
     P.append(("F1", "Fuse:Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal",
-              90.0, 36.5, 180.0, {"1": N("DC_IN"), "2": N("DC_F")}, "5x20 2A",
+              15.5, 26.0, 0.0, {"1": N("DC_IN"), "2": N("DC_F")}, "5x20 10A",
               "F.Cu", 0))
     P.append(("Q1", "Package_TO_SOT_THT:TO-220-3_Vertical",
-              72.6, 45.0, 0.0, {"1": N("MOS_G"), "2": N("DC_12"), "3": N("DC_F")},
+              13.5, 36.0, 0.0, {"1": N("MOS_G"), "2": N("DC_12"), "3": N("DC_F")},
               "IRF9540N", "F.Cu", 0))
     P.append(("D1", "Diode_THT:D_DO-15_P2.54mm_Vertical_AnodeUp",
-              71.0, 27.0, 0.0, {"1": N("MOS_G"), "2": N("DC_F")}, "BZX55C15V",
+              24.0, 36.0, 0.0, {"1": N("MOS_G"), "2": N("DC_F")}, "BZX55C15V",
               "F.Cu", 0))
     P.append(("D2", "Diode_THT:D_DO-15_P2.54mm_Vertical_AnodeUp",
-              78.0, 27.0, 0.0, {"1": N("DC_12"), "2": N("GND")}, "P6KE33A",
+              32.0, 36.0, 0.0, {"1": N("DC_12"), "2": N("GND")}, "P6KE33A",
               "F.Cu", 0))
     P.append(("R1", "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P2.54mm_Vertical",
-              85.0, 27.0, 0.0, {"1": N("MOS_G"), "2": N("DC_F")}, "10k", "F.Cu", 0))
+              13.5, 42.0, 0.0, {"1": N("MOS_G"), "2": N("DC_F")}, "10k", "F.Cu", 0))
     P.append(("C2", "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm",
-              90.5, 27.0, 0.0, {"1": N("DC_12"), "2": N("GND")}, "100n", "F.Cu", 0))
+              30.5, 41.0, 0.0, {"1": N("DC_12"), "2": N("GND")}, "100n", "F.Cu", 0))
+    # input / output bulk sit on F.Cu directly over the module
     P.append(("C1", "Capacitor_THT:CP_Radial_D10.0mm_P5.00mm",
-              86.0, 43.4, 0.0, {"1": N("DC_12"), "2": N("GND")}, "220u/50V",
+              29.5, 48.5, 0.0, {"1": N("DC_12"), "2": N("GND")}, "220u/50V",
               "F.Cu", 0))
-
-    # ---- LM2596 module: four solder pads on the BOTTOM face (custom fp) ----
-    pads = [("1", -LM["span_x"] / 2, -LM["span_y"] / 2, 3.5, 2.5, 1.0,
-             (N("DC_12"), "DC_12")),
-            ("2", LM["span_x"] / 2, -LM["span_y"] / 2, 3.5, 2.5, 1.0,
-             (N("GND"), "GND")),
-            ("3", -LM["span_x"] / 2, LM["span_y"] / 2, 3.5, 2.5, 1.0,
-             (N("V5"), "V5")),
-            ("4", LM["span_x"] / 2, LM["span_y"] / 2, 3.5, 2.5, 1.0,
-             (N("GND"), "GND"))]
-    P.append(("U4", None, LM["x"], LM["y"], 0.0, pads, "LM2596-MOD", "B.Cu", 0,
-              [(-10.5, -22.5), (10.5, -22.5), (10.5, 22.5), (-10.5, 22.5),
-               (-10.5, -22.5)]))
-
-    # output bulk sits on the TOP face, directly over the module (the module
-    # itself hangs under the board), between its two OUT pads and C4.
     P.append(("C3", "Capacitor_THT:CP_Radial_D10.0mm_P5.00mm",
-              84.0, 54.5, 0.0, {"1": N("V5"), "2": N("GND")}, "470u/35V",
+              15.5, 56.5, 0.0, {"1": N("V5"), "2": N("GND")}, "470u/35V",
               "F.Cu", 0))
     P.append(("C4", "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm",
-              84.0, 62.0, 0.0, {"1": N("V5"), "2": N("GND")}, "100n", "F.Cu", 0))
+              13.5, 47.5, 0.0, {"1": N("V5"), "2": N("GND")}, "100n", "F.Cu", 0))
 
-    # GPIO0: the DevKit does NOT break IO0 out to its headers (only the BOOT
-    # button), so this is a free pad to solder a lead to, wired to the dev
-    # board's BOOT button / IO0 net.  No net on the carrier.
-    P.append(("TP5", "TestPoint:TestPoint_Pad_D1.5mm", 12.8, 11.8, 0.0, {},
-              "GPIO0", "F.Cu", 0))
-    # hall sensor supply: jumper 5V <-> sel <-> 12V
-    P.append(("JP1", "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical",
-              53.8, 51.2, 90.0,
-              {"1": N("V5"), "2": N("HALL_VCC"), "3": N("DC_12")}, "HALL +V",
-              "F.Cu", 0))
-
-    # ---- optocouplers: ignition sense + hall (mid-left, under the dev board)
-    P.append(("OK1", "Package_DIP:DIP-4_W7.62mm",
-              13.0, 34.5, 0.0,
+    # ---- signal conditioning, F.Cu, in the drawn mid small-parts zone
+    # (43.38 x 18.91, under the dev board that hangs below).
+    P.append(("OK1", "Package_DIP:DIP-4_W7.62mm", 39.5, 30.0, 0.0,
               {"1": N("IGN_LED"), "2": N("GND"),
                "3": N("IGN_SENSE"), "4": N("V3V3")}, "PC817B", "F.Cu", 0))
-    P.append(("OK2", "Package_DIP:DIP-4_W7.62mm",
-              25.5, 34.5, 0.0,
+    P.append(("OK2", "Package_DIP:DIP-4_W7.62mm", 50.5, 30.0, 0.0,
               {"1": N("HALL_LED"), "2": N("GND"),
                "3": N("HALL_OUT"), "4": N("V3V3")}, "PC817B", "F.Cu", 0))
 
-    # ---- analog decoupling (quiet island, left of the antenna keep-out)
-    for ref, net, x, y in [("C5", "BAT_SNS", 12.5, 25.0), ("C6", "FUEL_SNS", 19.5, 25.0),
-                           ("C7", "COOL_SNS", 26.5, 25.0), ("C8", "LDR_SNS", 33.5, 25.0),
-                           ("C9", "IGN_SENSE", 40.5, 25.0), ("C10", "HALL", 19.5, 30.0)]:
-        P.append((ref, "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm", x, y, 0.0,
-                  {"1": N(net), "2": N("GND")}, "100n", "F.Cu", 0))
-
-    # ---- sensor signal conditioning resistors (bottom strip rows) ---------
     RVERT = "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P2.54mm_Vertical"
-    res = [
-        ("R2", "47k",  None, "DC_12", "BAT_DIV", 11.5, 56.0),
-        ("R3", "10k",  None, "BAT_DIV", "GND", 17.5, 55.8),
-        ("R4", "1k",   None, "BAT_DIV", "BAT_SNS", 23.5, 57.8),
-        ("R5", "220R", None, "V3V3", "FUEL_SNS", 29.5, 57.8),
-        ("R6", "10k",  None, "V3V3", "COOL_SNS", 35.5, 57.8),
-        ("R7", "10k",  None, "LDR_SNS", "GND", 41.5, 57.8),
-        ("R8", "1k",   None, "IGN_12", "IGN_LED", 47.5, 57.8),
-        ("R9", "10k",  None, "IGN_SENSE", "GND", 53.5, 57.8),
-        ("R10", "1k",  None, "HALL_SIG", "HALL_LED", 59.5, 57.8),
-        ("R11", "10k", None, "HALL_OUT", "GND", 11.5, 41.0),
-        ("R12", "10k", None, "TFT_BL", "GND", 18.5, 41.0),
-        ("R13", "1k",  None, "HALL_OUT", "HALL", 40.5, 41.0),
-    ]
-    for ref, val, _x, a, b, x, y in res:
-        P.append((ref, RVERT, x, y, 0.0, {"1": N(a), "2": N(b)}, val, "F.Cu", 0))
+    RX = [39.0, 44.9, 50.8, 56.7, 62.6, 68.5]
+    res = [("R2", "47k", "DC_12", "BAT_DIV", 37.5), ("R3", "10k", "BAT_DIV", "GND", 37.5),
+           ("R4", "1k", "BAT_DIV", "BAT_SNS", 37.5), ("R5", "220R", "V3V3", "FUEL_SNS", 37.5),
+           ("R6", "10k", "V3V3", "COOL_SNS", 37.5), ("R7", "10k", "V3V3", "LDR_SNS", 37.5),
+           ("R8", "1k", "IGN_12", "IGN_LED", 41.0), ("R9", "10k", "IGN_SENSE", "GND", 41.0),
+           ("R10", "1k", "HALL_SIG", "HALL_LED", 41.0), ("R11", "10k", "HALL_OUT", "GND", 41.0),
+           ("R12", "10k", "TFT_BL", "GND", 41.0), ("R13", "1k", "HALL_OUT", "HALL", 41.0)]
+    for i, (ref, val, a, b, y) in enumerate(res):
+        P.append((ref, RVERT, RX[i % 6], y, 0.0,
+                  {"1": N(a), "2": N(b)}, val, "F.Cu", 0))
 
+    CDISC = "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
+    CX = [39.6, 45.6, 51.6, 57.6, 63.6, 69.3]
+    caps = [("C5", "BAT_SNS"), ("C6", "FUEL_SNS"), ("C7", "COOL_SNS"),
+            ("C8", "LDR_SNS"), ("C9", "IGN_SENSE"), ("C10", "HALL")]
+    for i, (ref, net) in enumerate(caps):
+        P.append((ref, CDISC, CX[i], 44.5, 0.0, {"1": N(net), "2": N("GND")},
+                  "100n", "F.Cu", 0))
+    P.append(("C11", CDISC, 63.5, 21.5, 0.0, {"1": N("TRIP_BTN"), "2": N("GND")},
+              "100n", "F.Cu", 0))
+    P.append(("C13", CDISC, 30.5, 55.5, 0.0, {"1": N("V3V3"), "2": N("GND")},
+              "100n", "F.Cu", 0))
     P.append(("D3", "Diode_THT:D_DO-15_P2.54mm_Vertical_AnodeUp",
-              24.5, 41.0, 0.0, {"1": N("HALL"), "2": N("GND")}, "P6KE6V2",
-              "F.Cu", 0))
-    P.append(("C11", "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm",
-              12.0, 45.5, 0.0, {"1": N("TRIP_BTN"), "2": N("GND")}, "100n",
-              "F.Cu", 0))
-    P.append(("C13", "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm",
-              33.5, 41.0, 0.0, {"1": N("V3V3"), "2": N("GND")}, "100n", "F.Cu", 0))
-
-    # ---- vehicle-side connectors (bottom strip, pins along +X) ------------
-    H2 = "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
-    H3 = "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical"
-    H4 = "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
-    H5 = "Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical"
-    H6 = "Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical"
-    conns = [
-        ("J14", H2, "TRIP",     12.0, 51.2, {"1": "TRIP_BTN", "2": "GND"}),
-        ("J5",  H2, "COOLANT",  18.6, 51.2, {"1": "COOL_SNS", "2": "GND"}),
-        ("J7",  H2, "FUEL",     25.2, 51.2, {"1": "FUEL_SNS", "2": "GND"}),
-        ("J6",  H2, "LDR",      31.8, 51.2, {"1": "LDR_SNS", "2": "GND"}),
-        ("J9",  H3, "HALL",     38.4, 51.2,
-         {"1": "HALL_VCC", "2": "HALL_SIG", "3": "GND"}),
-        ("J17", H2, "IGNITION", 47.5, 51.2, {"1": "IGN_12", "2": "GND"}),
-    ]
-    for ref, fp, val, x, y, nm in conns:
-        P.append((ref, fp, x, y, 90.0, {k: N(v) for k, v in nm.items()}, val,
-                  "F.Cu", 0))
-
-    # ---- headers along the top edge --------------------------------------
-    P.append(("J13", H4, 18.0, 14.5, 90.0,
-              {"1": N("DBG_TX"), "2": N("DBG_RX"), "3": N("GND"), "4": N("V5")},
-              "DEBUG", "F.Cu", 0))
-    P.append(("J15", H6, 30.0, 14.5, 90.0,
-              {"1": N("SPARE_D26"), "2": N("SPARE_D21"), "3": N("SPARE_D22"),
-               "4": N("SPARE_D19"), "5": N("SPARE_D15"), "6": N("GND")}, "SPARE",
-              "F.Cu", 0))
-    P.append(("J16", H2, 46.5, 14.5, 90.0,
-              {"1": N("EN"), "2": N("GND")}, "RESET", "F.Cu", 0))
-    P.append(("J8", H6, 52.8, 14.5, 90.0,
-              {"1": N("SPARE_D21"), "2": N("SPARE_D22"), "3": N("V5"),
-               "4": N("GND"), "5": N("GPS_TX"), "6": N("GPS_RX")}, "GPS",
-              "F.Cu", 0))
-    P.append(("J11", "Connector_PinHeader_2.54mm:PinHeader_2x03_P2.54mm_Vertical",
-              62.5, 49.5, 90.0,
-              {"1": N("GND"), "2": N("V5"), "3": N("SPARE_D26"),
-               "4": N("SPARE_D13"), "5": N("IGN_12"), "6": N("SPARE_D2")}, "SMART",
+              39.5, 57.0, 0.0, {"1": N("HALL"), "2": N("GND")}, "P6KE6V2",
               "F.Cu", 0))
 
-    # ---- trip button (6 mm tactile, on-board; the panel button is optional)
-    P.append(("SW1", "Button_Switch_THT:SW_PUSH_6mm", 65.3, 53.0, 0.0,
+    # ---- trip button, south spare zone
+    P.append(("SW1", "Button_Switch_THT:SW_PUSH_6mm", 48.5, 53.6, 0.0,
               {"1": N("TRIP_BTN"), "2": N("TRIP_BTN"),
                "3": N("GND"), "4": N("GND")}, "TRIP", "F.Cu", 0))
 
-    # ---- test points (top strip row) -------------------------------------
-    tps = [("TP1", "IGN_SENSE"), ("TP2", "HALL"), ("TP3", "BAT_SNS"),
-                      ("TP4", "FUEL_SNS")]
-    for i, (ref, net) in enumerate(tps):
-        P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm",
-                  61.5 + i * 2.5, 19.5, 0.0, {"1": N(net)}, net, "F.Cu", 0))
+    # ---- debug / spare: solder pads, not headers (the drawing's two
+    # "Area for Spare and debug pads" zones). Pads are 1.7 x 1.0, 2.54 pitch.
+    def padgroup(ref, value, x, y, labels, nets):
+        n = len(labels)
+        pads = [(str(i + 1), i * 2.54, 0.0, 1.7, 1.0, 0.0,
+                 (N(net), net) if net != "GND" else (N("GND"), "GND"))
+                for i, net in enumerate(nets)]
+        return (ref, None, x, y, 0.0, pads, value, "F.Cu", 0,
+                [(-1.15, -0.85), ((n - 1) * 2.54 + 1.15, -0.85),
+                 ((n - 1) * 2.54 + 1.15, 0.85), (-1.15, 0.85), (-1.15, -0.85)])
+
+    P.append(padgroup("J13", "DEBUG", 40.0, 22.0,
+                      PIN_SILK["J13"], ["DBG_TX", "DBG_RX", "GND", "V5"]))
+    P.append(padgroup("J15", "SPARE", 62.5, 56.5,
+                      PIN_SILK["J15"], ["SPARE_D26", "SPARE_D21", "SPARE_D22",
+                                        "SPARE_D19", "SPARE_D15", "GND"]))
+
+    # ---- test points (north spare zone, below the GNSS header)
+    for i, (ref, net) in enumerate([("TP1", "IGN_SENSE"), ("TP2", "HALL"),
+                                    ("TP3", "BAT_SNS"), ("TP4", "FUEL_SNS"),
+                                    ("TP5", "GND")]):
+        P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm", 38.0 + i * 2.5, 19.5,
+                  0.0, {"1": N(net)}, net, "F.Cu", 0))
 
     return P
 
@@ -376,16 +445,12 @@ TFT_LABEL = ["VCC", "GND", "CS", "RST", "DC", "SDI", "SCK", "LED", "SDO",
              "T_CLK", "T_CS", "T_DIN", "TPEN", "T_DO", "SD", "NC"]
 
 # silkscreen next to the vehicle / accessory headers: (ref, [labels per pin])
+# Per-pin silks for the 2.54 mm groups. The 2.00 mm JST-PH shells carry a
+# single two-circuit label instead (see silks()); pin order is fixed by the
+# footprint and documented in the README / PINOUT.
 PIN_SILK = {
-    "J9": ["+V", "SIG", "G"],          # hall: solder-jumper selects +V (JP1)
-    "J17": ["IGN", "GND"],
-    "J5": ["SIG", "GND"],             # coolant NTC
-    "J7": ["SIG", "GND"],             # fuel sender (SAE)
-    "J6": ["SNS", "GND"],             # LDR (solder the LDR here too)
-    "J14": ["TRIP", "GND"],
     "J13": ["TX", "RX", "GND", "5V"],
     "J15": ["D26", "SDA", "SCL", "D19", "D15", "GND"],
-    "J16": ["EN", "GND"],
     "J8": ["SDA", "SCL", "5V", "GND", "RX", "TX"],
     "JP1": ["5V", "SEL", "12V"],
 }
@@ -495,66 +560,80 @@ def _dashrect(x0, y0, x1, y1, layer="Dwgs.User"):
 
 
 def silks():
-    """Silkscreen: short human markers only (0.8 mm min height for the fabs).
+    """Silkscreen + documentation marks, placed from the CAD geometry.
 
-    The 2.54 mm pitch of the DevKit / TFT headers cannot carry per-pad text
-    at a legal silkscreen height, so the rows are marked at pin 1 and the full
-    pin map is printed on Dwgs.User (visible in KiCad, not on the board) and
-    in the README.
+    Text height 0.8 mm minimum (fab limit). Per-pin text is only used where the
+    2.54 mm pitch leaves room for it; the 2.00 mm JST-PH shells carry one
+    two-circuit label instead.
     """
     out = []
-    ex = ESP_ROWS
 
-    # dev board outline + antenna keep-out (documentation layers only)
+    # documentation outlines from the drawing (not printed on the board)
     out += _dashrect(ESP_BODY[0], ESP_BODY[1], ESP_BODY[2], ESP_BODY[3])
     out += _dashrect(KEEP[0], KEEP[1], KEEP[2], KEEP[3])
+    out += _dashrect(*LM_BODY)
+    out += _dashrect(*GNSS_ZONE)
+    for ref in JST_ZONES:
+        out += _dashrect(*JST_ZONES[ref][0])
+    for z in (ZONE_SPARE_N, ZONE_SPARE_S, ZONE_SMD_MID, ZONE_SMD_WEST):
+        out += _dashrect(*z)
 
-    # ESP32 DevKit sockets: pad 1 (square pad) sits at the USB end
-    out += _txt(ex["x_start"] - 4.0, ex["y_near"] - 0.4, "1", size=0.9)
-    out += _txt(ex["x_start"] - 4.0, ex["y_far"] - 0.4, "1", size=0.9)
-    out += _txt(15.0, 22.6, "ESP PIN 1 = USB END", size=0.8)
-    out += _txt(55.0, 32.5, "NO COPPER", size=0.8)
+    # dev board rows: pin 1 is VIN, at the dev board's USB end
+    out += _txt(44.0, 26.9, "PIN 1 = USB END", size=0.8)
+    out += _txt(KEEP[0] + 0.8, KEEP[1] + 0.8, "ANTENNA - NO COPPER", size=0.8)
 
-    # TFT display socket: 16-way along the bottom edge, pin 1 = VCC
-    out += _txt(TFT["x_start"] - 3.4, TFT["y"] - 0.4, "1", size=0.9)
-    x_end = TFT["x_start"] + (len(TFT_LABEL) - 1) * TFT["pitch"]
-    out += _txt(x_end + 2.2, TFT["y"] - 0.4, "16", size=0.9)
+    # TFT socket, standing at the east edge (16-way, pin 1 = VCC to the north)
+    out += _txt(TFT["x"] - 4.2, TFT["y1"] - 0.5, "1", size=0.9)
+    out += _txt(TFT["x"] - 4.4, TFT["y_end"] - 0.5, "16", size=0.9)
+    out += _txt(TFT["x"] - 4.4, 36.0, "TFT", size=0.9, rot=90.0)
 
-    # vehicle / accessory headers: one short label per pin
+    # 12 V entry polarity, next to the XT30 (B.Cu part -> mirrored silks)
+    out += _txt(26.2, 12.4, "+12V", layer="B.SilkS", size=0.9, mirror=True)
+    out += _txt(25.6, 14.4, "GND", layer="B.SilkS", size=0.9, mirror=True)
+
+    # DC-DC module (under the board): labels outside its 21 x 43 outline
+    inx, iny = LM["x"] - LM["span_x"] / 2, LM["y"] - LM["span_y"] / 2
+    outx, outy = LM["x"] - LM["span_x"] / 2, LM["y"] + LM["span_y"] / 2
+    # B.SilkS text is mirrored, so the anchor is the text's RIGHT edge
+    for lab, x, y in [("IN+", inx + 0.9, iny - 4.3), ("IN-", inx + 17.9, iny - 4.3),
+                      ("OUT+", outx + 1.2, outy + 1.6), ("OUT-", outx + 18.2, outy + 1.6)]:
+        out += _txt(x, y, lab, layer="B.SilkS", size=0.9, mirror=True)
+
+    # JST-PH shells: one label per two-circuit zone (2.00 mm pitch is too fine
+    # for per-pin text); the pin order is in the README / Dwgs.User pin map
+    for lab, x, y in [("TRIP  EN", 63.2, 17.4), ("IGN  COOL", 75.2, 17.4),
+                      ("LDR  FUEL", 76.6, 57.6), ("HALL", 57.0, 57.6)]:
+        out += _txt(x, y, lab, size=0.8)
+
+    # GNSS + hall supply selector + trip button
+    out += _txt(55.2, 17.6, "GNSS", size=0.8)
+    out += _txt(48.2, 60.0, "TRIP", size=0.8)
+
+    # per-pin text where there is room (2.54 mm pitch groups)
+    SIDE = {"J8": 2.4, "JP1": 1.9, "J13": -1.4, "J15": 1.2}
     for ent in parts():
         ref, x, y = ent[0], ent[2], ent[3]
-        if ref not in PIN_SILK:
+        if ref not in PIN_SILK or ref not in SIDE:
             continue
-        below = y > 30.0
         for i, lab in enumerate(PIN_SILK[ref]):
-            out += _txt(x + i * 2.54 - 0.5, y + (2.4 if below else -3.2), lab,
-                        size=0.8)
+            out += _txt(x + i * 2.54 - 0.7 * len(lab) / 2.0, y + SIDE[ref],
+                        lab, size=0.8)
 
-    # LM2596 module lives on the bottom face -> label on B.SilkS
-    for lab, x, y in [("IN+", LM["x"] - LM["span_x"] / 2 - 4.6, LM["y"] - LM["span_y"] / 2 + 0.4),
-                      ("IN-", LM["x"] + LM["span_x"] / 2 - 6.2, LM["y"] - LM["span_y"] / 2 - 2.9),
-                      ("OUT+", LM["x"] - LM["span_x"] / 2 - 5.5, LM["y"] + LM["span_y"] / 2 + 2.5),
-                      ("OUT-", LM["x"] + LM["span_x"] / 2 - 4.0, LM["y"] + LM["span_y"] / 2 - 2.5)]:
-        out += _txt(x, y, lab, layer="B.SilkS", size=0.9, mirror=True)
-    out += _txt(65.5, 63.6, "LM2596 MODULE", layer="B.SilkS", size=1.0,
-                mirror=True)
-
-    # power entry polarity
-    out += _txt(11.0, 13.6, "GPIO0", size=0.8)
-    out += _txt(80.6, 15.4, "+12V", size=1.0)
-    out += _txt(88.2, 15.4, "GND", size=1.0)
-
-    # build documentation (not printed): pin map + test point list
-    docs = [("TP1 IGN_SENSE  TP2 HALL  TP3 BAT_SNS  TP4 FUEL_SNS  TP5=GPIO0 (wire to BOOT btn)", 2.0),
+    # build documentation (not printed): zones, pin map, test points
+    docs = [("SPARE / DEBUG PADS - see J13 (TX RX GND 5V) and J15", 23.6),
+            ("J13 DEBUG  J15 SPARE (D26 SDA SCL D19 D15 GND)", 25.0),
             ("TFT 1..16: VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS", 4.0),
-            ("TFL16 cont: T_DINTPEN T_DO SD NC NC NC NC", 5.0),
-            ("ESP far row 16..30 (USB end first): 3V3 GND 15 2 4 16 17 5 18", 7.0),
-            ("  19 21 3 1 22 23", 8.0),
-            ("ESP near row 1..15 (USB end first): VIN GND 13 12 14 27 26 25", 9.0),
-            ("  33 32 35 34 39 36 EN", 10.0)]
+            ("TFT cont: T_DINTPEN T_DO SD NC NC NC NC", 5.0),
+            ("ESP near row 1..15 (USB end first): VIN GND 13 12 14 27 26 25", 7.0),
+            ("  33 32 35 34 39 36 EN", 8.0),
+            ("ESP far row 16..30 (USB end first): 3V3 GND 15 2 4 16 17 5 18", 9.0),
+            ("  19 21 3 1 22 23", 10.0),
+            ("J17 IGN GND COOL GND   J14 TRIP GND EN GND", 12.0),
+            ("J6 LDR GND FUEL GND    J9 +V SIG GND", 13.0),
+            ("TP1 IGN_SENSE  TP2 HALL  TP3 BAT_SNS  TP4 FUEL_SNS  TP5 GND", 21.0)]
     for txt, y in docs:
-        out += _txt(6.0, y, txt, layer="Dwgs.User", size=1.0)
-    out += _txt(46.0, 65.8, "Dashboard++ for ESP32 carrier V0.1",
+        out += _txt(10.5, y, txt, layer="Dwgs.User", size=1.0)
+    out += _txt(10.5, 66.4, "Dashboard++ for ESP32 carrier - CAD layout rev 1",
                 layer="Dwgs.User", size=1.2)
     return out
 
@@ -566,7 +645,7 @@ def netcheck():
         netmap = ent[5]
         if ent[1] is None:                  # custom footprint: pads carry nets
             for p in netmap:
-                if p[6]:
+                if p[6] and p[6] != "npth":
                     cnt[p[6][1]] = cnt.get(p[6][1], 0) + 1
             continue
         for pad, v in netmap.items():
@@ -608,7 +687,7 @@ def main():
     txt = build()
     open(OUT, "w", encoding="utf-8").write(txt)
     names = write_footprint_lib()
-    print("footprint library: %d footprints -> footprints/carrier.pretty" % len(names))
+    print("footprint library: %d footprints -> footprints/%s.pretty" % (len(names), kf.LOCAL_LIB))
     print("wrote", os.path.abspath(OUT), "(%d bytes)" % len(txt))
     r = subprocess.run([KICAD_CLI, "pcb", "drc", "--severity-all",
                         "-o", "drc-report.txt", OUT], capture_output=True, text=True)
