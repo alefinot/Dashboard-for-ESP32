@@ -140,7 +140,7 @@ def get_module(fp_id):
 # board footprint still matches its library copy (DRC "lib_footprint_mismatch")
 # and the 3D viewer stays populated.
 DROP_TOKENS = {"version", "generator", "generator_version", "layer", "tedit",
-               "tstamp", "uuid", "embedded_fonts"}
+               "tstamp", "uuid", "embedded_fonts", "fp_text"}
 
 # Nickname of the project-local footprint library (footprints/<lib>.pretty)
 # that holds the footprints this generator builds from scratch.
@@ -168,6 +168,77 @@ def bake_rot(group, rot):
         return "(at %s %s %g)" % (m.group(1), m.group(2), r)
 
     return re.sub(r"\(at ([-\d.]+) ([-\d.]+)(?: ([-\d.]+))?\)", sub, group)
+
+
+BACK_SWAP = [('"F.Cu"', '"B.Cu"'), ('"F.Paste"', '"B.Paste"'),
+             ('"F.Mask"', '"B.Mask"'), ('"F.CrtYd"', '"B.CrtYd"'),
+             ('"F.Fab"', '"B.Fab"')]
+
+
+def _mirror_text(group):
+    """Flag a back-side text item as mirrored (KiCad keeps the flag in justify)."""
+    if "(justify" in group:
+        return group
+    k = group.find("(effects")
+    if k < 0:
+        return group
+    end = _skip_sexp(group, k)
+    return group[:end - 1] + " (justify mirror)" + group[end - 1:]
+
+
+def _to_back(group):
+    """Move a front-side child item to its back-side layer.
+
+    A B.Cu footprint keeps the library's local geometry: verified against a
+    KiCad 10 test board + B.Cu gerber (pad 1 of a 4-pin connector placed at
+    (10,10) lands at x 7.0, i.e. origin + local offset, NOT mirrored).  Only
+    the layer names change when a part moves to the underside.
+    """
+    for a, b in BACK_SWAP:
+        group = group.replace(a, b)
+    return group
+
+
+def pads_of(fp_id):
+    """[(number, x, y, w, h, drill)] of a stock module's pads (local coords)."""
+    txt = get_module(fp_id)
+    out = []
+    for g in _children(txt[1:_skip_sexp(txt, 0) - 1]):
+        if not g.startswith("(pad"):
+            continue
+        num = re.match(r'\(pad\s+"([^"]*)"', g)
+        at = re.search(r'\(at ([-\d.]+) ([-\d.]+)', g)
+        size = re.search(r'\(size ([-\d.]+) ([-\d.]+)\)', g)
+        drill = re.search(r'\(drill (?:circle |oval |square )?([-\d.]+)', g)
+        if num and at and size:
+            out.append((num.group(1), float(at.group(1)), float(at.group(2)),
+                        float(size.group(1)), float(size.group(2)),
+                        float(drill.group(1)) if drill else 0.0))
+    return out
+
+
+def pads_full(fp_id):
+    """Like pads_of, plus the set of copper layers the pad sits on."""
+    txt = get_module(fp_id)
+    out = []
+    for g in _children(txt[1:_skip_sexp(txt, 0) - 1]):
+        if not g.startswith("(pad"):
+            continue
+        num = re.match(r'\(pad\s+"([^"]*)"', g)
+        at = re.search(r'\(at ([-\d.]+) ([-\d.]+)', g)
+        size = re.search(r'\(size ([-\d.]+) ([-\d.]+)\)', g)
+        drill = re.search(r'\(drill (?:circle |oval |square )?([-\d.]+)', g)
+        lay = re.search(r'\(layers ([^)]*)\)', g)
+        cu = {t.strip('"') for t in lay.group(1).split()}
+        cu = {c for c in cu if c.endswith(".Cu")}
+        if "*.Cu" in cu:                       # plated through-hole: both faces
+            cu = {"F.Cu", "B.Cu"}
+        cu = cu or {"F.Cu"}
+        if num and at and size:
+            out.append((num.group(1), float(at.group(1)), float(at.group(2)),
+                        float(size.group(1)), float(size.group(2)),
+                        float(drill.group(1)) if drill else 0.0, cu))
+    return out
 
 
 def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
@@ -213,6 +284,22 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
         # would share them, so give every child item its own stable id
         kept.append(re.sub(r'\(uuid "[^"]*"\)',
                            lambda mm: '(uuid "%s")' % uid(), g))
+
+    if layer == "B.Cu":
+        # Bottom-side mounting: pads go to the back copper (module pads keep
+        # their own drill), fab/courtyard move to the back layers, text gets the
+        # mirror flag.  The library's own silkscreen graphics are dropped - they
+        # would sit against the back-side pads (silk_over_copper), and the
+        # top-side labels ("TRIP EN", "GNSS", ...) are placed by hand instead.
+        bk = []
+        for g in kept:
+            if '"F.SilkS"' in g or '"B.SilkS"' in g:
+                continue
+            g = _to_back(g)
+            if g.lstrip().startswith("(property"):
+                g = _mirror_text(g)
+            bk.append(g)
+        kept = bk
 
     x, y = at
     # ship the rewritten copy in the project library: DRC compares the board
@@ -281,10 +368,13 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
     the outline when given, otherwise computed from the pads).
     """
     x0, y0 = at
-    kept = ['	(property "Reference" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
-            ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (ref, 0.0, silk_off, rot),
-            '	(property "Value" "%s" (at %.2f %.2f %.1f) (layer "F.Fab")'
-            ' (effects (font (size 1.0 1.0) (thickness 0.15))))' % (value, 0.0, fab_off, rot),
+    fabl = "B.Fab" if layer == "B.Cu" else "F.Fab"
+    eff = (' (effects (font (size 1.0 1.0) (thickness 0.15))%s))'
+           % (" (justify mirror)" if layer == "B.Cu" else ""))
+    kept = ['	(property "Reference" "%s" (at %.2f %.2f %.1f) (layer "%s")%s'
+            % (ref, 0.0, silk_off, rot, fabl, eff),
+            '	(property "Value" "%s" (at %.2f %.2f %.1f) (layer "%s")%s'
+            % (value, 0.0, fab_off, rot, fabl, eff),
             '	(property "Footprint" "" (at 0 0 0) (effects (hide yes)))',
             '	(property "Datasheet" "" (at 0 0 0) (effects (hide yes)))',
             '	(property "Description" "" (at 0 0 0) (effects (hide yes)))']
@@ -310,7 +400,12 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
         if net:
             n, name = net
             s += ' (net %d "%s")' % (n, name)
-        s += ' (layers %s))' % ('"F.Cu" "B.Cu"' if dr else '"F.Cu" "F.Paste" "F.Mask"')
+        if dr:
+            s += ' (layers "F.Cu" "B.Cu"))'
+        else:
+            s += ' (layers %s))' % ('"B.Cu" "B.Paste" "B.Mask"'
+                                    if layer == "B.Cu"
+                                    else '"F.Cu" "F.Paste" "F.Mask"')
         kept.append(s)
     if outline:
         pts = " ".join('(xy %.3f %.3f)' % p for p in outline)
@@ -371,6 +466,17 @@ def courtyard(fp_id):
                 continue
             for c in re.finditer(r"\((?:start|end) ([-\d.]+) ([-\d.]+)\)", g):
                 pts.append((float(c.group(1)), float(c.group(2))))
+        elif tok in ("gr_circle", "fp_circle"):
+            # courtyards drawn as a circle (test points, mounting pads)
+            if '"F.CrtYd"' not in g:
+                continue
+            c0 = re.search(r"\(center ([-\d.]+) ([-\d.]+)\)", g)
+            e0 = re.search(r"\(end ([-\d.]+) ([-\d.]+)\)", g)
+            if c0 and e0:
+                cx, cy = float(c0.group(1)), float(c0.group(2))
+                r = ((float(e0.group(1)) - cx) ** 2
+                     + (float(e0.group(2)) - cy) ** 2) ** 0.5
+                pts += [(cx - r, cy - r), (cx + r, cy + r)]
         elif tok == "pad":
             m = re.search(r'\(at ([-\d.]+) ([-\d.]+)', g)
             w = re.search(r'\(size ([-\d.]+) ([-\d.]+)\)', g)

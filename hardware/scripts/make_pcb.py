@@ -53,18 +53,25 @@ def cadbox(u0, v0, u1, v1):
 
 
 # ESP32 DevKit V1 clone (30 pin, 2x15) hanging under the carrier (B.Cu).
-# Body drawn u 8.80..58.80 x v 13.49..41.49 (50.00 x 28.00); header strips
-# 36.99 x 1.00 at v 13.81..14.80 / 40.21..41.20 - the drawing puts their
-# centre lines 26.40 apart, the real DevKit is 25.40, so the rows are
-# re-centred on the body centre line (v 27.49) -> v 14.79 / 40.19.
+# Body drawn u 8.80..58.80 x v 13.49..41.49 (50.00 x 28.00); the two header
+# strips are drawn 36.99 x 1.00 (u 12.81..49.81) at v 13.81..14.80 and
+# v 40.21..41.20, which puts their centre lines 26.40 apart - a drafting
+# error: the real DevKit V1 rows are 25.40 apart, and 28.00 - 25.40 = 2 x
+# ~1.3 mm of body margin is exactly what the drawn body shows.  The rows are
+# kept on the drawn mid-line and spaced 25.40; pin 1 keeps the drawn west end
+# (inset half a pad from the strip end so the 15 pads sit inside the strip).
+STRIP_N = cadbox(12.81, 13.81, 49.81, 14.80)    # 45.19,23.81 .. 82.19,24.80
+STRIP_S = cadbox(12.81, 40.21, 49.81, 41.20)    # 45.19,50.21 .. 82.19,51.20
+ESP_MID = (STRIP_N[1] + STRIP_N[3] + STRIP_S[1] + STRIP_S[3]) / 4.0    # 37.505
+ESP_X0 = STRIP_N[0] + (STRIP_N[2] - STRIP_N[0] - 14 * 2.54) / 2.0        # 45.905
 ESP_ROWS = {
     "row_spacing": 25.40,               # centre-to-centre of the two header rows
     "pitch": 2.54,
     "pins": 15,
-    "y_near": 24.79,                    # north row (J10a), pin 1 = VIN at the west
-    "x_start": 46.46,                   # pin 1 (USB end of the dev board)
-    "x_end": 46.46 + 14 * 2.54,         # pin 15 (EN) = 82.02
-    "y_far": 50.19,                     # south row (J10b), pin 16 = 3V3 at the west
+    "y_near": ESP_MID - 12.70,          # 24.805 north row (J10a), VIN at the west
+    "x_start": ESP_X0,                  # pin 1 (USB end of the dev board)
+    "x_end": ESP_X0 + 14 * 2.54,        # pin 15 (EN) = 81.465
+    "y_far": ESP_MID + 12.70,           # 50.205 south row (J10b), 3V3 at the west
 }
 
 # DevKit board outline under the carrier (drawn 50.00 x 28.00)
@@ -87,11 +94,12 @@ LM = {"x": 22.75, "y": 41.405, "span_x": 17.00, "span_y": 38.99}
 LM_BODY = cadbox(61.75, 8.64, 82.75, 51.64)      # 12.25,18.64 .. 33.25,61.64
 
 # GNSS J8: drawn as a 22.99 x 7.00 "6 solder pads" zone (u 35.81..58.80,
-# v 0.00..7.00) - kept as a 6-pin 2.54 header inside it.
+# v 0.00..7.00) - built as six bare SMD pads, no header, no drill.
 GNSS_ZONE = cadbox(35.81, 0.00, 58.80, 7.00)     # 36.20,10.00 .. 59.19,17.00
 
 # Four JST-PH zones, 12.01 x 7.00 each, two designators per zone (the drawing
-# writes both); one shell per zone, two circuits each (user decision).
+# writes both); one right-angle SMD shell per zone, two circuits each.
+# ELEV view: the shells hang 5.01 mm below B.Cu, flush with the board edge.
 JST_ZONES = {
     "J14": (cadbox(20.81, 0.00, 32.82, 7.00), ("J14", "J16")),   # TRIP + EN
     "J17": (cadbox(8.80, 0.00, 20.81, 7.00), ("J17", "J5")),     # IGN + coolant
@@ -105,7 +113,7 @@ JP1_BOX = cadbox(34.65, 49.74, 40.66, 53.24)     # 54.34,59.74 .. 60.35,63.24
 # Mounting holes - the drawing has none; these four clear everything drawn
 # (H1/H2 sit in the free east corners, H3/H4 sit between the module's east
 # edge and the JST / GNSS zones).
-MOUNTS = [(91.50, 13.50), (91.50, 61.50), (44.00, 62.00), (34.50, 13.00)]
+MOUNTS = [(91.50, 13.50), (91.50, 61.50), (44.00, 62.00), (36.00, 13.00)]
 MOUNT_DRILL, MOUNT_RING = 3.2, 5.0
 
 # Annotation zones drawn dashed on the TOP view (F.Cu work areas, Dwgs.User)
@@ -214,15 +222,77 @@ def box_of(ent):
 
 
 # Round / oversized bodies that the KiCad courtyard understates, by ref.
-BODY = {"C1": 10.5, "C3": 10.5}
+# (the SMD electrolytic cans carry a courtyard bigger than the can itself)
+BODY = {}
 
-# Footprints that physically sit on the BOTTOM face (the off-board DC-DC module
-# soldered to the back): their courtyard does not block top-side parts.
+# Footprints that physically sit on the BOTTOM face: their courtyard only
+# clashes with other bottom-side parts, never with top-side ones.
 BOTTOM_SIDE = {"J10a", "J10b", "U4", "J1", "J14", "J17", "J6",
                "J9", "J8", "JP1"}
 
+
+# Edge-mounted shells may let their courtyard hang over the outline; the
+# RA JST-PH footprints are 10.2 deep against a 7.00 mm drawn zone.
+EDGE_OK = {"J14", "J17", "J6", "J9"}
+
+
+def holes_of(ent):
+    """Absolute (x, y, drill) of every drilled pad of a part."""
+    fp_id, x, y, rot = ent[1], ent[2], ent[3], ent[4]
+    pads = ([(p[0], p[1], p[2], p[3], p[4], p[5]) for p in ent[5]]
+            if fp_id is None else kf.pads_of(fp_id))
+    out = []
+    for (_n, px, py, _w, _h, dr) in pads:
+        if dr <= 0:
+            continue
+        dx, dy = _rot((px, py), rot)
+        out.append((dx + x, dy + y, dr))
+    return out
+
+
+def _padbox(px, py, w, h, rot, ox, oy):
+    """Absolute bounding box of a pad (rotated rect -> axis-aligned box)."""
+    hw, hh = _rot((w / 2.0, 0.0), rot), _rot((0.0, h / 2.0), rot)
+    ex, ey = max(abs(hw[0]), abs(hh[0])), max(abs(hw[1]), abs(hh[1]))
+    cx, cy = _rot((px, py), rot)
+    return (cx + ox - ex, cy + oy - ey, cx + ox + ex, cy + oy + ey)
+
+
+def pads_abs(ent):
+    """(ref, pad, net, copper-layers, box) for every bound pad of a part entry.
+
+    Used only for the build-time sanity checks (drc() is the authority).
+    """
+    ref, fp_id, x, y, rot, netmap, _value, layer = ent[:8]
+
+    def nm(v):
+        if isinstance(v, int):
+            return NETS[v - 1]
+        if isinstance(v, tuple):
+            return v[1]
+        return v
+
+    out = []
+    if fp_id is None:
+        for (num, px, py, w, h, dr, net) in ent[5]:
+            if net == "npth":
+                continue
+            cu = {"F.Cu", "B.Cu"} if dr else {layer}
+            out.append((ref, num, nm(net) if net else None, cu,
+                        _padbox(px, py, w, h, rot, x, y)))
+    else:
+        for (num, px, py, w, h, dr, cu) in kf.pads_full(fp_id):
+            net = netmap.get(num)
+            if not net or net == "NC":
+                continue
+            if layer == "B.Cu":
+                cu = {("B.Cu" if c == "F.Cu" else c) for c in cu}
+            out.append((ref, num, nm(net), cu,
+                        _padbox(px, py, w, h, rot, x, y)))
+    return out
+
 # ------------------------------------------------------------- parts -------
-# All through-hole. Entry:
+# Entry:
 #   (ref, footprint_id, x, y, rot, {pad: net}, value, layer, dnp[, outline])
 # For headers at rot 90/270 pin 1 sits at (x, y) and the row runs along +X.
 def parts():
@@ -270,36 +340,53 @@ def parts():
     # ---- JST-PH shells, one per drawn 12.01 x 7.00 zone, two circuits each.
     # Refs follow the drawing's first label of each zone; the second designator
     # is printed in the silks (README/PINOUT list both).
-    PH4 = "Connector_JST:JST_PH_B4B-PH-K_1x04_P2.00mm_Vertical"
-    PH3 = "Connector_JST:JST_PH_B3B-PH-K_1x03_P2.00mm_Vertical"
-    for ref, fp, val, nm in [
+    # Right-angle SMD shells (S..-PH-SM4-TB: everything soldered, no drill),
+    # solder tails 0.40 mm from the board edge, bodies hanging below B.Cu.
+    # Their 13.2 courtyards cannot both fit the two 12.01 zones, so each pair
+    # is shifted 1.2 mm apart from the zone centres.
+    PH4 = "Connector_JST:JST_PH_S4B-PH-SM4-TB_1x04-1MP_P2.00mm_Horizontal"
+    PH3 = "Connector_JST:JST_PH_S3B-PH-SM4-TB_1x03-1MP_P2.00mm_Horizontal"
+    GAP = 0.40                                  # pad tail -> board edge
+    NY = BOARD_Y0 + 4.60 + GAP                  # north origin: pads reach 10.40
+    SY = BOARD_Y1 - 4.60 - GAP                  # south origin: pads reach 64.60
+    for ref, fp, val, nm, x, y, rot in [
             ("J17", PH4, "IGN + COOLANT", {"1": "IGN_12", "2": "GND",
-                                           "3": "COOL_SNS", "4": "GND"}),
+                                           "3": "COOL_SNS", "4": "GND"},
+             81.40, NY, 0.0),
             ("J14", PH4, "TRIP + EN", {"1": "TRIP_BTN", "2": "GND",
-                                       "3": "EN", "4": "GND"}),
+                                       "3": "EN", "4": "GND"},
+             67.00, NY, 0.0),
             ("J6", PH4, "LDR + FUEL", {"1": "LDR_SNS", "2": "GND",
-                                       "3": "FUEL_SNS", "4": "GND"}),
+                                       "3": "FUEL_SNS", "4": "GND"},
+             81.40, SY, 180.0),
             ("J9", PH3, "HALL", {"1": "HALL_VCC", "2": "HALL_SIG",
-                                 "3": "GND"})]:
-        z = JST_ZONES[ref][0]
-        n = 4 if fp is PH4 else 3
-        x = (z[0] + z[2]) / 2 - (n - 1)          # pads at 2.00 pitch
-        y = (z[1] + z[3]) / 2 - 0.55
-        P.append((ref, fp, x, y, 0.0, {k: N(v) for k, v in nm.items()}, val,
+                                 "3": "GND"}, 67.00, SY, 180.0)]:
+        P.append((ref, fp, x, y, rot, {k: N(v) for k, v in nm.items()}, val,
                   "B.Cu", 0))
 
-    # ---- GNSS J8: 6-pin header inside the drawn 22.99 x 7.00 pad zone
-    P.append(("J8", "Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical",
-              40.00, 13.50, 90.0,
-              {"1": N("SPARE_D21"), "2": N("SPARE_D22"), "3": N("V5"),
-               "4": N("GND"), "5": N("GPS_TX"), "6": N("GPS_RX")}, "GPS",
-              "B.Cu", 0))
+    # ---- GNSS J8: six bare solder pads (no header, no drill) inside the drawn
+    # 22.99 x 7.00 zone - the module sits under the board and is soldered in.
+    gx = (GNSS_ZONE[0] + GNSS_ZONE[2]) / 2 - 5 * 2.54 / 2      # 41.35
+    gy = (GNSS_ZONE[1] + GNSS_ZONE[3]) / 2                    # 13.50
+    P.append(("J8", None, gx, gy, 0.0,
+              [(str(i + 1), i * 2.54, 0.0, 1.8, 1.2, 0.0, (N(net), net))
+               for i, net in enumerate(["SPARE_D21", "SPARE_D22", "V5",
+                                        "GND", "GPS_TX", "GPS_RX"])],
+              "GPS_PADS", "B.Cu", 0,
+              [(-1.40, -1.10), (14.10, -1.10), (14.10, 1.10), (-1.40, 1.10),
+               (-1.40, -1.10)]))
 
-    # ---- JP1: hall +V selector (5V / sel / 12V) in the drawn 6.00 x 3.50 box
-    P.append(("JP1", "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical",
-              55.50, 61.50, 90.0,
-              {"1": N("V5"), "2": N("HALL_VCC"), "3": N("DC_12")}, "HALL +V",
-              "B.Cu", 0))
+    # ---- JP1: hall +V selector (5V / sel / 12V) - three bare pads filling the
+    # drawn 6.00 x 3.50 "DIP SWITCH" box, pin 1 (5V) at the west end.
+    jx = JP1_BOX[0] + (JP1_BOX[2] - JP1_BOX[0] - 2 * 2.54) / 2  # 54.805
+    jy = (JP1_BOX[1] + JP1_BOX[3]) / 2                          # 61.49
+    P.append(("JP1", None, jx, jy, 0.0,
+              [(str(i + 1), i * 2.54, 0.0, 1.7, 1.6, 0.0, (N(net), net))
+               for i, net in enumerate(["V5", "HALL_VCC", "DC_12"])],
+              "JP1_PADS_3", "B.Cu", 0,
+              [(JP1_BOX[0] - jx, -1.75), (JP1_BOX[2] - jx, -1.75),
+               (JP1_BOX[2] - jx, 1.75), (JP1_BOX[0] - jx, 1.75),
+               (JP1_BOX[0] - jx, -1.75)]))
 
     # ---- mounting holes (the drawing has none; see plan section 6)
     for i, (x, y) in enumerate(MOUNTS, 1):
@@ -313,72 +400,70 @@ def parts():
     # ---- 12 V protection chain, F.Cu, in the drawn west small-parts zone
     # (26.17 x 52.92, the column above the module that hangs below).
     # XT30 -> F1 -> Q1 (P-MOS high side) -> module IN+; gate zener D1, R1.
+    # All SMD now (no through-hole except the fuse holder itself).
+    R805 = "Resistor_SMD:R_0805_2012Metric"
+    C805 = "Capacitor_SMD:C_0805_2012Metric"
     P.append(("F1", "Fuse:Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal",
-              15.5, 26.0, 0.0, {"1": N("DC_IN"), "2": N("DC_F")}, "5x20 10A",
+              17.6, 17.7, 0.0, {"1": N("DC_IN"), "2": N("DC_F")}, "5x20 2A",
               "F.Cu", 0))
-    P.append(("Q1", "Package_TO_SOT_THT:TO-220-3_Vertical",
-              13.5, 36.0, 0.0, {"1": N("MOS_G"), "2": N("DC_12"), "3": N("DC_F")},
-              "IRF9540N", "F.Cu", 0))
-    P.append(("D1", "Diode_THT:D_DO-15_P2.54mm_Vertical_AnodeUp",
-              24.0, 36.0, 0.0, {"1": N("MOS_G"), "2": N("DC_F")}, "BZX55C15V",
+    P.append(("Q1", "Package_TO_SOT_SMD:TO-263-3_TabPin2",
+              25.85, 30.65, 0.0, {"1": N("MOS_G"), "2": N("DC_12"), "3": N("DC_F")},
+              "IRFR9540N", "F.Cu", 0))
+    P.append(("D1", "Diode_SMD:D_SOD-123",
+              31.0, 41.5, 0.0, {"1": N("MOS_G"), "2": N("DC_F")}, "BZT52C15V",
               "F.Cu", 0))
-    P.append(("D2", "Diode_THT:D_DO-15_P2.54mm_Vertical_AnodeUp",
-              32.0, 36.0, 0.0, {"1": N("DC_12"), "2": N("GND")}, "P6KE33A",
+    P.append(("D2", "Diode_SMD:D_SMB",
+              35.25, 29.15, 90.0, {"1": N("DC_12"), "2": N("GND")}, "P6SMB33A",
               "F.Cu", 0))
-    P.append(("R1", "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P2.54mm_Vertical",
-              13.5, 42.0, 0.0, {"1": N("MOS_G"), "2": N("DC_F")}, "10k", "F.Cu", 0))
-    P.append(("C2", "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm",
-              30.5, 41.0, 0.0, {"1": N("DC_12"), "2": N("GND")}, "100n", "F.Cu", 0))
+    P.append(("R1", R805, 25.0, 38.0, 0.0,
+              {"1": N("MOS_G"), "2": N("DC_F")}, "10k", "F.Cu", 0))
+    P.append(("C2", C805, 30.0, 38.0, 0.0,
+              {"1": N("DC_12"), "2": N("GND")}, "100n", "F.Cu", 0))
     # input / output bulk sit on F.Cu directly over the module
-    P.append(("C1", "Capacitor_THT:CP_Radial_D10.0mm_P5.00mm",
-              29.5, 48.5, 0.0, {"1": N("DC_12"), "2": N("GND")}, "220u/50V",
-              "F.Cu", 0))
-    P.append(("C3", "Capacitor_THT:CP_Radial_D10.0mm_P5.00mm",
-              15.5, 56.5, 0.0, {"1": N("V5"), "2": N("GND")}, "470u/35V",
-              "F.Cu", 0))
-    P.append(("C4", "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm",
-              13.5, 47.5, 0.0, {"1": N("V5"), "2": N("GND")}, "100n", "F.Cu", 0))
+    P.append(("C1", "Capacitor_SMD:CP_Elec_10x12.5", 17.5, 45.25, 0.0,
+              {"1": N("DC_12"), "2": N("GND")}, "220u/50V", "F.Cu", 0))
+    P.append(("C3", "Capacitor_SMD:CP_Elec_10x12.5", 17.5, 56.5, 0.0,
+              {"1": N("V5"), "2": N("GND")}, "470u/35V", "F.Cu", 0))
+    P.append(("C4", C805, 34.5, 38.0, 0.0,
+              {"1": N("V5"), "2": N("GND")}, "100n", "F.Cu", 0))
+    P.append(("C13", C805, 26.5, 41.5, 0.0,
+              {"1": N("V3V3"), "2": N("GND")}, "100n", "F.Cu", 0))
 
     # ---- signal conditioning, F.Cu, in the drawn mid small-parts zone
     # (43.38 x 18.91, under the dev board that hangs below).
-    P.append(("OK1", "Package_DIP:DIP-4_W7.62mm", 39.5, 30.0, 0.0,
+    # ---- signal conditioning, F.Cu, in the drawn mid small-parts zone
+    # (43.38 x 18.91, under the dev board that hangs below).  Optocouplers are
+    # the SMD twin of the PC817 (Everlight EL357N, 4-pin SOP, 2.54 mm leads).
+    OPTO = "Package_SO:SO-4_4.4x3.9mm_P2.54mm"
+    P.append(("OK1", OPTO, 43.0, 30.5, 0.0,
               {"1": N("IGN_LED"), "2": N("GND"),
-               "3": N("IGN_SENSE"), "4": N("V3V3")}, "PC817B", "F.Cu", 0))
-    P.append(("OK2", "Package_DIP:DIP-4_W7.62mm", 50.5, 30.0, 0.0,
+               "3": N("IGN_SENSE"), "4": N("V3V3")}, "EL357N-B", "F.Cu", 0))
+    P.append(("OK2", OPTO, 57.0, 30.5, 0.0,
               {"1": N("HALL_LED"), "2": N("GND"),
-               "3": N("HALL_OUT"), "4": N("V3V3")}, "PC817B", "F.Cu", 0))
+               "3": N("HALL_OUT"), "4": N("V3V3")}, "EL357N-B", "F.Cu", 0))
 
-    RVERT = "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P2.54mm_Vertical"
-    RX = [39.0, 44.9, 50.8, 56.7, 62.6, 68.5]
-    res = [("R2", "47k", "DC_12", "BAT_DIV", 37.5), ("R3", "10k", "BAT_DIV", "GND", 37.5),
-           ("R4", "1k", "BAT_DIV", "BAT_SNS", 37.5), ("R5", "220R", "V3V3", "FUEL_SNS", 37.5),
-           ("R6", "10k", "V3V3", "COOL_SNS", 37.5), ("R7", "10k", "V3V3", "LDR_SNS", 37.5),
-           ("R8", "1k", "IGN_12", "IGN_LED", 41.0), ("R9", "10k", "IGN_SENSE", "GND", 41.0),
-           ("R10", "1k", "HALL_SIG", "HALL_LED", 41.0), ("R11", "10k", "HALL_OUT", "GND", 41.0),
-           ("R12", "10k", "TFT_BL", "GND", 41.0), ("R13", "1k", "HALL_OUT", "HALL", 41.0)]
+    RX = [39.6, 44.1, 48.6, 53.1, 57.6, 62.1]
+    res = [("R2", "47k", "DC_12", "BAT_DIV", 35.5), ("R3", "10k", "BAT_DIV", "GND", 35.5),
+           ("R4", "1k", "BAT_DIV", "BAT_SNS", 35.5), ("R5", "220R", "V3V3", "FUEL_SNS", 35.5),
+           ("R6", "10k", "V3V3", "COOL_SNS", 35.5), ("R7", "10k", "V3V3", "LDR_SNS", 35.5),
+           ("R8", "1k", "IGN_12", "IGN_LED", 38.5), ("R9", "10k", "IGN_SENSE", "GND", 38.5),
+           ("R10", "1k", "HALL_SIG", "HALL_LED", 38.5), ("R11", "10k", "HALL_OUT", "GND", 38.5),
+           ("R12", "10k", "TFT_BL", "GND", 38.5), ("R13", "1k", "HALL_OUT", "HALL", 38.5)]
     for i, (ref, val, a, b, y) in enumerate(res):
-        P.append((ref, RVERT, RX[i % 6], y, 0.0,
+        P.append((ref, R805, RX[i % 6], y, 0.0,
                   {"1": N(a), "2": N(b)}, val, "F.Cu", 0))
 
-    CDISC = "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
-    CX = [39.6, 45.6, 51.6, 57.6, 63.6, 69.3]
+    CX = RX
     caps = [("C5", "BAT_SNS"), ("C6", "FUEL_SNS"), ("C7", "COOL_SNS"),
             ("C8", "LDR_SNS"), ("C9", "IGN_SENSE"), ("C10", "HALL")]
     for i, (ref, net) in enumerate(caps):
-        P.append((ref, CDISC, CX[i], 44.5, 0.0, {"1": N(net), "2": N("GND")},
+        P.append((ref, C805, CX[i], 41.5, 0.0, {"1": N(net), "2": N("GND")},
                   "100n", "F.Cu", 0))
-    P.append(("C11", CDISC, 63.5, 21.5, 0.0, {"1": N("TRIP_BTN"), "2": N("GND")},
+    # TRIP_BTN filter, right behind the north-edge J14 shell (which hangs below)
+    P.append(("C11", C805, 66.0, 21.6, 0.0, {"1": N("TRIP_BTN"), "2": N("GND")},
               "100n", "F.Cu", 0))
-    P.append(("C13", CDISC, 30.5, 55.5, 0.0, {"1": N("V3V3"), "2": N("GND")},
-              "100n", "F.Cu", 0))
-    P.append(("D3", "Diode_THT:D_DO-15_P2.54mm_Vertical_AnodeUp",
-              39.5, 57.0, 0.0, {"1": N("HALL"), "2": N("GND")}, "P6KE6V2",
-              "F.Cu", 0))
-
-    # ---- trip button, south spare zone
-    P.append(("SW1", "Button_Switch_THT:SW_PUSH_6mm", 48.5, 53.6, 0.0,
-              {"1": N("TRIP_BTN"), "2": N("TRIP_BTN"),
-               "3": N("GND"), "4": N("GND")}, "TRIP", "F.Cu", 0))
+    P.append(("D3", "Diode_SMD:D_SMB", 67.0, 30.5, 0.0,
+              {"1": N("HALL"), "2": N("GND")}, "P6SMB6V2A", "F.Cu", 0))
 
     # ---- debug / spare: solder pads, not headers (the drawing's two
     # "Area for Spare and debug pads" zones). Pads are 1.7 x 1.0, 2.54 pitch.
@@ -397,11 +482,12 @@ def parts():
                       PIN_SILK["J15"], ["SPARE_D26", "SPARE_D21", "SPARE_D22",
                                         "SPARE_D19", "SPARE_D15", "GND"]))
 
-    # ---- test points (north spare zone, below the GNSS header)
+    # ---- test points (north spare zone, below the GNSS header).  The row is
+    # pushed east far enough to clear the 5x20 fuse clip's courtyard (F1).
     for i, (ref, net) in enumerate([("TP1", "IGN_SENSE"), ("TP2", "HALL"),
                                     ("TP3", "BAT_SNS"), ("TP4", "FUEL_SNS"),
                                     ("TP5", "GND")]):
-        P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm", 38.0 + i * 2.5, 19.5,
+        P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm", 38.6 + i * 2.5, 19.5,
                   0.0, {"1": N(net)}, net, "F.Cu", 0))
 
     return P
@@ -471,11 +557,15 @@ def build():
                    % (a[0], a[1], b[0], b[1], kf.uid()))
 
     boxes = []
+    holes = []
+    pads = []
     for ent in parts():
         ref, fp_id, x, y, rot, netmap, value, layer, dnp = ent[:9]
         bb = box_of(ent)
         if bb:
             boxes.append((ref, bb))
+        holes += [(ref, h) for h in holes_of(ent)]
+        pads += pads_abs(ent)
 
         if fp_id is None:                      # custom footprint (pads pre-resolved)
             out.append(kf.custom_footprint(ref, value, (x, y), rot, netmap,
@@ -492,9 +582,16 @@ def build():
         netmap = {k: _res(v) for k, v in netmap.items() if v and v != "NC"}
         out.append(kf.board_footprint(fp_id, (x, y), rot, ref, value, netmap, layer=layer))
 
+    # --- ADVISORY HINTS ONLY -------------------------------------------------
+    # KiCad's own DRC (run at the end of main()) is the single referee for
+    # clearance/creepage/courtyard/edge rules.  These bounding-box notes exist
+    # only to point at a suspect part before the DRC report scrolls past it.
+    # They are deliberately approximate (rectangles around curved courtyards);
+    # do NOT spend time making them match KiCad - read the DRC report instead.
     for ref, bb in boxes:
-        if not (BOARD_X0 <= bb[0] and bb[2] <= BOARD_X1
-                and BOARD_Y0 <= bb[1] and bb[3] <= BOARD_Y1):
+        lim = 0.40 if ref in EDGE_OK else 0.0   # edge shells hang over the line
+        if not (BOARD_X0 - lim <= bb[0] and bb[2] <= BOARD_X1 + lim
+                and BOARD_Y0 - lim <= bb[1] and bb[3] <= BOARD_Y1 + lim):
             print("  OUTSIDE BOARD  %-6s %s" % (ref, tuple(round(v, 2) for v in bb)))
         if not keepout_clear(bb):
             print("  IN ANTENNA AREA %-6s %s" % (ref, tuple(round(v, 2) for v in bb)))
@@ -502,10 +599,29 @@ def build():
         for j in range(i + 1, len(boxes)):
             ra, a = boxes[i]
             rb, b = boxes[j]
-            if ra in BOTTOM_SIDE or rb in BOTTOM_SIDE:
-                continue        # the module hangs under the PCB, no clash
+            if (ra in BOTTOM_SIDE) != (rb in BOTTOM_SIDE):
+                continue        # opposite faces of the board: no clash
             if a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]:
                 print("  OVERLAP %s / %s" % (ra, rb))
+    for i in range(len(holes)):          # drill vs drill (both faces)
+        for j in range(i + 1, len(holes)):
+            (ra, (ax, ay, ad)), (rb, (bx, by, bd)) = holes[i], holes[j]
+            if ra == rb:
+                continue
+            if (ax - bx) ** 2 + (ay - by) ** 2 < (ad / 2 + bd / 2 + 0.2) ** 2:
+                print("  HOLES TOO CLOSE %s (%.2f,%.2f) / %s (%.2f,%.2f)"
+                      % (ra, ax, ay, rb, bx, by))
+    for i in range(len(pads)):        # pad copper vs another net's pad copper
+        for j in range(i + 1, len(pads)):
+            ra, pa, na, ca, ba = pads[i]
+            rb, pb, nb, cb, bb = pads[j]
+            if ra == rb or na == nb or not (ca & cb):
+                continue
+            if (ba[0] < bb[2] and bb[0] < ba[2] and ba[1] < bb[3]
+                    and bb[1] < ba[3]):
+                print("  SHORT %s / %s: %s.%s at (%.2f,%.2f) vs %s.%s at (%.2f,%.2f)"
+                      % (na, nb, ra, pa, (ba[0] + ba[2]) / 2, (ba[1] + ba[3]) / 2,
+                         rb, pb, (bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2))
 
     out += silks()
     out += netcheck()
@@ -600,24 +716,33 @@ def silks():
         out += _txt(x, y, lab, layer="B.SilkS", size=0.9, mirror=True)
 
     # JST-PH shells: one label per two-circuit zone (2.00 mm pitch is too fine
-    # for per-pin text); the pin order is in the README / Dwgs.User pin map
-    for lab, x, y in [("TRIP  EN", 63.2, 17.4), ("IGN  COOL", 75.2, 17.4),
-                      ("LDR  FUEL", 76.6, 57.6), ("HALL", 57.0, 57.6)]:
-        out += _txt(x, y, lab, size=0.8)
+    # for per-pin text); the pin order is in the README / Dwgs.User pin map.
+    # Printed on the display side; the shells themselves hang under the board.
+    for lab, cx, y in [("TRIP  EN", 67.0, 17.4), ("IGN  COOL", 81.4, 17.4),
+                       ("LDR  FUEL", 81.4, 58.0), ("HALL", 67.0, 59.8)]:
+        out += _txt(cx - 0.35 * len(lab), y, lab, size=0.8)
 
-    # GNSS + hall supply selector + trip button
-    out += _txt(55.2, 17.6, "GNSS", size=0.8)
-    out += _txt(48.2, 60.0, "TRIP", size=0.8)
+    # GNSS pads sit under the board, so their label is mirrored silks too
+    out += _txt(57.6 + 1.4, 12.9, "GNSS", layer="B.SilkS", size=0.8,
+                mirror=True)
 
-    # per-pin text where there is room (2.54 mm pitch groups)
-    SIDE = {"J8": 2.4, "JP1": 1.9, "J13": -1.4, "J15": 1.2}
+    # per-pin text where there is room (2.54 mm pitch groups).  J8 / JP1 are
+    # pads on the underside, so their labels go on B.SilkS, mirrored.
+    SIDE = {"J13": -1.4, "J15": 1.2}
+    BSIDE = {"J8": 1.9, "JP1": -2.6}
     for ent in parts():
         ref, x, y = ent[0], ent[2], ent[3]
-        if ref not in PIN_SILK or ref not in SIDE:
+        if ref not in PIN_SILK:
             continue
-        for i, lab in enumerate(PIN_SILK[ref]):
-            out += _txt(x + i * 2.54 - 0.7 * len(lab) / 2.0, y + SIDE[ref],
-                        lab, size=0.8)
+        if ref in SIDE:
+            for i, lab in enumerate(PIN_SILK[ref]):
+                out += _txt(x + i * 2.54 - 0.7 * len(lab) / 2.0, y + SIDE[ref],
+                            lab, size=0.8)
+        elif ref in BSIDE:
+            for i, lab in enumerate(PIN_SILK[ref]):
+                out += _txt(x + i * 2.54 + 0.7 * len(lab) / 2.0,
+                            y + BSIDE[ref], lab, layer="B.SilkS", size=0.8,
+                            mirror=True)
 
     # build documentation (not printed): zones, pin map, test points
     docs = [("SPARE / DEBUG PADS - see J13 (TX RX GND 5V) and J15", 23.6),
@@ -630,6 +755,9 @@ def silks():
             ("  19 21 3 1 22 23", 10.0),
             ("J17 IGN GND COOL GND   J14 TRIP GND EN GND", 12.0),
             ("J6 LDR GND FUEL GND    J9 +V SIG GND", 13.0),
+            ("JST = right-angle SMD, bodies under the board; pin 1 is at the", 14.0),
+            ("west end of the north pair, east end of the south pair (top view)", 15.0),
+            ("no trip button on the carrier - trip comes in on J14 (pin 1)", 16.0),
             ("TP1 IGN_SENSE  TP2 HALL  TP3 BAT_SNS  TP4 FUEL_SNS  TP5 GND", 21.0)]
     for txt, y in docs:
         out += _txt(10.5, y, txt, layer="Dwgs.User", size=1.0)

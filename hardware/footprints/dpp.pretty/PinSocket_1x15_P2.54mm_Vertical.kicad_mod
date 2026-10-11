@@ -8,91 +8,26 @@
 (tags "Through hole socket strip THT 1x15 2.54mm single row")
 (property "Reference" "REF**"
 		(at 0 -2.77 0)
-		(layer "F.Fab")
+		(layer "B.Fab")
 		(effects
 			(font
 				(size 1 1)
 				(thickness 0.15)
 			)
-		)
+		 (justify mirror))
 	)
 (property "Value" ""
 		(at 0 38.33 0)
-		(layer "F.Fab")
+		(layer "B.Fab")
 		(effects
 			(font
 				(size 1 1)
 				(thickness 0.15)
 			)
-		)
-	)
-(property "KiLib_Generator" "connector/pin_header_socket"
-		(at 0 0 0)
-		(layer "F.SilkS")
-		(hide yes)
-		(effects
-			(font
-				(size 1 1)
-				(thickness 0.15)
-			)
-		)
+		 (justify mirror))
 	)
 (attr through_hole)
 (duplicate_pad_numbers_are_jumpers no)
-(fp_line
-		(start -1.33 1.27)
-		(end -1.33 36.89)
-		(stroke
-			(width 0.12)
-			(type solid)
-		)
-		(layer "F.SilkS")
-	)
-(fp_line
-		(start -1.33 1.27)
-		(end 1.33 1.27)
-		(stroke
-			(width 0.12)
-			(type solid)
-		)
-		(layer "F.SilkS")
-	)
-(fp_line
-		(start -1.33 36.89)
-		(end 1.33 36.89)
-		(stroke
-			(width 0.12)
-			(type solid)
-		)
-		(layer "F.SilkS")
-	)
-(fp_line
-		(start 0 -1.33)
-		(end 1.33 -1.33)
-		(stroke
-			(width 0.12)
-			(type solid)
-		)
-		(layer "F.SilkS")
-	)
-(fp_line
-		(start 1.33 -1.33)
-		(end 1.33 0)
-		(stroke
-			(width 0.12)
-			(type solid)
-		)
-		(layer "F.SilkS")
-	)
-(fp_line
-		(start 1.33 1.27)
-		(end 1.33 36.89)
-		(stroke
-			(width 0.12)
-			(type solid)
-		)
-		(layer "F.SilkS")
-	)
 (fp_line
 		(start -1.77 -1.77)
 		(end 1.77 -1.77)
@@ -100,7 +35,7 @@
 			(width 0.05)
 			(type solid)
 		)
-		(layer "F.CrtYd")
+		(layer "B.CrtYd")
 	)
 (fp_line
 		(start -1.77 37.33)
@@ -109,7 +44,7 @@
 			(width 0.05)
 			(type solid)
 		)
-		(layer "F.CrtYd")
+		(layer "B.CrtYd")
 	)
 (fp_line
 		(start 1.77 -1.77)
@@ -118,7 +53,7 @@
 			(width 0.05)
 			(type solid)
 		)
-		(layer "F.CrtYd")
+		(layer "B.CrtYd")
 	)
 (fp_line
 		(start 1.77 37.33)
@@ -127,7 +62,7 @@
 			(width 0.05)
 			(type solid)
 		)
-		(layer "F.CrtYd")
+		(layer "B.CrtYd")
 	)
 (fp_line
 		(start -1.27 -1.27)
@@ -136,7 +71,7 @@
 			(width 0.1)
 			(type solid)
 		)
-		(layer "F.Fab")
+		(layer "B.Fab")
 	)
 (fp_line
 		(start -1.27 36.83)
@@ -145,7 +80,7 @@
 			(width 0.1)
 			(type solid)
 		)
-		(layer "F.Fab")
+		(layer "B.Fab")
 	)
 (fp_line
 		(start 0.635 -1.27)
@@ -154,7 +89,7 @@
 			(width 0.1)
 			(type solid)
 		)
-		(layer "F.Fab")
+		(layer "B.Fab")
 	)
 (fp_line
 		(start 1.27 -0.635)
@@ -163,7 +98,7 @@
 			(width 0.1)
 			(type solid)
 		)
-		(layer "F.Fab")
+		(layer "B.Fab")
 	)
 (fp_line
 		(start 1.27 36.83)
@@ -172,17 +107,7 @@
 			(width 0.1)
 			(type solid)
 		)
-		(layer "F.Fab")
-	)
-(fp_text user "${REFERENCE}"
-		(at 0 17.78 90)
-		(layer "F.Fab")
-		(effects
-			(font
-				(size 1 1)
-				(thickness 0.15)
-			)
-		)
+		(layer "B.Fab")
 	)
 (pad "1" thru_hole rect
 		(at 0 0)

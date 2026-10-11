@@ -32,6 +32,9 @@ icon-*-preview.png
 # KiCad fabrication outputs + DRC reports (regenerate with scripts/make_pcb.py)
 hardware/out/
 hardware/scripts/drc-*.txt
+hardware/drc-report.txt
+hardware/scripts/tmp/
+hardware/~*.lck
 hardware/nets-report.md
 
 # Local-only design/reference artefacts + graphify corpus config.

@@ -3,7 +3,7 @@
 	(generator "make_pcb.py")
 	(generator_version "9.0")
 	(layer "F.Cu")
-	(tstamp "81836354-abde-5eb5-afb8-2e32d0d22997")
+	(tstamp "f5b24108-1a0d-5415-9701-7a8b94d7e95e")
 (descr "SMD pad as test Point, diameter 1.5mm")
 (tags "test point SMD pad")
 (property "Reference" "REF**"
@@ -33,7 +33,7 @@
 		(unlocked yes)
 		(layer "F.Fab")
 		(hide yes)
-		(uuid "ea94a3e6-c199-5290-b108-cb76f22e5dd8")
+		(uuid "2808b3f2-5e61-516c-aa81-a99d904af3c9")
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -46,7 +46,7 @@
 		(unlocked yes)
 		(layer "F.Fab")
 		(hide yes)
-		(uuid "08c1f521-4c39-52ac-bc32-82b3151d7b32")
+		(uuid "2743299e-2dfd-5d47-88aa-ec46fbc17d12")
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -65,7 +65,7 @@
 		)
 		(fill no)
 		(layer "F.SilkS")
-		(uuid "3a4eed09-3f92-5e1f-aff0-8968b18727a5")
+		(uuid "6bdceff2-e734-5366-9e8c-6fc17e61da67")
 	)
 (fp_circle
 		(center 0 0)
@@ -76,23 +76,12 @@
 		)
 		(fill no)
 		(layer "F.CrtYd")
-		(uuid "52372e32-40a2-5e13-87f9-be834bc0699a")
-	)
-(fp_text user "${REFERENCE}"
-		(at 0 -1.65 0)
-		(layer "F.Fab")
-		(uuid "94f6de1d-e048-5706-961d-9c6a2ca42ead")
-		(effects
-			(font
-				(size 1 1)
-				(thickness 0.15)
-			)
-		)
+		(uuid "53cc891b-82fb-5c8d-aeeb-a33804d648f3")
 	)
 (pad "1" smd circle
 		(at 0 0)
 		(size 1.5 1.5)
 		(layers "F.Cu" "F.Mask")
-		(uuid "01a868e8-e211-5001-8c70-5972f3984863")
+		(uuid "2773cc57-e40c-5377-a81f-68d1dfccd9eb")
 	)
 )
