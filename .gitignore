@@ -33,3 +33,14 @@ icon-*-preview.png
 hardware/out/
 hardware/scripts/drc-*.txt
 hardware/nets-report.md
+
+# Local-only design/reference artefacts + graphify corpus config.
+# NOTE: graphify is configured to ignore .gitignore (graphify-out/.graphify_build.json
+# -> "gitignore": false) so these reference assets stay IN the knowledge graph even
+# though they are never committed. Corpus exclusions live in .graphifyignore instead.
+# Any new .gitignore entry that must also stay out of the graph needs a .graphifyignore twin.
+.graphifyignore
+.migration/
+hardware/.history/
+hardware/screenshots/
+Screenshots/
