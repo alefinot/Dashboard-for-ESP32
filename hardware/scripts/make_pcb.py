@@ -289,6 +289,25 @@ BCU_KEEP_PADS = BCU_FLIP - {"J17", "J14", "J6", "J9"}
 EDGE_OK = {"J14", "J17", "J6", "J9"}
 
 
+# --- silkscreen designators --------------------------------------------------
+# Parts that print their reference ON the board (F.SilkS) rather than only on
+# the fabrication layer.  Everything not listed keeps its designator on F.Fab:
+# the 2.54 mm parts (DevKit socket, pin headers, debug/spare pad groups, the
+# JST shells, XT30) have no room for silk text between their pads - at that
+# pitch the text fails KiCad's silk-clearance checks, which is why this was
+# originally switched off wholesale - and those parts are identified by their
+# outlines and pin-1 marks anyway.  C1/C3 are on the underside, where the
+# generator drops all library silkscreen (see kicadfmt.board_footprint), and
+# U4 sits under the display, so those three stay on Fab too.
+# Sizes: 0.80 mm glyphs for the 0805 lattice, 1.00 mm where there is room.
+SILK_ON = {"F1", "Q1", "D1", "D2", "D3", "OK1", "OK2", "C2", "C4", "C11", "C13",
+           "TP1", "TP2", "TP3", "TP4", "TP5"}
+SILK_ON |= {"R%d" % i for i in range(1, 14)}
+SILK_ON |= {"C%d" % i for i in range(5, 11)}
+SILK_BIG = {"F1", "Q1", "D1", "D2", "D3", "OK1", "OK2"}
+SILK_AT = {}                    # ref: (dx, dy) local offset override, from DRC
+
+
 def holes_of(ent):
     """Absolute (x, y, drill) of every drilled pad of a part."""
     fp_id, x, y, rot = ent[1], ent[2], ent[3], ent[4]
@@ -711,9 +730,16 @@ def build():
                 return (v, NETS[v - 1])
             return (NETS.index(v) + 1, v)
         netmap = {k: _res(v) for k, v in netmap.items() if v and v != "NC"}
-        out.append(kf.board_footprint(fp_id, _onsheet(x, y), rot, ref, value, netmap,
-                                      layer=layer, bcu_flip=ref in BCU_FLIP,
-                                      bcu_keep_pads=ref in BCU_KEEP_PADS))
+        silk = ref in SILK_ON
+        fp_txt = kf.board_footprint(fp_id, _onsheet(x, y), rot, ref, value, netmap,
+                                    layer=layer, ref_to_fab=not silk,
+                                    bcu_flip=ref in BCU_FLIP,
+                                    bcu_keep_pads=ref in BCU_KEEP_PADS)
+        if silk:
+            fp_txt = kf.silk_reference(fp_txt, "F.SilkS",
+                                       size=1.0 if ref in SILK_BIG else 0.8,
+                                       at=SILK_AT.get(ref))
+        out.append(fp_txt)
 
     # --- ADVISORY HINTS ONLY -------------------------------------------------
     # KiCad's own DRC (run at the end of main()) is the single referee for
@@ -821,8 +847,10 @@ def silks():
     out += _txt(-12.60, 37.20, "C1 / C3 UNDER THE BOARD",
                 layer="Dwgs.User", size=0.7)
 
-    # dev board rows: pin 1 is VIN, at the dev board's USB end
-    out += _txt(44.0, 26.9, "PIN 1 = USB END", size=0.8)
+    # dev board rows: pin 1 is VIN, at the dev board's USB end.  The note sits
+    # under the west end of the north row, 0.35 mm east of J13's pads and
+    # 0.30 mm north of OK1's printed designator.
+    out += _txt(41.20, 26.00, "PIN 1 = USB END", size=0.8)
     out += _txt(KEEP[0] + 0.8, KEEP[1] + 0.8, "ANTENNA - NO COPPER", size=0.8)
 
     # TFT socket, standing at the east edge (14-way, pin 1 = VCC to the north)

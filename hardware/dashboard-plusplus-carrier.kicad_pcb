@@ -2430,11 +2430,11 @@
 (tags "fuse clip open")
 (property "Reference" "F1"
 		(at 8.5 -2 90)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(uuid "39983751-50c4-5010-b9c0-37afde819388")
 		(effects
 			(font
-				(size 1 1)
+				(size 1.00 1.00)
 				(thickness 0.15)
 			)
 		)
@@ -2732,10 +2732,10 @@
 (tags "D2PAK DDPAK TO-263 D2PAK-3 TO-263-3 SOT-404")
 (property "Reference" "Q1"
 		(at 0 -6.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
+				(size 1.00 1.00)
 				(thickness 0.15)
 			)
 		)
@@ -3013,11 +3013,11 @@
 (tags "SOD-123")
 (property "Reference" "D1"
 		(at 0 -2 270)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(uuid "081867d5-5171-55e8-9ed3-d37fef6f5fc6")
 		(effects
 			(font
-				(size 1 1)
+				(size 1.00 1.00)
 				(thickness 0.15)
 			)
 		)
@@ -3275,11 +3275,11 @@
 (tags "Diode SMB (DO-214AA)")
 (property "Reference" "D2"
 		(at 0 -3 270)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(uuid "e2e65c2f-d9a2-59d6-b036-863a5a6a1cb5")
 		(effects
 			(font
-				(size 1 1)
+				(size 1.00 1.00)
 				(thickness 0.15)
 			)
 		)
@@ -3527,11 +3527,11 @@
 (tags "resistor")
 (property "Reference" "R1"
 		(at 0 -1.65 270)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -3628,11 +3628,11 @@
 (tags "capacitor")
 (property "Reference" "C2"
 		(at 0 -1.68 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -4249,11 +4249,11 @@
 (tags "capacitor")
 (property "Reference" "C4"
 		(at 0 -1.68 90)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -4350,11 +4350,11 @@
 (tags "capacitor")
 (property "Reference" "C13"
 		(at 0 -1.68 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -4451,10 +4451,10 @@
 (tags "SO SO")
 (property "Reference" "OK1"
 		(at 0 -2.9 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
+				(size 1.00 1.00)
 				(thickness 0.15)
 			)
 		)
@@ -4716,10 +4716,10 @@
 (tags "SO SO")
 (property "Reference" "OK2"
 		(at 0 -2.9 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
+				(size 1.00 1.00)
 				(thickness 0.15)
 			)
 		)
@@ -4981,11 +4981,11 @@
 (tags "resistor")
 (property "Reference" "R2"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -5082,11 +5082,11 @@
 (tags "resistor")
 (property "Reference" "R3"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -5183,11 +5183,11 @@
 (tags "resistor")
 (property "Reference" "R4"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -5284,11 +5284,11 @@
 (tags "resistor")
 (property "Reference" "R5"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -5385,11 +5385,11 @@
 (tags "resistor")
 (property "Reference" "R6"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -5486,11 +5486,11 @@
 (tags "resistor")
 (property "Reference" "R7"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -5587,11 +5587,11 @@
 (tags "resistor")
 (property "Reference" "R8"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -5688,11 +5688,11 @@
 (tags "resistor")
 (property "Reference" "R9"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -5789,11 +5789,11 @@
 (tags "resistor")
 (property "Reference" "R10"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -5890,11 +5890,11 @@
 (tags "resistor")
 (property "Reference" "R11"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -5991,11 +5991,11 @@
 (tags "resistor")
 (property "Reference" "R12"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -6092,11 +6092,11 @@
 (tags "resistor")
 (property "Reference" "R13"
 		(at 0 -1.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -6193,11 +6193,11 @@
 (tags "capacitor")
 (property "Reference" "C5"
 		(at 0 -1.68 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -6294,11 +6294,11 @@
 (tags "capacitor")
 (property "Reference" "C6"
 		(at 0 -1.68 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -6395,11 +6395,11 @@
 (tags "capacitor")
 (property "Reference" "C7"
 		(at 0 -1.68 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -6496,11 +6496,11 @@
 (tags "capacitor")
 (property "Reference" "C8"
 		(at 0 -1.68 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -6597,11 +6597,11 @@
 (tags "capacitor")
 (property "Reference" "C9"
 		(at 0 -1.68 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -6698,11 +6698,11 @@
 (tags "capacitor")
 (property "Reference" "C10"
 		(at 0 -1.68 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -6799,11 +6799,11 @@
 (tags "capacitor")
 (property "Reference" "C11"
 		(at 0 -1.68 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -6900,11 +6900,11 @@
 (tags "Diode SMB (DO-214AA)")
 (property "Reference" "D3"
 		(at 0 -3 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(uuid "94f6de1d-e048-5706-961d-9c6a2ca42ead")
 		(effects
 			(font
-				(size 1 1)
+				(size 1.00 1.00)
 				(thickness 0.15)
 			)
 		)
@@ -7192,12 +7192,12 @@
 (tags "test point SMD pad")
 (property "Reference" "TP1"
 		(at 0 -1.648 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(uuid "c9b663bc-acf1-5cfc-b5a4-9e3b9cd8b8d3")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -7277,12 +7277,12 @@
 (tags "test point SMD pad")
 (property "Reference" "TP2"
 		(at 0 -1.648 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(uuid "51f582af-cb93-518c-b564-62d0ef4d58fb")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -7362,12 +7362,12 @@
 (tags "test point SMD pad")
 (property "Reference" "TP3"
 		(at 0 -1.648 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(uuid "a2e94794-e742-52cc-85eb-35348aeecc6b")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -7447,12 +7447,12 @@
 (tags "test point SMD pad")
 (property "Reference" "TP4"
 		(at 0 -1.648 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(uuid "69f0e994-a8cc-5e76-b137-278b1b909f78")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -7532,12 +7532,12 @@
 (tags "test point SMD pad")
 (property "Reference" "TP5"
 		(at 0 -1.648 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(uuid "bfea89bc-2d0f-5fce-ac89-bf1090c84369")
 		(effects
 			(font
-				(size 1 1)
-				(thickness 0.15)
+				(size 0.80 0.80)
+				(thickness 0.12)
 			)
 		)
 	)
@@ -7611,7 +7611,7 @@
 )
 (gr_text "DRAWN 85 x 55 ENVELOPE - BOARD EXTENDED 10 mm WEST" (at 125.00 76.40 0.0) (layer "Dwgs.User") (uuid "eaeb6862-5b44-5154-a2d7-f675c68e8e88") (effects (font (size 1.00 1.00) (thickness 0.12)) (justify left top)))
 (gr_text "C1 / C3 UNDER THE BOARD" (at 88.40 104.70 0.0) (layer "Dwgs.User") (uuid "c51d2c43-b862-51a6-9473-95da33267149") (effects (font (size 0.70 0.70) (thickness 0.12)) (justify left top)))
-(gr_text "PIN 1 = USB END" (at 145.00 94.40 0.0) (layer "F.SilkS") (uuid "a8482c1d-c94a-58c4-af91-0b89c4a3ca84") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
+(gr_text "PIN 1 = USB END" (at 142.20 93.50 0.0) (layer "F.SilkS") (uuid "a8482c1d-c94a-58c4-af91-0b89c4a3ca84") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
 (gr_text "ANTENNA - NO COPPER" (at 174.67 95.10 0.0) (layer "F.SilkS") (uuid "66c1157f-9893-5a92-81c5-078d03f006d5") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
 (gr_text "1" (at 189.31 84.99 0.0) (layer "F.SilkS") (uuid "7893f128-1270-5879-9591-b3303b15bf4e") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top)))
 (gr_text "14" (at 189.11 118.01 0.0) (layer "F.SilkS") (uuid "7912eb18-923d-53b5-9770-460033cf4086") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top)))

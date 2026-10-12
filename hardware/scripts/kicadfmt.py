@@ -297,6 +297,34 @@ def pads_full(fp_id):
     return out
 
 
+def silk_reference(txt, layer="F.SilkS", size=None, at=None):
+    """Move one footprint's Reference field onto a silkscreen layer.
+
+    Called on the already-expanded board entry (see board_footprint's ref_to_fab,
+    which does the opposite and keeps the designator off the board).  `size` is
+    the glyph height in mm - the stroke follows at 15 %, the KiCad convention -
+    and `at` is an optional (x, y) local offset in mm for parts whose library
+    default would land the text on a pad.  The text angle stays as emitted, so a
+    rot-270 part reads its label sideways like any other rotated part.
+    """
+    i = txt.find('(property "Reference"')
+    if i < 0:
+        return txt
+    j = _skip_sexp(txt, i)
+    blk = txt[i:j]
+    blk = re.sub(r'\(layer "[^"]*"\)', '(layer "%s")' % layer, blk, count=1)
+    if at is not None:
+        m = re.search(r'\(at ([-\d.]+) ([-\d.]+) ([-\d.]+)\)', blk)
+        if m:
+            blk = (blk[:m.start()] + "(at %.2f %.2f %s)" % (at[0], at[1], m.group(3))
+                   + blk[m.end():])
+    if size:
+        blk = re.sub(r'\(size [^)]*\)', "(size %.2f %.2f)" % (size, size), blk, count=1)
+        blk = re.sub(r'\(thickness [^)]*\)', "(thickness %.2f)" % (0.15 * size),
+                     blk, count=1)
+    return txt[:i] + blk + txt[j:]
+
+
 def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
                     silk_off=-1.3, fab_off=1.3, ref_to_fab=True, bcu_flip=False,
                     bcu_keep_pads=True):
