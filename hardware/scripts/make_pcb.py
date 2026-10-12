@@ -10,7 +10,7 @@ Coordinate system: KiCad coordinates, millimetres, Y increasing downwards
 BOARD_X0..BOARD_X1 x BOARD_Y0..BOARD_Y1.
 
 Sides:
-  F.Cu  = display side.  The 4.3" TFT module plugs in here and lies flat.
+  F.Cu  = display side.  The 4.0" TFT module plugs in here and lies flat.
   B.Cu  = ESP32 side.    The DevKit plugs in here and lies flat.
 """
 import os
@@ -105,12 +105,16 @@ ESP_ROWS = {
 ESP_BODY = cadbox(8.80, 13.49, 58.80, 41.49)     # 36.20,23.49 .. 86.20,51.49
 
 # TFT display socket J3: drawn as a 1.00 x 35.00 slab standing 10.02 mm above
-# F.Cu at the board edge (u 1.99..2.99, v 7.00..42.00). The module's own
-# silkscreen is 16-way (VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS T_DIN
-# TPEN T_DO SD NC), so a 1x16 socket is used: its 40.64 body is centred on the
-# drawn slot's north end, growing 5.6 mm into the drawing's 13 mm south gap.
-TFT = {"x": 92.51, "y1": 18.27, "pitch": 2.54, "pins": 16}   # pin 1 north
-TFT["y_end"] = TFT["y1"] + (TFT["pins"] - 1) * TFT["pitch"]  # 56.37
+# F.Cu at the board edge (u 1.99..2.99, v 7.00..42.00).  The drawing's block is
+# "Display header 14 pin", so J3 is a **1x14** socket, placed exactly as the CAD
+# mapping row says: pin 1 (VCC) y 17.99 -> pin 14 (T_DO) y 51.01, 33.02 = 13 x
+# 2.54, the header centred in the drawn slot.  Its 35.56 mm body stands 0.28 mm
+# past each end of the 35.00 mm slot - the earlier 1x16 reading of the module's
+# silks put 40.64 mm of socket 5.6 mm into the drawing's south gap, which is
+# what this corrects.  Only pins 1..8 are wired; 9..14 (SDO + the touch lines)
+# stay open - no MISO in the firmware, touch removed in 1.3.6.
+TFT = {"x": 92.51, "y1": 17.99, "pitch": 2.54, "pins": 14}  # pin 1 north
+TFT["y_end"] = TFT["y1"] + (TFT["pins"] - 1) * TFT["pitch"]  # 51.01
 
 # LM2596 step-down module, soldered to the BOTTOM face.
 # Drawn 21.00 x 43.00 (u 61.75..82.75, v 8.64..51.64) with silks `in +` / `-`
@@ -360,9 +364,9 @@ def parts():
               "B.Cu", 0))
 
     # ---- TFT display socket J3, F.Cu, standing at the east board edge
-    # (drawn 1.00 x 35.00 slab, 10.02 mm above F.Cu; the module is 16-way).
+    # (drawn 1.00 x 35.00 slab, 10.02 mm above F.Cu; the module is 14-way).
     tft = {str(i + 1): n for i, n in enumerate(TFT_MAP)}
-    P.append(("J3", "Connector_PinSocket_2.54mm:PinSocket_1x16_P2.54mm_Vertical",
+    P.append(("J3", "Connector_PinSocket_2.54mm:PinSocket_1x14_P2.54mm_Vertical",
               TFT["x"], TFT["y1"], 0.0, tft, "TFT-ILI9488", "F.Cu", 0))
 
     # ---- DC-DC step-down module, soldered to the BOTTOM face (custom fp).
@@ -594,13 +598,14 @@ ESP_LABEL = {
     28: "IO1", 29: "IO22", 30: "IO23",
 }
 
-# TFT 1x16 socket ("4.0'' TFT SPI 480X320 V1.1"), pin 1..16 as read off the
-# display's own silkscreen (plan section 1). Only the LCD lines are connected:
-# touch and the SD pads stay open (no MISO in firmware, touch removed in 1.3.6).
+# TFT 1x14 socket ("4.0'' TFT SPI 480X320 V1.1", the drawing's "Display header
+# 14 pin" block), pin 1..14 as read off the display's own silkscreen (plan
+# section 1). Only the LCD lines are connected: SDO and the touch pads stay
+# open (no MISO in firmware, touch removed in 1.3.6).
 TFT_MAP = ["V5", "GND", "TFT_CS", "TFT_RST", "TFT_DC", "TFT_MOSI", "TFT_SCK",
-           "TFT_BL", "NC", "NC", "NC", "NC", "NC", "NC", "NC", "NC"]
+           "TFT_BL", "NC", "NC", "NC", "NC", "NC", "NC"]
 TFT_LABEL = ["VCC", "GND", "CS", "RST", "DC", "SDI", "SCK", "LED", "SDO",
-             "T_CLK", "T_CS", "T_DIN", "TPEN", "T_DO", "SD", "NC"]
+             "T_CLK", "T_CS", "T_DIN", "TPEN", "T_DO"]
 
 # silkscreen next to the vehicle / accessory headers: (ref, [labels per pin])
 # Per-pin silks for the 2.54 mm groups. The 2.00 mm JST-PH shells carry a
@@ -767,10 +772,11 @@ def silks():
     out += _txt(44.0, 26.9, "PIN 1 = USB END", size=0.8)
     out += _txt(KEEP[0] + 0.8, KEEP[1] + 0.8, "ANTENNA - NO COPPER", size=0.8)
 
-    # TFT socket, standing at the east edge (16-way, pin 1 = VCC to the north)
+    # TFT socket, standing at the east edge (14-way, pin 1 = VCC to the north)
     out += _txt(TFT["x"] - 4.2, TFT["y1"] - 0.5, "1", size=0.9)
-    out += _txt(TFT["x"] - 4.4, TFT["y_end"] - 0.5, "16", size=0.9)
-    out += _txt(TFT["x"] - 4.4, 36.0, "TFT", size=0.9, rot=90.0)
+    out += _txt(TFT["x"] - 4.4, TFT["y_end"] - 0.5, "14", size=0.9)
+    out += _txt(TFT["x"] - 4.4, (TFT["y1"] + TFT["y_end"]) / 2.0 + 1.05,
+                "TFT", size=0.9, rot=90.0)
 
     # 12 V entry polarity, east of the XT30 (B.Cu part -> mirrored silks, so the
     # anchor is the text's RIGHT edge).  Right-aligned at x 34.60: glyphs land at
@@ -838,8 +844,8 @@ def silks():
                             " - board 95 x 55 mm", layer="Dwgs.User", size=1.2)
     out += _txt(10.5, 68.8, "BUILD NOTES (Dwgs.User - not on the board)",
                 layer="Dwgs.User", size=1.0)
-    docs = ["TFT 1..16: VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS",
-            "TFT cont: T_DINTPEN T_DO SD NC NC NC NC",
+    docs = ["TFT 1..14: VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS",
+            "TFT cont: T_DIN TPEN T_DO",
             "ESP near row 1..15 (USB end first): VIN GND 13 12 14 27 26 25",
             "  33 32 35 34 39 36 EN",
             "ESP far row 16..30 (USB end first): 3V3 GND 15 2 4 16 17 5 18",

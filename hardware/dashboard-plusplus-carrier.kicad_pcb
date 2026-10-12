@@ -577,12 +577,12 @@
 		)
 	)
 )
-(footprint "dpp:PinSocket_1x16_P2.54mm_Vertical"
+(footprint "dpp:PinSocket_1x14_P2.54mm_Vertical"
 	(layer "F.Cu")
 	(uuid "bbb28d96-4aef-5954-903e-c860f7f493d9")
-	(at 193.5100 85.7700 0.0)
-(descr "Through hole straight socket strip, 1x16, 2.54mm pitch, single row (from Kicad 4.0.7), script generated")
-(tags "Through hole socket strip THT 1x16 2.54mm single row")
+	(at 193.5100 85.4900 0.0)
+(descr "Through hole straight socket strip, 1x14, 2.54mm pitch, single row (from Kicad 4.0.7), script generated")
+(tags "Through hole socket strip THT 1x14 2.54mm single row")
 (property "Reference" "J3"
 		(at 0 -2.77 0)
 		(layer "F.Fab")
@@ -594,7 +594,7 @@
 		)
 	)
 (property "Value" "TFT-ILI9488"
-		(at 0 40.87 0)
+		(at 0 35.79 0)
 		(layer "F.Fab")
 		(effects
 			(font
@@ -618,7 +618,7 @@
 (duplicate_pad_numbers_are_jumpers no)
 (fp_line
 		(start -1.33 1.27)
-		(end -1.33 39.43)
+		(end -1.33 34.35)
 		(stroke
 			(width 0.12)
 			(type solid)
@@ -635,8 +635,8 @@
 		(layer "F.SilkS")
 	)
 (fp_line
-		(start -1.33 39.43)
-		(end 1.33 39.43)
+		(start -1.33 34.35)
+		(end 1.33 34.35)
 		(stroke
 			(width 0.12)
 			(type solid)
@@ -663,7 +663,7 @@
 	)
 (fp_line
 		(start 1.33 1.27)
-		(end 1.33 39.43)
+		(end 1.33 34.35)
 		(stroke
 			(width 0.12)
 			(type solid)
@@ -680,7 +680,7 @@
 		(layer "F.CrtYd")
 	)
 (fp_line
-		(start -1.77 39.87)
+		(start -1.77 34.79)
 		(end -1.77 -1.77)
 		(stroke
 			(width 0.05)
@@ -690,7 +690,7 @@
 	)
 (fp_line
 		(start 1.77 -1.77)
-		(end 1.77 39.87)
+		(end 1.77 34.79)
 		(stroke
 			(width 0.05)
 			(type solid)
@@ -698,8 +698,8 @@
 		(layer "F.CrtYd")
 	)
 (fp_line
-		(start 1.77 39.87)
-		(end -1.77 39.87)
+		(start 1.77 34.79)
+		(end -1.77 34.79)
 		(stroke
 			(width 0.05)
 			(type solid)
@@ -716,7 +716,7 @@
 		(layer "F.Fab")
 	)
 (fp_line
-		(start -1.27 39.37)
+		(start -1.27 34.29)
 		(end -1.27 -1.27)
 		(stroke
 			(width 0.1)
@@ -735,7 +735,7 @@
 	)
 (fp_line
 		(start 1.27 -0.635)
-		(end 1.27 39.37)
+		(end 1.27 34.29)
 		(stroke
 			(width 0.1)
 			(type solid)
@@ -743,8 +743,8 @@
 		(layer "F.Fab")
 	)
 (fp_line
-		(start 1.27 39.37)
-		(end -1.27 39.37)
+		(start 1.27 34.29)
+		(end -1.27 34.29)
 		(stroke
 			(width 0.1)
 			(type solid)
@@ -849,21 +849,7 @@
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
-(pad "15" thru_hole circle
-		(at 0 35.56)
-		(size 1.7 1.7)
-		(drill 1)
-		(layers "*.Cu" "*.Mask")
-		(remove_unused_layers no)
-	)
-(pad "16" thru_hole circle
-		(at 0 38.1)
-		(size 1.7 1.7)
-		(drill 1)
-		(layers "*.Cu" "*.Mask")
-		(remove_unused_layers no)
-	)
-(model "${KICAD10_3DMODEL_DIR}/Connector_PinSocket_2.54mm.3dshapes/PinSocket_1x16_P2.54mm_Vertical.step"
+(model "${KICAD10_3DMODEL_DIR}/Connector_PinSocket_2.54mm.3dshapes/PinSocket_1x14_P2.54mm_Vertical.step"
 		(offset
 			(xyz 0 0 0)
 		)
@@ -7627,9 +7613,9 @@
 (gr_text "C1 / C3 UNDER THE BOARD" (at 88.40 104.70 0.0) (layer "Dwgs.User") (uuid "c51d2c43-b862-51a6-9473-95da33267149") (effects (font (size 0.70 0.70) (thickness 0.12)) (justify left top)))
 (gr_text "PIN 1 = USB END" (at 145.00 94.40 0.0) (layer "F.SilkS") (uuid "a8482c1d-c94a-58c4-af91-0b89c4a3ca84") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
 (gr_text "ANTENNA - NO COPPER" (at 174.67 95.10 0.0) (layer "F.SilkS") (uuid "66c1157f-9893-5a92-81c5-078d03f006d5") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
-(gr_text "1" (at 189.31 85.27 0.0) (layer "F.SilkS") (uuid "7893f128-1270-5879-9591-b3303b15bf4e") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top)))
-(gr_text "16" (at 189.11 123.37 0.0) (layer "F.SilkS") (uuid "7912eb18-923d-53b5-9770-460033cf4086") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top)))
-(gr_text "TFT" (at 189.11 103.50 90.0) (layer "F.SilkS") (uuid "6aeb61d4-6612-5858-a4c6-a338971178b7") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top)))
+(gr_text "1" (at 189.31 84.99 0.0) (layer "F.SilkS") (uuid "7893f128-1270-5879-9591-b3303b15bf4e") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top)))
+(gr_text "14" (at 189.11 118.01 0.0) (layer "F.SilkS") (uuid "7912eb18-923d-53b5-9770-460033cf4086") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top)))
+(gr_text "TFT" (at 189.11 103.05 90.0) (layer "F.SilkS") (uuid "6aeb61d4-6612-5858-a4c6-a338971178b7") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top)))
 (gr_text "+12V" (at 135.60 79.90 0.0) (layer "B.SilkS") (uuid "212796e5-2c9f-504f-8b15-0a4382853a2e") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top mirror)))
 (gr_text "GND" (at 135.60 81.90 0.0) (layer "B.SilkS") (uuid "ed4866dd-e2ee-5e83-a38f-d482566c02c4") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top mirror)))
 (gr_text "IN+" (at 116.15 83.84 0.0) (layer "B.SilkS") (uuid "c788fa72-ac8f-5f40-93e1-c048932e0db5") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top mirror)))
@@ -7665,8 +7651,8 @@
 (gr_text "GND" (at 175.15 125.20 0.0) (layer "F.SilkS") (uuid "a2c6daf7-1137-5155-8b6f-a3764f446772") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
 (gr_text "Dashboard++ for ESP32 carrier - CAD layout rev 2 - board 95 x 55 mm" (at 111.50 133.90 0.0) (layer "Dwgs.User") (uuid "7f85e1e1-3a2c-5dfe-9e35-15391cf131a7") (effects (font (size 1.20 1.20) (thickness 0.12)) (justify left top)))
 (gr_text "BUILD NOTES (Dwgs.User - not on the board)" (at 111.50 136.30 0.0) (layer "Dwgs.User") (uuid "ad6d19f5-ff42-5b08-8859-8a0185e015c3") (effects (font (size 1.00 1.00) (thickness 0.12)) (justify left top)))
-(gr_text "TFT 1..16: VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS" (at 111.50 137.90 0.0) (layer "Dwgs.User") (uuid "9e166c3d-850e-5562-8a4b-bbff22d70818") (effects (font (size 1.00 1.00) (thickness 0.12)) (justify left top)))
-(gr_text "TFT cont: T_DINTPEN T_DO SD NC NC NC NC" (at 111.50 139.40 0.0) (layer "Dwgs.User") (uuid "befb854e-00f6-5f89-ba1a-d5ef7f0b19c9") (effects (font (size 1.00 1.00) (thickness 0.12)) (justify left top)))
+(gr_text "TFT 1..14: VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS" (at 111.50 137.90 0.0) (layer "Dwgs.User") (uuid "9e166c3d-850e-5562-8a4b-bbff22d70818") (effects (font (size 1.00 1.00) (thickness 0.12)) (justify left top)))
+(gr_text "TFT cont: T_DIN TPEN T_DO" (at 111.50 139.40 0.0) (layer "Dwgs.User") (uuid "befb854e-00f6-5f89-ba1a-d5ef7f0b19c9") (effects (font (size 1.00 1.00) (thickness 0.12)) (justify left top)))
 (gr_text "ESP near row 1..15 (USB end first): VIN GND 13 12 14 27 26 25" (at 111.50 140.90 0.0) (layer "Dwgs.User") (uuid "b46d39b6-f993-5ace-b9f8-92c81c1b3316") (effects (font (size 1.00 1.00) (thickness 0.12)) (justify left top)))
 (gr_text "  33 32 35 34 39 36 EN" (at 111.50 142.40 0.0) (layer "Dwgs.User") (uuid "61764899-65c8-5e87-aa74-4bab84c0a647") (effects (font (size 1.00 1.00) (thickness 0.12)) (justify left top)))
 (gr_text "ESP far row 16..30 (USB end first): 3V3 GND 15 2 4 16 17 5 18" (at 111.50 143.90 0.0) (layer "Dwgs.User") (uuid "fd9922a5-4272-510c-a97c-02759bbf8f76") (effects (font (size 1.00 1.00) (thickness 0.12)) (justify left top)))

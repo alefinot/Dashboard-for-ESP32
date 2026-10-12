@@ -18,7 +18,7 @@ the silkscreen; what you call each block on your drawing is up to you.
 | Pin 1 of both rows (square pad) | x = 45.91 — that end is the DevKit's **USB end** (west); pin 15 at x = 81.47 |
 | DevKit body hanging underneath | x 36.20→86.20, y 23.49→51.49 (coordinates only — the outline is no longer drawn on the board) |
 | Antenna keep-out (no copper, any layer) | x 73.42→86.80, y 26.79→48.19 (the drawn zone between EN and IO23) |
-| Display socket `J3` | along the **east** edge, pin 1 (VCC) at (92.51, 18.27), socket grows south to y 57.22 |
+| Display socket `J3` | along the **east** edge, pin 1 (VCC) at (92.51, 17.99), pin 14 (T_DO) at (92.51, 51.01); courtyard y 16.72→52.28 |
 | DC-DC module `U4` | underside, 21.0 × 43.0 body, **SMD pads 3.50 × 2.50 with no drill** (the module lies flat, pins soldered onto back-side copper), pad centres x 12.50→33.00 / y 19.39→60.89; `IN+` at (14.25, 20.64) (input pads north, `+` pads west) |
 | 12 V entry `J1` (XT30U-M) | underside, pad pair **centred on the module's centreline x 22.75**: pad 1 `DC_IN` at (20.25, 13.99), pad 2 `GND` at (25.25, 13.99) — 5.00 mm pitch, Ø3.8 pads with Ø2.7 drills. Body/courtyard x 17.15→28.35, y 10.89→17.09, mating face 0.89 mm inside the north edge; 1.55 mm north of the module's courtyard. Polarity silks `+12V` / `GND` (mirrored, bottom side) sit east of it, glyphs x 31.0→34.6 |
 | Bulk cans `C1` / `C3` | underside, as a pair in the middle of the 10 mm west extension: centres (6.00, 29.60) rot 90 and (6.00, 45.40) rot 270, courtyards x 0.50→11.50 standing 2.50 mm apart (13.30 × 11.00 each) and 6.95 mm clear of both west corner holes. Each can's `+` pad (1) faces outward, onto the module pad it belongs to: 5.25 mm in x / 1.31 mm in y from `IN+` for `C1`, 5.25 × 6.59 mm from `OUT+` for `C3`; the two inner pads are both `GND`, 3.00 mm apart. Only rot 90/270 fits — rot 0/180 turns the 13.30 mm courtyard across the 12.25 mm strip and into `U4` |
@@ -40,7 +40,7 @@ the silkscreen; what you call each block on your drawing is up to you.
 | DC-DC step-down module LM2596, 4 pads, **soldered underneath** | `U4` |
 | 5 V output caps by the module | `C3` `C4` |
 | ESP32 DevKit sockets (it hangs under the board) | `J10a` = north row, `J10b` = south row |
-| 4.0" TFT display socket, 16 pins, east edge | `J3` |
+| 4.0" TFT display socket, 14 pins, east edge | `J3` |
 | GNSS / GPS module — six bare pads, module soldered under the board | `J8` |
 | debug / serial pads (TX, RX, GND, 5V) | `J13` |
 | spare GPIO pads (6) | `J15` |
@@ -101,10 +101,13 @@ Silkscreen note on the board says *CHECK SILK* — clones differ, verify against
 | 29 | IO22 | `SPARE_D22` | spare / I2C SCL |
 | 30 | IO23 | `TFT_MOSI` | display data in |
 
-## 4. Display socket `J3` (16 pins, pin 1 = VCC, along the east edge, pin 1 at the north end)
+## 4. Display socket `J3` (14 pins, pin 1 = VCC, along the east edge, pin 1 at the north end)
 
-Pins 9–16 (touch + SD) are on the socket but not wired — the drawing's slot is only
-35 mm long, so the 1×16 socket (40.64 mm body) grows 5.6 mm into the drawn south gap.
+Pins 9–14 (`SDO` + the touch lines) sit on the socket but are not wired - there is no
+MISO in the firmware and touch was removed in 1.3.6. The socket is 1×14 because the
+drawing's block is **"Display header 14 pin"** with a 35.00 mm slot (x 92.01→93.01,
+y 17.00→52.00): a 14-way body is 35.56 mm, so it stands 0.28 mm past each end of the
+drawn slot, centred - pin 1 y 17.99 → pin 14 y 51.01 (33.02 = 13 × 2.54).
 
 | pin | silk | net | | pin | silk | net |
 |---|---|---|---|---|---|---|
@@ -114,8 +117,8 @@ Pins 9–16 (touch + SD) are on the socket but not wired — the drawing's slot 
 | 4 | RST | `TFT_RST` | | 12 | T_DIN | *(open)* |
 | 5 | DC | `TFT_DC` | | 13 | TPEN | *(open)* |
 | 6 | SDI | `TFT_MOSI` | | 14 | T_DO | *(open)* |
-| 7 | SCK | `TFT_SCK` | | 15 | SD | *(open)* |
-| 8 | LED | `TFT_BL` | | 16 | NC | *(open)* |
+| 7 | SCK | `TFT_SCK` | | | | |
+| 8 | LED | `TFT_BL` | | | | |
 
 Touch and SD pads are deliberately left unconnected (no MISO in the firmware, touch removed in 1.3.6).
 
