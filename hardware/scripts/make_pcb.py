@@ -658,7 +658,19 @@ def parts():
                 [(-1.15, -0.85), ((n - 1) * 2.54 + 1.15, -0.85),
                  ((n - 1) * 2.54 + 1.15, 0.85), (-1.15, 0.85), (-1.15, -0.85)])
 
-    P.append(padgroup("J13", "DEBUG", 40.0, 22.0,
+    # J13 (debug TX/RX/GND/5V) sits on the SOUTH row line, immediately west of
+    # J15's D26 pad: pad 4 at x 59.56 is J15's pad 1 (62.10) one 2.54 mm step to
+    # the west, so DEBUG + SPARE read as one 10-pad strip along y 56.50 and one
+    # line of pin names prints under it (TX RX GND 5V D26 SDA SCL D19 D15 GND).
+    # Courtyards 0.24 mm apart - J13 reaches x 60.71, J15 starts at 60.95.  It
+    # used to sit at (40.00, 22.00) in the north spare zone, 46.0 / 42.1 mm of
+    # rats nest from the DevKit pins the console comes in on (J10b pins 13/14 =
+    # IO1/IO2, x 76.39 / 78.93 at y 50.21); here those two nets drop to 25.2 and
+    # 20.4 mm, GND moves 263.0 -> 262.7 mm, and the only cost is V5's span,
+    # 148.0 -> 159.3 mm, because the 5V probe now hangs off the far end of a
+    # net whose real loads are up north - a 5 mm stub on a poured rail.  All
+    # figures from nets-report.md.
+    P.append(padgroup("J13", "DEBUG", 51.94, 56.50,
                       PIN_SILK["J13"], ["DBG_TX", "DBG_RX", "GND", "V5"]))
     P.append(padgroup("J15", "SPARE", 62.10, 56.50,
                       PIN_SILK["J15"], ["SPARE_D26", "SPARE_D21", "SPARE_D22",
@@ -897,8 +909,8 @@ def silks():
                 layer="Dwgs.User", size=0.7)
 
     # dev board rows: pin 1 is VIN, at the dev board's USB end.  The note sits
-    # under the west end of the north row, 0.35 mm east of J13's pads and
-    # 0.30 mm north of OK1's printed designator.
+    # under the west end of the north row, 0.30 mm north of OK1's printed
+    # designator and clear of the C2 / D2 column (courtyard west edge 33.00).
     out += _txt(41.20, 26.00, "PIN 1 = USB END", size=0.8)
     out += _txt(KEEP[0] + 0.8, KEEP[1] + 0.8, "ANTENNA - NO COPPER", size=0.8)
 
@@ -950,7 +962,8 @@ def silks():
 
     # per-pin text where there is room (2.54 mm pitch groups).  J8 / JP1 are
     # pads on the underside, so their labels go on B.SilkS, mirrored.
-    SIDE = {"J13": -1.4, "J15": 1.2}
+    # both 2.54 mm pad groups are labelled on their south side, one text strip
+    SIDE = {"J13": 1.2, "J15": 1.2}
     BSIDE = {"J8": 1.9, "JP1": -2.6}
     for ent in parts():
         ref, x, y = ent[0], ent[2], ent[3]
