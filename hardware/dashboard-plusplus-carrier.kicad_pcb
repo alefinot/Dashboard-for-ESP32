@@ -3623,11 +3623,11 @@
 (footprint "dpp:C_0805_2012Metric"
 	(layer "F.Cu")
 	(uuid "6fd8ffb3-d70f-5898-9d32-e633d97ea043")
-	(at 131.0000 99.0000 0.0)
+	(at 136.2500 90.7000 270.0)
 (descr "Capacitor SMD 0805 (2012 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf, https://docs.google.com/spreadsheets/d/1BsfQQcO9C6DZCsRaXUlFlo91Tg2WpOkGARC1WS5S8t0/edit?usp=sharing)")
 (tags "capacitor")
 (property "Reference" "C2"
-		(at 0 -1.68 0)
+		(at 0 -1.68 270)
 		(layer "F.SilkS")
 		(effects
 			(font
@@ -3637,7 +3637,7 @@
 		)
 	)
 (property "Value" "100n"
-		(at 0 1.68 0)
+		(at 0 1.68 270)
 		(layer "F.Fab")
 		(effects
 			(font
@@ -3647,7 +3647,7 @@
 		)
 	)
 (property "KiLib_Generator" "SMD_2terminal_chip_molded"
-		(at 0 0 0)
+		(at 0 0 270)
 		(layer "F.SilkS")
 		(hide yes)
 		(effects
@@ -3698,13 +3698,13 @@
 		(layer "F.Fab")
 	)
 (pad "1" smd roundrect
-		(net 5 "DC_12") (at -0.95 0)
+		(net 5 "DC_12") (at -0.95 0 270)
 		(size 1 1.45)
 		(layers "F.Cu" "F.Mask" "F.Paste")
 		(roundrect_rratio 0.25)
 	)
 (pad "2" smd roundrect
-		(net 1 "GND") (at 0.95 0)
+		(net 1 "GND") (at 0.95 0 270)
 		(size 1 1.45)
 		(layers "F.Cu" "F.Mask" "F.Paste")
 		(roundrect_rratio 0.25)

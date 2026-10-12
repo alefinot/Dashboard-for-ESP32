@@ -536,14 +536,20 @@ def parts():
               "F.Cu", 0))
     P.append(("R1", R805, 13.30, 25.74, 270.0,
               {"1": N("MOS_G"), "2": N("DC_F")}, "10k", "F.Cu", 0))
-    # The DC_12 parts form the matching column on the east side of Q1, x 35.25
-    # (C2 at the tab's row, D2 the TVS below it, C4 far south at the module's OUT
-    # end - see below).  C2 rot 270: pads (35.25,22.25) DC_12 / (35.25,24.15) GND,
-    # 1.97 mm east of Q1's courtyard and 2.25 mm off the TP row; D2 rot 270 puts
-    # its DC_12 tail north, facing the tab: pads (35.25,27.85) / (35.25,32.15),
-    # 1.45 mm under C2 and 0.70 mm east of Q1.  The HF bypass now sits at the
-    # switching node it decouples instead of 15 mm down the west column.
-    P.append(("C2", C805, 30.0, 31.50, 0.0,
+    # The DC_12 parts form the matching column on the east side of Q1, x 35.25:
+    # C2 in the tab's row, D2 the TVS below it, C4 far south at the module's OUT
+    # end (see below).  C2 rot 270 - courtyard x 34.27..36.23 / y 21.50..24.90,
+    # 1.97 mm east of Q1's courtyard, 1.45 mm above D2's, 2.25 mm clear of the TP
+    # row, 0.93 mm inside the x 37.16 small-parts limit.  Its GND pad (2) sits
+    # north at (35.25,22.25), 1.52 mm off the module's IN- pad (x 29.50..33.00 /
+    # y 19.39..21.89, other face); the DC_12 pad (1) south at (35.25,24.15), 2.47
+    # mm east of Q1's drain tab (x 22.65..32.05 / y 17.80..28.60).  That is the HF
+    # loop this 100 n is meant to short - MOSFET tab to module input - instead of
+    # the detour it took from its old seat at (30.00,31.50), 15 mm from the node
+    # it decouples.  D2 rot 270 runs the same pad order: GND north at (35.25,27.85)
+    # 2.05 mm off the tab, cathode (DC_12) south at (35.25,32.15); courtyard
+    # x 33.00..37.50 / y 26.35..33.65, 0.70 mm east of Q1's.
+    P.append(("C2", C805, 35.25, 23.20, 270.0,
               {"1": N("DC_12"), "2": N("GND")}, "100n", "F.Cu", 0))
     # Input / output bulk: the two 10 x 12.5 mm cans, moved to the BOTTOM
     # face in the 10 mm west extension (plan "carrier stage 3").  Inside the
