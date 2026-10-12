@@ -144,7 +144,10 @@ JP1_BOX = cadbox(34.65, 49.74, 40.66, 53.24)     # 54.34,59.74 .. 60.35,63.24
 MOUNTS = [(3.50, 13.50), (91.50, 13.50), (91.50, 61.50), (3.50, 61.50)]
 MOUNT_DRILL, MOUNT_RING = 3.2, 5.0
 
-# Annotation zones drawn dashed on the TOP view (F.Cu work areas, Dwgs.User)
+# Annotation zones from the CAD drawing (F.Cu work areas).  They used to be
+# dashed rectangles on Dwgs.User; they are kept here as the drawing's record and
+# in PINOUT.md section 1 - nothing but the outline, copper, courtyards and silks
+# is drawn on the board now.
 ZONE_SPARE_N = cadbox(13.74, 0.80, 57.13, 13.33)    # 37.87,10.80 .. 81.26,23.33
 ZONE_SPARE_S = cadbox(13.74, 41.17, 57.13, 53.73)   # 37.87,51.17 .. 81.26,63.73
 ZONE_SMD_MID = cadbox(13.74, 17.89, 57.13, 36.80)   # 37.87,27.89 .. 81.26,46.80
@@ -739,18 +742,6 @@ def _txt(x, y, text, layer="F.SilkS", size=0.8, thick=0.12, rot=0.0,
             % (text, x, y, rot, layer, kf.uid(), eff)]
 
 
-def _dashrect(x0, y0, x1, y1, layer="Dwgs.User"):
-    x0, y0 = _onsheet(x0, y0)
-    x1, y1 = _onsheet(x1, y1)
-    out = []
-    for a, b in [((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)),
-                 ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))]:
-        out.append('(gr_line (start %.3f %.3f) (end %.3f %.3f)'
-                   ' (stroke (width 0.12) (type dash)) (layer "%s")'
-                   ' (uuid "%s"))' % (a[0], a[1], b[0], b[1], layer, kf.uid()))
-    return out
-
-
 def silks():
     """Silkscreen + documentation marks, placed from the CAD geometry.
 
@@ -760,17 +751,12 @@ def silks():
     """
     out = []
 
-    # documentation outlines from the drawing (not printed on the board)
-    out += _dashrect(ESP_BODY[0], ESP_BODY[1], ESP_BODY[2], ESP_BODY[3])
-    out += _dashrect(KEEP[0], KEEP[1], KEEP[2], KEEP[3])
-    out += _dashrect(*LM_BODY)
-    out += _dashrect(*GNSS_ZONE)
-    for ref in JST_ZONES:
-        out += _dashrect(*JST_ZONES[ref][0])
-    for z in (ZONE_SPARE_N, ZONE_SPARE_S, ZONE_SMD_MID, ZONE_SMD_WEST):
-        out += _dashrect(*z)
-    # the drawing's 85 x 55 envelope, kept visible inside the extended outline
-    out += _dashrect(10.0, 10.0, 95.0, 65.0)
+    # No documentation boxes any more: the DevKit body outline, the antenna
+    # keep-out, the module body, the GNSS pad zone, the four JST-PH plug zones,
+    # the spare/debug work zones and the drawn 85 x 55 envelope were all dashed
+    # rectangles on Dwgs.User (13 of them, 52 gr_lines).  Their coordinates are
+    # still listed in PINOUT.md section 1; the board is drawn clean - outline,
+    # copper, courtyards and silks only.
     out += _txt(24.0, 8.9, "DRAWN 85 x 55 ENVELOPE - BOARD EXTENDED 10 mm WEST",
                 layer="Dwgs.User", size=1.0)
     # the two bulk cans live underneath, mid-tail: label them in the west margin
