@@ -139,7 +139,10 @@ JST_ZONES = {
 }
 
 # JP1 (hall +V selector): drawn 6.00 x 3.50 box, silks `JP1` / `DIP SWITCH`.
+# The pads deliberately do NOT sit in that box any more - see parts() for the
+# 5.00 mm shift west (JP1_OFF) away from the hall plug.
 JP1_BOX = cadbox(34.65, 49.74, 40.66, 53.24)     # 54.34,59.74 .. 60.35,63.24
+JP1_OFF = (-5.00, 0.00)
 
 # Mounting holes - the drawing has none; these four sit 3.50 mm inside the four
 # board corners (M3/M4 clearance): the Ø3.2 drill keeps 1.90 mm to the edge and
@@ -457,17 +460,25 @@ def parts():
               [(-1.40, -1.10), (14.10, -1.10), (14.10, 1.10), (-1.40, 1.10),
                (-1.40, -1.10)]))
 
-    # ---- JP1: hall +V selector (5V / sel / 12V) - three bare pads filling the
-    # drawn 6.00 x 3.50 "DIP SWITCH" box, pin 1 (5V) at the west end.
-    jx = JP1_BOX[0] + (JP1_BOX[2] - JP1_BOX[0] - 2 * 2.54) / 2  # 54.805
-    jy = (JP1_BOX[1] + JP1_BOX[3]) / 2                          # 61.49
+    # ---- JP1: hall +V selector (5V / sel / 12V) - three bare pads filling a
+    # 6.00 x 3.50 box, pin 1 (5V) at the west end.  The box is the drawing's
+    # "DIP SWITCH" box shifted 5.00 mm WEST (JP1_OFF) - which is to the RIGHT as
+    # read from the underside, the face these pads are on.  Reason: as drawn, the
+    # box's east edge stood 0.06 mm off J9's courtyard, i.e. the jumper was
+    # flush against the hall plug's shell with nothing to grip.  Moved, it keeps
+    # 5.06 mm to that shell; the courtyard outline moves with the pads.
+    bx0 = JP1_BOX[0] + JP1_OFF[0]                 # 49.34
+    by0, by1 = JP1_BOX[1], JP1_BOX[3]             # y unchanged: 59.74 .. 63.24
+    bx1 = JP1_BOX[2] + JP1_OFF[0]                 # 55.35
+    jx = bx0 + (bx1 - bx0 - 2 * 2.54) / 2         # 49.805
+    jy = (by0 + by1) / 2                          # 61.49
     P.append(("JP1", None, jx, jy, 0.0,
               [(str(i + 1), i * 2.54, 0.0, 1.7, 1.6, 0.0, (N(net), net))
                for i, net in enumerate(["V5", "HALL_VCC", "DC_12"])],
               "JP1_PADS_3", "B.Cu", 0,
-              [(JP1_BOX[0] - jx, -1.75), (JP1_BOX[2] - jx, -1.75),
-               (JP1_BOX[2] - jx, 1.75), (JP1_BOX[0] - jx, 1.75),
-               (JP1_BOX[0] - jx, -1.75)]))
+              [(bx0 - jx, -1.75), (bx1 - jx, -1.75),
+               (bx1 - jx, 1.75), (bx0 - jx, 1.75),
+               (bx0 - jx, -1.75)]))
 
     # ---- mounting holes (the drawing has none; see plan section 6)
     for i, (x, y) in enumerate(MOUNTS, 1):
