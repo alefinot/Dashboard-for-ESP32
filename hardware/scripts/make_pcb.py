@@ -788,25 +788,32 @@ def silks():
                             y + BSIDE[ref], lab, layer="B.SilkS", size=0.8,
                             mirror=True)
 
-    # build documentation (not printed): zones, pin map, test points
-    docs = [("SPARE / DEBUG PADS - see J13 (TX RX GND 5V) and J15", 23.6),
-            ("J13 DEBUG  J15 SPARE (D26 SDA SCL D19 D15 GND)", 25.0),
-            ("TFT 1..16: VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS", 4.0),
-            ("TFT cont: T_DINTPEN T_DO SD NC NC NC NC", 5.0),
-            ("ESP near row 1..15 (USB end first): VIN GND 13 12 14 27 26 25", 7.0),
-            ("  33 32 35 34 39 36 EN", 8.0),
-            ("ESP far row 16..30 (USB end first): 3V3 GND 15 2 4 16 17 5 18", 9.0),
-            ("  19 21 3 1 22 23", 10.0),
-            ("J17 IGN GND COOL GND   J14 TRIP GND EN GND", 12.0),
-            ("J6 LDR GND FUEL GND    J9 +V SIG GND", 13.0),
-            ("JST = right-angle SMD, bodies under the board; pin 1 is at the", 14.0),
-            ("west end of the north pair, east end of the south pair (top view)", 15.0),
-            ("no trip button on the carrier - trip comes in on J14 (pin 1)", 16.0),
-            ("TP1 IGN_SENSE  TP2 HALL  TP3 BAT_SNS  TP4 FUEL_SNS  TP5 GND", 21.0)]
-    for txt, y in docs:
-        out += _txt(10.5, y, txt, layer="Dwgs.User", size=1.0)
+    # build documentation (not printed): zones, pin map, test points.  The block
+    # sits south of the board outline (bottom edge y = 65), never over the pads -
+    # it used to be laid across the north end of the board and got in the way of
+    # the view while working.  Still inside the A4 page, still the same text.
     out += _txt(10.5, 66.4, "Dashboard++ for ESP32 carrier - CAD layout rev 2"
                             " - board 95 x 55 mm", layer="Dwgs.User", size=1.2)
+    out += _txt(10.5, 68.8, "BUILD NOTES (Dwgs.User - not on the board)",
+                layer="Dwgs.User", size=1.0)
+    docs = ["TFT 1..16: VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS",
+            "TFT cont: T_DINTPEN T_DO SD NC NC NC NC",
+            "ESP near row 1..15 (USB end first): VIN GND 13 12 14 27 26 25",
+            "  33 32 35 34 39 36 EN",
+            "ESP far row 16..30 (USB end first): 3V3 GND 15 2 4 16 17 5 18",
+            "  19 21 3 1 22 23",
+            "J17 IGN GND COOL GND   J14 TRIP GND EN GND",
+            "J6 LDR GND FUEL GND    J9 +V SIG GND",
+            "JST = right-angle SMD, bodies under the board; pin 1 is at the",
+            "west end of the north pair, east end of the south pair (top view)",
+            "no trip button on the carrier - trip comes in on J14 (pin 1)",
+            "SPARE / DEBUG PADS - see J13 (TX RX GND 5V) and J15",
+            "J13 DEBUG  J15 SPARE (D26 SDA SCL D19 D15 GND)",
+            "TP1 IGN_SENSE  TP2 HALL  TP3 BAT_SNS  TP4 FUEL_SNS  TP5 GND"]
+    y = 70.4
+    for txt in docs:
+        out += _txt(10.5, y, txt, layer="Dwgs.User", size=1.0)
+        y += 1.5
     return out
 
 
