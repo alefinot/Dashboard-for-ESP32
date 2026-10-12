@@ -235,6 +235,18 @@ BODY = {}
 BOTTOM_SIDE = {"J10a", "J10b", "U4", "J1", "J14", "J17", "J6",
                "J9", "J8", "JP1", "C1", "C3"}
 
+# Of those, the ones we currently store the KiCad way (child geometry mirrored
+# in y, placement angle re-picked so every pad - and therefore every net - stays
+# on the same copper it has today).  Without that mirroring KiCad's 3D viewer
+# draws the part's body mirrored about the part origin, so an underside part's
+# shell ends up beside its own pads instead of on them (a pad row lands a whole
+# row-length away, usually hanging off the board edge).  The four JST-PH shells
+# (J14/J17/J6/J9) are deliberately NOT here: their pad pattern is not symmetric
+# in y, so a mirrored storage would put pad 1 on the opposite end of the shell -
+# i.e. reverse the wire order on those connectors.  That is a wiring decision
+# (hardware/PINOUT.md), not a formatting one, so it waits for the owner.
+BCU_FLIP = {"J10a", "J10b", "J1", "C1", "C3"}
+
 
 # Edge-mounted shells may let their courtyard hang over the outline; the
 # RA JST-PH footprints are 10.2 deep against a 7.00 mm drawn zone.
@@ -596,7 +608,8 @@ def build():
                 return (v, NETS[v - 1])
             return (NETS.index(v) + 1, v)
         netmap = {k: _res(v) for k, v in netmap.items() if v and v != "NC"}
-        out.append(kf.board_footprint(fp_id, (x, y), rot, ref, value, netmap, layer=layer))
+        out.append(kf.board_footprint(fp_id, (x, y), rot, ref, value, netmap,
+                                      layer=layer, bcu_flip=ref in BCU_FLIP))
 
     # --- ADVISORY HINTS ONLY -------------------------------------------------
     # KiCad's own DRC (run at the end of main()) is the single referee for

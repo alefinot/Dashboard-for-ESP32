@@ -177,8 +177,12 @@ BACK_SWAP = [('"F.Cu"', '"B.Cu"'), ('"F.Paste"', '"B.Paste"'),
 
 def _mirror_text(group):
     """Flag a back-side text item as mirrored (KiCad keeps the flag in justify)."""
-    if "(justify" in group:
+    if "justify mirror" in group:
         return group
+    j = group.find("(justify")
+    if j >= 0:                        # extend the existing justify list
+        e = group.index(")", j)
+        return group[:e] + " mirror" + group[e:]
     k = group.find("(effects")
     if k < 0:
         return group
@@ -187,16 +191,68 @@ def _mirror_text(group):
 
 
 def _to_back(group):
-    """Move a front-side child item to its back-side layer.
-
-    A B.Cu footprint keeps the library's local geometry: verified against a
-    KiCad 10 test board + B.Cu gerber (pad 1 of a 4-pin connector placed at
-    (10,10) lands at x 7.0, i.e. origin + local offset, NOT mirrored).  Only
-    the layer names change when a part moves to the underside.
-    """
+    """Move a front-side child item to its back-side layer (layer names only)."""
     for a, b in BACK_SWAP:
         group = group.replace(a, b)
     return group
+
+
+def mirror_y(group):
+    """Mirror one footprint child item in y - how KiCad stores a B.Cu footprint.
+
+    KiCad writes an underside footprint with the library geometry mirrored about
+    the part's origin (the pad/graphics y coordinates change sign, x and the
+    items' own angles stay put, text gets "justify mirror"); the 3D model block
+    is left exactly as the library has it, because the viewer applies the
+    bottom-side mirroring itself.  Proof: every official KiCad demo board that
+    uses the same footprint on both faces stores the B.Cu copy y-negated (8 of 8
+    asymmetric cases in demos/jetson-agx-thor-baseboard, 0 identical), and the
+    GUI-saved B.Cu pads of demos/.../SOT-23-6 read (at -0.954 -1.1 90) where the
+    F.Cu copy reads (at -0.954 1.1 90).
+
+    Storing the library geometry unmirrored instead (what a naive generator does)
+    keeps the copper exactly where the placement math says - so gerbers, DRC and
+    nets all look fine - but the 3D body of the part lands mirrored about the
+    origin: for a row of pads it sits a whole row-length away from its own pads,
+    usually hanging off the board edge.  See flip_rot() for the compensation.
+    """
+    if group.lstrip().startswith("(model"):
+        return group                      # 3D blocks stay as the library wrote them
+    group = re.sub(r"\(at ([-\d.]+) ([-\d.]+)(?: ([-\d.]+))?\)",
+                   lambda m: "(at %s %s%s)" % (m.group(1), -float(m.group(2)),
+                                               " " + m.group(3) if m.group(3) else ""),
+                   group)
+    for tok in ("start", "end", "mid", "center"):
+        group = re.sub(r"\(%s ([-\d.]+) ([-\d.]+)\)" % tok,
+                       lambda m, t=tok: "(%s %s %s)" % (t, m.group(1),
+                                                        -float(m.group(2))), group)
+    return re.sub(r"\(xy ([-\d.]+) ([-\d.]+)\)",
+                  lambda m: "(xy %s %s)" % (m.group(1), -float(m.group(2))), group)
+
+
+def flip_rot(fp_id, rot):
+    """Placement angle that puts the copper back where `rot` had it, once the
+    child geometry is mirrored in y.  Returns None when the part's pad pattern
+    cannot survive that (its pad numbers would end up on other pads, i.e. the
+    nets would move) - that is a real wiring decision, not a formatting one.
+    """
+    import math
+
+    def place(r, mir):
+        th = math.radians(r)
+        c, s = math.cos(th), math.sin(th)
+        out = {}
+        for num, x, y, _, _, _ in pads_of(fp_id):
+            yy = -y if mir else y
+            out[num] = (round(x * c - yy * s, 6), round(x * s + yy * c, 6))
+        return out
+
+    want = place(rot, False)
+    for cand in (rot, (360.0 - rot) % 360.0, (rot + 180.0) % 360.0,
+                 (180.0 - rot) % 360.0):
+        if place(cand, True) == want:
+            return cand
+    return None
 
 
 def pads_of(fp_id):
@@ -242,10 +298,14 @@ def pads_full(fp_id):
 
 
 def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
-                    silk_off=-1.3, fab_off=1.3, ref_to_fab=True):
+                    silk_off=-1.3, fab_off=1.3, ref_to_fab=True, bcu_flip=False):
     """Expand a stock footprint file into a pcbnew (footprint ...) board entry.
 
     netmap: {pad_number: (net_number, net_name)}; pads not in the map stay unbound.
+    bcu_flip: store the underside footprint the way KiCad's GUI does - child
+    geometry mirrored in y, placement angle re-picked so the copper stays exactly
+    where it was (flip_rot).  Without it the 3D body of a bottom-mounted part
+    renders mirrored about the part origin, i.e. off its own pads.
     """
     txt = get_module(fp_id)
     assert txt.startswith("(module") or txt.startswith("(footprint"), txt[:20]
@@ -296,10 +356,17 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
             if '"F.SilkS"' in g or '"B.SilkS"' in g:
                 continue
             g = _to_back(g)
+            if bcu_flip:
+                g = mirror_y(g)
             if g.lstrip().startswith("(property"):
                 g = _mirror_text(g)
             bk.append(g)
         kept = bk
+        if bcu_flip:
+            keep_rot = flip_rot(fp_id, rot)
+            assert keep_rot is not None, \
+                "%s: mirrored storage cannot keep its copper at rot %g" % (ref, rot)
+            rot = keep_rot
 
     x, y = at
     # ship the rewritten copy in the project library: DRC compares the board

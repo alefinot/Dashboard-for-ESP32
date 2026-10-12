@@ -7,7 +7,7 @@
 (descr "Through hole straight socket strip, 1x15, 2.54mm pitch, single row (from Kicad 4.0.7), script generated")
 (tags "Through hole socket strip THT 1x15 2.54mm single row")
 (property "Reference" "REF**"
-		(at 0 -2.77 0)
+		(at 0 2.77 0)
 		(layer "B.Fab")
 		(effects
 			(font
@@ -17,7 +17,7 @@
 		 (justify mirror))
 	)
 (property "Value" ""
-		(at 0 38.33 0)
+		(at 0 -38.33 0)
 		(layer "B.Fab")
 		(effects
 			(font
@@ -29,8 +29,8 @@
 (attr through_hole)
 (duplicate_pad_numbers_are_jumpers no)
 (fp_line
-		(start -1.77 -1.77)
-		(end 1.77 -1.77)
+		(start -1.77 1.77)
+		(end 1.77 1.77)
 		(stroke
 			(width 0.05)
 			(type solid)
@@ -38,8 +38,8 @@
 		(layer "B.CrtYd")
 	)
 (fp_line
-		(start -1.77 37.33)
-		(end -1.77 -1.77)
+		(start -1.77 -37.33)
+		(end -1.77 1.77)
 		(stroke
 			(width 0.05)
 			(type solid)
@@ -47,8 +47,8 @@
 		(layer "B.CrtYd")
 	)
 (fp_line
-		(start 1.77 -1.77)
-		(end 1.77 37.33)
+		(start 1.77 1.77)
+		(end 1.77 -37.33)
 		(stroke
 			(width 0.05)
 			(type solid)
@@ -56,8 +56,8 @@
 		(layer "B.CrtYd")
 	)
 (fp_line
-		(start 1.77 37.33)
-		(end -1.77 37.33)
+		(start 1.77 -37.33)
+		(end -1.77 -37.33)
 		(stroke
 			(width 0.05)
 			(type solid)
@@ -65,8 +65,8 @@
 		(layer "B.CrtYd")
 	)
 (fp_line
-		(start -1.27 -1.27)
-		(end 0.635 -1.27)
+		(start -1.27 1.27)
+		(end 0.635 1.27)
 		(stroke
 			(width 0.1)
 			(type solid)
@@ -74,8 +74,8 @@
 		(layer "B.Fab")
 	)
 (fp_line
-		(start -1.27 36.83)
-		(end -1.27 -1.27)
+		(start -1.27 -36.83)
+		(end -1.27 1.27)
 		(stroke
 			(width 0.1)
 			(type solid)
@@ -83,8 +83,8 @@
 		(layer "B.Fab")
 	)
 (fp_line
-		(start 0.635 -1.27)
-		(end 1.27 -0.635)
+		(start 0.635 1.27)
+		(end 1.27 0.635)
 		(stroke
 			(width 0.1)
 			(type solid)
@@ -92,8 +92,8 @@
 		(layer "B.Fab")
 	)
 (fp_line
-		(start 1.27 -0.635)
-		(end 1.27 36.83)
+		(start 1.27 0.635)
+		(end 1.27 -36.83)
 		(stroke
 			(width 0.1)
 			(type solid)
@@ -101,8 +101,8 @@
 		(layer "B.Fab")
 	)
 (fp_line
-		(start 1.27 36.83)
-		(end -1.27 36.83)
+		(start 1.27 -36.83)
+		(end -1.27 -36.83)
 		(stroke
 			(width 0.1)
 			(type solid)
@@ -110,105 +110,105 @@
 		(layer "B.Fab")
 	)
 (pad "1" thru_hole rect
-		(at 0 0)
+		(at 0 -0.0)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "2" thru_hole circle
-		(at 0 2.54)
+		(at 0 -2.54)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "3" thru_hole circle
-		(at 0 5.08)
+		(at 0 -5.08)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "4" thru_hole circle
-		(at 0 7.62)
+		(at 0 -7.62)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "5" thru_hole circle
-		(at 0 10.16)
+		(at 0 -10.16)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "6" thru_hole circle
-		(at 0 12.7)
+		(at 0 -12.7)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "7" thru_hole circle
-		(at 0 15.24)
+		(at 0 -15.24)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "8" thru_hole circle
-		(at 0 17.78)
+		(at 0 -17.78)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "9" thru_hole circle
-		(at 0 20.32)
+		(at 0 -20.32)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "10" thru_hole circle
-		(at 0 22.86)
+		(at 0 -22.86)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "11" thru_hole circle
-		(at 0 25.4)
+		(at 0 -25.4)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "12" thru_hole circle
-		(at 0 27.94)
+		(at 0 -27.94)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "13" thru_hole circle
-		(at 0 30.48)
+		(at 0 -30.48)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "14" thru_hole circle
-		(at 0 33.02)
+		(at 0 -33.02)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 	)
 (pad "15" thru_hole circle
-		(at 0 35.56)
+		(at 0 -35.56)
 		(size 1.7 1.7)
 		(drill 1)
 		(layers "*.Cu" "*.Mask")
