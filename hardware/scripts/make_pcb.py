@@ -492,21 +492,27 @@ def parts():
               25.85, 23.20, 0.0, {"1": N("MOS_G"), "2": N("DC_12"), "3": N("DC_F")},
               "IRFR9540N", "F.Cu", 0))
     # D1 (gate zener) and R1 (gate pull-down) stand in the 4.4 mm strip west of
-    # that pin column, stacked along it: D1 rot 270 (pads (13.30,17.00) /
-    # (13.30,20.22)), R1 rot 90 (pads (13.55,23.09) / (13.55,24.91)) - 1.37 mm
-    # apart, 1.20 / 1.15 mm west of Q1's courtyard, 2.10 / 1.10 mm from C1's
-    # courtyard on the other face, 9.52 / 5.72 mm from the fuse courtyard.
-    # MOS_G's rats nest drops from 17.8 mm to 12.4 mm.
-    P.append(("D1", "Diode_SMD:D_SOD-123", 13.30, 18.60, 270.0,
+    # that pin column, one above the other, both rot 270 so their centres land on
+    # Q1's own pad rows: D1 at y 20.66 (gate row, pads (13.30,19.01)/(13.30,22.31))
+    # and R1 at y 25.74 (source row, pads (13.30,24.83)/(13.30,26.65)) - 1.05 mm
+    # apart, 1.20 / 1.40 mm west of Q1's courtyard, 1.97 mm (in y) north of the
+    # fuse, 0.65 / 0.85 mm from C1's courtyard on the other face.  Q1's own pad
+    # rows are y 20.66 (gate) / 23.20 (drain + tab) / 25.74 (source), which is what
+    # the two centres are pinned to.  MOS_G's rats nest: 17.8 -> 12.4 -> 11.0 mm.
+    P.append(("D1", "Diode_SMD:D_SOD-123", 13.30, 20.66, 270.0,
               {"1": N("MOS_G"), "2": N("DC_F")}, "BZT52C15V", "F.Cu", 0))
     P.append(("D2", "Diode_SMD:D_SMB",
-              35.25, 29.15, 90.0, {"1": N("DC_12"), "2": N("GND")}, "P6SMB33A",
+              35.25, 30.00, 270.0, {"1": N("DC_12"), "2": N("GND")}, "P6SMB33A",
               "F.Cu", 0))
-    P.append(("R1", R805, 13.55, 24.00, 90.0,
+    P.append(("R1", R805, 13.30, 25.74, 270.0,
               {"1": N("MOS_G"), "2": N("DC_F")}, "10k", "F.Cu", 0))
-    # C2 moves up beside Q1's copper tab in D2's row: 1.92 mm off the tab, 1.65 mm
-    # east of the fuse, 1.30 mm west of D2 - the HF bypass now sits at the
-    # switching node it decouples instead of 15 mm down the column.
+    # The DC_12 parts form the matching column on the east side of Q1, x 35.25
+    # (C2 at the tab's row, D2 the TVS below it, C4 far south at the module's OUT
+    # end - see below).  C2 rot 270: pads (35.25,22.25) DC_12 / (35.25,24.15) GND,
+    # 1.97 mm east of Q1's courtyard and 2.25 mm off the TP row; D2 rot 270 puts
+    # its DC_12 tail north, facing the tab: pads (35.25,27.85) / (35.25,32.15),
+    # 1.45 mm under C2 and 0.70 mm east of Q1.  The HF bypass now sits at the
+    # switching node it decouples instead of 15 mm down the west column.
     P.append(("C2", C805, 30.0, 31.50, 0.0,
               {"1": N("DC_12"), "2": N("GND")}, "100n", "F.Cu", 0))
     # Input / output bulk: the two 10 x 12.5 mm cans, moved to the BOTTOM
@@ -528,7 +534,14 @@ def parts():
               {"1": N("DC_12"), "2": N("GND")}, "220u/50V", "B.Cu", 0))
     P.append(("C3", "Capacitor_SMD:CP_Elec_10x12.5", 6.0, 45.4, 270.0,
               {"1": N("V5"), "2": N("GND")}, "470u/35V", "B.Cu", 0))
-    P.append(("C4", C805, 34.5, 38.0, 0.0,
+    # C4 (the 5 V HF bypass) finishes the x 35.25 column at the OTHER end of the
+    # current path: it sits beside the module's OUT pads instead of stranded in
+    # the middle of the west zone.  rot 90 puts its V5 pad north at (35.25,57.95),
+    # level with OUT+ (y 58.39..60.89) and 1.02 mm east of U4's courtyard (which
+    # it may cross - opposite faces).  8.80 mm from the fuse courtyard, which is
+    # now its nearest F.Cu neighbour.  V5's rats nest drops 1.7 mm and the column
+    # reads C2 / D2 / C4 top to bottom.
+    P.append(("C4", C805, 35.25, 57.00, 90.0,
               {"1": N("V5"), "2": N("GND")}, "100n", "F.Cu", 0))
     # C13 moves east into the mid small-parts zone: it now sits at the head of the
     # 3V3 pin (J10b pad 1, 6.0 mm away) instead of 25 mm away in the west column,
@@ -542,16 +555,20 @@ def parts():
     # (43.38 x 18.91, under the dev board that hangs below).
     # ---- signal conditioning, F.Cu, in the drawn mid small-parts zone
     # (43.38 x 18.91, under the dev board that hangs below).  Optocouplers are
-    # the SMD twin of the PC817 (Everlight EL357N, 4-pin SOP, 2.54 mm leads).
+    # the SMD twin of the PC817 (Everlight EL357N, 4-pin SOP, 2.54 mm leads);
+    # both move onto the RX/CX column grid below (x 44.10 and 57.60) so the whole
+    # mid band reads as one lattice: an opto standing over its own column.
     OPTO = "Package_SO:SO-4_4.4x3.9mm_P2.54mm"
-    P.append(("OK1", OPTO, 43.0, 30.5, 0.0,
+    P.append(("OK1", OPTO, 44.10, 30.50, 0.0,
               {"1": N("IGN_LED"), "2": N("GND"),
                "3": N("IGN_SENSE"), "4": N("V3V3")}, "EL357N-B", "F.Cu", 0))
-    P.append(("OK2", OPTO, 57.0, 30.5, 0.0,
+    P.append(("OK2", OPTO, 57.60, 30.50, 0.0,
               {"1": N("HALL_LED"), "2": N("GND"),
                "3": N("HALL_OUT"), "4": N("V3V3")}, "EL357N-B", "F.Cu", 0))
 
     RX = [39.6, 44.1, 48.6, 53.1, 57.6, 62.1]
+    # the grid's 7th column, x 66.60, is used by C11 and D3 (and starts the spare
+    # header); the test-point row below sits on columns 1..5 of the same lattice
     res = [("R2", "47k", "DC_12", "BAT_DIV", 35.5), ("R3", "10k", "BAT_DIV", "GND", 35.5),
            ("R4", "1k", "BAT_DIV", "BAT_SNS", 35.5), ("R5", "220R", "V3V3", "FUEL_SNS", 35.5),
            ("R6", "10k", "V3V3", "COOL_SNS", 35.5), ("R7", "10k", "V3V3", "LDR_SNS", 35.5),
@@ -568,10 +585,11 @@ def parts():
     for i, (ref, net) in enumerate(caps):
         P.append((ref, C805, CX[i], 41.5, 0.0, {"1": N(net), "2": N("GND")},
                   "100n", "F.Cu", 0))
-    # TRIP_BTN filter, right behind the north-edge J14 shell (which hangs below)
-    P.append(("C11", C805, 66.0, 21.6, 0.0, {"1": N("TRIP_BTN"), "2": N("GND")},
+    # TRIP_BTN filter, right behind the north-edge J14 shell (which hangs below),
+    # on the grid's 7th column - same x as D3 under it.
+    P.append(("C11", C805, 66.60, 21.60, 0.0, {"1": N("TRIP_BTN"), "2": N("GND")},
               "100n", "F.Cu", 0))
-    P.append(("D3", "Diode_SMD:D_SMB", 67.0, 30.5, 0.0,
+    P.append(("D3", "Diode_SMD:D_SMB", 66.60, 30.50, 0.0,
               {"1": N("HALL"), "2": N("GND")}, "P6SMB6V2A", "F.Cu", 0))
 
     # ---- debug / spare: solder pads, not headers (the drawing's two
@@ -587,17 +605,18 @@ def parts():
 
     P.append(padgroup("J13", "DEBUG", 40.0, 22.0,
                       PIN_SILK["J13"], ["DBG_TX", "DBG_RX", "GND", "V5"]))
-    P.append(padgroup("J15", "SPARE", 62.5, 56.5,
+    P.append(padgroup("J15", "SPARE", 62.10, 56.50,
                       PIN_SILK["J15"], ["SPARE_D26", "SPARE_D21", "SPARE_D22",
                                         "SPARE_D19", "SPARE_D15", "GND"]))
 
-    # ---- test points (north spare zone, below the GNSS header).  The row starts
-    # at the spare zone's west edge (x 37.87); the fuse clip no longer reaches
-    # this corner now that it stands vertical over the module.
+    # ---- test points (north spare zone, below the GNSS header).  The row sits on
+    # the mid band's column lattice - x 39.60 / 44.10 / 48.60 / 53.10 / 57.60, the
+    # same five columns that carry R2-R6 / R8-R12 / C5-C9 - so a probe point lines
+    # up with the part it probes instead of drifting off on a 2.5 mm pitch.
     for i, (ref, net) in enumerate([("TP1", "IGN_SENSE"), ("TP2", "HALL"),
                                     ("TP3", "BAT_SNS"), ("TP4", "FUEL_SNS"),
                                     ("TP5", "GND")]):
-        P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm", 38.6 + i * 2.5, 19.5,
+        P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm", 39.6 + i * 4.5, 19.5,
                   0.0, {"1": N(net)}, net, "F.Cu", 0))
 
     return P
