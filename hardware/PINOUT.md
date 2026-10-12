@@ -27,7 +27,8 @@ the silkscreen; what you call each block on your drawing is up to you.
 | Parts on the **underside** (`B.Cu`) | `J10a` `J10b` (DevKit sockets), `U4` (DC-DC module), `J1` (XT30), `J17` `J14` `J6` `J9` (JST-PH), `J8` (GNSS pads), `JP1` (pads), `C1` `C3` (bulk electrolytics) |
 | JST-PH plugs (right-angle SMD, shells under the board) | north pair `J14` (67.00, 15.00) · `J17` (81.40, 15.00), rot 0 — south pair `J9` (67.00, 60.00) · `J6` (81.40, 60.00), rot 180. Each shell sits flush at the board edge with its mating face **outward**, so the plug and its cable leave the board at that edge; the four solder tails fold inward and the mounting ears keep 0.40 mm to the edge. Pin 1 is the west end of the north pair, the east end of the south pair (top view). Each named pin gets its own mirrored `B.SilkS` word on the shell's own side, centred on that pin's column and standing just inside the pad row: `TRIP` 64.00 / `EN` 68.00 and `IGN` 78.40 / `COOL` 82.40 at y 21.1→21.9 (north pair), `LDR` 84.40 / `FUEL` 80.40 and `HALL` 67.00 at y 53.0→53.8 (south pair) — 0.5 mm clear of the courtyard, 1.5 mm off the solder tails, 2.0 mm clear of the DevKit rows and outside the DevKit body footprint; `C11` (top side) stands over `TRIP`/`EN`, opposite faces, so they still read from below |
 | GNSS / jumper pads | `J8` six bare pads, no drill, west pad at (41.35, 13.50), pitch 2.54 — `JP1` three bare pads at (54.805 / 57.345 / 59.885, 61.49) |
-| Test-point row | `TP1`…`TP5` Ø1.5 pads at y 19.50, x 38.60 + 2.50 each (shifted east to clear the fuse clip) |
+| Test-point row | `TP1`…`TP5` Ø1.5 pads at y 19.50, x 38.60 + 2.50 each (the row starts at the drawn spare zone's west edge, x 37.87) |
+| Fuse holder `F1` (5 × 20 clip, THT, **top side**) | stands **north–south, dead centre on the DC-DC module**: rot 90, origin (its pad-1 corner) at (20.25, 48.64), courtyard x 18.85→26.65 / y 29.39→50.89, centre (22.75, 40.14) — `U4`'s centre to 0.01 mm. Pad pair `DC_IN` at the **south** end (y 48.64), `DC_F` at the **north** end (y 31.64), both columns at x 20.25 / 25.25; Ø1.3 drills, 2.30 × 2.30 pads, 17.00 mm apart. The fuse and its glass tube sit above the module while the module lies underneath — opposite faces, which is what makes centring possible. Nearest clearances: 0.54 mm to `Q1` (which stands between the clip and `J1`), 1.65 mm to `C2`, 7.50 mm to the module's OUT pads, 12.30 mm from `J1`'s courtyard, 7.35 mm from `C3`'s |
 | Annotation zones (CAD reference, **not drawn on the board**) | spare/debug north y 10.80→23.33 and south y 51.17→63.73 (both x 37.87→81.26); small-parts mid x 37.87→81.26 / y 27.89→46.80 and west column x 10.99→37.16 / y 10.80→63.72. They were 13 dashed `Dwgs.User` rectangles (DevKit body, antenna keep-out, module body, GNSS pad zone, four JST-PH plug zones, four work zones, the 85 × 55 envelope) — removed; the antenna keep-out still stands as a real KiCad keep-out zone on `F.Cu`/`B.Cu`, and the other limits are enforced by part placement, not by drawing |
 
 ## 2. Which block is which
@@ -144,6 +145,12 @@ are **SO-4 (4.4 × 3.9)**, `Q1` is **TO-263 / D²PAK**, `F1` is a **lateral 5 ×
 holder** (THT). Everything except `F1` and `J3` is surface-mount; the `R`/`C`/`D`/`OK`/`Q1`
 group sits on the top face, the plugs, the module and the two bulk cans `C1`/`C3`
 underneath.
+
+The 12 V chain reads top to bottom on the board: `J1` (XT30, underside, north edge) →
+`F1` standing vertical over the module's middle → `Q1` just north of the clip, its pin
+column above the module's `IN+` pad → `D1` / `R1` in the 4.4 mm strip west of that column,
+`C2` east of it in `D2`'s row. `C13` (the 3V3 bypass) sits in the mid zone at the head of
+the 3V3 pin rather than in the west column.
 
 | label | value | between | purpose |
 |---|---|---|---|

@@ -465,21 +465,49 @@ def parts():
     # All SMD now (no through-hole except the fuse holder itself).
     R805 = "Resistor_SMD:R_0805_2012Metric"
     C805 = "Capacitor_SMD:C_0805_2012Metric"
+    # F1 stands with its 5x20 axis north-south, dead centre on the DC-DC module.
+    # This clip's *origin* is the pad-1 corner (pad 1 at local (0,0), pad 2 at
+    # (17,0), the second column at local y +5.0), and rot 90 turns pad 2 to the
+    # north end, facing the module's IN row.  Origin (20.25, 48.64) puts the
+    # courtyard on (18.85,29.39)..(26.65,50.89) - centre (22.75, 40.14), which is
+    # U4's centre to 0.01 mm, so the clip straddles the module: fuse and glass
+    # tube on the display face, module underneath, opposite faces, which is what
+    # makes centring over the module possible at all.  Nearest clearances: 7.86 mm
+    # to the drawn west zone's west edge, 12.30 mm to J1's courtyard, 7.50 mm to
+    # the module's OUT pads, 7.35 mm to C3's courtyard (other face), 11.22 mm to
+    # the mid small-parts zone, 15.20 mm to the H4 ring.
+    # DC_IN now arrives at the SOUTH end (y 48.64: the long 12 V run down from the
+    # XT30 - that net's rats nest grows from 9.6 mm to 39.7 mm, the one real cost
+    # of centring the clip, and free to drop to an inner layer at the THT pad) and
+    # leaves DC_F at the NORTH end (y 31.64): 9.14 mm from IN+, 4.20 mm from Q1's
+    # source pad, and DC_F's rats nest halves (39.3 mm -> 19.4 mm).
     P.append(("F1", "Fuse:Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal",
-              17.6, 17.7, 0.0, {"1": N("DC_IN"), "2": N("DC_F")}, "5x20 2A",
+              20.25, 48.64, 90.0, {"1": N("DC_IN"), "2": N("DC_F")}, "5x20 2A",
               "F.Cu", 0))
+    # Q1 steps north of the fuse: its 16.65 x 11.30 courtyard (the D2PAK courtyard
+    # carries the copper tab) lands in the band y 17.55..28.85, 0.54 mm clear of
+    # F1, with its pin column at x 18.20 right above the module's IN+ pad
+    # (12.50..16.00, 19.39..21.89) on the far face.  0.70 mm west of D2.
     P.append(("Q1", "Package_TO_SOT_SMD:TO-263-3_TabPin2",
-              25.85, 30.65, 0.0, {"1": N("MOS_G"), "2": N("DC_12"), "3": N("DC_F")},
+              25.85, 23.20, 0.0, {"1": N("MOS_G"), "2": N("DC_12"), "3": N("DC_F")},
               "IRFR9540N", "F.Cu", 0))
-    P.append(("D1", "Diode_SMD:D_SOD-123",
-              31.0, 41.5, 0.0, {"1": N("MOS_G"), "2": N("DC_F")}, "BZT52C15V",
-              "F.Cu", 0))
+    # D1 (gate zener) and R1 (gate pull-down) stand in the 4.4 mm strip west of
+    # that pin column, stacked along it: D1 rot 270 (pads (13.30,17.00) /
+    # (13.30,20.22)), R1 rot 90 (pads (13.55,23.09) / (13.55,24.91)) - 1.37 mm
+    # apart, 1.20 / 1.15 mm west of Q1's courtyard, 2.10 / 1.10 mm from C1's
+    # courtyard on the other face, 9.52 / 5.72 mm from the fuse courtyard.
+    # MOS_G's rats nest drops from 17.8 mm to 12.4 mm.
+    P.append(("D1", "Diode_SMD:D_SOD-123", 13.30, 18.60, 270.0,
+              {"1": N("MOS_G"), "2": N("DC_F")}, "BZT52C15V", "F.Cu", 0))
     P.append(("D2", "Diode_SMD:D_SMB",
               35.25, 29.15, 90.0, {"1": N("DC_12"), "2": N("GND")}, "P6SMB33A",
               "F.Cu", 0))
-    P.append(("R1", R805, 25.0, 38.0, 0.0,
+    P.append(("R1", R805, 13.55, 24.00, 90.0,
               {"1": N("MOS_G"), "2": N("DC_F")}, "10k", "F.Cu", 0))
-    P.append(("C2", C805, 30.0, 38.0, 0.0,
+    # C2 moves up beside Q1's copper tab in D2's row: 1.92 mm off the tab, 1.65 mm
+    # east of the fuse, 1.30 mm west of D2 - the HF bypass now sits at the
+    # switching node it decouples instead of 15 mm down the column.
+    P.append(("C2", C805, 30.0, 31.50, 0.0,
               {"1": N("DC_12"), "2": N("GND")}, "100n", "F.Cu", 0))
     # Input / output bulk: the two 10 x 12.5 mm cans, moved to the BOTTOM
     # face in the 10 mm west extension (plan "carrier stage 3").  Inside the
@@ -502,7 +530,12 @@ def parts():
               {"1": N("V5"), "2": N("GND")}, "470u/35V", "B.Cu", 0))
     P.append(("C4", C805, 34.5, 38.0, 0.0,
               {"1": N("V5"), "2": N("GND")}, "100n", "F.Cu", 0))
-    P.append(("C13", C805, 26.5, 41.5, 0.0,
+    # C13 moves east into the mid small-parts zone: it now sits at the head of the
+    # 3V3 pin (J10b pad 1, 6.0 mm away) instead of 25 mm away in the west column,
+    # which the vertical fuse courtyard owns.  1.04 mm south of C7, 2.95 mm north
+    # of the DevKit row (opposite face), inside the drawn mid zone; V3V3's rats
+    # nest drops from 62.2 mm to 40.1 mm.
+    P.append(("C13", C805, 48.60, 44.50, 0.0,
               {"1": N("V3V3"), "2": N("GND")}, "100n", "F.Cu", 0))
 
     # ---- signal conditioning, F.Cu, in the drawn mid small-parts zone
@@ -558,8 +591,9 @@ def parts():
                       PIN_SILK["J15"], ["SPARE_D26", "SPARE_D21", "SPARE_D22",
                                         "SPARE_D19", "SPARE_D15", "GND"]))
 
-    # ---- test points (north spare zone, below the GNSS header).  The row is
-    # pushed east far enough to clear the 5x20 fuse clip's courtyard (F1).
+    # ---- test points (north spare zone, below the GNSS header).  The row starts
+    # at the spare zone's west edge (x 37.87); the fuse clip no longer reaches
+    # this corner now that it stands vertical over the module.
     for i, (ref, net) in enumerate([("TP1", "IGN_SENSE"), ("TP2", "HALL"),
                                     ("TP3", "BAT_SNS"), ("TP4", "FUEL_SNS"),
                                     ("TP5", "GND")]):
