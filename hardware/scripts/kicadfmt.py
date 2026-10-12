@@ -464,8 +464,10 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
     """Build a footprint from scratch.
 
     pads: list of (number, x, y, w, h, drill, net_or_None)  -- rect/round pads.
-    outline: list of (x, y) for a Fab/Silk polygon (courtyard is +0.25mm box of
-    the outline when given, otherwise computed from the pads).
+    outline: list of (x, y) for a Fab/Silk polygon.  The courtyard falls back to
+    the outline's bounding box (or the pads' when there is no outline) unless
+    courtyard_box spells one out; pass a box with a margin around the body, as
+    the DC-DC module does (+0.25 mm), or courtyard=False for a bare pad field.
     """
     x0, y0 = at
     fabl = "B.Fab" if layer == "B.Cu" else "F.Fab"

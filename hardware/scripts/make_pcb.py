@@ -242,6 +242,9 @@ def box_of(ent):
     """Absolute courtyard bounding box of a part entry (None if unknown)."""
     ref, fp_id, x, y, rot = ent[0], ent[1], ent[2], ent[3], ent[4]
     if fp_id is None:
+        # Custom part: ent[9] is the drawn body outline.  U4's real courtyard sits
+        # 0.25 mm outside that box, so this hint box is 0.25 mm optimistic on that
+        # part only - KiCad's DRC is the referee, not this number.
         pts = [_rot(pt, rot) for pt in ent[9]]
     else:
         c = kf.courtyard(fp_id)
@@ -566,7 +569,8 @@ def parts():
     # Input / output bulk: the two 10 x 12.5 mm cans, moved to the BOTTOM
     # face in the 10 mm west extension (plan "carrier stage 3").  Inside the
     # drawn 85 x 55 envelope there is no B.Cu room for a can near the power
-    # section at all (U4 fills x 12.25..33.25, J1 fills y <= 17.09), and on
+    # section at all (U4 fills x 12.25..33.25 body, 12.00..33.50 once its
+    # courtyard is counted, J1 fills y <= 17.09), and on
     # F.Cu they stand 12.5 mm proud of the display side.  Under the board they
     # cost nothing: that face already carries 17 mm of module and a 10 mm
     # XT30.  They now stand together as a pair mid-tail - centres (6.00, 29.60)
@@ -577,7 +581,8 @@ def parts():
     # puts + south, 5.25 x 6.59 mm from OUT+ (y 58.39..60.89), with the In2.Cu
     # V5 plane right there.  The two inner pads are both GND, 3.00 mm apart, so
     # one copper bridge can dress both cans.  Only rot 90/270 fits: rot 0/180
-    # turns the 13.3 mm courtyard across the 12.25 mm strip and into U4.
+    # turns the 13.3 mm courtyard across the 12.00 mm strip (courtyard to
+    # courtyard) and into U4.
     P.append(("C1", "Capacitor_SMD:CP_Elec_10x12.5", 6.0, 29.6, 90.0,
               {"1": N("DC_12"), "2": N("GND")}, "220u/50V", "B.Cu", 0))
     P.append(("C3", "Capacitor_SMD:CP_Elec_10x12.5", 6.0, 45.4, 270.0,
@@ -749,10 +754,23 @@ def build():
         pads += pads_abs(ent)
 
         if fp_id is None:                      # custom footprint (pads pre-resolved)
+            ol = ent[9]
+            # U4 used to carry a 0.4 mm CrtYd tick at the IN row, which left DRC
+            # policing no keepout around the module at all - a part could sit on
+            # top of its 21 x 43 body and nothing would complain.  Give it the
+            # real courtyard: the drawn body outline plus the 0.25 mm margin.
+            # Verified on the regenerated board - still 0 violations - and the
+            # rule is genuinely live: widening the west edge by 1.25 mm lights up
+            # courtyards_overlap against C1 / C3 on the same face.  KiCad only
+            # compares footprints on the SAME side, which is what keeps F1 (F.Cu)
+            # straddling the module legal, and Q1 / C2 / D2 / C4 beside it.
+            # Same-face (B.Cu) clearances with the margin: 0.50 mm to C1 / C3,
+            # 1.30 mm to J1's shell, 3.11 mm to the south edge.
+            cbox = ((min(p[0] for p in ol) - 0.25, min(p[1] for p in ol) - 0.25,
+                     max(p[0] for p in ol) + 0.25, max(p[1] for p in ol) + 0.25)
+                    if ref == "U4" and ol else None)
             out.append(kf.custom_footprint(ref, value, _onsheet(x, y), rot, netmap,
-                                           layer=layer, outline=ent[9],
-                                           courtyard_box=(None if ref != "U4"
-                                                          else (-0.2, -13.2, 0.2, -12.8))))
+                                           layer=layer, outline=ol, courtyard_box=cbox))
             continue
         def _res(v):
             if isinstance(v, tuple):
