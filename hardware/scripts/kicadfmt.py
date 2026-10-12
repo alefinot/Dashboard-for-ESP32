@@ -298,14 +298,19 @@ def pads_full(fp_id):
 
 
 def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
-                    silk_off=-1.3, fab_off=1.3, ref_to_fab=True, bcu_flip=False):
+                    silk_off=-1.3, fab_off=1.3, ref_to_fab=True, bcu_flip=False,
+                    bcu_keep_pads=True):
     """Expand a stock footprint file into a pcbnew (footprint ...) board entry.
 
     netmap: {pad_number: (net_number, net_name)}; pads not in the map stay unbound.
     bcu_flip: store the underside footprint the way KiCad's GUI does - child
-    geometry mirrored in y, placement angle re-picked so the copper stays exactly
-    where it was (flip_rot).  Without it the 3D body of a bottom-mounted part
-    renders mirrored about the part origin, i.e. off its own pads.
+    geometry mirrored in y (flip_rot).  Without it the 3D body of a bottom-mounted
+    part renders mirrored about the part origin, i.e. off its own pads, and an
+    edge-mounted shell mates towards the board instead of off its edge.
+    bcu_keep_pads: with bcu_flip, also re-pick the placement angle so the copper
+    lands exactly where the unmirrored placement had it.  Only possible for parts
+    whose pattern survives a 180-degree turn; False mirrors in place and lets the
+    footprint's own pattern decide which side faces the board edge.
     """
     txt = get_module(fp_id)
     assert txt.startswith("(module") or txt.startswith("(footprint"), txt[:20]
@@ -362,7 +367,7 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
                 g = _mirror_text(g)
             bk.append(g)
         kept = bk
-        if bcu_flip:
+        if bcu_flip and bcu_keep_pads:
             keep_rot = flip_rot(fp_id, rot)
             assert keep_rot is not None, \
                 "%s: mirrored storage cannot keep its copper at rot %g" % (ref, rot)

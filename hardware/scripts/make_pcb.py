@@ -235,17 +235,23 @@ BODY = {}
 BOTTOM_SIDE = {"J10a", "J10b", "U4", "J1", "J14", "J17", "J6",
                "J9", "J8", "JP1", "C1", "C3"}
 
-# Of those, the ones we currently store the KiCad way (child geometry mirrored
-# in y, placement angle re-picked so every pad - and therefore every net - stays
-# on the same copper it has today).  Without that mirroring KiCad's 3D viewer
-# draws the part's body mirrored about the part origin, so an underside part's
-# shell ends up beside its own pads instead of on them (a pad row lands a whole
-# row-length away, usually hanging off the board edge).  The four JST-PH shells
-# (J14/J17/J6/J9) are deliberately NOT here: their pad pattern is not symmetric
-# in y, so a mirrored storage would put pad 1 on the opposite end of the shell -
-# i.e. reverse the wire order on those connectors.  That is a wiring decision
-# (hardware/PINOUT.md), not a formatting one, so it waits for the owner.
-BCU_FLIP = {"J10a", "J10b", "J1", "C1", "C3"}
+# Of those, the ones stored the KiCad way (child geometry mirrored in y).  Without
+# that mirroring KiCad's 3D viewer draws the part's body mirrored about the part
+# origin: an underside part's shell lands beside its own pads instead of on them
+# (a pad row ends up a whole row-length away), and an edge-mounted shell mates
+# towards the middle of the board so no cable can reach it.
+#   - J10a / J10b / J1 / C1 / C3 are also placed at the angle that puts every pad
+#     - and with it every net - back on exactly the copper it sits on today.
+#   - The four JST-PH shells are mirrored in place, no compensation, on purpose:
+#     their solder tails sit 4.60 mm on one side of the origin and their mounting
+#     ears 4.60 mm on the other, so mirroring swaps which group faces the board
+#     edge.  That swap is the point - mirrored, the shells mate off the board edge
+#     (what PINOUT.md calls "bodies hang outside the outline") instead of into the
+#     middle of the board.  Their origins do not move, the ears keep the 0.40 mm
+#     edge gap the tails had, and pin 1 stays at the west end of the north pair /
+#     east end of the south pair, so no net changes ends.
+BCU_FLIP = {"J10a", "J10b", "J1", "C1", "C3", "J17", "J14", "J6", "J9"}
+BCU_KEEP_PADS = BCU_FLIP - {"J17", "J14", "J6", "J9"}
 
 
 # Edge-mounted shells may let their courtyard hang over the outline; the
@@ -358,12 +364,15 @@ def parts():
     # Refs follow the drawing's first label of each zone; the second designator
     # is printed in the silks (README/PINOUT list both).
     # Right-angle SMD shells (S..-PH-SM4-TB: everything soldered, no drill),
-    # solder tails 0.40 mm from the board edge, bodies hanging below B.Cu.
+    # mirrored (B.Cu) so they mate off the board edge: mounting ears 0.40 mm from
+    # the edge, solder tails folded inward, shells hanging below B.Cu.
     # Their 13.2 courtyards cannot both fit the two 12.01 zones, so each pair
     # is shifted 1.2 mm apart from the zone centres.
     PH4 = "Connector_JST:JST_PH_S4B-PH-SM4-TB_1x04-1MP_P2.00mm_Horizontal"
     PH3 = "Connector_JST:JST_PH_S3B-PH-SM4-TB_1x03-1MP_P2.00mm_Horizontal"
-    GAP = 0.40                                  # pad tail -> board edge
+    GAP = 0.40                                  # footprint feature -> board edge
+    # tails and mounting ears both sit 4.60 mm from the origin, on opposite sides;
+    # mirrored (B.Cu) it is the ears that face the edge and the tails fold inward
     NY = BOARD_Y0 + 4.60 + GAP                  # north origin: pads reach 10.40
     SY = BOARD_Y1 - 4.60 - GAP                  # south origin: pads reach 64.60
     for ref, fp, val, nm, x, y, rot in [
@@ -609,7 +618,8 @@ def build():
             return (NETS.index(v) + 1, v)
         netmap = {k: _res(v) for k, v in netmap.items() if v and v != "NC"}
         out.append(kf.board_footprint(fp_id, (x, y), rot, ref, value, netmap,
-                                      layer=layer, bcu_flip=ref in BCU_FLIP))
+                                      layer=layer, bcu_flip=ref in BCU_FLIP,
+                                      bcu_keep_pads=ref in BCU_KEEP_PADS))
 
     # --- ADVISORY HINTS ONLY -------------------------------------------------
     # KiCad's own DRC (run at the end of main()) is the single referee for
