@@ -532,24 +532,36 @@ def parts():
     P.append(("D1", "Diode_SMD:D_SOD-123", 13.30, 20.66, 270.0,
               {"1": N("MOS_G"), "2": N("DC_F")}, "BZT52C15V", "F.Cu", 0))
     P.append(("D2", "Diode_SMD:D_SMB",
-              35.25, 30.00, 270.0, {"1": N("DC_12"), "2": N("GND")}, "P6SMB33A",
+              35.25, 30.00, 90.0, {"1": N("DC_12"), "2": N("GND")}, "P6SMB33A",
               "F.Cu", 0))
     P.append(("R1", R805, 13.30, 25.74, 270.0,
               {"1": N("MOS_G"), "2": N("DC_F")}, "10k", "F.Cu", 0))
     # The DC_12 parts form the matching column on the east side of Q1, x 35.25:
     # C2 in the tab's row, D2 the TVS below it, C4 far south at the module's OUT
-    # end (see below).  C2 rot 270 - courtyard x 34.27..36.23 / y 21.50..24.90,
-    # 1.97 mm east of Q1's courtyard, 1.45 mm above D2's, 2.25 mm clear of the TP
-    # row, 0.93 mm inside the x 37.16 small-parts limit.  Its GND pad (2) sits
-    # north at (35.25,22.25), 1.52 mm off the module's IN- pad (x 29.50..33.00 /
-    # y 19.39..21.89, other face); the DC_12 pad (1) south at (35.25,24.15), 2.47
-    # mm east of Q1's drain tab (x 22.65..32.05 / y 17.80..28.60).  That is the HF
-    # loop this 100 n is meant to short - MOSFET tab to module input - instead of
-    # the detour it took from its old seat at (30.00,31.50), 15 mm from the node
-    # it decouples.  D2 rot 270 runs the same pad order: GND north at (35.25,27.85)
-    # 2.05 mm off the tab, cathode (DC_12) south at (35.25,32.15); courtyard
-    # x 33.00..37.50 / y 26.35..33.65, 0.70 mm east of Q1's.
-    P.append(("C2", C805, 35.25, 23.20, 270.0,
+    # end (see below).  Both rot 90, which puts their GND pads north, facing the
+    # module's input-GND pad (31.25,20.64, other face).
+    # C2 - courtyard x 34.27..36.23 / y 21.50..24.90, measured against the real
+    # CrtYd graphics: 1.97 mm west to Q1, 1.45 mm south to D2, 2.62 mm east to
+    # J13 (3.81 mm to TP1's pad - test points carry no courtyard).  GND (pad 2)
+    # north at (35.25,22.25), 1.75 mm off that module pad; DC_12 (pad 1) south at
+    # (35.25,24.15), 2.70 mm east of Q1's drain tab (x 22.65..32.05 / y
+    # 17.80..28.60).  That is the HF loop this 100 n is meant to short - MOSFET
+    # tab to the module's input pair - rather than the detour from its old seat at
+    # (30.00,31.50), 15 mm from the node it decouples.
+    # D2 - courtyard x 33.00..37.50 / y 26.35..33.65, 0.70 mm east of Q1's.  Anode
+    # (pad 2, GND) north at (35.25,27.85): 1.95 mm off the tab, 4.91 mm off that
+    # module pad.  Cathode (pad 1, DC_12) south at (35.25,32.15), 3.09 mm off the
+    # tab.  rot 270 would bring the cathode 1.14 mm nearer the tab but throw the
+    # anode 4.26 mm further from the switcher's return; the rail side is already a
+    # fat copper node (tab + module IN+), the return side is not, so the 4.26 mm
+    # is the one worth buying.  It shows in the rats nest: DC_12's MST 80.8 mm and
+    # GND's 263.0 mm, against 84.1 / 267.1 with C2 still in the old west seat.
+    # Every number above comes from nets-report.md, the pad coordinates in
+    # drc-report.txt and the CrtYd graphics in the board file - KiCad's own
+    # transforms.  A hand-rolled rotation model is not trustworthy: in KiCad's
+    # Y-down frame a guessed sign on rot 90/270 silently swaps pad 1 and pad 2,
+    # and these courtyards are an fp_rect (0805/SMB), not four fp_lines.
+    P.append(("C2", C805, 35.25, 23.20, 90.0,
               {"1": N("DC_12"), "2": N("GND")}, "100n", "F.Cu", 0))
     # Input / output bulk: the two 10 x 12.5 mm cans, moved to the BOTTOM
     # face in the 10 mm west extension (plan "carrier stage 3").  Inside the
@@ -572,11 +584,13 @@ def parts():
               {"1": N("V5"), "2": N("GND")}, "470u/35V", "B.Cu", 0))
     # C4 (the 5 V HF bypass) finishes the x 35.25 column at the OTHER end of the
     # current path: it sits beside the module's OUT pads instead of stranded in
-    # the middle of the west zone.  rot 90 puts its V5 pad north at (35.25,57.95),
-    # level with OUT+ (y 58.39..60.89) and 1.02 mm east of U4's courtyard (which
-    # it may cross - opposite faces).  8.80 mm from the fuse courtyard, which is
-    # now its nearest F.Cu neighbour.  V5's rats nest drops 1.7 mm and the column
-    # reads C2 / D2 / C4 top to bottom.
+    # the middle of the west zone.  rot 90 puts its V5 pad south at (35.25,57.95),
+    # 1.75 mm from the module's OUT- pad (31.25,59.64, other face); OUT+ sits 17 mm
+    # west of that pad, so V5 reaches C4 through the copper pour rather than a
+    # short stub - the pair of output pins is too far apart for one 0805 to bridge.
+    # GND (pad 2) north at (35.25,56.05).  Nearest courtyards: J10b 8.58 mm, the
+    # fuse 8.80 mm.  V5's rats nest drops 1.7 mm and the column reads
+    # C2 / D2 / C4 top to bottom.
     P.append(("C4", C805, 35.25, 57.00, 90.0,
               {"1": N("V5"), "2": N("GND")}, "100n", "F.Cu", 0))
     # C13 moves east into the mid small-parts zone: it now sits at the head of the

@@ -3270,11 +3270,11 @@
 (footprint "dpp:D_SMB"
 	(layer "F.Cu")
 	(uuid "64beb576-f1b1-5ff0-b266-95a9f150420f")
-	(at 136.2500 97.5000 270.0)
+	(at 136.2500 97.5000 90.0)
 (descr "Diode SMB (DO-214AA)")
 (tags "Diode SMB (DO-214AA)")
 (property "Reference" "D2"
-		(at 0 -3 270)
+		(at 0 -3 90)
 		(layer "F.SilkS")
 		(uuid "e2e65c2f-d9a2-59d6-b036-863a5a6a1cb5")
 		(effects
@@ -3285,7 +3285,7 @@
 		)
 	)
 (property "Value" "P6SMB33A"
-		(at 0 3.1 270)
+		(at 0 3.1 90)
 		(layer "F.Fab")
 		(uuid "6643a130-7578-5d97-9fc7-a303efbe823c")
 		(effects
@@ -3296,7 +3296,7 @@
 		)
 	)
 (property "Datasheet" ""
-		(at 0 0 270)
+		(at 0 0 90)
 		(unlocked yes)
 		(layer "F.Fab")
 		(hide yes)
@@ -3309,7 +3309,7 @@
 		)
 	)
 (property "Description" ""
-		(at 0 0 270)
+		(at 0 0 90)
 		(unlocked yes)
 		(layer "F.Fab")
 		(hide yes)
@@ -3494,14 +3494,14 @@
 		(uuid "cc2ac931-0b22-57b9-89c8-42e8bc29884d")
 	)
 (pad "1" smd roundrect
-		(net 5 "DC_12") (at -2.15 0 270)
+		(net 5 "DC_12") (at -2.15 0 90)
 		(size 2.5 2.3)
 		(layers "F.Cu" "F.Mask" "F.Paste")
 		(roundrect_rratio 0.1086956522)
 		(uuid "e59ca4be-591d-5769-9b32-4250ada78cf9")
 	)
 (pad "2" smd roundrect
-		(net 1 "GND") (at 2.15 0 270)
+		(net 1 "GND") (at 2.15 0 90)
 		(size 2.5 2.3)
 		(layers "F.Cu" "F.Mask" "F.Paste")
 		(roundrect_rratio 0.1086956522)
@@ -3623,11 +3623,11 @@
 (footprint "dpp:C_0805_2012Metric"
 	(layer "F.Cu")
 	(uuid "6fd8ffb3-d70f-5898-9d32-e633d97ea043")
-	(at 136.2500 90.7000 270.0)
+	(at 136.2500 90.7000 90.0)
 (descr "Capacitor SMD 0805 (2012 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf, https://docs.google.com/spreadsheets/d/1BsfQQcO9C6DZCsRaXUlFlo91Tg2WpOkGARC1WS5S8t0/edit?usp=sharing)")
 (tags "capacitor")
 (property "Reference" "C2"
-		(at 0 -1.68 270)
+		(at 0 -1.68 90)
 		(layer "F.SilkS")
 		(effects
 			(font
@@ -3637,7 +3637,7 @@
 		)
 	)
 (property "Value" "100n"
-		(at 0 1.68 270)
+		(at 0 1.68 90)
 		(layer "F.Fab")
 		(effects
 			(font
@@ -3647,7 +3647,7 @@
 		)
 	)
 (property "KiLib_Generator" "SMD_2terminal_chip_molded"
-		(at 0 0 270)
+		(at 0 0 90)
 		(layer "F.SilkS")
 		(hide yes)
 		(effects
@@ -3698,13 +3698,13 @@
 		(layer "F.Fab")
 	)
 (pad "1" smd roundrect
-		(net 5 "DC_12") (at -0.95 0 270)
+		(net 5 "DC_12") (at -0.95 0 90)
 		(size 1 1.45)
 		(layers "F.Cu" "F.Mask" "F.Paste")
 		(roundrect_rratio 0.25)
 	)
 (pad "2" smd roundrect
-		(net 1 "GND") (at 0.95 0 270)
+		(net 1 "GND") (at 0.95 0 90)
 		(size 1 1.45)
 		(layers "F.Cu" "F.Mask" "F.Paste")
 		(roundrect_rratio 0.25)
