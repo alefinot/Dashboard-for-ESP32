@@ -787,12 +787,26 @@ def silks():
                       ("OUT+", outx + 1.2, outy + 1.6), ("OUT-", outx + 18.2, outy + 1.6)]:
         out += _txt(x, y, lab, layer="B.SilkS", size=0.9, mirror=True)
 
-    # JST-PH shells: one label per two-circuit zone (2.00 mm pitch is too fine
-    # for per-pin text); the pin order is in the README / Dwgs.User pin map.
-    # Printed on the display side; the shells themselves hang under the board.
-    for lab, cx, y in [("TRIP  EN", 67.0, 17.4), ("IGN  COOL", 81.4, 17.4),
-                       ("LDR  FUEL", 81.4, 58.0), ("HALL", 67.0, 59.8)]:
-        out += _txt(cx - 0.35 * len(lab), y, lab, size=0.8)
+    # JST-PH shells hang under the board, so every pin name is printed on the
+    # shell's own side - B.SilkS, mirrored, one word per named pin, centred on
+    # that pin's column and set just inside the pad row (B.SilkS anchor is the
+    # text's RIGHT edge).  Pads reach y 19.60 (north pair) and y 55.40 (south
+    # pair); the 10.2 mm-deep courtyards stop at y 20.60 / y 54.40; the DevKit
+    # rows run y 23.96..25.66 (J10a) and y 49.35..51.06 (J10b) and the DevKit
+    # body hanging underneath spans y 23.49..51.49 - so both text bands sit
+    # clear of plug, body, courtyard and copper.  C11 (the TRIP filter) is on the
+    # TOP side above the TRIP/EN words: opposite faces, so the silks still read
+    # from below.  Columns: J14 TRIP 64.00 / EN 68.00, J17 IGN_12 78.40 /
+    # COOL_SNS 82.40, J6 LDR_SNS 84.40 / FUEL_SNS 80.40, J9 HALL_SIG 67.00.
+    # Widths measured from the exported PDF at size 0.8 (KiCad stroke font).
+    W8 = {"TRIP": 2.59, "EN": 1.56, "IGN": 2.02, "COOL": 3.12,
+          "LDR": 2.25, "FUEL": 2.89, "HALL": 2.82}
+    for lab, cx, y in [("TRIP", 64.00, 21.00), ("EN", 68.00, 21.00),
+                       ("IGN", 78.40, 21.00), ("COOL", 82.40, 21.00),
+                       ("LDR", 84.40, 52.90), ("FUEL", 80.40, 52.90),
+                       ("HALL", 67.00, 52.90)]:
+        out += _txt(cx + W8[lab] / 2.0, y, lab, layer="B.SilkS", size=0.8,
+                    mirror=True)
 
     # GNSS pads sit under the board, so their label is mirrored silks too
     out += _txt(57.6 + 1.4, 12.9, "GNSS", layer="B.SilkS", size=0.8,
