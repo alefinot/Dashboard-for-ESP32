@@ -8,7 +8,7 @@
 (tags "SO SO")
 (property "Reference" "REF**"
 		(at 0 -2.9 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
 				(size 1 1)

@@ -8,7 +8,7 @@
 (tags "fuse clip open")
 (property "Reference" "REF**"
 		(at 8.5 -2 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		
 		(effects
 			(font

@@ -8,7 +8,7 @@
 (tags "SOD-123")
 (property "Reference" "REF**"
 		(at 0 -2 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		
 		(effects
 			(font

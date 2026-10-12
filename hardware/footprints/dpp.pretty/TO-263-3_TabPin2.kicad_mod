@@ -8,7 +8,7 @@
 (tags "D2PAK DDPAK TO-263 D2PAK-3 TO-263-3 SOT-404")
 (property "Reference" "REF**"
 		(at 0 -6.65 0)
-		(layer "F.Fab")
+		(layer "F.SilkS")
 		(effects
 			(font
 				(size 1 1)
