@@ -366,10 +366,12 @@ def parts():
     # Drawn 21 x 43 body, `in +`/`-` at the north end, `out +`/`-` at the south,
     # `+` on the west side -> IN pair north, OUT pair south, `+` pads west.
     hx, hy = LM["span_x"] / 2, LM["span_y"] / 2
-    pads = [("1", -hx, -hy, 3.5, 2.5, 1.0, (N("DC_12"), "DC_12")),      # IN +
-            ("2", hx, -hy, 3.5, 2.5, 1.0, (N("GND"), "GND")),           # IN -
-            ("3", -hx, hy, 3.5, 2.5, 1.0, (N("V5"), "V5")),             # OUT +
-            ("4", hx, hy, 3.5, 2.5, 1.0, (N("GND"), "GND")),            # OUT -
+    # pads carry no drill - the module lies flat on the underside with its pins
+    # soldered straight onto back-side copper, so they emit as SMD rects
+    pads = [("1", -hx, -hy, 3.5, 2.5, 0.0, (N("DC_12"), "DC_12")),      # IN +
+            ("2", hx, -hy, 3.5, 2.5, 0.0, (N("GND"), "GND")),           # IN -
+            ("3", -hx, hy, 3.5, 2.5, 0.0, (N("V5"), "V5")),             # OUT +
+            ("4", hx, hy, 3.5, 2.5, 0.0, (N("GND"), "GND")),            # OUT -
             ]
     bx0, by0, bx1, by1 = LM_BODY
     cx, cy = (bx0 + bx1) / 2, (by0 + by1) / 2
@@ -378,9 +380,13 @@ def parts():
     P.append(("U4", None, cx, cy, 0.0, pads, "DPP_DCDC_MODULE", "B.Cu", 0, outl))
     LM["x"], LM["y"] = cx, cy
 
-    # ---- 12 V entry: XT30 on the BOTTOM face, in the drawn 9.99 x 5.01 zone
+    # ---- 12 V entry: XT30 on the BOTTOM face, pad pair centred on the DC-DC
+    # module's centreline x 22.75 (pad 1 at 20.25, pad 2 at 25.25), shell face
+    # 0.89 mm inside the north edge.  It used to sit 5.5 mm west, where the pad
+    # pair centred on the module's IN-pair centreline (17.00) rather than on the
+    # module itself - and it fell outside the drawn 9.99 x 5.01 zone anyway.
     P.append(("J1", "Connector_AMASS:AMASS_XT30U-M_1x02_P5.0mm_Vertical",
-              14.75, 13.99, 0.0, {"1": N("DC_IN"), "2": N("GND")}, "XT30U-M",
+              20.25, 13.99, 0.0, {"1": N("DC_IN"), "2": N("GND")}, "XT30U-M",
               "B.Cu", 0))
 
     # ---- JST-PH shells, one per drawn 12.01 x 7.00 zone, two circuits each.
@@ -780,9 +786,12 @@ def silks():
     out += _txt(TFT["x"] - 4.4, TFT["y_end"] - 0.5, "16", size=0.9)
     out += _txt(TFT["x"] - 4.4, 36.0, "TFT", size=0.9, rot=90.0)
 
-    # 12 V entry polarity, next to the XT30 (B.Cu part -> mirrored silks)
-    out += _txt(26.2, 12.4, "+12V", layer="B.SilkS", size=0.9, mirror=True)
-    out += _txt(25.6, 14.4, "GND", layer="B.SilkS", size=0.9, mirror=True)
+    # 12 V entry polarity, east of the XT30 (B.Cu part -> mirrored silks, so the
+    # anchor is the text's RIGHT edge).  Right-aligned at x 34.60: glyphs land at
+    # x 31.0..34.6, clear of the shifted body (courtyard east edge 28.35, pad 2
+    # edge 27.05) and of the module's "IN-" label (x 28.25..31.15, y 14.35..15.55)
+    out += _txt(34.60, 12.4, "+12V", layer="B.SilkS", size=0.9, mirror=True)
+    out += _txt(34.60, 14.4, "GND", layer="B.SilkS", size=0.9, mirror=True)
 
     # DC-DC module (under the board): labels outside its 21 x 43 outline
     inx, iny = LM["x"] - LM["span_x"] / 2, LM["y"] - LM["span_y"] / 2
