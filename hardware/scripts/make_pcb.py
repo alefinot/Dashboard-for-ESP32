@@ -676,14 +676,26 @@ def parts():
                       PIN_SILK["J15"], ["SPARE_D26", "SPARE_D21", "SPARE_D22",
                                         "SPARE_D19", "SPARE_D15", "GND"]))
 
-    # ---- test points (north spare zone, below the GNSS header).  The row sits on
-    # the mid band's column lattice - x 39.60 / 44.10 / 48.60 / 53.10 / 57.60, the
-    # same five columns that carry R2-R6 / R8-R12 / C5-C9 - so a probe point lines
-    # up with the part it probes instead of drifting off on a 2.5 mm pitch.
+    # ---- test points.  The row stands on the XT30's own pad line: y 13.99 is
+    # J1's pad row, so the 12 V entry and the five probe points read as one row
+    # across the north of the board (it used to sit at y 19.50, one lattice row
+    # lower, with 5.5 mm of slack between them).  The column lattice is untouched
+    # - x 39.60 / 44.10 / 48.60 / 53.10 / 57.60, the same five columns that carry
+    # R2-R6 / R8-R12 / C5-C9 - so a probe still lines up with the part it probes,
+    # and the pads land over the GNSS group (J8, soldered on the far face, its
+    # own pads y 12.65..14.35) without touching its courtyard (opposite faces).
+    # Two other readings of "align to the XT30" were probed and rejected by DRC:
+    # centred on the connector's centreline (x 13.75..31.75 at y 16.30) puts TP2
+    # against J1's plated through-hole - shorting_items plus a solder-mask
+    # bridge, 8 items; pushed flush to the north edge (y 11.25) the TP designators
+    # run off the board (silk_edge_clearance, 5 items).  Here: 0 violations.
+    # The five nets they hang on also get shorter, not longer (MST from
+    # nets-report.md): IGN_SENSE 50.6 -> 49.5, HALL 43.4 -> 42.3, BAT_SNS
+    # 59.3 -> 58.2, FUEL_SNS 84.3 -> 83.8, GND 262.7 -> 262.2 mm.
     for i, (ref, net) in enumerate([("TP1", "IGN_SENSE"), ("TP2", "HALL"),
                                     ("TP3", "BAT_SNS"), ("TP4", "FUEL_SNS"),
                                     ("TP5", "GND")]):
-        P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm", 39.6 + i * 4.5, 19.5,
+        P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm", 39.6 + i * 4.5, 13.99,
                   0.0, {"1": N(net)}, net, "F.Cu", 0))
 
     return P
