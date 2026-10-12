@@ -36,6 +36,28 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
 BOARD_X0, BOARD_Y0 = 0.0, 10.0           # board outline corners
 BOARD_X1, BOARD_Y1 = 95.0, 65.0          # 95.0 x 55.0 mm
 
+# ------------------------------------------------------- sheet placement ----
+# KiCad 10 pins the printed sheet to (0,0) of the board coordinate system, so a
+# board drawn at x 0..95 / y 10..65 lands in the corner of the A4 landscape page
+# (297 x 210 mm) instead of the middle of it.  PAGE_DX / PAGE_DY shift what is
+# WRITTEN TO THE FILE so the outline is dead centre on that page:
+#   outline -> x 101.0..196.0, y 77.5..132.5   (page centre is 148.5, 105.0)
+#   margins -> 91 mm left/right, 67.5 mm top/bottom, inside the drawing border
+#              (the border the plotter draws sits at x 10..287, y 10..200)
+# Design coordinates stay in the old frame - the tables in this file,
+# cad/*.geo.json and every number in PINOUT.md still read the outline as
+# BOARD_X0..BOARD_X1 x BOARD_Y0..BOARD_Y1.  The offset is applied only by the
+# emitters (through _onsheet), so the advisory hints, the internal checks and
+# the footprint library keep their familiar numbers.  Gerbers and drills DO move
+# with the drawing: the KiCad datum is the coordinate origin, which now sits
+# 101 mm west / 67.5 mm north of the board's north-west corner.
+PAGE_DX, PAGE_DY = 101.0, 67.5
+
+
+def _onsheet(x, y):
+    """Design-frame (x, y) -> position on the A4 sheet (PAGE_DX/PAGE_DY shift)."""
+    return x + PAGE_DX, y + PAGE_DY
+
 # ---------------------------------------------------------------- CAD frame --
 # Every position below comes from the CAD drawing
 # (hardware/screenshots/Dashboard++ PCB with dimensions.pdf), extracted as
@@ -589,9 +611,10 @@ def build():
                  ((BOARD_X1, BOARD_Y0), (BOARD_X1, BOARD_Y1)),
                  ((BOARD_X1, BOARD_Y1), (BOARD_X0, BOARD_Y1)),
                  ((BOARD_X0, BOARD_Y1), (BOARD_X0, BOARD_Y0))]:
+        (ax, ay), (bx, by) = _onsheet(*a), _onsheet(*b)
         out.append('(gr_line (start %.3f %.3f) (end %.3f %.3f) (stroke (width 0.1) (type solid))'
                    ' (layer "Edge.Cuts") (uuid "%s"))'
-                   % (a[0], a[1], b[0], b[1], kf.uid()))
+                   % (ax, ay, bx, by, kf.uid()))
 
     boxes = []
     holes = []
@@ -605,7 +628,7 @@ def build():
         pads += pads_abs(ent)
 
         if fp_id is None:                      # custom footprint (pads pre-resolved)
-            out.append(kf.custom_footprint(ref, value, (x, y), rot, netmap,
+            out.append(kf.custom_footprint(ref, value, _onsheet(x, y), rot, netmap,
                                            layer=layer, outline=ent[9],
                                            courtyard_box=(None if ref != "U4"
                                                           else (-0.2, -13.2, 0.2, -12.8))))
@@ -617,7 +640,7 @@ def build():
                 return (v, NETS[v - 1])
             return (NETS.index(v) + 1, v)
         netmap = {k: _res(v) for k, v in netmap.items() if v and v != "NC"}
-        out.append(kf.board_footprint(fp_id, (x, y), rot, ref, value, netmap,
+        out.append(kf.board_footprint(fp_id, _onsheet(x, y), rot, ref, value, netmap,
                                       layer=layer, bcu_flip=ref in BCU_FLIP,
                                       bcu_keep_pads=ref in BCU_KEEP_PADS))
 
@@ -670,7 +693,8 @@ def build():
     keep = [(kx0, ky0), (kx1, ky0), (kx1, ky1), (kx0, ky1), (kx0, ky0)]
 
     def poly(pts):
-        return "(polygon (pts %s))" % " ".join("(xy %.2f %.2f)" % q for q in pts)
+        return "(polygon (pts %s))" % " ".join("(xy %.2f %.2f)" % _onsheet(*q)
+                                               for q in pts)
 
     for lay in ("F.Cu", "B.Cu"):
         out.append('(zone (net 0) (net_name "") (layer "%s") (uuid "%s") (hatch edge 0.5)'
@@ -698,6 +722,7 @@ def build():
 def _txt(x, y, text, layer="F.SilkS", size=0.8, thick=0.12, rot=0.0,
          mirror=False):
     # anchor = top-left corner of the text (KiCad centres fields by default)
+    x, y = _onsheet(x, y)
     eff = '(effects (font (size %.2f %.2f) (thickness %.2f)) (justify left top%s))' % (
         size, size, thick, " mirror" if mirror else "")
     return ['(gr_text "%s" (at %.2f %.2f %.1f) (layer "%s") (uuid "%s") %s)'
@@ -705,6 +730,8 @@ def _txt(x, y, text, layer="F.SilkS", size=0.8, thick=0.12, rot=0.0,
 
 
 def _dashrect(x0, y0, x1, y1, layer="Dwgs.User"):
+    x0, y0 = _onsheet(x0, y0)
+    x1, y1 = _onsheet(x1, y1)
     out = []
     for a, b in [((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)),
                  ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))]:

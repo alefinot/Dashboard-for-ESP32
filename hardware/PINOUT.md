@@ -11,8 +11,9 @@ the silkscreen; what you call each block on your drawing is up to you.
 
 | Item | Value |
 |---|---|
-| Board outline | **95.0 × 55.0 mm** — KiCad coords x 0→95, y 10→65. The AutoCAD drawing's envelope is 85.0 × 55.0 and sits at x 10→95; the extra 10 mm is a tail at the **west** end, added so the bulk cans fit on the underside (dashed `Dwgs.User` rectangle shows the drawn envelope inside the outline) |
+| Board outline | **95.0 × 55.0 mm** — design-frame coords x 0→95, y 10→65 (the file is written shifted; see the *Sheet placement* row below). The AutoCAD drawing's envelope is 85.0 × 55.0 and sits at x 10→95; the extra 10 mm is a tail at the **west** end, added so the bulk cans fit on the underside (dashed `Dwgs.User` rectangle shows the drawn envelope inside the outline) |
 | View used everywhere | top view: x grows to the right, y grows **down**. The AutoCAD drawing is mirrored onto this frame: `x = 95 − u`, `y = 10 + v` (scale 3.7368 pt/mm) — antenna end east, as built |
+| Sheet placement | KiCad 10 pins the printed sheet to board coordinate (0,0), so `make_pcb.py` adds `PAGE_DX`/`PAGE_DY` = **101.0 / 67.5 mm** to everything it emits. The outline then sits dead centre on the A4 landscape page (297 × 210 mm): x 101→196, y 77.5→132.5, page centre (148.5, 105.0), margins 91 mm left/right and 67.5 mm top/bottom inside the drawing border (x 10→287, y 10→200). Every number in this sheet stays in the **design frame** — add 101.0 / 67.5 to read it out of KiCad's status bar. Gerbers and drills move with the drawing, and a DXF underlay has to carry the same offset to line up |
 | ESP32 DevKit header rows | north row y = 24.805 (`J10a`), south row y = 50.205 (`J10b`) — 25.40 mm apart (real DevKit V1 pitch), 15 pins each, pitch 2.54 |
 | Pin 1 of both rows (square pad) | x = 45.91 — that end is the DevKit's **USB end** (west); pin 15 at x = 81.47 |
 | DevKit body hanging underneath | x 36.20→86.20, y 23.49→51.49 (dashed outline on `Dwgs.User`) |
@@ -193,4 +194,9 @@ notes the script prints are hints only - they are approximations, never the refe
 
 All coordinates come from `hardware/cad/Dashboard++ PCB with dimensions.geo.json`
 (`hardware/scripts/extract_cad.py`), mirrored with `x = 95 − u`, `y = 10 + v`.
+Those design-frame numbers are what the tables in `make_pcb.py`, this sheet and the
+geo.json use; the emitters (`_txt`, `_dashrect`, the outline, the footprints, the
+zone polygons) push them through `_onsheet()` by `PAGE_DX`/`PAGE_DY` at the moment
+they are written, so the internal hints and the footprint library keep the small
+familiar numbers while the sheet gets a centred drawing.
 The plan is `Implementation plans/PCB-REARRANGEMENT-FROM-CAD-2026-10-10.md` (local only).
