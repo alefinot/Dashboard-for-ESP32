@@ -20,8 +20,8 @@ the silkscreen; what you call each block on your drawing is up to you.
 | Antenna keep-out (no copper, any layer) | x 73.42→86.80, y 26.79→48.19 (the drawn zone between EN and IO23) |
 | Display socket `J3` | along the **east** edge, pin 1 (VCC) at (92.51, 18.27), socket grows south to y 57.22 |
 | DC-DC module `U4` | underside, 21.0 × 43.0 body, pads x 12.50→33.00 / y 19.39→60.89; `IN+` at (14.25, 20.64) (input pads north) |
-| Bulk cans `C1` / `C3` | underside, in the 10 mm west extension: centres (6.00, 24.50) rot 270 and (6.00, 55.50) rot 90, courtyards x 0.50→11.50. Each can's `+` pad faces the module, 5.25 mm pad-edge to pad-edge from `IN+` / `OUT+` |
-| Mounting holes (NPTH, no pads) | Ø3.2 drill, Ø5.0 copper keep-out: H1 (91.50, 13.50) · H2 (91.50, 61.50) · H3 (44.00, 62.00) · H4 (36.00, 13.00) |
+| Bulk cans `C1` / `C3` | underside, as a pair in the middle of the 10 mm west extension: centres (6.00, 29.60) rot 90 and (6.00, 45.40) rot 270, courtyards x 0.50→11.50 standing 2.50 mm apart (13.30 × 11.00 each) and 6.95 mm clear of both west corner holes. Each can's `+` pad (1) faces outward, onto the module pad it belongs to: 5.25 mm in x / 1.31 mm in y from `IN+` for `C1`, 5.25 × 6.59 mm from `OUT+` for `C3`; the two inner pads are both `GND`, 3.00 mm apart. Only rot 90/270 fits — rot 0/180 turns the 13.30 mm courtyard across the 12.25 mm strip and into `U4` |
+| Mounting holes (NPTH, no pads) | Ø3.2 drill, Ø5.0 copper keep-out, **3.50 mm inside each of the four board corners**: H1 (3.50, 13.50) · H2 (91.50, 13.50) · H3 (91.50, 61.50) · H4 (3.50, 61.50) — ring 1.00 mm, drill 1.90 mm from the outline; the west pair sits in the tail, north/south of the cans |
 | Layer stackup (4) | `F.Cu` signals + small parts · `In1.Cu` solid GND · `In2.Cu` +12 V / +5 V rails (pours added when routing) · `B.Cu` connectors, module, DevKit rows |
 | Parts on the **underside** (`B.Cu`) | `J10a` `J10b` (DevKit sockets), `U4` (DC-DC module), `J1` (XT30), `J17` `J14` `J6` `J9` (JST-PH), `J8` (GNSS pads), `JP1` (pads), `C1` `C3` (bulk electrolytics) |
 | JST-PH plugs (right-angle SMD, shells under the board) | north pair `J14` (67.00, 15.00) · `J17` (81.40, 15.00), rot 0 — south pair `J9` (67.00, 60.00) · `J6` (81.40, 60.00), rot 180. Each shell sits flush at the board edge with its mating face **outward**, so the plug and its cable leave the board at that edge; the four solder tails fold inward and the mounting ears keep 0.40 mm to the edge. Pin 1 is the west end of the north pair, the east end of the south pair (top view) |
@@ -147,9 +147,9 @@ underneath.
 | `D1` | BZT52C15V (SOD-123) | `MOS_G` `DC_F` | gate zener |
 | `R1` | 10 k | `MOS_G` `DC_F` | gate pull-down |
 | `D2` | P6SMB33A (SMB) | `DC_12` `GND` | load-dump TVS |
-| `C1` | 220 µ/50 V (can 10 × 12.5, underside at (6.00, 24.50)) | `DC_12` `GND` | input bulk |
+| `C1` | 220 µ/50 V (can 10 × 12.5, underside at (6.00, 29.60) rot 90) | `DC_12` `GND` | input bulk |
 | `C2` | 100 n | `DC_12` `GND` | input HF |
-| `C3` | 470 µ/35 V (can 10 × 12.5, underside at (6.00, 55.50)) | `V5` `GND` | 5 V bulk |
+| `C3` | 470 µ/35 V (can 10 × 12.5, underside at (6.00, 45.40) rot 270) | `V5` `GND` | 5 V bulk |
 | `C4` | 100 n | `V5` `GND` | 5 V HF |
 | `R2` | 47 k | `DC_12` `BAT_DIV` | battery divider, top |
 | `R3` | 10 k | `BAT_DIV` `GND` | battery divider, bottom |

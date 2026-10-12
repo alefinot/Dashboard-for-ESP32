@@ -39,6 +39,9 @@ def parse(path):
         i = j
         fx, fy, frot = [float(v) for v in re.search(
             r'\t\(at ([-\d.]+) ([-\d.]+) ([-\d.]+)\)', blk).groups()]
+        # the file is written shifted by PAGE_DX/PAGE_DY so the drawing sits
+        # centred on the A4 sheet; this report speaks the design frame
+        fx, fy = fx - mp.PAGE_DX, fy - mp.PAGE_DY
         layer = re.search(r'\t\(layer "([^"]+)"\)', blk).group(1)
         ref = re.search(r'\(property "Reference" "([^"]*)"', blk)
         val = re.search(r'\(property "Value" "([^"]*)"', blk)
@@ -111,11 +114,14 @@ def main():
     W("Board: `%s`  |  generated %s  |  **no copper routed yet** (0 tracks, "
       "0 vias)" % (os.path.basename(BOARD), time.strftime("%Y-%m-%d %H:%M")))
     W("")
-    W("Board outline 10.0-95.0 x 10.0-65.0 mm (85 x 55 mm on the 100 x 65 mm "
-      "carrier plate). %d parts, %d pads. Coordinates below are the real pad "
-      "positions on the board (footprint placement + rotation applied), X right, "
-      "Y down, origin at the outline's bottom-left corner +10 mm margin." %
-      (len(parts), len(pads)))
+    W("Board outline %.1f-%.1f x %.1f-%.1f mm (%.1f x %.1f mm board, the drawn "
+      "85 x 55 envelope plus a 10 mm west tail). %d parts, %d pads. Coordinates "
+      "below are design-frame pad positions (footprint placement + rotation, "
+      "sheet offset removed), X right, Y down. On the printed sheet everything "
+      "sits %.1f/%.1f mm further along."
+      % (mp.BOARD_X0, mp.BOARD_X1, mp.BOARD_Y0, mp.BOARD_Y1,
+         mp.BOARD_X1 - mp.BOARD_X0, mp.BOARD_Y1 - mp.BOARD_Y0,
+         len(parts), len(pads), mp.PAGE_DX, mp.PAGE_DY))
     W("")
     W("`span` = straight-line distance between the two farthest pads of the "
       "net; `MST` = minimum spanning tree over all its pads, i.e. the bare "

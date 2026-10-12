@@ -137,10 +137,11 @@ JST_ZONES = {
 # JP1 (hall +V selector): drawn 6.00 x 3.50 box, silks `JP1` / `DIP SWITCH`.
 JP1_BOX = cadbox(34.65, 49.74, 40.66, 53.24)     # 54.34,59.74 .. 60.35,63.24
 
-# Mounting holes - the drawing has none; these four clear everything drawn
-# (H1/H2 sit in the free east corners, H3/H4 sit between the module's east
-# edge and the JST / GNSS zones).
-MOUNTS = [(91.50, 13.50), (91.50, 61.50), (44.00, 62.00), (36.00, 13.00)]
+# Mounting holes - the drawing has none; these four sit 3.50 mm inside the four
+# board corners (M3/M4 clearance): the Ø3.2 drill keeps 1.90 mm to the edge and
+# the Ø5.0 keep-out ring keeps 1.00 mm.  The west pair lands in the 10 mm tail,
+# north and south of the bulk-can pair; the east pair is unchanged.
+MOUNTS = [(3.50, 13.50), (91.50, 13.50), (91.50, 61.50), (3.50, 61.50)]
 MOUNT_DRILL, MOUNT_RING = 3.2, 5.0
 
 # Annotation zones drawn dashed on the TOP view (F.Cu work areas, Dwgs.User)
@@ -473,15 +474,18 @@ def parts():
     # section at all (U4 fills x 12.25..33.25, J1 fills y <= 17.09), and on
     # F.Cu they stand 12.5 mm proud of the display side.  Under the board they
     # cost nothing: that face already carries 17 mm of module and a 10 mm
-    # XT30.  rot 270 (C1) / rot 90 (C3) keeps the 11.0 mm courtyard width
-    # inside the 12.25 mm west strip and puts each can's + pad (1) on the
-    # module side: pad edge to pad edge 5.25 mm from IN+ (x 12.50..16.00,
-    # y 19.39..21.89) and from OUT+ (x 12.50..16.00, y 58.39..60.89), on the
-    # same copper.  C1 used to sit on top of the module body, 22.1 mm away and
-    # on the far face; C3 used to straddle OUT+ from the other side.
-    P.append(("C1", "Capacitor_SMD:CP_Elec_10x12.5", 6.0, 24.5, 270.0,
+    # XT30.  They now stand together as a pair mid-tail - centres (6.00, 29.60)
+    # and (6.00, 45.40), courtyards 2.50 mm apart, 6.95 mm clear of both west
+    # corner holes - and each can is turned so pad 1 (+) faces the module pad it
+    # belongs to: C1 (220u on DC_12) rot 90 puts + north, 5.25 mm in x / 1.31 mm
+    # in y from IN+ (x 12.50..16.00, y 19.39..21.89); C3 (470u on V5) rot 270
+    # puts + south, 5.25 x 6.59 mm from OUT+ (y 58.39..60.89), with the In2.Cu
+    # V5 plane right there.  The two inner pads are both GND, 3.00 mm apart, so
+    # one copper bridge can dress both cans.  Only rot 90/270 fits: rot 0/180
+    # turns the 13.3 mm courtyard across the 12.25 mm strip and into U4.
+    P.append(("C1", "Capacitor_SMD:CP_Elec_10x12.5", 6.0, 29.6, 90.0,
               {"1": N("DC_12"), "2": N("GND")}, "220u/50V", "B.Cu", 0))
-    P.append(("C3", "Capacitor_SMD:CP_Elec_10x12.5", 6.0, 55.5, 90.0,
+    P.append(("C3", "Capacitor_SMD:CP_Elec_10x12.5", 6.0, 45.4, 270.0,
               {"1": N("V5"), "2": N("GND")}, "470u/35V", "B.Cu", 0))
     P.append(("C4", C805, 34.5, 38.0, 0.0,
               {"1": N("V5"), "2": N("GND")}, "100n", "F.Cu", 0))
@@ -763,7 +767,9 @@ def silks():
     out += _dashrect(10.0, 10.0, 95.0, 65.0)
     out += _txt(24.0, 8.9, "DRAWN 85 x 55 ENVELOPE - BOARD EXTENDED 10 mm WEST",
                 layer="Dwgs.User", size=1.0)
-    out += _txt(0.6, 12.6, "C1 / C3 UNDER THE BOARD", layer="Dwgs.User", size=0.7)
+    # the two bulk cans live underneath, mid-tail: label them in the west margin
+    out += _txt(-12.60, 37.20, "C1 / C3 UNDER THE BOARD",
+                layer="Dwgs.User", size=0.7)
 
     # dev board rows: pin 1 is VIN, at the dev board's USB end
     out += _txt(44.0, 26.9, "PIN 1 = USB END", size=0.8)

@@ -2375,7 +2375,7 @@
 (footprint "dpp:MOUNT"
 	(layer "F.Cu")
 	(uuid "8c629e13-e9f1-5039-9f2c-bffa88d9d8af")
-	(at 192.5000 81.0000 0.0)
+	(at 104.5000 81.0000 0.0)
 	(property "Reference" "H1" (at 0.00 -1.30 0.0) (layer "F.Fab") (effects (font (size 1.0 1.0) (thickness 0.15))))
 	(property "Value" "MOUNT" (at 0.00 1.30 0.0) (layer "F.Fab") (effects (font (size 1.0 1.0) (thickness 0.15))))
 	(property "Footprint" "" (at 0 0 0) (effects (hide yes)))
@@ -2391,7 +2391,7 @@
 (footprint "dpp:MOUNT"
 	(layer "F.Cu")
 	(uuid "d4c98a1e-9fb8-5f21-93f8-78fd468606c5")
-	(at 192.5000 129.0000 0.0)
+	(at 192.5000 81.0000 0.0)
 	(property "Reference" "H2" (at 0.00 -1.30 0.0) (layer "F.Fab") (effects (font (size 1.0 1.0) (thickness 0.15))))
 	(property "Value" "MOUNT" (at 0.00 1.30 0.0) (layer "F.Fab") (effects (font (size 1.0 1.0) (thickness 0.15))))
 	(property "Footprint" "" (at 0 0 0) (effects (hide yes)))
@@ -2407,7 +2407,7 @@
 (footprint "dpp:MOUNT"
 	(layer "F.Cu")
 	(uuid "85ec125e-eea4-5e72-a10d-a92f8bc7bd7f")
-	(at 145.0000 129.5000 0.0)
+	(at 192.5000 129.0000 0.0)
 	(property "Reference" "H3" (at 0.00 -1.30 0.0) (layer "F.Fab") (effects (font (size 1.0 1.0) (thickness 0.15))))
 	(property "Value" "MOUNT" (at 0.00 1.30 0.0) (layer "F.Fab") (effects (font (size 1.0 1.0) (thickness 0.15))))
 	(property "Footprint" "" (at 0 0 0) (effects (hide yes)))
@@ -2423,7 +2423,7 @@
 (footprint "dpp:MOUNT"
 	(layer "F.Cu")
 	(uuid "5534efb6-4bec-54f8-842d-61863acb23e8")
-	(at 137.0000 80.5000 0.0)
+	(at 104.5000 129.0000 0.0)
 	(property "Reference" "H4" (at 0.00 -1.30 0.0) (layer "F.Fab") (effects (font (size 1.0 1.0) (thickness 0.15))))
 	(property "Value" "MOUNT" (at 0.00 1.30 0.0) (layer "F.Fab") (effects (font (size 1.0 1.0) (thickness 0.15))))
 	(property "Footprint" "" (at 0 0 0) (effects (hide yes)))
@@ -3738,270 +3738,10 @@
 (footprint "dpp:CP_Elec_10x12.5"
 	(layer "B.Cu")
 	(uuid "d7d469da-cb91-518e-b3d1-aa5c85b8c5ff")
-	(at 107.0000 92.0000 270.0)
+	(at 107.0000 97.1000 90.0)
 (descr "SMD capacitor, aluminum electrolytic, Vishay 1012, 10.0x12.5mm, http://www.vishay.com/docs/28395/150crz.pdf")
 (tags "capacitor electrolytic")
 (property "Reference" "C1"
-		(at 0 6.3 270)
-		(layer "B.Fab")
-		(effects
-			(font
-				(size 1 1)
-				(thickness 0.15)
-			)
-		 (justify mirror))
-	)
-(property "Value" "220u/50V"
-		(at 0 -6.3 270)
-		(layer "B.Fab")
-		(effects
-			(font
-				(size 1 1)
-				(thickness 0.15)
-			)
-		 (justify mirror))
-	)
-(attr smd)
-(duplicate_pad_numbers_are_jumpers no)
-(fp_line
-		(start -6.65 1.5)
-		(end -6.65 -1.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start -6.65 -1.5)
-		(end -5.5 -1.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start -5.5 4.35)
-		(end -5.5 1.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start -5.5 4.35)
-		(end -4.35 5.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start -5.5 1.5)
-		(end -6.65 1.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start -5.5 -1.5)
-		(end -5.5 -4.35)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start -5.5 -4.35)
-		(end -4.35 -5.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start -4.35 5.5)
-		(end 5.5 5.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start -4.35 -5.5)
-		(end 5.5 -5.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start 5.5 5.5)
-		(end 5.5 1.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start 5.5 1.5)
-		(end 6.65 1.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start 5.5 -1.5)
-		(end 5.5 -5.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start 6.65 1.5)
-		(end 6.65 -1.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start 6.65 -1.5)
-		(end 5.5 -1.5)
-		(stroke
-			(width 0.05)
-			(type solid)
-		)
-		(layer "B.CrtYd")
-	)
-(fp_line
-		(start -5.25 4.25)
-		(end -5.25 -4.25)
-		(stroke
-			(width 0.1)
-			(type solid)
-		)
-		(layer "B.Fab")
-	)
-(fp_line
-		(start -5.25 4.25)
-		(end -4.25 5.25)
-		(stroke
-			(width 0.1)
-			(type solid)
-		)
-		(layer "B.Fab")
-	)
-(fp_line
-		(start -5.25 -4.25)
-		(end -4.25 -5.25)
-		(stroke
-			(width 0.1)
-			(type solid)
-		)
-		(layer "B.Fab")
-	)
-(fp_line
-		(start -4.558325 1.7)
-		(end -3.558325 1.7)
-		(stroke
-			(width 0.1)
-			(type solid)
-		)
-		(layer "B.Fab")
-	)
-(fp_line
-		(start -4.25 5.25)
-		(end 5.25 5.25)
-		(stroke
-			(width 0.1)
-			(type solid)
-		)
-		(layer "B.Fab")
-	)
-(fp_line
-		(start -4.25 -5.25)
-		(end 5.25 -5.25)
-		(stroke
-			(width 0.1)
-			(type solid)
-		)
-		(layer "B.Fab")
-	)
-(fp_line
-		(start -4.058325 2.2)
-		(end -4.058325 1.2)
-		(stroke
-			(width 0.1)
-			(type solid)
-		)
-		(layer "B.Fab")
-	)
-(fp_line
-		(start 5.25 5.25)
-		(end 5.25 -5.25)
-		(stroke
-			(width 0.1)
-			(type solid)
-		)
-		(layer "B.Fab")
-	)
-(fp_circle
-		(center 0 -0.0)
-		(end 5 -0.0)
-		(stroke
-			(width 0.1)
-			(type solid)
-		)
-		(fill no)
-		(layer "B.Fab")
-	)
-(pad "1" smd roundrect
-		(net 5 "DC_12") (at -4.2 -0.0 270)
-		(size 4.4 2.5)
-		(layers "B.Cu" "B.Mask" "B.Paste")
-		(roundrect_rratio 0.1)
-	)
-(pad "2" smd roundrect
-		(net 1 "GND") (at 4.2 -0.0 270)
-		(size 4.4 2.5)
-		(layers "B.Cu" "B.Mask" "B.Paste")
-		(roundrect_rratio 0.1)
-	)
-(model "${KICAD10_3DMODEL_DIR}/Capacitor_SMD.3dshapes/CP_Elec_10x12.5.step"
-		(offset
-			(xyz 0 0 0)
-		)
-		(scale
-			(xyz 1 1 1)
-		)
-		(rotate
-			(xyz 0 0 0)
-		)
-	)
-)
-(footprint "dpp:CP_Elec_10x12.5"
-	(layer "B.Cu")
-	(uuid "0ec83675-ee54-5c62-828a-0d49a2b4f3af")
-	(at 107.0000 123.0000 90.0)
-(descr "SMD capacitor, aluminum electrolytic, Vishay 1012, 10.0x12.5mm, http://www.vishay.com/docs/28395/150crz.pdf")
-(tags "capacitor electrolytic")
-(property "Reference" "C3"
 		(at 0 6.3 90)
 		(layer "B.Fab")
 		(effects
@@ -4011,7 +3751,7 @@
 			)
 		 (justify mirror))
 	)
-(property "Value" "470u/35V"
+(property "Value" "220u/50V"
 		(at 0 -6.3 90)
 		(layer "B.Fab")
 		(effects
@@ -4232,13 +3972,273 @@
 		(layer "B.Fab")
 	)
 (pad "1" smd roundrect
-		(net 6 "V5") (at -4.2 -0.0 90)
+		(net 5 "DC_12") (at -4.2 -0.0 90)
 		(size 4.4 2.5)
 		(layers "B.Cu" "B.Mask" "B.Paste")
 		(roundrect_rratio 0.1)
 	)
 (pad "2" smd roundrect
 		(net 1 "GND") (at 4.2 -0.0 90)
+		(size 4.4 2.5)
+		(layers "B.Cu" "B.Mask" "B.Paste")
+		(roundrect_rratio 0.1)
+	)
+(model "${KICAD10_3DMODEL_DIR}/Capacitor_SMD.3dshapes/CP_Elec_10x12.5.step"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)
+(footprint "dpp:CP_Elec_10x12.5"
+	(layer "B.Cu")
+	(uuid "0ec83675-ee54-5c62-828a-0d49a2b4f3af")
+	(at 107.0000 112.9000 270.0)
+(descr "SMD capacitor, aluminum electrolytic, Vishay 1012, 10.0x12.5mm, http://www.vishay.com/docs/28395/150crz.pdf")
+(tags "capacitor electrolytic")
+(property "Reference" "C3"
+		(at 0 6.3 270)
+		(layer "B.Fab")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		 (justify mirror))
+	)
+(property "Value" "470u/35V"
+		(at 0 -6.3 270)
+		(layer "B.Fab")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		 (justify mirror))
+	)
+(attr smd)
+(duplicate_pad_numbers_are_jumpers no)
+(fp_line
+		(start -6.65 1.5)
+		(end -6.65 -1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start -6.65 -1.5)
+		(end -5.5 -1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start -5.5 4.35)
+		(end -5.5 1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start -5.5 4.35)
+		(end -4.35 5.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start -5.5 1.5)
+		(end -6.65 1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start -5.5 -1.5)
+		(end -5.5 -4.35)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start -5.5 -4.35)
+		(end -4.35 -5.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start -4.35 5.5)
+		(end 5.5 5.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start -4.35 -5.5)
+		(end 5.5 -5.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start 5.5 5.5)
+		(end 5.5 1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start 5.5 1.5)
+		(end 6.65 1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start 5.5 -1.5)
+		(end 5.5 -5.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start 6.65 1.5)
+		(end 6.65 -1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start 6.65 -1.5)
+		(end 5.5 -1.5)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "B.CrtYd")
+	)
+(fp_line
+		(start -5.25 4.25)
+		(end -5.25 -4.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "B.Fab")
+	)
+(fp_line
+		(start -5.25 4.25)
+		(end -4.25 5.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "B.Fab")
+	)
+(fp_line
+		(start -5.25 -4.25)
+		(end -4.25 -5.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "B.Fab")
+	)
+(fp_line
+		(start -4.558325 1.7)
+		(end -3.558325 1.7)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "B.Fab")
+	)
+(fp_line
+		(start -4.25 5.25)
+		(end 5.25 5.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "B.Fab")
+	)
+(fp_line
+		(start -4.25 -5.25)
+		(end 5.25 -5.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "B.Fab")
+	)
+(fp_line
+		(start -4.058325 2.2)
+		(end -4.058325 1.2)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "B.Fab")
+	)
+(fp_line
+		(start 5.25 5.25)
+		(end 5.25 -5.25)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "B.Fab")
+	)
+(fp_circle
+		(center 0 -0.0)
+		(end 5 -0.0)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "B.Fab")
+	)
+(pad "1" smd roundrect
+		(net 6 "V5") (at -4.2 -0.0 270)
+		(size 4.4 2.5)
+		(layers "B.Cu" "B.Mask" "B.Paste")
+		(roundrect_rratio 0.1)
+	)
+(pad "2" smd roundrect
+		(net 1 "GND") (at 4.2 -0.0 270)
 		(size 4.4 2.5)
 		(layers "B.Cu" "B.Mask" "B.Paste")
 		(roundrect_rratio 0.1)
@@ -7676,7 +7676,7 @@
 (gr_line (start 196.000 132.500) (end 111.000 132.500) (stroke (width 0.12) (type dash)) (layer "Dwgs.User") (uuid "afe909e3-21c5-5b10-aafa-96de010b4cac"))
 (gr_line (start 111.000 132.500) (end 111.000 77.500) (stroke (width 0.12) (type dash)) (layer "Dwgs.User") (uuid "9668e5f7-65f6-5936-8125-92ed20d43244"))
 (gr_text "DRAWN 85 x 55 ENVELOPE - BOARD EXTENDED 10 mm WEST" (at 125.00 76.40 0.0) (layer "Dwgs.User") (uuid "96a11132-3c7e-5949-9a88-c4f5a266bb99") (effects (font (size 1.00 1.00) (thickness 0.12)) (justify left top)))
-(gr_text "C1 / C3 UNDER THE BOARD" (at 101.60 80.10 0.0) (layer "Dwgs.User") (uuid "e3b7a0ca-e538-5a60-b9e4-a2fee5762a07") (effects (font (size 0.70 0.70) (thickness 0.12)) (justify left top)))
+(gr_text "C1 / C3 UNDER THE BOARD" (at 88.40 104.70 0.0) (layer "Dwgs.User") (uuid "e3b7a0ca-e538-5a60-b9e4-a2fee5762a07") (effects (font (size 0.70 0.70) (thickness 0.12)) (justify left top)))
 (gr_text "PIN 1 = USB END" (at 145.00 94.40 0.0) (layer "F.SilkS") (uuid "5c9543f3-f7c6-5197-a4ed-e2dac6f13e3e") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
 (gr_text "ANTENNA - NO COPPER" (at 174.67 95.10 0.0) (layer "F.SilkS") (uuid "7db2db7f-3277-5a6f-909e-a3991cfd7a76") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
 (gr_text "1" (at 189.31 85.27 0.0) (layer "F.SilkS") (uuid "ef6658c4-4cb4-52a8-966f-948ff740a0cd") (effects (font (size 0.90 0.90) (thickness 0.12)) (justify left top)))
