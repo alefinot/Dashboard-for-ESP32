@@ -128,6 +128,18 @@ LM_BODY = cadbox(61.75, 8.64, 82.75, 51.64)      # 12.25,18.64 .. 33.25,61.64
 # v 0.00..7.00) - built as six bare SMD pads, no header, no drill.
 GNSS_ZONE = cadbox(35.81, 0.00, 58.80, 7.00)     # 36.20,10.00 .. 59.19,17.00
 
+# Test-point row (TP1..TP5), on J1's pad row.  Shared by parts() and silks():
+# the silks carry the NET of each probe, not its designator.
+TPS = [("TP1", "IGN_SENSE"), ("TP2", "HALL"), ("TP3", "BAT_SNS"),
+       ("TP4", "FUEL_SNS"), ("TP5", "GND")]
+TP_X0, TP_PITCH, TP_Y = 39.60, 4.50, 13.99
+# Ink width of each name, measured off the plotted F.SilkS (KiCad's stroke
+# font, 0.80 mm glyphs, 0.12 mm stroke) so the labels sit centred on their pad
+# instead of on a 0.70 mm-per-glyph guess, which ran ~0.2 mm wide.
+TP_INKW = {"IGN_SENSE": 6.10, "HALL": 2.55, "BAT_SNS": 4.72,
+           "FUEL_SNS": 5.52, "GND": 2.13}
+TP_BEAR = 0.27        # ink starts this far right of the anchor (left bearing)
+
 # Four JST-PH zones, 12.01 x 7.00 each, two designators per zone (the drawing
 # writes both); one right-angle SMD shell per zone, two circuits each.
 # ELEV view: the shells hang 5.01 mm below B.Cu, flush with the board edge.
@@ -306,8 +318,9 @@ EDGE_OK = {"J14", "J17", "J6", "J9"}
 # generator drops all library silkscreen (see kicadfmt.board_footprint), and
 # U4 sits under the display, so those three stay on Fab too.
 # Sizes: 0.80 mm glyphs for the 0805 lattice, 1.00 mm where there is room.
-SILK_ON = {"F1", "Q1", "D1", "D2", "D3", "OK1", "OK2", "C2", "C4", "C11", "C13",
-           "TP1", "TP2", "TP3", "TP4", "TP5"}
+# The test points print their NET instead of their designator (see silks()),
+# so TP1..TP5 stay off this set and their references move to F.Fab.
+SILK_ON = {"F1", "Q1", "D1", "D2", "D3", "OK1", "OK2", "C2", "C4", "C11", "C13"}
 SILK_ON |= {"R%d" % i for i in range(1, 14)}
 SILK_ON |= {"C%d" % i for i in range(5, 11)}
 SILK_BIG = {"F1", "Q1", "D1", "D2", "D3", "OK1", "OK2"}
@@ -692,11 +705,12 @@ def parts():
     # The five nets they hang on also get shorter, not longer (MST from
     # nets-report.md): IGN_SENSE 50.6 -> 49.5, HALL 43.4 -> 42.3, BAT_SNS
     # 59.3 -> 58.2, FUEL_SNS 84.3 -> 83.8, GND 262.7 -> 262.2 mm.
-    for i, (ref, net) in enumerate([("TP1", "IGN_SENSE"), ("TP2", "HALL"),
-                                    ("TP3", "BAT_SNS"), ("TP4", "FUEL_SNS"),
-                                    ("TP5", "GND")]):
-        P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm", 39.6 + i * 4.5, 13.99,
-                  0.0, {"1": N(net)}, net, "F.Cu", 0))
+    # The silks above them read out the net (IGN_SENSE / HALL / BAT_SNS /
+    # FUEL_SNS / GND, captioned TEST PROBES) - see silks() - so the row can be
+    # read off the board without a datasheet.
+    for i, (ref, net) in enumerate(TPS):
+        P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm", TP_X0 + i * TP_PITCH,
+                  TP_Y, 0.0, {"1": N(net)}, net, "F.Cu", 0))
 
     return P
 
@@ -971,6 +985,26 @@ def silks():
     # GNSS pads sit under the board, so their label is mirrored silks too
     out += _txt(57.6 + 1.4, 12.9, "GNSS", layer="B.SilkS", size=0.8,
                 mirror=True)
+
+    # test-point row: the five probes are labelled with the NET they sit on,
+    # not with TP1..TP5.  At 0.80 mm the names are wider than the 4.50 mm pitch
+    # (IGN_SENSE ~6.3, FUEL_SNS ~5.6, BAT_SNS ~4.9 mm), so adjacent probes step
+    # onto a second line: pads 1/3/5 read low, pads 2/4 read high.  Two names on
+    # the same line then sit 9.00 mm apart against <= 5.7 mm of glyphs, so the
+    # labels cannot run into each other; centring uses the widths measured off
+    # the plotted layer (TP_INKW above), not a per-glyph guess, which is how
+    # each name lands on its pad to within 0.04 mm.  Both lines clear the pads'
+    # own silks rings (r 0.95 -> y 13.04: 0.39 mm of clearance) and the north edge
+    # (y 10.00: 0.32 mm).  TEST PROBES captions the row from below, in the gap
+    # between the test-point courtyards (y 15.24) and the DevKit's north socket
+    # (courtyard y 23.96) - the GNSS pads it hovers over are soldered on the
+    # far face.
+    for i, (ref, net) in enumerate(TPS):
+        cx = TP_X0 + i * TP_PITCH
+        top = TP_Y - 3.70 if i % 2 else TP_Y - 2.25
+        out += _txt(cx - TP_INKW[net] / 2.0 - TP_BEAR, top, net, size=0.8)
+    out += _txt(TP_X0 + 2 * TP_PITCH - 9.76 / 2.0 - TP_BEAR, 15.80,
+                "TEST PROBES", size=1.0, thick=0.15)
 
     # per-pin text where there is room (2.54 mm pitch groups).  J8 / JP1 are
     # pads on the underside, so their labels go on B.SilkS, mirrored.
