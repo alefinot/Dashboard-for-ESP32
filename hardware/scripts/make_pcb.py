@@ -132,11 +132,36 @@ GNSS_ZONE = cadbox(35.81, 0.00, 58.80, 7.00)     # 36.20,10.00 .. 59.19,17.00
 # the silks carry a short form of the NET each probe sits on, not its
 # designator - full net names (IGN_SENSE & co) are 6 mm wide and cannot share
 # the 4.50 mm pitch, the words below can.
+#
+# TP_X0 52.15 puts the middle probe (TP3) on x 61.15, the midpoint of the free
+# run along that row: Q1's pad-2 east edge (x 27.30) to the board's east edge
+# (x 95.00).  The row is therefore centred in the north strip east of the 12 V
+# column instead of riding the first five columns of the small-parts lattice.
+# What that costs and buys, all measured off the board (KiCad DRC is clean
+# through the whole move: 0 violations, 0 warnings, 115 unconnected as before):
+#   - the row leaves the 4.50 mm lattice (39.60..57.60 -> 52.15..70.15), so the
+#     "one grid top to bottom" reading of the mid band goes; the pitch stays 4.50.
+#   - the five probe nets get shorter, not longer - their circuitry sits east of
+#     the old row (nets-report.md MSTs): HALL 42.3 -> 32.1, FUEL_SNS 83.8 -> 76.0,
+#     BAT_SNS 58.2 -> 51.5, IGN_SENSE 49.5 -> 48.6, GND 262.2 -> 260.6.
+#   - the far-face neighbours: J8's GNSS pads (x 40.44..54.94) pass under the
+#     west end - TP1 sits over J8.5, 0.24 mm off J8.6 (as before, the row was
+#     never clear of them); TP3 lands on J14's left mounting tab (x 60.90..
+#     62.40 / y 10.40..13.80) with a 1.00 x 0.50 mm cross-face overlap, TP4/TP5
+#     stand 1.36 mm north of J14's signal pads and TP5 0.70 mm from that
+#     connector's right tab.  Different faces, 1.6 mm of board in between, and
+#     the row stays 12.06 mm north of the antenna keep-out (y 26.80), so the
+#     keep-out never sees a probe.
+#   - the ink follows the row, so BAT / FUEL / GND (x 59.96..70.95, y 11.77..
+#     12.57) and the TEST PROBES caption (x 56.00..65.76, y 15.84..16.84) now
+#     sit in that same J14 band on the far face - no DRC hit (those custom JST
+#     footprints carry no courtyard, and the silk is on the other side), but it
+#     is crowded there.
 TPS = [("TP1", "IGN_SENSE"), ("TP2", "HALL"), ("TP3", "BAT_SNS"),
        ("TP4", "FUEL_SNS"), ("TP5", "GND")]
 TP_SHORT = {"IGN_SENSE": "IGN", "HALL": "HALL", "BAT_SNS": "BAT",
             "FUEL_SNS": "FUEL", "GND": "GND"}
-TP_X0, TP_PITCH, TP_Y = 39.60, 4.50, 13.99
+TP_X0, TP_PITCH, TP_Y = 52.15, 4.50, 13.99
 # Ink width of each word (stroke centre-lines), measured off the plotted
 # F.SilkS (KiCad's stroke font, 0.80 mm glyphs, 0.12 mm stroke) so the labels
 # sit centred on their pad instead of on a 0.70 mm-per-glyph guess, which ran
@@ -531,23 +556,28 @@ def parts():
     # D2's (see Q1 below).
     # This clip's *origin* is the pad-1 corner (pad 1 at local (0,0), pad 2 at
     # (17,0), the second column at local y +5.0), and rot 90 turns pad 2 to the
-    # north end, facing the module's IN row.  Origin (20.25, 52.74) puts the
-    # courtyard on (18.85,33.49)..(26.65,54.99) - centre (22.75, 44.24), which is
-    # 4.10 mm south of U4's centre.  The clip still straddles the module (fuse and
-    # glass tube on the display face, module underneath, opposite faces); only the
-    # centring is gone.  Nearest clearances: 0.54 mm to Q1's courtyard to the
-    # north, 7.86 mm to the drawn west zone's west edge, 11.22 mm to the mid
-    # small-parts zone, 16.40 mm to J1's courtyard, 3.40 mm (in y) to the module's
-    # OUT pads on the far face, 4.43 mm edge-to-edge to pad 4, 7.35 mm to C3's
-    # courtyard (far face), 12.53 mm to the H4 ring.
-    # DC_IN arrives at the SOUTH end (y 52.74: the long 12 V run down from the
-    # XT30, 4.10 mm longer than before - that net's MST 39.7 -> 43.8 mm in
-    # nets-report.md - and free to drop to an inner layer at the THT pad) and
-    # leaves DC_F at the NORTH end (y 35.74): 13.07 mm from the module's IN+ pad,
-    # 4.20 mm from Q1's source pad; DC_F's MST stays 20.6 mm because the fuse's
-    # north pads and Q1's source row move together.
+    # north end, facing the module's IN row.  Origin (20.25, 57.15) puts the
+    # courtyard on (18.85,37.90)..(26.65,59.40) - centre (22.75, 48.65), the
+    # midpoint of the free run down that column: Q1's body edge (y 32.30) to the
+    # board's south edge (y 65.00).  The body outline, the courtyard and the pad
+    # pair all share that centre, so it is the only sensible "fuse centre".
+    # The clip still straddles the module (fuse and glass tube on the display
+    # face, module underneath, opposite faces); its courtyard stays wholly inside
+    # U4's (module courtyard y 18.39..61.89 against the fuse's 37.90..59.40).
+    # Nearest clearances after the 4.41 mm move south (courtyard to courtyard,
+    # measured off the board file): 4.95 mm to Q1 to the north, 7.35 mm to C3,
+    # 7.53 mm to C1 (far-face courtyards), 7.62 mm to C4, 7.64 mm to D2, 7.87 mm
+    # to R1, 11.65 mm to D1, 12.85 mm to the H4 ring, 20.81 mm to J1's courtyard;
+    # 5.60 mm from the courtyard to the south board edge, and the courtyard stays
+    # wholly inside U4's (module courtyard 12.00,18.39..33.50,61.89).
+    # DC_IN arrives at the SOUTH end (y 57.15: that net's MST 43.8 -> 48.2 mm in
+    # nets-report.md, and free to drop to an inner layer at the THT pad; its pads
+    # now stand 3.10 mm from the module's OUT pads on the far face) and leaves
+    # DC_F at the NORTH end (y 40.15): 17.39 mm from the module's IN+ pad, 8.61 mm
+    # from Q1's source pad; DC_F's MST 20.6 -> 24.8 mm (the fuse's north pads move
+    # 4.41 mm away from Q1's source row).
     P.append(("F1", "Fuse:Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal",
-              20.25, 52.74, 90.0, {"1": N("DC_IN"), "2": N("DC_F")}, "5x20 2A",
+              20.25, 57.15, 90.0, {"1": N("DC_IN"), "2": N("DC_F")}, "5x20 2A",
               "F.Cu", 0))
     # Q1 steps north of the fuse: its 16.65 x 11.30 courtyard (the D2PAK courtyard
     # carries the copper tab) lands in the band y 21.65..32.95, 0.54 mm clear of
@@ -720,19 +750,24 @@ def parts():
     # ---- test points.  The row stands on the XT30's own pad line: y 13.99 is
     # J1's pad row, so the 12 V entry and the five probe points read as one row
     # across the north of the board (it used to sit at y 19.50, one lattice row
-    # lower, with 5.5 mm of slack between them).  The column lattice is untouched
-    # - x 39.60 / 44.10 / 48.60 / 53.10 / 57.60, the same five columns that carry
-    # R2-R6 / R8-R12 / C5-C9 - so a probe still lines up with the part it probes,
-    # and the pads land over the GNSS group (J8, soldered on the far face, its
-    # own pads y 12.65..14.35) without touching its courtyard (opposite faces).
+    # lower, with 5.5 mm of slack between them).  The row runs x 52.15..70.15 -
+    # centred on the free run east of the 12 V column (TP_X0 up in the constants:
+    # the midpoint of Q1's pad-2 east edge and the board's east edge), which takes
+    # it off the lattice columns it used to share with R2-R6 / R8-R12 / C5-C9;
+    # the pitch is still 4.50 mm.  The pads land over the GNSS group (J8, soldered
+    # on the far face, its own pads y 12.90..14.10) and, at the east end, over
+    # J14's mounting tab and signal pads - opposite faces, 1.6 mm of board
+    # between them, and neither custom footprint carries a courtyard to collide
+    # with.  Neither group is a keep-out; the antenna keep-out stays 12.06 mm
+    # south of the row.
     # Two other readings of "align to the XT30" were probed and rejected by DRC:
     # centred on the connector's centreline (x 13.75..31.75 at y 16.30) puts TP2
     # against J1's plated through-hole - shorting_items plus a solder-mask
     # bridge, 8 items; pushed flush to the north edge (y 11.25) the TP designators
     # run off the board (silk_edge_clearance, 5 items).  Here: 0 violations.
-    # The five nets they hang on also get shorter, not longer (MST from
-    # nets-report.md): IGN_SENSE 50.6 -> 49.5, HALL 43.4 -> 42.3, BAT_SNS
-    # 59.3 -> 58.2, FUEL_SNS 84.3 -> 83.8, GND 262.7 -> 262.2 mm.
+    # The five nets they hang on are shorter after this move than before it
+    # (MST from nets-report.md): IGN_SENSE 49.5 -> 48.6, HALL 42.3 -> 32.1,
+    # BAT_SNS 58.2 -> 51.5, FUEL_SNS 83.8 -> 76.0, GND 262.2 -> 260.6 mm.
     # The silks above them read out a short form of the net (IGN / HALL / BAT /
     # FUEL / GND, captioned TEST PROBES) - see silks() - so the row can be read
     # off the board without a datasheet.
@@ -1024,8 +1059,10 @@ def silks():
     # plotted layer (TP_INKW above), not a per-glyph guess, which is how each
     # word lands on its pad to within 0.04 mm.  TEST PROBES captions the row
     # from below, in the gap between the test-point courtyards (y 15.24) and the
-    # DevKit's north socket (courtyard y 23.96) - the GNSS pads it hovers over
-    # are soldered on the far face.
+    # DevKit's north socket (courtyard y 23.96).  What it hovers over is all
+    # far-face copper now: the GNSS pads (J8, to x 54.94) at its west end and
+    # J14's signal pads (x 63.50..70.50, y 16.10..19.60 - the ink crosses their
+    # north edge by 0.74 mm) at its east end.
     for i, (ref, net) in enumerate(TPS):
         lab = TP_SHORT[net]
         out += _txt(TP_X0 + i * TP_PITCH - TP_INKW[lab] / 2.0 - TP_BEAR,

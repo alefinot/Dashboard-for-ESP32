@@ -2425,7 +2425,7 @@
 (footprint "dpp:Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal"
 	(layer "F.Cu")
 	(uuid "6e13bc8a-2dfa-5329-8dca-d0b2fafd7dfa")
-	(at 121.2500 120.2400 90.0)
+	(at 121.2500 124.6500 90.0)
 (descr "Fuseholder Clips, 5x20mm Cylinder Fuse, Pins Inline, Horizontal, Littelfuse 521, https://www.littelfuse.com/~/media/electronics/datasheets/fuse_clips/littelfuse_fuse_clip_520_521_102071_datasheet.pdf.pdf")
 (tags "fuse clip open")
 (property "Reference" "F1"
@@ -7187,7 +7187,7 @@
 (footprint "dpp:TestPoint_Pad_D1.5mm"
 	(layer "F.Cu")
 	(uuid "c5bc3e4b-6408-59e0-817f-b3d7e54086f3")
-	(at 140.6000 81.4900 0.0)
+	(at 153.1500 81.4900 0.0)
 (descr "SMD pad as test Point, diameter 1.5mm")
 (tags "test point SMD pad")
 (property "Reference" "TP1"
@@ -7272,7 +7272,7 @@
 (footprint "dpp:TestPoint_Pad_D1.5mm"
 	(layer "F.Cu")
 	(uuid "e4bc4ee2-7c89-566e-8708-49971c2e0cff")
-	(at 145.1000 81.4900 0.0)
+	(at 157.6500 81.4900 0.0)
 (descr "SMD pad as test Point, diameter 1.5mm")
 (tags "test point SMD pad")
 (property "Reference" "TP2"
@@ -7357,7 +7357,7 @@
 (footprint "dpp:TestPoint_Pad_D1.5mm"
 	(layer "F.Cu")
 	(uuid "b49f8561-5529-5f59-a19b-19f781a84d0c")
-	(at 149.6000 81.4900 0.0)
+	(at 162.1500 81.4900 0.0)
 (descr "SMD pad as test Point, diameter 1.5mm")
 (tags "test point SMD pad")
 (property "Reference" "TP3"
@@ -7442,7 +7442,7 @@
 (footprint "dpp:TestPoint_Pad_D1.5mm"
 	(layer "F.Cu")
 	(uuid "3c5fd231-ee18-5584-8d01-21177561ce64")
-	(at 154.1000 81.4900 0.0)
+	(at 166.6500 81.4900 0.0)
 (descr "SMD pad as test Point, diameter 1.5mm")
 (tags "test point SMD pad")
 (property "Reference" "TP4"
@@ -7527,7 +7527,7 @@
 (footprint "dpp:TestPoint_Pad_D1.5mm"
 	(layer "F.Cu")
 	(uuid "38ac85b7-0b2e-5d18-b162-8dce792fb6a6")
-	(at 158.6000 81.4900 0.0)
+	(at 171.1500 81.4900 0.0)
 (descr "SMD pad as test Point, diameter 1.5mm")
 (tags "test point SMD pad")
 (property "Reference" "TP5"
@@ -7630,12 +7630,12 @@
 (gr_text "FUEL" (at 182.84 120.40 0.0) (layer "B.SilkS") (uuid "aea75437-c632-5c74-9917-d08693f4753b") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top mirror)))
 (gr_text "HALL" (at 169.41 120.40 0.0) (layer "B.SilkS") (uuid "946cd921-3371-5d87-81a4-2d8855e3f1c4") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top mirror)))
 (gr_text "GNSS" (at 160.00 80.40 0.0) (layer "B.SilkS") (uuid "b05ed874-c6e2-5666-8064-f9e7dcd91ce1") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top mirror)))
-(gr_text "IGN" (at 139.51 79.24 0.0) (layer "F.SilkS") (uuid "d6f4ba98-dfc0-5285-8bd8-1d57a7a552e6") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
-(gr_text "HALL" (at 143.56 79.24 0.0) (layer "F.SilkS") (uuid "f372d42a-8b01-5e32-b4e8-8484ad713eb8") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
-(gr_text "BAT" (at 148.41 79.24 0.0) (layer "F.SilkS") (uuid "ef06ac8e-b038-563f-8b08-588f9f29d01f") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
-(gr_text "FUEL" (at 152.51 79.24 0.0) (layer "F.SilkS") (uuid "8834e6b6-13b9-559f-805b-adb6b64dae8f") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
-(gr_text "GND" (at 157.26 79.24 0.0) (layer "F.SilkS") (uuid "afdf6649-5f68-560d-bd2e-385ae3e45676") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
-(gr_text "TEST PROBES" (at 144.45 83.30 0.0) (layer "F.SilkS") (uuid "00beb30e-afcc-59f4-9738-97680d68eb6f") (effects (font (size 1.00 1.00) (thickness 0.15)) (justify left top)))
+(gr_text "IGN" (at 152.06 79.24 0.0) (layer "F.SilkS") (uuid "d6f4ba98-dfc0-5285-8bd8-1d57a7a552e6") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
+(gr_text "HALL" (at 156.10 79.24 0.0) (layer "F.SilkS") (uuid "f372d42a-8b01-5e32-b4e8-8484ad713eb8") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
+(gr_text "BAT" (at 160.97 79.24 0.0) (layer "F.SilkS") (uuid "ef06ac8e-b038-563f-8b08-588f9f29d01f") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
+(gr_text "FUEL" (at 165.06 79.24 0.0) (layer "F.SilkS") (uuid "8834e6b6-13b9-559f-805b-adb6b64dae8f") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
+(gr_text "GND" (at 169.81 79.24 0.0) (layer "F.SilkS") (uuid "afdf6649-5f68-560d-bd2e-385ae3e45676") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top)))
+(gr_text "TEST PROBES" (at 157.00 83.30 0.0) (layer "F.SilkS") (uuid "00beb30e-afcc-59f4-9738-97680d68eb6f") (effects (font (size 1.00 1.00) (thickness 0.15)) (justify left top)))
 (gr_text "SDA" (at 143.39 82.90 0.0) (layer "B.SilkS") (uuid "6c026a80-82a3-5eb9-bf57-3dd3ef4ff8dd") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top mirror)))
 (gr_text "SCL" (at 145.94 82.90 0.0) (layer "B.SilkS") (uuid "708bd641-d705-5a45-a9b6-906654c03a8c") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top mirror)))
 (gr_text "5V" (at 148.12 82.90 0.0) (layer "B.SilkS") (uuid "a8243c39-58d5-581c-88f2-cc385b03c90a") (effects (font (size 0.80 0.80) (thickness 0.12)) (justify left top mirror)))
