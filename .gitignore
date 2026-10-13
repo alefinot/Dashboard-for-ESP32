@@ -48,5 +48,7 @@ hardware/.history/
 hardware/screenshots/
 Screenshots/
 
-# Throwaway A/B scaffolding for the B.Cu 3D-mirroring investigation (regenerable).
-hardware/scratch/
+# Throwaway analysis / scaffolding dirs - local only, regenerable. Matches at any
+# level: ./scratch (DRC + geometry investigation) and hardware/scratch (the B.Cu
+# 3D-mirroring A/B scaffolding).
+scratch/
