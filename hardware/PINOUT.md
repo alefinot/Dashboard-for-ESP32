@@ -135,7 +135,7 @@ Touch and SD pads are deliberately left unconnected (no MISO in the firmware, to
 | `J6` LDR + fuel (4-pin PH, south-east) | 1 `LDR` = `LDR_SNS` · 2 `GND` · 3 `FUEL` = `FUEL_SNS` · 4 `GND` (LDR also solders on the board) |
 | `J9` speed/hall (3-pin PH, south-west) | 1 `+V` = `HALL_VCC` · 2 `SIG` = `HALL_SIG` · 3 `G` = `GND` |
 | `J8` GNSS module | 1 `SDA` = `SPARE_D21` · 2 `SCL` = `SPARE_D22` · 3 `5V` = `V5` · 4 `GND` · 5 `RX` = `GPS_TX` · 6 `TX` = `GPS_RX` |
-| `J13` debug pads (4 bare pads, top side, (51.94, 56.50), continuing `J15`'s 2.54 mm row west of its `D26` pad) | 1 `TX` = `DBG_TX` · 2 `RX` = `DBG_RX` · 3 `GND` · 4 `5V` = `V5` |
+| `J13` debug pads (4 bare pads, top side, (51.94, **61.50**) — the 10-pad `J13`+`J15` strip lies on the mounting-hole line `y 61.50`, flush with `H3`/`H4`, `J13` continuing `J15`'s 2.54 mm row west of its `D26` pad; pin-name silks ink y 62.73→63.53, 1.47 mm from the south outline) | 1 `TX` = `DBG_TX` · 2 `RX` = `DBG_RX` · 3 `GND` · 4 `5V` = `V5` |
 | `J15` spare pads | 1 `D26` · 2 `SDA` · 3 `SCL` · 4 `D19` · 5 `D15` · 6 `GND` |
 | `JP1` hall supply | 1 `5V` = `V5` · 2 `SEL` = `HALL_VCC` · 3 `12V` = `DC_12` (jumper picks the sensor supply) |
 

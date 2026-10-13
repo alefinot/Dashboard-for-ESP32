@@ -731,19 +731,28 @@ def parts():
 
     # J13 (debug TX/RX/GND/5V) sits on the SOUTH row line, immediately west of
     # J15's D26 pad: pad 4 at x 59.56 is J15's pad 1 (62.10) one 2.54 mm step to
-    # the west, so DEBUG + SPARE read as one 10-pad strip along y 56.50 and one
+    # the west, so DEBUG + SPARE read as one 10-pad strip along y 61.50 and one
     # line of pin names prints under it (TX RX GND 5V D26 SDA SCL D19 D15 GND).
-    # Courtyards 0.24 mm apart - J13 reaches x 60.71, J15 starts at 60.95.  It
-    # used to sit at (40.00, 22.00) in the north spare zone, 46.0 / 42.1 mm of
-    # rats nest from the DevKit pins the console comes in on (J10b pins 13/14 =
-    # IO1/IO2, x 76.39 / 78.93 at y 50.21); here those two nets drop to 25.2 and
-    # 20.4 mm, GND moves 263.0 -> 262.7 mm, and the only cost is V5's span,
-    # 148.0 -> 159.3 mm, because the 5V probe now hangs off the far end of a
-    # net whose real loads are up north - a 5 mm stub on a poured rail.  All
-    # figures from nets-report.md.
-    P.append(padgroup("J13", "DEBUG", 51.94, 56.50,
+    # That row line is the MOUNTING-HOLE line: H3 (91.50, 61.50) and H4 (3.50,
+    # 61.50) share it, so the strip, the west hole and the east hole read as one
+    # line across the south edge (the row used to sit at y 56.50).  Pad bottom
+    # edge y 62.00 = 3.00 mm from the outline; name-strip ink y 62.73..63.53 =
+    # 1.47 mm from it; the row stays inside the drawn south spare zone
+    # (y 51.17..63.73) and its courtyard stops 13.05 mm short of H3's Ø5.0
+    # keep-out ring.  It crosses over J9's underside mounting tabs (B.Cu, y
+    # 61.20..64.60 at x 61.90..63.40 and 70.60..72.10) - these DEBUG/SPARE pads
+    # are bare SMD rects on the top face with no drill, so the overlap is across
+    # the two faces and KiCad is happy (0 violations, 115 unconnected pads).
+    # Courtyards 0.24 mm apart - J13 reaches x 60.71, J15 starts at 60.95.  The
+    # 5.00 mm shift costs, from nets-report.md: DBG_TX 25.2 -> 26.9, DBG_RX 20.4
+    # -> 22.4, SPARE_D26 31.7 -> 36.7, SPARE_D19 6.4 -> 11.3, SPARE_D21 MST 56.6
+    # -> 60.5, SPARE_D22 MST 62.2 -> 67.0, GND MST 260.6 -> 268.1; V5 improves
+    # instead (MST 159.3 -> 158.4) and V3V3 is untouched.  For the record, when
+    # this pair sat at (40.00, 22.00) in the north spare zone the same two
+    # console nets were 46.0 and 42.1 mm of rats nest to J10b pins 13/14.
+    P.append(padgroup("J13", "DEBUG", 51.94, 61.50,
                       PIN_SILK["J13"], ["DBG_TX", "DBG_RX", "GND", "V5"]))
-    P.append(padgroup("J15", "SPARE", 62.10, 56.50,
+    P.append(padgroup("J15", "SPARE", 62.10, 61.50,
                       PIN_SILK["J15"], ["SPARE_D26", "SPARE_D21", "SPARE_D22",
                                         "SPARE_D19", "SPARE_D15", "GND"]))
 
