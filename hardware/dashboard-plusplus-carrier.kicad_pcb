@@ -2425,7 +2425,7 @@
 (footprint "dpp:Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal"
 	(layer "F.Cu")
 	(uuid "6e13bc8a-2dfa-5329-8dca-d0b2fafd7dfa")
-	(at 121.2500 116.1400 90.0)
+	(at 121.2500 120.2400 90.0)
 (descr "Fuseholder Clips, 5x20mm Cylinder Fuse, Pins Inline, Horizontal, Littelfuse 521, https://www.littelfuse.com/~/media/electronics/datasheets/fuse_clips/littelfuse_fuse_clip_520_521_102071_datasheet.pdf.pdf")
 (tags "fuse clip open")
 (property "Reference" "F1"
@@ -2727,7 +2727,7 @@
 (footprint "dpp:TO-263-3_TabPin2"
 	(layer "F.Cu")
 	(uuid "463eed6a-3b4c-547d-831b-6d511385cdea")
-	(at 126.8500 90.7000 0.0)
+	(at 126.8500 94.8000 0.0)
 (descr "TO-263/D2PAK/DDPAK SMD package, http://www.infineon.com/cms/en/product/packages/PG-TO263/PG-TO263-3-1/")
 (tags "D2PAK DDPAK TO-263 D2PAK-3 TO-263-3 SOT-404")
 (property "Reference" "Q1"
@@ -3008,7 +3008,7 @@
 (footprint "dpp:D_SOD-123"
 	(layer "F.Cu")
 	(uuid "9bafd1d5-97b8-59f5-a837-ca2558b9b32f")
-	(at 114.3000 88.1600 270.0)
+	(at 114.3000 92.2600 270.0)
 (descr "SOD-123")
 (tags "SOD-123")
 (property "Reference" "D1"
@@ -3274,7 +3274,7 @@
 (descr "Diode SMB (DO-214AA)")
 (tags "Diode SMB (DO-214AA)")
 (property "Reference" "D2"
-		(at 0 -3 90)
+		(at -5.90 0.00 90)
 		(layer "F.SilkS")
 		(uuid "e2e65c2f-d9a2-59d6-b036-863a5a6a1cb5")
 		(effects
@@ -3522,7 +3522,7 @@
 (footprint "dpp:R_0805_2012Metric"
 	(layer "F.Cu")
 	(uuid "4fd3a424-2e71-5fe3-aae6-432dba4ee707")
-	(at 114.3000 93.2400 270.0)
+	(at 114.3000 97.3400 270.0)
 (descr "Resistor SMD 0805 (2012 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 (tags "resistor")
 (property "Reference" "R1"

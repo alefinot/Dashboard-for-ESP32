@@ -328,7 +328,17 @@ SILK_ON = {"F1", "Q1", "D1", "D2", "D3", "OK1", "OK2", "C2", "C4", "C11", "C13"}
 SILK_ON |= {"R%d" % i for i in range(1, 14)}
 SILK_ON |= {"C%d" % i for i in range(5, 11)}
 SILK_BIG = {"F1", "Q1", "D1", "D2", "D3", "OK1", "OK2"}
-SILK_AT = {}                    # ref: (dx, dy) local offset override, from DRC
+SILK_AT = {"D2": (-5.90, 0.00)}   # ref: (dx, dy) local offset override, from DRC
+# D2's designator has to move with Q1's move: the library seats "D2" at local
+# (0,-3), which is design (32.25,30.00), and Q1's drain tab now runs to x 32.05 /
+# y 21.90..32.70 - the text printed straight over that copper (DRC
+# `silk_over_copper`).  Local (-5.90, 0.00) on a rot-90 part puts the anchor at
+# design (35.25, 35.90), just outside the diode's own courtyard and clear of the
+# tab; the DRC is clean with it there.  The ink measures x 34.70..35.70 /
+# y 35.11..36.64 (off the F.SilkS gerber): 1.46 mm below D2's courtyard, 2.65 mm
+# east of the tab, and it reads vertically like C2's and C4's labels.  North-west
+# of the part is not an option: the module's IN- pad (x 29.50..33.00,
+# y 19.39..21.89, far face) sits there.
 
 
 def holes_of(ent):
@@ -515,46 +525,58 @@ def parts():
     # All SMD now (no through-hole except the fuse holder itself).
     R805 = "Resistor_SMD:R_0805_2012Metric"
     C805 = "Capacitor_SMD:C_0805_2012Metric"
-    # F1 stands with its 5x20 axis north-south, dead centre on the DC-DC module.
+    # F1 stands with its 5x20 axis north-south, lined up under Q1 rather than
+    # dead centre on the DC-DC module: the two protection parts now read as one
+    # straight column down the west zone, with the MOSFET's body edge level with
+    # D2's (see Q1 below).
     # This clip's *origin* is the pad-1 corner (pad 1 at local (0,0), pad 2 at
     # (17,0), the second column at local y +5.0), and rot 90 turns pad 2 to the
-    # north end, facing the module's IN row.  Origin (20.25, 48.64) puts the
-    # courtyard on (18.85,29.39)..(26.65,50.89) - centre (22.75, 40.14), which is
-    # U4's centre to 0.01 mm, so the clip straddles the module: fuse and glass
-    # tube on the display face, module underneath, opposite faces, which is what
-    # makes centring over the module possible at all.  Nearest clearances: 7.86 mm
-    # to the drawn west zone's west edge, 12.30 mm to J1's courtyard, 7.50 mm to
-    # the module's OUT pads, 7.35 mm to C3's courtyard (other face), 11.22 mm to
-    # the mid small-parts zone, 15.20 mm to the H4 ring.
-    # DC_IN now arrives at the SOUTH end (y 48.64: the long 12 V run down from the
-    # XT30 - that net's rats nest grows from 9.6 mm to 39.7 mm, the one real cost
-    # of centring the clip, and free to drop to an inner layer at the THT pad) and
-    # leaves DC_F at the NORTH end (y 31.64): 9.14 mm from IN+, 4.20 mm from Q1's
-    # source pad, and DC_F's rats nest halves (39.3 mm -> 19.4 mm).
+    # north end, facing the module's IN row.  Origin (20.25, 52.74) puts the
+    # courtyard on (18.85,33.49)..(26.65,54.99) - centre (22.75, 44.24), which is
+    # 4.10 mm south of U4's centre.  The clip still straddles the module (fuse and
+    # glass tube on the display face, module underneath, opposite faces); only the
+    # centring is gone.  Nearest clearances: 0.54 mm to Q1's courtyard to the
+    # north, 7.86 mm to the drawn west zone's west edge, 11.22 mm to the mid
+    # small-parts zone, 16.40 mm to J1's courtyard, 3.40 mm (in y) to the module's
+    # OUT pads on the far face, 4.43 mm edge-to-edge to pad 4, 7.35 mm to C3's
+    # courtyard (far face), 12.53 mm to the H4 ring.
+    # DC_IN arrives at the SOUTH end (y 52.74: the long 12 V run down from the
+    # XT30, 4.10 mm longer than before - that net's MST 39.7 -> 43.8 mm in
+    # nets-report.md - and free to drop to an inner layer at the THT pad) and
+    # leaves DC_F at the NORTH end (y 35.74): 13.07 mm from the module's IN+ pad,
+    # 4.20 mm from Q1's source pad; DC_F's MST stays 20.6 mm because the fuse's
+    # north pads and Q1's source row move together.
     P.append(("F1", "Fuse:Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal",
-              20.25, 48.64, 90.0, {"1": N("DC_IN"), "2": N("DC_F")}, "5x20 2A",
+              20.25, 52.74, 90.0, {"1": N("DC_IN"), "2": N("DC_F")}, "5x20 2A",
               "F.Cu", 0))
     # Q1 steps north of the fuse: its 16.65 x 11.30 courtyard (the D2PAK courtyard
-    # carries the copper tab) lands in the band y 17.55..28.85, 0.54 mm clear of
-    # F1, with its pin column at x 18.20 right above the module's IN+ pad
-    # (12.50..16.00, 19.39..21.89) on the far face.  0.70 mm west of D2.
+    # carries the copper tab) lands in the band y 21.65..32.95, 0.54 mm clear of
+    # F1, with its 14.95 x 10.00 body edge at y 32.30 - level with D2's body edge,
+    # which is what the two now share.  What the 4.10 mm costs: the gate pad
+    # (15.90..20.50, 24.21..25.31) used to sit straight above the module's IN+ pad
+    # (12.50..16.00, 19.39..21.89, far face) and now clears it by 2.32 mm in y,
+    # while the drain tab (22.65..32.05, 21.90..32.70) instead ends level with the
+    # module's IN- pad row, 0.01 mm short of it.  DC_12's MST 80.8 -> 82.6 mm.
+    # 0.70 mm west of D2.
     P.append(("Q1", "Package_TO_SOT_SMD:TO-263-3_TabPin2",
-              25.85, 23.20, 0.0, {"1": N("MOS_G"), "2": N("DC_12"), "3": N("DC_F")},
+              25.85, 27.30, 0.0, {"1": N("MOS_G"), "2": N("DC_12"), "3": N("DC_F")},
               "IRFR9540N", "F.Cu", 0))
     # D1 (gate zener) and R1 (gate pull-down) stand in the 4.4 mm strip west of
     # that pin column, one above the other, both rot 270 so their centres land on
-    # Q1's own pad rows: D1 at y 20.66 (gate row, pads (13.30,19.01)/(13.30,22.31))
-    # and R1 at y 25.74 (source row, pads (13.30,24.83)/(13.30,26.65)) - 1.05 mm
+    # Q1's own pad rows: D1 at y 24.76 (gate row, pads (13.30,23.11)/(13.30,26.41))
+    # and R1 at y 29.84 (source row, pads (13.30,28.93)/(13.30,30.75)) - 1.05 mm
     # apart, 1.20 / 1.40 mm west of Q1's courtyard, 1.97 mm (in y) north of the
     # fuse, 0.65 / 0.85 mm from C1's courtyard on the other face.  Q1's own pad
-    # rows are y 20.66 (gate) / 23.20 (drain + tab) / 25.74 (source), which is what
-    # the two centres are pinned to.  MOS_G's rats nest: 17.8 -> 12.4 -> 11.0 mm.
-    P.append(("D1", "Diode_SMD:D_SOD-123", 13.30, 20.66, 270.0,
+    # rows are y 24.76 (gate) / 27.30 (drain + tab) / 29.84 (source), which is what
+    # the two centres are pinned to; both parts ride along with Q1 so that stays
+    # true.  MOS_G's MST is 11.0 mm, unchanged, because all four of its pads move
+    # together.
+    P.append(("D1", "Diode_SMD:D_SOD-123", 13.30, 24.76, 270.0,
               {"1": N("MOS_G"), "2": N("DC_F")}, "BZT52C15V", "F.Cu", 0))
     P.append(("D2", "Diode_SMD:D_SMB",
               35.25, 30.00, 90.0, {"1": N("DC_12"), "2": N("GND")}, "P6SMB33A",
               "F.Cu", 0))
-    P.append(("R1", R805, 13.30, 25.74, 270.0,
+    P.append(("R1", R805, 13.30, 29.84, 270.0,
               {"1": N("MOS_G"), "2": N("DC_F")}, "10k", "F.Cu", 0))
     # The DC_12 parts form the matching column on the east side of Q1, x 35.25:
     # C2 in the tab's row, D2 the TVS below it, C4 far south at the module's OUT
@@ -565,17 +587,19 @@ def parts():
     # J13 (3.81 mm to TP1's pad - test points carry no courtyard).  GND (pad 2)
     # north at (35.25,22.25), 1.75 mm off that module pad; DC_12 (pad 1) south at
     # (35.25,24.15), 2.70 mm east of Q1's drain tab (x 22.65..32.05 / y
-    # 17.80..28.60).  That is the HF loop this 100 n is meant to short - MOSFET
+    # 21.90..32.70).  That is the HF loop this 100 n is meant to short - MOSFET
     # tab to the module's input pair - rather than the detour from its old seat at
     # (30.00,31.50), 15 mm from the node it decouples.
     # D2 - courtyard x 33.00..37.50 / y 26.35..33.65, 0.70 mm east of Q1's.  Anode
     # (pad 2, GND) north at (35.25,27.85): 1.95 mm off the tab, 4.91 mm off that
-    # module pad.  Cathode (pad 1, DC_12) south at (35.25,32.15), 3.09 mm off the
-    # tab.  rot 270 would bring the cathode 1.14 mm nearer the tab but throw the
-    # anode 4.26 mm further from the switcher's return; the rail side is already a
-    # fat copper node (tab + module IN+), the return side is not, so the 4.26 mm
-    # is the one worth buying.  It shows in the rats nest: DC_12's MST 80.8 mm and
-    # GND's 263.0 mm, against 84.1 / 267.1 with C2 still in the old west seat.
+    # module pad.  Cathode (pad 1, DC_12) south at (35.25,32.15), 1.95 mm off the
+    # tab (since Q1 moved south the tab spans y 21.90..32.70, so it overlaps both
+    # pads in y).  Flipping to rot 270 would now buy nothing on the tab side and
+    # would throw the anode 5.40 mm further from the switcher's return (10.31 mm
+    # against 4.91): the rail side is already a fat copper node (tab + module
+    # IN+), the return side is not, so it is the return leg that is worth keeping
+    # short.  DC_12's MST now reads 82.6 mm and GND's 262.2 mm (nets-report.md);
+    # C2's old seat at (30.00,31.50) was 15 mm from the node it decouples.
     # Every number above comes from nets-report.md, the pad coordinates in
     # drc-report.txt and the CrtYd graphics in the board file - KiCad's own
     # transforms.  A hand-rolled rotation model is not trustworthy: in KiCad's
