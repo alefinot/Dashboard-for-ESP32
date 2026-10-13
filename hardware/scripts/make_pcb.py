@@ -129,15 +129,19 @@ LM_BODY = cadbox(61.75, 8.64, 82.75, 51.64)      # 12.25,18.64 .. 33.25,61.64
 GNSS_ZONE = cadbox(35.81, 0.00, 58.80, 7.00)     # 36.20,10.00 .. 59.19,17.00
 
 # Test-point row (TP1..TP5), on J1's pad row.  Shared by parts() and silks():
-# the silks carry the NET of each probe, not its designator.
+# the silks carry a short form of the NET each probe sits on, not its
+# designator - full net names (IGN_SENSE & co) are 6 mm wide and cannot share
+# the 4.50 mm pitch, the words below can.
 TPS = [("TP1", "IGN_SENSE"), ("TP2", "HALL"), ("TP3", "BAT_SNS"),
        ("TP4", "FUEL_SNS"), ("TP5", "GND")]
+TP_SHORT = {"IGN_SENSE": "IGN", "HALL": "HALL", "BAT_SNS": "BAT",
+            "FUEL_SNS": "FUEL", "GND": "GND"}
 TP_X0, TP_PITCH, TP_Y = 39.60, 4.50, 13.99
-# Ink width of each name, measured off the plotted F.SilkS (KiCad's stroke
-# font, 0.80 mm glyphs, 0.12 mm stroke) so the labels sit centred on their pad
-# instead of on a 0.70 mm-per-glyph guess, which ran ~0.2 mm wide.
-TP_INKW = {"IGN_SENSE": 6.10, "HALL": 2.55, "BAT_SNS": 4.72,
-           "FUEL_SNS": 5.52, "GND": 2.13}
+# Ink width of each word (stroke centre-lines), measured off the plotted
+# F.SilkS (KiCad's stroke font, 0.80 mm glyphs, 0.12 mm stroke) so the labels
+# sit centred on their pad instead of on a 0.70 mm-per-glyph guess, which ran
+# ~0.2 mm wide.  At this pitch the tightest pair (FUEL | GND) keeps 2.12 mm.
+TP_INKW = {"IGN": 1.64, "HALL": 2.55, "BAT": 1.83, "FUEL": 2.63, "GND": 2.13}
 TP_BEAR = 0.27        # ink starts this far right of the anchor (left bearing)
 
 # Four JST-PH zones, 12.01 x 7.00 each, two designators per zone (the drawing
@@ -705,9 +709,9 @@ def parts():
     # The five nets they hang on also get shorter, not longer (MST from
     # nets-report.md): IGN_SENSE 50.6 -> 49.5, HALL 43.4 -> 42.3, BAT_SNS
     # 59.3 -> 58.2, FUEL_SNS 84.3 -> 83.8, GND 262.7 -> 262.2 mm.
-    # The silks above them read out the net (IGN_SENSE / HALL / BAT_SNS /
-    # FUEL_SNS / GND, captioned TEST PROBES) - see silks() - so the row can be
-    # read off the board without a datasheet.
+    # The silks above them read out a short form of the net (IGN / HALL / BAT /
+    # FUEL / GND, captioned TEST PROBES) - see silks() - so the row can be read
+    # off the board without a datasheet.
     for i, (ref, net) in enumerate(TPS):
         P.append((ref, "TestPoint:TestPoint_Pad_D1.5mm", TP_X0 + i * TP_PITCH,
                   TP_Y, 0.0, {"1": N(net)}, net, "F.Cu", 0))
@@ -986,23 +990,22 @@ def silks():
     out += _txt(57.6 + 1.4, 12.9, "GNSS", layer="B.SilkS", size=0.8,
                 mirror=True)
 
-    # test-point row: the five probes are labelled with the NET they sit on,
-    # not with TP1..TP5.  At 0.80 mm the names are wider than the 4.50 mm pitch
-    # (IGN_SENSE ~6.3, FUEL_SNS ~5.6, BAT_SNS ~4.9 mm), so adjacent probes step
-    # onto a second line: pads 1/3/5 read low, pads 2/4 read high.  Two names on
-    # the same line then sit 9.00 mm apart against <= 5.7 mm of glyphs, so the
-    # labels cannot run into each other; centring uses the widths measured off
-    # the plotted layer (TP_INKW above), not a per-glyph guess, which is how
-    # each name lands on its pad to within 0.04 mm.  Both lines clear the pads'
-    # own silks rings (r 0.95 -> y 13.04: 0.39 mm of clearance) and the north edge
-    # (y 10.00: 0.32 mm).  TEST PROBES captions the row from below, in the gap
-    # between the test-point courtyards (y 15.24) and the DevKit's north socket
-    # (courtyard y 23.96) - the GNSS pads it hovers over are soldered on the
-    # far face.
+    # test-point row: the five probes are labelled with a short form of the net
+    # they sit on, not with TP1..TP5.  At 0.80 mm the full names are wider than
+    # the 4.50 mm pitch (IGN_SENSE 6.10, FUEL_SNS 5.52 mm ink), which forced two
+    # staggered lines; the short words (1.64..2.63 mm ink) leave 2.12..2.41 mm
+    # of air between neighbours, so all five sit on ONE line at y 11.77->12.57,
+    # each centred on its own pad: 0.47 mm clear of the pads' silks rings
+    # (r 0.95 -> y 13.04) and 1.77 mm off the north edge.  Widths come off the
+    # plotted layer (TP_INKW above), not a per-glyph guess, which is how each
+    # word lands on its pad to within 0.04 mm.  TEST PROBES captions the row
+    # from below, in the gap between the test-point courtyards (y 15.24) and the
+    # DevKit's north socket (courtyard y 23.96) - the GNSS pads it hovers over
+    # are soldered on the far face.
     for i, (ref, net) in enumerate(TPS):
-        cx = TP_X0 + i * TP_PITCH
-        top = TP_Y - 3.70 if i % 2 else TP_Y - 2.25
-        out += _txt(cx - TP_INKW[net] / 2.0 - TP_BEAR, top, net, size=0.8)
+        lab = TP_SHORT[net]
+        out += _txt(TP_X0 + i * TP_PITCH - TP_INKW[lab] / 2.0 - TP_BEAR,
+                    TP_Y - 2.25, lab, size=0.8)
     out += _txt(TP_X0 + 2 * TP_PITCH - 9.76 / 2.0 - TP_BEAR, 15.80,
                 "TEST PROBES", size=1.0, thick=0.15)
 
@@ -1046,7 +1049,8 @@ def silks():
             "no trip button on the carrier - trip comes in on J14 (pin 1)",
             "SPARE / DEBUG PADS - see J13 (TX RX GND 5V) and J15",
             "J13 DEBUG  J15 SPARE (D26 SDA SCL D19 D15 GND)",
-            "TP1 IGN_SENSE  TP2 HALL  TP3 BAT_SNS  TP4 FUEL_SNS  TP5 GND"]
+            "TP1 IGN_SENSE  TP2 HALL  TP3 BAT_SNS  TP4 FUEL_SNS  TP5 GND",
+            "their silks read out short forms: IGN HALL BAT FUEL GND"]
     y = 70.4
     for txt in docs:
         out += _txt(10.5, y, txt, layer="Dwgs.User", size=1.0)
