@@ -1009,12 +1009,18 @@ def silks():
     out += _txt(TFT["x"] - 4.4, (TFT["y1"] + TFT["y_end"]) / 2.0 + 1.05,
                 "TFT", size=0.9, rot=90.0)
 
-    # 12 V entry polarity, east of the XT30 (B.Cu part -> mirrored silks, so the
-    # anchor is the text's RIGHT edge).  Right-aligned at x 34.60: glyphs land at
-    # x 31.0..34.6, clear of the shifted body (courtyard east edge 28.35, pad 2
-    # edge 27.05) and of the module's "IN-" label (x 28.25..31.15, y 14.35..15.55)
-    out += _txt(34.60, 12.4, "+12V", layer="B.SilkS", size=0.9, mirror=True)
-    out += _txt(34.60, 14.4, "GND", layer="B.SilkS", size=0.9, mirror=True)
+    # 12 V entry polarity: one label outside each XT30 pad, both centred on the
+    # connector's y centre (pads at y 13.99, courtyard y 10.89..17.09).  B.Cu part
+    # -> mirrored silks, so the anchor is the text's RIGHT edge: "+12V" (3.30 mm of
+    # ink) hangs west of x 16.15, "GND" (2.40 mm of ink) starts at x 29.35 - 1.00 mm
+    # clear of J1's courtyard (x 17.15 / 28.35) and 2.20 mm clear of the pad it
+    # names (pad 1 DC_IN reaches x 18.35, pad 2 GND reaches x 27.15).  Ink widths
+    # are measured off the plotted B.SilkS gerber, not estimated.  Both lines land
+    # at y 13.54..14.44, 1.94 mm north of the module's "IN+" / "IN-" row (ink
+    # 12.80..14.86 and 29.80..31.86 at y 16.38..17.28), and the west slot is empty
+    # board: no pad, courtyard or silk reaches x 12.85..16.15 at that height
+    out += _txt(16.44, 13.50, "+12V", layer="B.SilkS", size=0.9, mirror=True)
+    out += _txt(32.00, 13.50, "GND", layer="B.SilkS", size=0.9, mirror=True)
 
     # DC-DC module (under the board): labels outside its 21 x 43 outline
     inx, iny = LM["x"] - LM["span_x"] / 2, LM["y"] - LM["span_y"] / 2
