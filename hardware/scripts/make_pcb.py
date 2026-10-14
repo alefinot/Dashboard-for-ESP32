@@ -19,6 +19,7 @@ import subprocess
 import sys
 
 import kicadfmt as kf
+import model_frame as MF
 import pcbheader
 
 KICAD_CLI = os.environ.get(
@@ -855,6 +856,10 @@ def build():
     boxes = []
     holes = []
     pads = []
+    placed = {}                # ref -> (layer, rot, children-mirrored), for the
+    # model_frame.MODEL_REFS check below: the hand-made package files are written
+    # for the placements this table records, and a part that quietly moves to
+    # another side or angle would land its body across its own pads.
     for ent in parts():
         ref, fp_id, x, y, rot, netmap, value, layer, dnp = ent[:9]
         bb = box_of(ent)
@@ -890,6 +895,11 @@ def build():
             return (NETS.index(v) + 1, v)
         netmap = {k: _res(v) for k, v in netmap.items() if v and v != "NC"}
         silk = ref in SILK_ON
+        if ref in MF.MODEL_REFS:
+            # exactly what kicadfmt.board_footprint is about to do to this
+            # footprint's children, read off the same two flags it takes
+            placed[ref] = (layer, rot,
+                           layer == "B.Cu" and ref in BCU_FLIP)
         fp_txt = kf.board_footprint(fp_id, _onsheet(x, y), rot, ref, value, netmap,
                                     layer=layer, ref_to_fab=not silk,
                                     bcu_flip=ref in BCU_FLIP,
@@ -899,6 +909,19 @@ def build():
                                        size=1.0 if ref in SILK_BIG else 0.8,
                                        at=SILK_AT.get(ref))
         out.append(fp_txt)
+
+    problems = MF.check(placed)
+    for p in problems:
+        print("MODEL FRAME: " + p)
+    if problems:
+        raise SystemExit(
+            "the hand-made package files are written for the placements recorded "
+            "in model_frame.MODEL_REFS, and this board no longer matches them. "
+            "Either the placement moved by accident, or it moved on purpose, in "
+            "which case update that table and rebuild the files "
+            "(python scripts/make_3d_models.py).  A rotation that is not a "
+            "multiple of 90 degrees cannot be served by one file at all - "
+            "scripts/probe_frame.py --place shows why.")
 
     # --- ADVISORY HINTS ONLY -------------------------------------------------
     # KiCad's own DRC (run at the end of main()) is the single referee for

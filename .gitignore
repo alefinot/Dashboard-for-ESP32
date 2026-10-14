@@ -52,3 +52,10 @@ Screenshots/
 # level: ./scratch (DRC + geometry investigation) and hardware/scratch (the B.Cu
 # 3D-mirroring A/B scaffolding).
 scratch/
+
+# scratch boards / renders from the frame probe (scripts/probe_frame.py)
+hardware/probe_*
+hardware/_probe/
+hardware/board_*.png
+hardware/crop_*.png
+hardware/check_*.png

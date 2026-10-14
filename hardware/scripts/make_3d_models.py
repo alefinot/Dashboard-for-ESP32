@@ -53,10 +53,16 @@ All dimensions come either from the vendor package itself or from the
 pads of the footprint the model belongs to, so a body always lands on its own
 copper: verify() at the end of this run re-measures every package against the
 copper it is supposed to sit on and fails the build if a pin, a solder tail or
-a body is off.  Coordinates are the footprint library's own convention; for the
-parts mounted on B.Cu that is the un-mirrored library frame, because mirror_y()
-in kicadfmt.py leaves the model block alone and the viewer mirrors bottom-side
-parts itself.
+a body is off.  Coordinates are the footprint library's own convention - the
+frame each .step is then written in is not: KiCad draws a model through the
+placement, and the rule differs between the two board sides and with the
+rotation.  scripts/probe_frame.py measured it on this install (see
+scripts/model_frame.py, which both generators share): a point in the file draws
+at M_y.R(rot) on F.Cu and at R(-rot) on B.Cu.  Writing every package y-mirrored
+therefore happens to be right for the JST headers and the optocouplers, and was
+wrong for the 521 clip, which at rot 90 on F.Cu needs a flip in x and had one in
+y - which is the misalignment that was visible on the board.  The XT30 keeps a
+flip it cannot show: both the flip and its own shell are symmetric in y.
 
 Needs  pip install --no-deps cadquery-ocp      (the OCCT kernel; ~48 MB wheel)
 Usage:  python scripts/make_3d_models.py [--out <dir>] [--dry-run] [--no-verify]
@@ -88,6 +94,9 @@ from OCP.TDocStd import TDocStd_Document
 from OCP.XCAFApp import XCAFApp_Application
 from OCP.XCAFDoc import XCAFDoc_ColorGen, XCAFDoc_ColorSurf, XCAFDoc_DocumentTool
 from OCP.gp import gp_Ax1, gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+
+import kicadfmt as kf
+import model_frame as MF
 
 # ---------------------------------------------------------------------------
 # where things live: the packages and their vendor sources are inside the repo,
@@ -189,14 +198,43 @@ class Model:
         self.prism(outer + inner[::-1], "x", x0, x1, color)
 
     # ---- writing ------------------------------------------------------
-    def write(self, path):
+    def write(self, path, frame=None):
+        """Write the package, one STEP product per solid.
+
+        `frame` is a gp_Trsf applied to every solid on the way out - the frame
+        this file has to be written in.  model_frame.required_matrix() works it
+        out from the placement the package is used at; None writes the body
+        exactly as authored, which scripts/probe_frame.py uses to ask KiCad what
+        it does with a raw file frame in the first place.
+
+        KiCad's own drawing rule, measured by scripts/probe_frame.py --place
+        (a blue L with a foot, asymmetric in both axes, at known coordinates in
+        one-part probe boards at every 90 deg on both sides, scored against the
+        rendered picture with the frame pinned by an off-centre marker pad):
+
+            F.Cu   drawn = M_y . R(rot) . file     B.Cu  drawn = R(-rot) . file
+
+        so a body authored in the footprint's own frame needs a flip that
+        depends on the placement, not on the package: mirror x for the 521 clip
+        (F.Cu, rot 90), mirror y for the JST headers (B.Cu, children mirrored)
+        and for the SO-4 (F.Cu, rot 0).  The XT30 keeps a flip it cannot show -
+        both its shell and its footprint are symmetric in y.  What was wrong here
+        before was one global y-mirror for everything, which put the 521 clip's
+        clips across the pads they are soldered to.
+
+        Everything else in this file - the parametric clip, the vendor
+        re-anchoring, bbox() - is written in footprint coordinates, so the
+        numbers read the same as the .kicad_mod pads.  The frame change happens
+        once, here.
+        """
         doc = TDocStd_Document(TCollection_ExtendedString("XmlOcaf"))
         app = XCAFApp_Application.GetApplication_s()
         app.NewDocument(TCollection_ExtendedString("XmlOcaf"), doc)
         shapes = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
         colors = XCAFDoc_DocumentTool.ColorTool_s(doc.Main())
         for shape, rgb in self.parts:
-            label = shapes.AddShape(shape)
+            out = BRepBuilderAPI_Transform(shape, frame, True).Shape() if frame else shape
+            label = shapes.AddShape(out)
             col = Quantity_Color(rgb[0], rgb[1], rgb[2], Quantity_TOC_RGB)
             colors.AddColor(col)
             colors.SetColor(label, col, XCAFDoc_ColorGen)
@@ -220,6 +258,37 @@ class Model:
             BRepBndLib.Add_s(shape, b)
         lo, hi = b.CornerMin(), b.CornerMax()
         return ((lo.X(), lo.Y(), lo.Z()), (hi.X(), hi.Y(), hi.Z()))
+
+
+# ---------------------------------------------------------------------------
+# the four square frames a package file can be written in
+# ---------------------------------------------------------------------------
+
+
+def trsf_for(tag):
+    """gp_Trsf for one of the frames model_frame.describe() can name.
+
+    Built by composing primitives rather than from the raw 2x2: gp_Trsf keeps
+    its matrix transposed and SetValues follows Value(i, j), which is a quiet way
+    to transpose a flip.  Every placement on this board is a multiple of 90 deg
+    so the required frame is always one of these four; anything else is a real
+    problem (no single .step can serve it) and gets reported as one.
+    """
+    if tag in (None, "as authored (no flip)"):
+        return None
+    t = gp_Trsf()
+    if tag == "mirror in y":
+        t.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0)))     # y -> -y
+    elif tag == "mirror in x":
+        t.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0)))     # x -> -x
+    elif tag == "turn 180 deg about z":
+        t.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), math.pi)
+    else:
+        raise SystemExit(
+            "this placement wants %s, which is not one of the four square "
+            "frames - a .step cannot serve it. Either place the part at a "
+            "multiple of 90 deg or give it its own model file" % tag)
+    return t
 
 
 # ---------------------------------------------------------------------------
@@ -399,16 +468,19 @@ def sexp(text):
 def footprint_geom(name):
     """Pads (name/x/y/w/h/drill) + Fab and courtyard boxes of one dpp footprint.
 
-    A B.Cu footprint keeps its pads and courtyard y-mirrored (mirror_y in
-    kicadfmt.py) while a package is stored in the library's un-mirrored frame, so
-    `back` reports which frame the file is in and the caller flips the sign back
-    before comparing anything.
+    `back` says whether that footprint is a bottom-side one, read from the
+    footprint's own (layer ...) token - not from the pads: a through-hole part
+    says "*.Cu" and never names a side.  A B.Cu footprint carries its children
+    y-mirrored (mirror_y in kicadfmt.py), a package stored for the top side does
+    not, and the caller has to know which frame these numbers are in.
     """
     path = os.path.join(PRETTY, name + ".kicad_mod")
     if not os.path.isfile(path):
         raise SystemExit("%s: no footprint %s to check against" % (name, path))
     tree = sexp(open(path, encoding="utf-8").read())[0]
-    pads, fab, cy, back = [], [], [], False
+    pads, fab, cy = [], [], []
+    back = (next((n[1] for n in tree[1:] if n and n[0] == "layer"), "F.Cu")
+            == "B.Cu")
 
     def pts(node, out):
         for k in node[1:]:
@@ -432,7 +504,6 @@ def footprint_geom(name):
                 elif k[0] == "layers":
                     lay = " ".join(k[1:])
             if at and size:
-                back = back or "B.Cu" in lay
                 pads.append(dict(name=n[1], x=at[0], y=at[1], w=size[0],
                                  h=size[1], drill=dr))
         elif n[0] in ("fp_line", "fp_poly", "fp_rect"):
@@ -475,10 +546,52 @@ def verify(names):
     board's keepouts are built from; the Fab outline is only printed - a real
     moulding is allowed to differ from a library's outline drawing by a fraction
     of a millimetre, and here the XT30 body is 0.4 wider than its Fab.
+
+    Everything is compared in the frame of the file that was actually written,
+    through the measured drawing rule (model_frame): the copper of a footprint
+    draws at R(rot) . stored, and the body draws at M_y.R(rot) . file on F.Cu /
+    R(-rot) . file on B.Cu, so the place to probe inside the file is
+    drawn_inverse . R(rot) . stored.  That works at any rotation and on either
+    side, which the hand-written sign flips it replaces did not.
     """
+    where = {}
+    for ref, (pkg, lib, layer, rot, mir) in MF.MODEL_REFS.items():
+        where.setdefault(pkg, (ref, lib, layer, rot, mir))
     bad = 0
     for name in names:
+        if name not in where:
+            print("  %-58s  no placement recorded in model_frame.MODEL_REFS" % name)
+            bad += 1
+            continue
+        ref, lib, layer, rot, mir = where[name]
         pads, fab, cy, back = footprint_geom(name)
+        if back != (layer == "B.Cu"):
+            print("      %s: its pads sit on %s, MODEL_REFS says %s"
+                  % (ref, "B.Cu" if back else "F.Cu", layer))
+            bad += 1
+        stored = MF.children_frame(
+            [(x, y, w, h) for _n, x, y, w, h, _d in kf.pads_of(lib)],
+            [(p["x"], p["y"], p["w"], p["h"]) for p in pads])
+        if stored is None:
+            print("      %s: %s does not carry %s's pad pattern any more, so "
+                  "nobody can tell how its children are stored"
+                  % (ref, name, lib.split(":")[-1]))
+            bad += 1
+        elif stored in ("I", "M_y") and \
+                MF.required_matrix(layer, rot, stored == "M_y") != \
+                MF.required_matrix(layer, rot, mir):
+            print("      %s: %s stores its children %s, which MODEL_REFS does not "
+                  "expect - this placement would want the file written %s, and "
+                  "%s.step is written %s"
+                  % (ref, name, stored,
+                     MF.describe(MF.required_matrix(layer, rot, stored == "M_y")),
+                     name, MF.describe(MF.required_matrix(layer, rot, mir))))
+            bad += 1
+
+        def to_file(x, y, layer=layer, rot=rot):
+            """A point as stored in the .kicad_mod, in the frame of the .step."""
+            return MF.file_from_drawn(layer, rot, *MF.rot2(x, y, rot))
+
         path = os.path.join(OUT_DIR, name + ".step")
         rd = STEPControl_Reader()
         with quiet_cout():                        # one banner per read, too
@@ -494,23 +607,41 @@ def verify(names):
         for s in _solids(shape):
             BRepBndLib.Add_s(s, b)
         lo, hi = b.CornerMin(), b.CornerMax()
-        print("  %s" % name)
+        print("  %s  (%s at %s rot %d, file written %s)"
+              % (name, ref, layer, rot,
+                 MF.describe(MF.required_matrix(layer, rot, mir))))
         print("      body %6.2f x %6.2f mm, z %6.2f .. %6.2f (%d solids)"
               % (hi.X() - lo.X(), hi.Y() - lo.Y(), lo.Z(), hi.Z(),
                  len(_solids(shape))))
+        if stored == "both":
+            # every pad sits at y = 0, so the footprint cannot say whether it was
+            # stored mirrored or not.  That is only harmless if the moulding is
+            # symmetric in y too, and then it is provably harmless: a y-mirror
+            # leaves the body where it is.
+            if abs(lo.Y() + hi.Y()) > 0.05:
+                print("      %s: FAIL - its pads cannot tell a y-mirror from no "
+                      "mirror (all at y=0) and its body is not symmetric in y "
+                      "either (y %.2f..%.2f), so nothing here says which way it "
+                      "faces; settle it against the vendor drawing"
+                      % (ref, lo.Y(), hi.Y()))
+                bad += 1
+            else:
+                print("      pads and body are both symmetric in y: which of the "
+                      "two this footprint is stored cannot be seen, and does not "
+                      "matter")
         worst = 0.0
         for p in pads:
-            y = -p["y"] if back else p["y"]
+            px, py = to_file(p["x"], p["y"])
             if p["drill"]:
                 how = "pin"
-                got = _material_at(shape, p["x"], y, -1.2, -0.6,
+                got = _material_at(shape, px, py, -1.2, -0.6,
                                    max(0.30, p["drill"] / 2.0))
             else:
                 how = "tail"
-                got = _material_at(shape, p["x"], y, 0.02, 0.45, 0.30)
+                got = _material_at(shape, px, py, 0.02, 0.45, 0.30)
             if got is None:
                 print("      pad %-3s  NO %s OVER THE PAD (%.2f x %.2f at %.2f, %.2f)"
-                      % (p["name"], how, p["w"], p["h"], p["x"], y))
+                      % (p["name"], how, p["w"], p["h"], px, py))
                 bad += 1
                 continue
             worst = max(worst, got[0])
@@ -518,18 +649,20 @@ def verify(names):
         if worst > 0.35:
             print("      FAIL: a pin or tail is %.2f mm off its pad" % worst)
             bad += 1
-        for tag, ext in (("Fab", fab), ("courtyard", cy)):
+        for tag2, ext in (("Fab", fab), ("courtyard", cy)):
             if not ext:
                 continue
             x0, y0, x1, y1 = ext
-            if back:
-                y0, y1 = -y1, -y0
+            corners = [to_file(x, y) for x, y in ((x0, y0), (x1, y0),
+                                                  (x0, y1), (x1, y1))]
+            xs, ys = [c[0] for c in corners], [c[1] for c in corners]
+            x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
             mx = min(lo.X() - x0, x1 - hi.X())
             my = min(lo.Y() - y0, y1 - hi.Y())
-            if tag == "Fab":
+            if tag2 == "Fab":
                 # informational: a real moulding (and every solder leg) is
                 # allowed to cross the library's outline drawing
-                print("      vs %-9s x %+5.2f  y %+5.2f" % (tag + ":", mx, my))
+                print("      vs %-9s x %+5.2f  y %+5.2f" % (tag2 + ":", mx, my))
             elif min(mx, my) < -0.15:
                 print("      FAIL: body is %.2f mm outside the courtyard"
                       % -min(mx, my))
@@ -552,14 +685,16 @@ def main():
         OUT_DIR = a.out
     print("3dshapes dir: %s" % OUT_DIR)
     made = []
+    frames = MF.frames_by_package()
     for model, name in all_models():
         (x0, y0, z0), (x1, y1, z1) = model.bbox()
-        print("  %-58s %2d solids  %6.2f x %6.2f x %6.2f mm  z %6.2f..%6.2f"
-              % (name, len(model.parts), x1 - x0, y1 - y0, z1 - z0, z0, z1))
+        tag = frames[name][1]
+        print("  %-58s %2d solids  %6.2f x %6.2f x %6.2f mm  z %6.2f..%6.2f  file %s"
+              % (name, len(model.parts), x1 - x0, y1 - y0, z1 - z0, z0, z1, tag))
         if a.dry_run:
             continue
         os.makedirs(OUT_DIR, exist_ok=True)
-        model.write(os.path.join(OUT_DIR, name + ".step"))
+        model.write(os.path.join(OUT_DIR, name + ".step"), frame=trsf_for(tag))
         made.append(name)
     if a.dry_run:
         return
