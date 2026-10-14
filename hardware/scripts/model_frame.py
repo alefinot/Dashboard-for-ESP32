@@ -4,6 +4,8 @@ Shared by make_3d_models.py (which writes the .step files) and make_pcb.py
 (which places the footprints and checks that it still places them the way those
 files were written for).  Pure math - importing it costs nothing.
 
+All coordinates in this file are the .kicad_pcb frame: x east, y SOUTH.
+
 The rules below were measured on this KiCad 10 install, not assumed.
 scripts/probe_frame.py --place drops a blue L (x 4..6, y 2..4 with a foot at
 x 4..5, y 4..8: asymmetric in both axes, so a mirror and a turn cannot be
@@ -15,20 +17,39 @@ rules hold at 0/90/180/270 on both layers:
     F.Cu   drawn = M_y . R(rot) . file          B.Cu   drawn = R(-rot) . file
 
 `file` is a point as written in the .step, `drawn` is where that point shows up
-in design coordinates relative to the footprint origin.  KiCad negates y *after*
-applying the placement rotation, and only on the top side; a bottom-side model
-turns the other way (-rot, no negation).  At rot 0 both reduce to the plain
-y-negation that made "mirror every package in y" look right - which is why the
-521 clip (F.Cu, rot 90) landed wrong.
+in design coordinates relative to the footprint origin.  Read the F.Cu rule the
+other way round - M_y . R(rot) is the same map as R(-rot) . M_y - and it says
+something much more natural: the viewer rotates a package exactly the way it
+rotates the copper, and additionally mirrors it in y, because a package file's
+own frame has y pointing north while the board's points south.
 
-A footprint's own copper and courtyard draw at R(rot) . C . library, where C is
-"mirror y" for every footprint kicadfmt mirrored when it moved it to the bottom
-side (bcu_flip in kicadfmt.board_footprint - bcu_keep_pads only re-picks the
-placement angle afterwards, it does not leave the children unmirrored), and
-identity for anything that stays on the top side.  Setting drawn_body ==
-drawn_copper and solving for the file frame gives required_matrix(): the flip
-depends on the placement, not on the package.  The 521 clip (F.Cu, rot 90) is the
-part this got wrong for years - it wants a flip in x, and had one in y.
+A footprint's own copper, Fab and courtyard draw at R(-rot) . C . library, where
+C is "mirror y" for every footprint kicadfmt mirrored when it moved it to the
+bottom side (bcu_flip in kicadfmt.board_footprint - bcu_keep_pads only re-picks
+the placement angle afterwards, it does not leave the children unmirrored), and
+identity for anything that stays on the top side.  The minus sign is not a
+convention: a positive placement angle turns a footprint counter-clockwise on
+screen, and in a frame whose y points south that is R(-rot).  Measured on the
+shipped board (scripts/check_models_on_board.py, kicad-cli render of the real
+board): F1 sits at (121.25, 124.65) rot 90, and its pad-2 pair, stored at local
+(17,0) and (17,5), renders at (121.25, 107.65) and (126.25, 107.65) - north of
+the origin, at R(-90) . stored - with its Fab outline at x 121.25..126.25,
+y 105.65..126.65 (R(+90) would have put it at y 122.65..143.65, off the south
+edge of the board).
+
+Setting drawn_body == drawn_copper and solving for the file frame gives
+required_matrix().  The rotations cancel on both sides (M_y.R(rot) is the same map
+as R(-rot).M_y), so the frame a package file needs does not depend on the placement
+angle at all: a top-side part wants a plain mirror in y whatever angle it sits at,
+a bottom-side part wants whatever mirror its stored children already carry.  What
+the angle decides is whether a wrong rotation *sign* is visible.  R(+rot) and
+R(-rot) agree at 0 and 180, so an earlier reading of these rules (copper drawn at
+R(+rot).C.body) was harmless for the four packages placed at 0 or 180 degrees and
+wrong only for F1 (F.Cu, rot 90): it asked for a flip in x where the 521 clip wants
+a flip in y, and put its clips 17 mm south-west of the pads they solder into,
+hanging off the south edge of the board.  scripts/check_models_on_board.py is the
+counter-test - it measures the bodies KiCad actually draws on the shipped board, so
+nothing in the chain is taken on trust.
 """
 
 import math
@@ -100,20 +121,44 @@ def file_from_drawn(layer, rot, x, y):
     return rot2(x, y, rot)
 
 
+def copper_from_stored(x, y, rot):
+    """Where a point as stored in the .kicad_mod draws on the board.
+
+    Just the placement rotation, negated: a positive angle turns a footprint
+    counter-clockwise on screen, and in a frame whose y points south that is
+    R(-rot).  Same law on both sides - the y-mirror a bottom-side footprint
+    carries is already in its stored children, so it is not applied again here.
+    """
+    return rot2(x, y, -rot)
+
+
+def copper_from_body(rot, children_mirrored, x, y):
+    """Where a point of the library footprint draws on the board.
+
+    C first (the y-mirror kicadfmt mirrors into a footprint it moves to the
+    bottom side - bake_rot runs after mirror_y and only touches angles, never
+    positions, so the stored children are already mirrored before pcbnew
+    rotates them), then the placement rotation.
+    """
+    return copper_from_stored(x, -y if children_mirrored else y, rot)
+
+
 def required_matrix(layer, rot, children_mirrored):
     """2x2 matrix taking a body authored in the library frame into the file.
 
-    The copper draws at R(rot).C.body: kicadfmt mirrors the children in the
-    footprint's own frame first, and pcbnew bakes the placement rotation on top
-    of that (bake_rot runs after mirror_y), so the order matters at 90 and 270.
-    The body draws at M_y.R(rot).file on F.Cu and R(-rot).file on B.Cu, so
-    file = drawn_inverse.R(rot).C.body.
+    The copper draws at R(-rot).C.body and the body at M_y.R(rot).file on F.Cu or
+    R(-rot).file on B.Cu; setting those equal and solving for the file gives
+    file = drawn_inverse.R(-rot).C.body.  The placement rotation cancels on both
+    sides, so a top-side package wants the plain y-mirror at any angle and a
+    bottom-side one wants the mirror its stored children already carry.  C is
+    applied first because kicadfmt mirrors a footprint it moves to the bottom side
+    in the footprint's own frame, and bake_rot (which only touches angles, never
+    positions) runs after that - so the stored children are already mirrored
+    before pcbnew rotates them.
     """
     cols = []
     for basis in ((1.0, 0.0), (0.0, 1.0)):
-        if children_mirrored:
-            basis = (basis[0], -basis[1])
-        x, y = rot2(*basis, rot)
+        x, y = copper_from_body(rot, children_mirrored, *basis)
         cols.append(file_from_drawn(layer, rot, x, y))
     return ((cols[0][0], cols[1][0]), (cols[0][1], cols[1][1]))
 

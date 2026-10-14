@@ -55,14 +55,19 @@ copper: verify() at the end of this run re-measures every package against the
 copper it is supposed to sit on and fails the build if a pin, a solder tail or
 a body is off.  Coordinates are the footprint library's own convention - the
 frame each .step is then written in is not: KiCad draws a model through the
-placement, and the rule differs between the two board sides and with the
-rotation.  scripts/probe_frame.py measured it on this install (see
-scripts/model_frame.py, which both generators share): a point in the file draws
-at M_y.R(rot) on F.Cu and at R(-rot) on B.Cu.  Writing every package y-mirrored
-therefore happens to be right for the JST headers and the optocouplers, and was
-wrong for the 521 clip, which at rot 90 on F.Cu needs a flip in x and had one in
-y - which is the misalignment that was visible on the board.  The XT30 keeps a
-flip it cannot show: both the flip and its own shell are symmetric in y.
+placement, and the rule differs between the two board sides.  scripts/probe_frame.py
+measured both halves on this install (scripts/model_frame.py, which the generators
+share): a point in the file draws at M_y.R(rot) on F.Cu and at R(-rot) on B.Cu,
+while the footprint's own copper draws at R(-rot) applied to the stored children.
+Solved against each other that comes out a mirror in y for all five packages here,
+and the placement angle cancels out, so F1 sitting at 90 degrees changes nothing.
+An earlier reading of the same probe put the copper at R(+rot) instead, which asked
+for a flip in x for the 521 clip and is the misalignment that was visible on the
+board: the clips landed 17 mm from the pads they solder into.  The counter-test is
+scripts/check_models_on_board.py, which measures the answer on the rendered board
+instead of on paper.
+The XT30 keeps a flip it cannot show: both the flip and its own shell are symmetric
+in y.
 
 Needs  pip install --no-deps cadquery-ocp      (the OCCT kernel; ~48 MB wheel)
 Usage:  python scripts/make_3d_models.py [--out <dir>] [--dry-run] [--no-verify]
@@ -215,12 +220,15 @@ class Model:
             F.Cu   drawn = M_y . R(rot) . file     B.Cu  drawn = R(-rot) . file
 
         so a body authored in the footprint's own frame needs a flip that
-        depends on the placement, not on the package: mirror x for the 521 clip
-        (F.Cu, rot 90), mirror y for the JST headers (B.Cu, children mirrored)
-        and for the SO-4 (F.Cu, rot 0).  The XT30 keeps a flip it cannot show -
-        both its shell and its footprint are symmetric in y.  What was wrong here
-        before was one global y-mirror for everything, which put the 521 clip's
-        clips across the pads they are soldered to.
+        depends on the placement, not on the package.  With the copper drawn at
+        R(-rot).stored (measured on the shipped board by
+        scripts/check_models_on_board.py, and model_frame.copper_from_body),
+        every placement on this board comes out as a mirror in y - the 521 clip
+        (F.Cu, rot 90) included, which is the one part whose angle could have
+        told the two rotation signs apart.  The XT30 keeps a flip it cannot show
+        - both its shell and its footprint are symmetric in y.  What was wrong
+        here before was a mirror in x for the clip, which put its clips 17 mm off
+        the pads they are soldered to, hanging off the south edge of the board.
 
         Everything else in this file - the parametric clip, the vendor
         re-anchoring, bbox() - is written in footprint coordinates, so the
@@ -529,6 +537,8 @@ def _material_at(shape, x, y, z0, z1, r):
     for s in _solids(cut):
         b = Bnd_Box()
         BRepBndLib.Add_s(s, b)
+        if b.IsVoid():
+            continue                      # boolean left a degenerate solid behind
         lo, hi = b.CornerMin(), b.CornerMax()
         cx, cyy = (lo.X() + hi.X()) / 2.0, (lo.Y() + hi.Y()) / 2.0
         d = math.hypot(cx - x, cyy - y)
@@ -548,11 +558,17 @@ def verify(names):
     of a millimetre, and here the XT30 body is 0.4 wider than its Fab.
 
     Everything is compared in the frame of the file that was actually written,
-    through the measured drawing rule (model_frame): the copper of a footprint
-    draws at R(rot) . stored, and the body draws at M_y.R(rot) . file on F.Cu /
+    through the measured drawing rules (model_frame): the copper of a footprint
+    draws at R(-rot) . stored, and the body draws at M_y.R(rot) . file on F.Cu /
     R(-rot) . file on B.Cu, so the place to probe inside the file is
-    drawn_inverse . R(rot) . stored.  That works at any rotation and on either
-    side, which the hand-written sign flips it replaces did not.
+    drawn_inverse . R(-rot) . stored.  That works at any rotation and on either
+    side, which the hand-written sign flips it replaced did not.
+
+    Probing through required_matrix() would prove nothing - it is the same map,
+    so a check that reads the body back through the rule that wrote it passes
+    whatever that rule was.  The copper half comes from the separately measured
+    copper rule, and that makes this check bite: a mirror in x for F1 puts its
+    clip legs 17 mm from every pad it is supposed to sit on.
     """
     where = {}
     for ref, (pkg, lib, layer, rot, mir) in MF.MODEL_REFS.items():
@@ -589,8 +605,14 @@ def verify(names):
             bad += 1
 
         def to_file(x, y, layer=layer, rot=rot):
-            """A point as stored in the .kicad_mod, in the frame of the .step."""
-            return MF.file_from_drawn(layer, rot, *MF.rot2(x, y, rot))
+            """A point as stored in the .kicad_mod, in the frame of the .step.
+
+            The pad / Fab / courtyard tables read by footprint_geom are the
+            footprint's own stored numbers - already y-mirrored for a bottom-side
+            part - so only the placement rotation goes on top of them.
+            """
+            return MF.file_from_drawn(
+                layer, rot, *MF.copper_from_stored(x, y, rot))
 
         path = os.path.join(OUT_DIR, name + ".step")
         rd = STEPControl_Reader()
@@ -679,6 +701,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-verify", action="store_true",
                     help="skip the check against the footprints")
+    ap.add_argument("--check", action="store_true",
+                    help="check the .step files already on disk, write nothing")
     a = ap.parse_args()
     global OUT_DIR
     if a.out:
@@ -686,6 +710,14 @@ def main():
     print("3dshapes dir: %s" % OUT_DIR)
     made = []
     frames = MF.frames_by_package()
+    if a.check:
+        made = sorted({pkg for pkg, _lib, _l, _r, _m in MF.MODEL_REFS.values()})
+        print("\nchecking the files already on disk (nothing written):")
+        bad = verify(made)
+        if bad:
+            raise SystemExit("%d package/pad problem(s) - see above" % bad)
+        print("\nall packages land on their own copper, inside their own courtyard.")
+        return
     for model, name in all_models():
         (x0, y0, z0), (x1, y1, z1) = model.bbox()
         tag = frames[name][1]

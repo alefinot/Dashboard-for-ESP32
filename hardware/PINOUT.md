@@ -227,6 +227,27 @@ tails run 0.93 mm past their Fab at the cable-entry end (courtyard margin 0.61).
 within its courtyard on either face today, but it is the number to check against before
 anything new is placed near `J1`.
 
+A package file has to be written in the frame its *placement* needs, not the frame it
+was authored in. KiCad turns a body by the placement angle and, on the top face only,
+mirrors it in y (`drawn = M_y·R(rot)·file` on F.Cu, `R(-rot)·file` on B.Cu) while the
+footprint's own copper draws at `R(-rot)·stored`. Both rules are measured on this
+install, not assumed: `scripts/probe_frame.py --place` drops an asymmetric blue L at
+known coordinates and scores the rendered picture against every candidate rule at
+0/90/180/270 on both faces, and `scripts/check_models_on_board.py` (≈1 min, four
+renders) re-measures the result on the shipped board — it renders the board twice, with
+and without the hand-made model links, and demands that every pixel the viewer adds
+falls inside that footprint's own courtyard. `scripts/model_frame.py` keeps the table
+(`MODEL_REFS`: ref → layer, angle, how its children are stored) and `make_pcb.py` fails
+the build when a placement stops matching the frame the `.step` files were written for;
+`make_3d_models.py --check` re-runs the pad probe on the files already on disk. Every
+placement here comes out as a mirror in y — but only because nothing sits at 90° or 270°
+except `F1`, and an angle that is not a multiple of 180° is exactly where a rotation-sign
+error hides: writing the 521 clip mirror-in-x (a wrong reading of the same rules) put its
+clips 17 mm off the pads they solder into, hanging off the south edge, while every
+in-process check kept passing — a check that reads the body back through the rule that
+wrote it agrees whatever that rule was, which is why the copper half is measured
+separately and the render test above exists.
+
 Rules are settled by **KiCad's own DRC** (`kicad-cli pcb drc`, run automatically at the end
 of `make_pcb.py`; exit 0 and "Found 0 DRC violations" is the target). The bounding-box
 notes the script prints are hints only - they are approximations, never the referee.
