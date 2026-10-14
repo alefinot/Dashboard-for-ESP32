@@ -13,17 +13,26 @@ same folders answer 200 - the library's own model links are dangling here:
   Connector_AMASS:AMASS_XT30U-M_1x02_P5.0mm_Vertical             J1  (12 V in)
   Fuse:Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_...         F1
 
-Three of the five are now the real vendor package instead of something drawn
-here: footprints/vendor_step/ holds those STEP files exactly as fetched and
-footprints/vendor_step/SOURCES.md records where each came from, the measured
-bounding box and the licensing caveat.  The vendor files use their own origin
-convention, so each is re-anchored to its footprint's origin by a rigid move
-(VENDOR below spells out the measurement that justifies each one).  The two
-that stay parametric - the EL357N in the SO-4 4.4x3.9 variant and the
-Littelfuse 521 clip - have no package to be found anywhere: not in the KiCad
-release, and the component CAD portals (SnapEDA, Digi-Key Models, Ultra
-Librarian, Littelfuse's own design center) all need a browser session and an
-account, so they are drawn from their datasheet numbers instead.
+Four of the five are the real vendor package: footprints/vendor_step/ holds those
+STEP files exactly as fetched and footprints/vendor_step/SOURCES.md records where
+each came from, the measured bounding box and the licensing caveat.  The vendor
+files use their own origin convention, so each is re-anchored to its footprint's
+frame by a rigid turn and move (VENDOR below spells out the measurement that
+justifies each one).
+
+The hand-drawn EL357N optocoupler is gone, replaced by Lite-On's own LTV-357T
+package: LTV-357T is Lite-On's part number for the same 4 pin SOP 4.4x3.9
+optocoupler form (the footprint's pads, Fab and courtyard are that form's), so
+the vendor moulding and the vendor leads go in instead of a reading of the
+Everlight drawing.
+
+The Littelfuse 521 clip stays parametric.  Its package is not in the KiCad
+release, and Littelfuse's own design center - like every component-CAD portal
+that carries it - needs a browser session and an account, so it is drawn from the
+520/521 datasheet numbers instead.  It stays on the board as F1: every closed
+(captive, shrouded) 5x20 holder in the stock library needs 33 mm of run or more,
+and the west column this fuse lives in has 32.05 mm between Q1's courtyard and
+the board edge, with no sideways escape past Q1 and R1.  Measured 2026-10-14.
 
 Everything is written into footprints/dpp.3dshapes/ in this repo, one .step per
 footprint named exactly like it, and kicadfmt.py repoints those five model
@@ -214,43 +223,38 @@ class Model:
 
 
 # ---------------------------------------------------------------------------
-# the five packages
+# the parametric package - F1's clip, no vendor MCAD reachable
 # ---------------------------------------------------------------------------
 
 
-def so4_el357n():
-    """D1 - EL357N-B photocoupler, "4 PIN ULTRA SMALL SOP".
+def littelfuse_521():
+    """F1 - Littelfuse 521 clip for a 5 x 20 mm cartridge fuse.
 
-    Everlight EL357 datasheet (DPC-0000014): compact 4 pin SOP, 2.0 mm max
-    profile.  The footprint Package_SO:SO-4_4.4x3.9mm_P2.54mm draws the body
-    4.4 x 3.9 with a chamfer on the pin-1 corner, and pads 1.8 x 0.6 at
-    x = +-3.15, so the body edge is at x = 2.2 and the leads run out over the
-    pad to x = 4.05.
-    Body 4.4 x 3.9 in plan, 0.15 off the board, top at 1.85 (<= 2.0 max).
-    Leads gull-wing: 0.6 wide (pad width), 0.22 thick, out to x = 3.25, which is
-    the drawing's 6.50 mm "across leads" dimension - an earlier version reached
-    to 3.85 (7.70 across), wider than the real part, and the feet then hung past
-    the pads, which stop at x = 4.05.
+    520/521 datasheet: PC-board 5 mm pin spacing, formed from 0.4 mm stock,
+    pin section 1.3 +-0.1 (the footprint drills 1.3), fuse axis 3.0 mm above
+    the board, about 8 mm of clip over the leads.  Pins are at (0,0), (0,5),
+    (17,0), (17,5): each clip's two legs stand 2.5 either side of the fuse axis
+    at y = 2.5, and a 5 mm fuse (r 2.5) beds in a half shell around that axis -
+    the legs meet that shell exactly at its own height, which is how the part
+    is drawn in the datasheet.  Open clip: the fuse snaps in by hand.
     """
-    m = Model("SO-4_4.4x3.9mm_P2.54mm")
-    body = [(-1.225, -1.95), (2.2, -1.95), (2.2, 1.95),
-            (-2.2, 1.95), (-2.2, -0.975)]          # = the footprint Fab, pin-1 chamfer
-    m.prism(body, "z", 0.15, 1.85, PLASTIC_BLACK)
-    lead = [(2.0, 1.20), (2.75, 0.22), (3.25, 0.22), (3.25, 0.0),
-            (2.55, 0.0), (2.0, 0.70)]              # gull wing, profile in x/z
-    for sx in (1, -1):
-        prof = [(sx * x, z) for (x, z) in lead]
-        for py in (-1.27, 1.27):                   # pad rows at y = +-1.27
-            m.prism(prof, "y", py - 0.3, py + 0.3, METAL_TIN)
-    return m, "SO-4_4.4x3.9mm_P2.54mm"
+    m = Model("Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm"
+              "_D1.30mm_Horizontal")
+    for cx in (0.0, 17.0):
+        for py in (0.0, 5.0):                   # legs, 1.15 square in a 1.3 drill
+            m.box(cx - 0.575, cx + 0.575, py - 0.575, py + 0.575,
+                  -1.6, 3.0, METAL_TIN)
+        m.ring(2.5, 3.0, 2.5, 2.9, 180.0, 360.0, cx - 0.4, cx + 0.4, METAL_TIN)
+    return m, ("Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm"
+               "_D1.30mm_Horizontal")
 
 
 # ---------------------------------------------------------------------------
-# the three real vendor packages, re-anchored to the footprint origin
+# the four real vendor packages, re-anchored to the footprint frame
 # ---------------------------------------------------------------------------
 #
 # A vendor MCAD file never shares KiCad's origin convention, so each one needs a
-# rigid move before it can be dropped on its footprint.  The numbers below are
+# rigid turn and move before it can be dropped on its footprint.  The numbers below are
 # measured off the package (cross-sections sliced out of the STEP at a height
 # where only the solder tails / pins are present) and compared with the copper
 # of the footprint - they are not fitted after the fact.  A rotation rather than
@@ -291,9 +295,27 @@ def so4_el357n():
 #     footprint on this board has legs outside its Fab - so the courtyard is the
 #     outline that has to contain them.  Housing height 5.60 - the parametric
 #     model this replaces was 6.60, a full millimetre too tall.
+#
+#   Lite-On LTV-357T                                    OK1, OK2 (EL357N-B)
+#     The package arrives lying on its side: 3.85 (the short body dimension) in
+#     x, the 2.10 body height in y, and the 7.02 "across leads" span in z.  A
+#     quarter turn about y and then one about x stand it up, and the vendor
+#     origin turns out to be the footprint origin already: sliced at z 0.00..0.30
+#     the package is four lead toes spanning x 2.62..3.51 and y 1.07..1.47, i.e.
+#     dead centred on the 1.80 x 0.60 pads at (+-3.15, +-1.27), toe ends 0.89 long
+#     inside pads that end at x 4.05.  The moulding then spans x 4.26..4.38 by
+#     y 3.72..3.85 (draft angle: narrower at the top), against the Fab's
+#     4.62 x 4.12, and its top is at z 2.10 - the datasheet maximum.  The toes
+#     reach x +-3.51 and the body y +-1.93, all inside the courtyard's
+#     +-4.30 x +-2.20.  Nothing needs moving, and the moulding carries no pin-1
+#     mark at all (its top face is a plain rectangle at every height probed), so
+#     the corner it lands in is a library question, not a model one.
 VENDOR = {
     "AMASS_XT30U-M_1x02_P5.0mm_Vertical": dict(
         src="AMASS_XT30U-M.step", colour=PLASTIC_XT, move=(2.50, 0.0, 0.0)),
+    "SO-4_4.4x3.9mm_P2.54mm": dict(
+        src="LiteOn_LTV-357T.step", colour=PLASTIC_BLACK,
+        rot_y=-90.0, rot_x=90.0),
     "JST_PH_S3B-PH-SM4-TB_1x03-1MP_P2.00mm_Horizontal": dict(
         src="JST_S3B-PH-SM4-TB.step", colour=PLASTIC_JST, rot_z=180.0,
         move=(0.0, 1.475, 0.0)),
@@ -323,12 +345,16 @@ def vendor_model(name, spec):
             rd.TransferRoots()
     if done != IFSelect_ReturnStatus.IFSelect_RetDone:
         raise SystemExit("%s: could not read %s" % (name, src))
+    # rot_z / rot_y / rot_x compose so the shape is turned about z first, then y,
+    # then x (gp_Trsf multiplies right to left), which is the order the LTV-357T
+    # measurement above is written in.
     trsf = gp_Trsf()
-    if spec.get("rot_z"):
-        spin = gp_Trsf()
-        spin.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
-                         math.radians(spec["rot_z"]))
-        trsf = spin
+    for key, axis in (("rot_z", (0, 0, 1)), ("rot_y", (0, 1, 0)), ("rot_x", (1, 0, 0))):
+        if spec.get(key):
+            spin = gp_Trsf()
+            spin.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(*axis)),
+                             math.radians(spec[key]))
+            trsf = spin * trsf
     if spec.get("move"):
         shift = gp_Trsf()
         shift.SetTranslation(gp_Vec(*spec["move"]))
@@ -341,30 +367,8 @@ def vendor_model(name, spec):
     return m
 
 
-def littelfuse_521():
-    """F1 - Littelfuse 521 clip for a 5 x 20 mm cartridge fuse.
-
-    520/521 datasheet: PC-board 5 mm pin spacing, formed from 0.4 mm stock,
-    pin section 1.3 +-0.1 (the footprint drills 1.3), fuse axis 3.0 mm above
-    the board, about 8 mm of clip over the leads.  Pins are at (0,0), (0,5),
-    (17,0), (17,5): each clip's two legs stand 2.5 either side of the fuse axis
-    at y = 2.5, and a 5 mm fuse (r 2.5) beds in a half shell around that axis -
-    the legs meet that shell exactly at its own height, which is how the part
-    is drawn in the datasheet.  Open clip: the fuse snaps in by hand.
-    """
-    m = Model("Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm"
-              "_D1.30mm_Horizontal")
-    for cx in (0.0, 17.0):
-        for py in (0.0, 5.0):                   # legs, 1.15 square in a 1.3 drill
-            m.box(cx - 0.575, cx + 0.575, py - 0.575, py + 0.575,
-                  -1.6, 3.0, METAL_TIN)
-        m.ring(2.5, 3.0, 2.5, 2.9, 180.0, 360.0, cx - 0.4, cx + 0.4, METAL_TIN)
-    return m, ("Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm"
-               "_D1.30mm_Horizontal")
-
 def all_models():
-    """The five packages: vendor MCAD where a package exists, parametric where not."""
-    yield so4_el357n()
+    """The five packages KiCad lacks: vendor MCAD where a package exists, parametric where not."""
     yield littelfuse_521()
     for name in sorted(VENDOR):
         yield vendor_model(name, VENDOR[name]), name
