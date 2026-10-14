@@ -253,7 +253,7 @@
 		(layers "F.Cu" "F.Mask" "F.Paste")
 		(roundrect_rratio 0.25)
 	)
-(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/SO-4_4.4x3.9mm_P2.54mm.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/SO-4_4.4x3.9mm_P2.54mm.step"
 		(offset
 			(xyz 0 0 0)
 		)

@@ -290,7 +290,7 @@
 		(remove_unused_layers no)
 		(uuid "9b787c65-0c2c-552b-b78a-0bf591658cc3")
 	)
-(model "${KICAD10_3DMODEL_DIR}/Fuse.3dshapes/Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal.step"
 		(offset
 			(xyz 0 0 0)
 		)

@@ -131,8 +131,38 @@ def get_module(fp_id):
         return _mod_cache[fp_id]
     lib, name = fp_id.split(":")
     path = os.path.join(FP_DIR, lib + ".pretty", name + ".kicad_mod")
-    _mod_cache[fp_id] = open(path, encoding="utf-8").read().strip()
+    _mod_cache[fp_id] = localize_models(
+        open(path, encoding="utf-8").read().strip())
     return _mod_cache[fp_id]
+
+
+# Project-local 3D packages (scripts/make_3d_models.py writes them; the vendor
+# MCAD they are built from is in footprints/vendor_step/ with its SOURCES.md).
+MODEL_DIR = os.path.join(KICAD, "share", "kicad", "3dmodels")
+PRJ_3D = "footprints/dpp.3dshapes"
+_MODEL_LINK = re.compile(r'\$\{KICAD10_3DMODEL_DIR\}/([^\s"]+?)\.step')
+
+
+def localize_models(text):
+    """Repoint a model link at the repo's own 3dshapes when KiCad lacks the file.
+
+    Five footprints on this board ask for packages the KiCad release does not
+    ship - AMASS_XT30U-M_1x02_P5.0mm_Vertical, the two JST PH SxB-PH-SM4-TB
+    variants, SO-4_4.4x3.9mm_P2.54mm and the Littelfuse 521 fuse clip - so their
+    links dangle in a stock install and the parts render as nothing.  Those five
+    are rebuilt in footprints/dpp.3dshapes/ and linked with ${KIPRJMOD}, which
+    makes the board's 3D self-contained: it renders the same on any machine, and
+    the .step files travel with the repo instead of being dropped into somebody's
+    KiCad install.  Links that do resolve are left exactly as the library wrote
+    them, so nothing here shadows a package the install really has.
+    """
+    def sub(m):
+        rel = m.group(1)
+        if os.path.isfile(os.path.join(MODEL_DIR, rel + ".step")):
+            return m.group(0)
+        return "${KIPRJMOD}/%s/%s.step" % (PRJ_3D, rel.rsplit("/", 1)[-1])
+
+    return _MODEL_LINK.sub(sub, text)
 
 
 # Everything we drop is bookkeeping that pcbnew re-creates (ids, timestamps);

@@ -193,7 +193,7 @@
 		(remove_unused_layers no)
 		(uuid "3196d0b7-4f51-5a48-b61d-7931ff030ab4")
 	)
-(model "${KICAD10_3DMODEL_DIR}/Connector_AMASS.3dshapes/AMASS_XT30U-M_1x02_P5.0mm_Vertical.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/AMASS_XT30U-M_1x02_P5.0mm_Vertical.step"
 		(offset
 			(xyz 0 0 0)
 		)

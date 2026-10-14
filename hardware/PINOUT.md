@@ -204,7 +204,28 @@ python hardware/scripts/netsreport.py      # nets-report.md (per-net pad positio
 python hardware/scripts/placementmap.py    # out/placement-map.png (courtyards + ratsnest MST)
 python hardware/scripts/place.py <fp_id> <body_dia> [x y]   # legal free slots for a part
 python hardware/scripts/dump.py               # placement table (courtyard + holes per part)
+python hardware/scripts/make_3d_models.py     # footprints/dpp.3dshapes/ + checks each package against its own pads
 ```
+
+**The 3D packages.** Five footprints on this board (`J1`, `J6`/`J9`/`J14`/`J17`,
+`D1`/`OK2`, `F1`) ask for packages the KiCad release does not ship, so their model
+links dangle in a stock install and the parts render as nothing. They are built into
+`footprints/dpp.3dshapes/` instead — three of them are real vendor MCAD (byte-identical
+copies in `footprints/vendor_step/`, with provenance and the measurements made against
+the copper in `footprints/vendor_step/SOURCES.md`), the EL357N and the Littelfuse 521
+fuse clip are drawn from their datasheet numbers. `kicadfmt.localize_models()` rewrites
+a model link to `${KIPRJMOD}/footprints/dpp.3dshapes/<name>.step` **only** when the
+install really has no such file, so the 3D travels with the repo and nothing here
+shadows a package the install does have. `make_3d_models.py` ends by cutting a probe
+box over every pad and measuring where the package's material actually is (0.00-0.10 mm
+off pad centre today) and whether the body stays inside its courtyard; it exits non-zero
+otherwise, so a package that does not sit on its own copper cannot slip in silently.
+What the real parts taught us, both inside their courtyards: the XT30 moulding is
+0.40 mm wider than its Fab (0.20 a side; courtyard margin 0.30), and the JST contact
+tails run 0.93 mm past their Fab at the cable-entry end (courtyard margin 0.61). The XT30's contacts stand
+3.00 mm above the *display* face at `J1` - that is what the real part does, nothing is
+within its courtyard on either face today, but it is the number to check against before
+anything new is placed near `J1`.
 
 Rules are settled by **KiCad's own DRC** (`kicad-cli pcb drc`, run automatically at the end
 of `make_pcb.py`; exit 0 and "Found 0 DRC violations" is the target). The bounding-box

@@ -1073,7 +1073,7 @@
 		(remove_unused_layers no)
 		(uuid "3196d0b7-4f51-5a48-b61d-7931ff030ab4")
 	)
-(model "${KICAD10_3DMODEL_DIR}/Connector_AMASS.3dshapes/AMASS_XT30U-M_1x02_P5.0mm_Vertical.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/AMASS_XT30U-M_1x02_P5.0mm_Vertical.step"
 		(offset
 			(xyz 0 0 0)
 		)
@@ -1383,7 +1383,7 @@
 		(layers "B.Cu" "B.Mask" "B.Paste")
 		(roundrect_rratio 0.166667)
 	)
-(model "${KICAD10_3DMODEL_DIR}/Connector_JST.3dshapes/JST_PH_S4B-PH-SM4-TB_1x04-1MP_P2.00mm_Horizontal.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/JST_PH_S4B-PH-SM4-TB_1x04-1MP_P2.00mm_Horizontal.step"
 		(offset
 			(xyz 0 0 0)
 		)
@@ -1693,7 +1693,7 @@
 		(layers "B.Cu" "B.Mask" "B.Paste")
 		(roundrect_rratio 0.166667)
 	)
-(model "${KICAD10_3DMODEL_DIR}/Connector_JST.3dshapes/JST_PH_S4B-PH-SM4-TB_1x04-1MP_P2.00mm_Horizontal.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/JST_PH_S4B-PH-SM4-TB_1x04-1MP_P2.00mm_Horizontal.step"
 		(offset
 			(xyz 0 0 0)
 		)
@@ -2003,7 +2003,7 @@
 		(layers "B.Cu" "B.Mask" "B.Paste")
 		(roundrect_rratio 0.166667)
 	)
-(model "${KICAD10_3DMODEL_DIR}/Connector_JST.3dshapes/JST_PH_S4B-PH-SM4-TB_1x04-1MP_P2.00mm_Horizontal.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/JST_PH_S4B-PH-SM4-TB_1x04-1MP_P2.00mm_Horizontal.step"
 		(offset
 			(xyz 0 0 0)
 		)
@@ -2307,7 +2307,7 @@
 		(layers "B.Cu" "B.Mask" "B.Paste")
 		(roundrect_rratio 0.166667)
 	)
-(model "${KICAD10_3DMODEL_DIR}/Connector_JST.3dshapes/JST_PH_S3B-PH-SM4-TB_1x03-1MP_P2.00mm_Horizontal.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/JST_PH_S3B-PH-SM4-TB_1x03-1MP_P2.00mm_Horizontal.step"
 		(offset
 			(xyz 0 0 0)
 		)
@@ -2712,7 +2712,7 @@
 		(remove_unused_layers no)
 		(uuid "9b787c65-0c2c-552b-b78a-0bf591658cc3")
 	)
-(model "${KICAD10_3DMODEL_DIR}/Fuse.3dshapes/Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal.step"
 		(offset
 			(xyz 0 0 0)
 		)
@@ -4696,7 +4696,7 @@
 		(layers "F.Cu" "F.Mask" "F.Paste")
 		(roundrect_rratio 0.25)
 	)
-(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/SO-4_4.4x3.9mm_P2.54mm.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/SO-4_4.4x3.9mm_P2.54mm.step"
 		(offset
 			(xyz 0 0 0)
 		)
@@ -4961,7 +4961,7 @@
 		(layers "F.Cu" "F.Mask" "F.Paste")
 		(roundrect_rratio 0.25)
 	)
-(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/SO-4_4.4x3.9mm_P2.54mm.step"
+(model "${KIPRJMOD}/footprints/dpp.3dshapes/SO-4_4.4x3.9mm_P2.54mm.step"
 		(offset
 			(xyz 0 0 0)
 		)
