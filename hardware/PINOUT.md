@@ -18,7 +18,7 @@ the silkscreen; what you call each block on your drawing is up to you.
 | Pin 1 of both rows (square pad) | x = 45.91 — that end is the DevKit's **USB end** (west); pin 15 at x = 81.47 |
 | DevKit body hanging underneath | x 36.20→86.20, y 23.49→51.49 (coordinates only — the outline is no longer drawn on the board) |
 | Antenna keep-out (no copper, any layer) | x 73.42→86.80, y 26.79→48.19 (the drawn zone between EN and IO23) |
-| Display socket `J3` | along the **east** edge, pad 1 (`TPN`, the module's `T_IRQ`) at (92.51, 51.01), pad 14 (`V5`) at (92.51, 17.99) — the module's own numbering, touch end south; courtyard y 16.72→52.28 |
+| Display socket `J3` | along the **east** edge, pin 1 (VCC) at (92.51, 17.99), pin 14 (T_DO) at (92.51, 51.01); courtyard y 16.72→52.28 |
 | DC-DC module `U4` | underside, 21.0 × 43.0 body, **SMD pads 3.50 × 2.50 with no drill** (the module lies flat, pins soldered onto back-side copper), pad centres x 12.50→33.00 / y 19.39→60.89; `IN+` at (14.25, 20.64) (input pads north, `+` pads west); courtyard x 12.00→33.50 / y 18.39→61.89 — the body box plus 0.25 mm, so DRC polices keep-out to the module (§7) |
 | 12 V entry `J1` (XT30U-M) | underside, pad pair **centred on the module's centreline x 22.75**: pad 1 `DC_IN` at (20.25, 13.99), pad 2 `GND` at (25.25, 13.99) — 5.00 mm pitch, Ø3.8 pads with Ø2.7 drills. Body/courtyard x 17.15→28.35, y 10.89→17.09, mating face 0.89 mm inside the north edge; 1.30 mm north of `U4`'s courtyard (1.55 mm to its body outline, 2.50 mm pad-to-courtyard). Polarity silks (mirrored, bottom side) sit **one outside each pad, both centred on the connector's y centre** (ink y 13.54→14.44, i.e. on the pad row y 13.99): `+12V` x 12.85→16.15 west of pad 1, `GND` x 29.35→31.75 east of pad 2 — 1.00 mm clear of the courtyard and 2.20 mm clear of the pad it names, and 1.94 mm north of the module's `IN+` / `IN-` labels (y 16.38→17.28) |
 | Bulk cans `C1` / `C3` | underside, as a pair in the middle of the 10 mm west extension: centres (6.00, 29.60) rot 90 and (6.00, 45.40) rot 270, courtyards x 0.50→11.50 standing 2.50 mm apart (13.30 × 11.00 each) and 6.95 mm clear of both west corner holes. Each can's `+` pad (1) faces outward, onto the module pad it belongs to: 5.25 mm in x / 1.31 mm in y from `IN+` for `C1`, 5.25 × 6.59 mm from `OUT+` for `C3`; the two inner pads are both `GND`, 3.00 mm apart. Only rot 90/270 fits — rot 0/180 turns the 13.30 mm courtyard across the 12.25 mm strip and into `U4` |
@@ -44,7 +44,7 @@ the silkscreen; what you call each block on your drawing is up to you.
 | DC-DC step-down module LM2596, 4 pads, **soldered underneath** | `U4` |
 | 5 V output caps by the module | `C3` `C4` |
 | ESP32 DevKit sockets (it hangs under the board) | `J10a` = north row, `J10b` = south row |
-| 4.0" TFT display socket, 14 pins, east edge, the module's pad 1 at the south end | `J3` |
+| 4.0" TFT display socket, 14 pins, east edge | `J3` |
 | GNSS / GPS module — six bare pads, module soldered under the board | `J8` |
 | debug / serial pads (TX, RX, GND, 5V) — west of the spare pads, same row | `J13` |
 | spare GPIO pads (6) | `J15` |
@@ -104,48 +104,56 @@ Silkscreen note on the board says *CHECK SILK* — clones differ, verify against
 | 29 | IO22 | `SPARE_D22` | spare / I2C SCL |
 | 30 | IO23 | `TFT_MOSI` | display data in |
 
-## 4. Display socket `J3` (14 pins, east edge; the module's own numbering, pad 1 at the south end)
+## 4. Display socket `J3` (14 pins, pin 1 = VCC, along the east edge, pin 1 at the north end)
 
-The 4.0" module numbers its header **from the touch end**, so `T_IRQ` is pad 1 and `VCC`
-is pad 14, and the carrier follows the module rather than the other way round: pad 1 sits
-at (92.51, **51.01**) with the square pad and the chamfer on that same south end, pad 14
-(`V5`) at (92.51, **17.99**). The footprint is the stock 1×14 socket strip turned 180°
-about its own pad-1 origin, which is what moves the pin-1 mark to the south end while
-leaving every net on the pad it already sat on.
+The module numbers its header **`1 = VCC` at one end down to `14 = T_DO` at the other**, and
+the carrier follows it directly: pad 1 (`V5`) sits at (92.51, **17.99**) with the square pad
+and the courtyard chamfer on that same north end, pad 14 (`TFT_TDO`) at (92.51, **51.01**).
+The footprint is the stock 1×14 socket strip at rot 0, placed on its pad-1 origin — which is
+where it has always sat.
 
 The socket is 1×14 because the drawing's block is **"Display header 14 pin"** with a
 35.00 mm slot (x 92.01→93.01, y 17.00→52.00): a 14-way body is 35.56 mm, so it stands
-0.28 mm past each end of the drawn slot, centred - pad 1 y 51.01 → pad 14 y 17.99
+0.28 mm past each end of the drawn slot, centred - pin 1 y 17.99 → pin 14 y 51.01
 (33.02 = 13 × 2.54).
 
-| pad | silk | net | | pad | silk | net |
+| pin | silk | net | | pin | silk | net |
 |---|---|---|---|---|---|---|
-| 1 | TPN | `TFT_TPEN` | | 8 | SCK | `TFT_SCK` |
-| 2 | TDO | `TFT_TDO` | | 9 | SDI | `TFT_MOSI` |
-| 3 | TDI | `TFT_TDIN` | | 10 | DC | `TFT_DC` |
-| 4 | TCS | `TFT_TCS` | | 11 | RST | `TFT_RST` |
-| 5 | TCK | `TFT_TCLK` | | 12 | CS | `TFT_CS` |
-| 6 | SDO | `TFT_SDO` | | 13 | GND | `GND` |
-| 7 | LED | `TFT_BL` | | 14 | VCC | `V5` |
+| 1 | VCC | `V5` | | 9 | SDO | `TFT_SDO` |
+| 2 | GND | `GND` | | 10 | T_CLK | `TFT_TCLK` |
+| 3 | CS | `TFT_CS` | | 11 | T_CS | `TFT_TCS` |
+| 4 | RST | `TFT_RST` | | 12 | T_DIN | `TFT_TDIN` |
+| 5 | DC | `TFT_DC` | | 13 | TPEN | `TFT_TPEN` |
+| 6 | SDI | `TFT_MOSI` | | 14 | T_DO | `TFT_TDO` |
+| 7 | SCK | `TFT_SCK` | | | | |
+| 8 | LED | `TFT_BL` | | | | |
 
-Pads 1-6 are the touch panel (`TFT_TPEN` `TFT_TDO` `TFT_TDIN` `TFT_TCS` `TFT_TCLK`) and
-the display's MISO (`TFT_SDO`): they land on the socket and on nothing else - there is no
-MISO in the firmware and touch was removed in 1.3.6 - but each is given its own net name
-so the netlist says what the pad is instead of leaving it nameless.
+Pins 9-14 - the touch panel (`TFT_TPEN` `TFT_TDO` `TFT_TDIN` `TFT_TCS` `TFT_TCLK`) and the
+display's MISO (`TFT_SDO`) - land on the socket and on nothing else: there is no MISO in the
+firmware and touch was removed in 1.3.6. They used to be six nameless pads; each now carries
+its own single-pad net so the netlist says what the hole is *for* instead of leaving it blank.
+No copper changed - same pads, same places, no ratsnest added.
 
-**Silkscreen beside the socket.** Every pad is named in the clear west of the socket,
-glyphs rotated 90° so the column reads bottom-up, 0.80 mm high. At 2.54 mm pitch three
-characters is the limit, so the board shortens the long forms of the table above: `T_CLK`
-→ `TCK`, `T_CS` → `TCS`, `T_DIN` → `TDI`, `T_DO` → `TDO`, `T_IRQ` → `TPN`. Each name is
-centred on its own pad by KiCad's own justify rather than by a width estimate: measured
-off the `F.Silkscreen` gerber, twelve of the fourteen centre within 0.06 mm of their pad
-(the two the gerber segmentation could not isolate are the north and south ends, same
-call as the rest). The column anchor is x **89.80**, ink **89.63→90.63** - 0.55 mm clear
-of the socket's own body silks at x 91.18, 1.03 mm off the pad edge at x 91.66, 1.70 mm
-east of the vertical `TFT` name at x 88.11. The pad numbers `14` (north) and `1` (south)
-print 1.95 mm further west, anchor x **87.85**: at the old x 88.31 DRC flagged
-`silk_overlap` between `14` and `VCC`. All of it sits inside the socket's own courtyard
-clearance - DRC stays at 0 violations.
+**Silkscreen beside the socket.** Every pin is named in the clear west of the socket,
+**horizontally** (rot 0, so the words read straight off the board), 0.80 mm glyphs
+right-aligned on a common anchor at x **91.00**. The words are the module's own, printed in
+full - horizontal costs board width instead of pad pitch, and there is width to spare: the
+longest word `T_CLK` measures 3.24 mm of ink, so the column runs x **87.53→90.84**, still
+1.33 mm east of the DevKit's body outline at x 86.20, **0.82-0.93 mm** clear of the pad edge
+at x 91.66 and **0.34-0.45 mm** clear of the socket's own body silks at x 91.18. Each name is
+centred on its own pad by KiCad's own justify (`halign="right", valign="middle" - no
+stroke-font width estimate, which came out up to 0.4 mm off when centring was computed by
+hand): measured off the `F.Silkscreen` gerber, all fourteen land within **0.036 mm** of their
+pad's y centre. The pin numbers `1` and `14` print outboard of the column and 2.5 mm west of
+its edge, anchor x **88.50** (ink `1` x 87.74→88.25 / y 15.16→16.06, `14` x 86.88→88.29 /
+y 52.82→53.76; 0.60 mm north and 0.48 mm south of the socket's end silks): straight north of
+pad 1 they would sit over the NE mounting hole `H2` (91.50, 13.50) - its mask opening reaches
+y 15.15, which DRC flags as `silk_over_copper` - and beside the pads they would run into the
+`VCC` / `T_DO` words (`silk_overlap`). The socket's own name `TFT` is horizontal too,
+centred on the socket's x under the south end (anchor 92.51, 54.45; ink x 91.52→93.50, y
+54.49→55.39) - 2.15 mm clear of the socket silks, 1.50 mm inside the east board edge, and
+clear of the `GND` fill's south cap, which ends at y 54.27. All of it stays inside the
+socket's courtyard clearance - DRC remains 0 violations, 115 unconnected, 0 footprint errors.
 
 ## 5. Vehicle & accessory connectors
 
