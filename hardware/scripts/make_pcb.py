@@ -107,21 +107,26 @@ ESP_BODY = cadbox(8.80, 13.49, 58.80, 41.49)     # 36.20,23.49 .. 86.20,51.49
 
 # TFT display socket J3: drawn as a 1.00 x 35.00 slab standing 10.02 mm above
 # F.Cu at the board edge (u 1.99..2.99, v 7.00..42.00).  The drawing's block is
-# "Display header 14 pin", so J3 is a **1x14** socket, placed exactly as the CAD
-# mapping row says: pin 1 (VCC) y 17.99 -> pin 14 (T_DO) y 51.01, 33.02 = 13 x
-# 2.54, the header centred in the drawn slot.  Its 35.56 mm body stands 0.28 mm
-# past each end of the 35.00 mm slot - the earlier 1x16 reading of the module's
-# silks put 40.64 mm of socket 5.6 mm into the drawing's south gap, which is
-# what this corrects.
+# "Display header 14 pin", so J3 is a **1x14** socket, centred in that 35.00 mm
+# slot: the pad row spans y 17.99..51.01 (33.02 = 13 x 2.54) and the 35.56 mm
+# body stands 0.28 mm past each end of the slot - the earlier 1x16 reading of
+# the module's silks put 40.64 mm of socket 5.6 mm into the drawing's south gap,
+# which is what that correction was about.
 #
-# Pin order follows the display module's own silks, read off the module in hand:
-# **pad 1 = VCC at the north end (y 17.99), pad 14 = T_DO at the south (y
-# 51.01)**.  The footprint sits at pad 1, rot 0, exactly where it has always
-# sat - the 180-degree reading tried in between (pad 1 at the touch end) was a
-# misreading of the LCDWiki table against the module's silks and is backed out.
-# See TFT_MAP below: all 14 pads are named, six of them deliberately dead-ends.
-TFT = {"x": 92.51, "y1": 17.99, "pitch": 2.54, "pins": 14}   # pad 1 north
-TFT["y_end"] = TFT["y1"] + (TFT["pins"] - 1) * TFT["pitch"]  # 51.01
+# Which END of the row is pad 1 is what matters, and **pad 1 = VCC sits at the
+# SOUTH end, y 51.01**; the stack runs north from there (VCC GND CS RST DC SDI
+# SCK LED | SDO T_CLK T_CS T_DIN TPEN T_DO), so the far north pad (y 17.99) is
+# pad 14 = T_DO.  The stock 1x14 strip grows toward +y (south) from its pad-1
+# origin, so that origin is pinned to (92.51, 51.01) and the footprint is turned
+# 180 degrees about it: square pad, courtyard chamfer and the "1" all land on the
+# VCC end.  The board used to sit the other way round (V5 on the pad at y 17.99);
+# the 180-degree experiment that preceded this only renumbered the same holes and
+# left VCC at the north, which was still wrong - this is the change that actually
+# moves the nets, and with no track on the board yet it moves nothing but pad
+# nets and the ratsnest.  See TFT_MAP below: all 14 pads are named, six of them
+# deliberately dead-ends.
+TFT = {"x": 92.51, "y1": 51.01, "pitch": 2.54, "pins": 14}   # pad 1 (VCC) south
+TFT["y_end"] = TFT["y1"] - (TFT["pins"] - 1) * TFT["pitch"]  # 17.99 (pad 14)
 
 # LM2596 step-down module, soldered to the BOTTOM face.
 # Drawn 21.00 x 43.00 (u 61.75..82.75, v 8.64..51.64) with silks `in +` / `-`
@@ -455,11 +460,11 @@ def parts():
 
     # ---- TFT display socket J3, F.Cu, standing at the east board edge
     # (drawn 1.00 x 35.00 slab, 10.02 mm above F.Cu; the module is 14-way).
-    # Pad 1 (VCC) at the NORTH pad, y 17.99, rot 0 - the module's own silks run
-    # 1 = VCC .. 14 = T_DO in that same direction.
+    # Pad 1 (VCC) on the SOUTH pad, y 51.01, turned 180 deg about that origin -
+    # the row runs north, pad 14 (T_DO) at y 17.99.
     tft = {str(i + 1): n for i, n in enumerate(TFT_MAP)}
     P.append(("J3", "Connector_PinSocket_2.54mm:PinSocket_1x14_P2.54mm_Vertical",
-              TFT["x"], TFT["y1"], 0.0, tft, "TFT-ILI9488", "F.Cu", 0))
+              TFT["x"], TFT["y1"], 180.0, tft, "TFT-ILI9488", "F.Cu", 0))
 
     # ---- DC-DC step-down module, soldered to the BOTTOM face (custom fp).
     # Drawn 21 x 43 body, `in +`/`-` at the north end, `out +`/`-` at the south,
@@ -893,10 +898,9 @@ ESP_LABEL = {
 }
 
 # TFT 1x14 socket ("4.0'' TFT SPI 480X320 V1.1", the drawing's "Display header
-# 14 pin" block).  TFT_MAP is indexed by KiCad **pad number 1..14**, and the pad
-# numbers follow the display module's own silks, read off the module in hand:
-# pad 1 = VCC at the north end (y 17.99) down to pad 14 = T_DO at the south end
-# (y 51.01).  Every pad carries a name now.
+# 14 pin" block).  TFT_MAP is indexed by KiCad **pad number 1..14**, and pad 1 =
+# VCC is the SOUTH pad of the row (y 51.01), the stack running north to pad 14 =
+# T_DO at y 17.99.  Every pad carries a name now.
 # Pads 9..14 - the LCD's SDO and the XPT2046-style touch lines - are single-pad
 # nets, unconnected on purpose (no MISO read path in the firmware, touch
 # removed in 1.3.6); naming them is what records *why* those six holes are
@@ -1126,36 +1130,45 @@ def silks():
     # under the west end of the north row, 0.30 mm north of OK1's printed
     # designator and clear of the C2 / D2 column (courtyard west edge 33.00).
     out += _txt(41.20, 26.00, "PIN 1 = USB END", size=0.8)
-    out += _txt(KEEP[0] + 0.8, KEEP[1] + 0.8, "ANTENNA - NO COPPER", size=0.8)
+    # The antenna keep-out reminder is split over two lines: one line measured
+    # ~17.4 mm of ink but the zone it describes is 13.94 mm wide (x 72.87->86.80),
+    # so the single line ran 3.5 mm east of its own zone and into the TFT name
+    # column at x 87.5 (DRC: silk_overlap against T_CLK).  Split, each word is
+    # ~6.7 mm of ink and sits well inside the zone (ink x 73.83->80.64, y
+    # 27.63->29.88); the 1.45 mm line pitch leaves 0.65 mm between the two lines
+    # of ink, since 0.80 mm stroke glyphs draw 0.80 mm tall caps.
+    out += _txt(KEEP[0] + 0.8, KEEP[1] + 0.8, "ANTENNA", size=0.8)
+    out += _txt(KEEP[0] + 0.8, KEEP[1] + 2.25, "NO COPPER", size=0.8)
 
-    # TFT socket, standing at the east edge (14-way), pad 1 = VCC at the north
-    # end.  Every pad is named in the clear west of the socket, **horizontally**
-    # (rot 0) so the words read straight off the board, right-aligned on a common
-    # edge at anchor x 91.00 and centred on their own pad row by KiCad's own
-    # justify (halign="right", valign="middle" - no stroke-font width guesswork,
-    # which came out up to 0.4 mm off when centring was computed by hand).
+    # TFT socket, standing at the east edge (14-way), pad 1 = VCC at the SOUTH
+    # end and the row running north to pad 14 = T_DO.  Every pad is named in the
+    # clear west of the socket, **horizontally** (rot 0) so the words read
+    # straight off the board, right-aligned on a common edge at anchor x 91.00
+    # and centred on their own pad row by KiCad's own justify (halign="right",
+    # valign="middle" - no stroke-font width guesswork, which came out up to 0.4
+    # mm off when centring was computed by hand).
     # Horizontal costs board width rather than pitch, and there is width to
-    # spare: the longest word (T_CLK) is ~3.7 mm of ink, so the words run from x
-    # 91.00 west to ~87.3, still ~1.1 mm east of the DevKit's body outline at x
+    # spare: the longest word (T_CLK) is ~3.2 mm of ink, so the words run from x
+    # 91.00 west to ~87.5, still ~1.3 mm east of the DevKit's body outline at x
     # 86.20 - which is also why the module's long forms go on the board whole
     # (T_CLK / T_CS / T_DIN), no abbreviating.
     for i, nm in enumerate(TFT_LABEL):
-        out += _txt(91.00, TFT["y1"] + i * TFT["pitch"], nm, size=0.8,
+        out += _txt(91.00, TFT["y1"] - i * TFT["pitch"], nm, size=0.8,
                     halign="right", valign="middle")
-    # The pin numbers move west of the name column and outboard of the pad
-    # column (north of pad 1, south of pad 14).  Two reasons: beside the pads,
-    # where they used to sit at x 88.31/88.11, they would now run into the "VCC"
-    # / "T_DO" words (DRC: silk_overlap), and straight north of pad 1 they would
-    # sit over the NE mounting hole H2 at (91.50, 13.50) - its mask opening runs
-    # to y 15.15 and DRC flags silk_over_copper.
-    out += _txt(88.50, TFT["y1"] - 2.34, "1", size=0.9,
+    # The pin numbers sit outboard of the row and 2.5 mm west of the name
+    # column: "1" below the VCC (south) end, "14" above the T_DO (north) end.
+    # Straight outboard of the pads they would sit over the NE mounting hole H2
+    # at (91.50, 13.50) - its mask opening reaches y 15.15, which DRC flags as
+    # silk_over_copper - and level with the pads they run into the outermost
+    # words (DRC: silk_overlap).
+    out += _txt(88.50, TFT["y1"] + 2.34, "1", size=0.9,
                 halign="right", valign="middle")
-    out += _txt(88.50, TFT["y_end"] + 2.34, "14", size=0.9,
+    out += _txt(88.50, TFT["y_end"] - 2.34, "14", size=0.9,
                 halign="right", valign="middle")
-    # the socket's own name, horizontal, centred under the south end of the row:
-    # 2.1 mm clear of the socket's south body silks, and clear of the GND fill's
-    # south cap (the strip ends at y 54.27)
-    out += _txt(TFT["x"], 54.45, "TFT", size=0.9, halign="center")
+    # the socket's own name, horizontal, centred under the south (pad-1) end:
+    # 2.1 mm clear of the socket's body silks, and clear of the GND fill's south
+    # cap (the strip ends at y 54.27)
+    out += _txt(TFT["x"], TFT["y1"] + 3.44, "TFT", size=0.9, halign="center")
 
     # 12 V entry polarity: one label outside each XT30 pad, both centred on the
     # connector's y centre (pads at y 13.99, courtyard y 10.89..17.09).  B.Cu part
@@ -1251,8 +1264,9 @@ def silks():
                             " - board 95 x 55 mm", layer="Dwgs.User", size=1.2)
     out += _txt(10.5, 68.8, "BUILD NOTES (Dwgs.User - not on the board)",
                 layer="Dwgs.User", size=1.0)
-    docs = ["TFT 1..14: VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS",
-            "TFT cont: T_DIN TPEN T_DO - pads 9..14 named, open",
+    docs = ["TFT pad 1 = VCC at the SOUTH end; 1..14 north:",
+            "  VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS T_DIN TPEN T_DO",
+            "  (pads 9..14 named, left open)",
             "ESP near row 1..15 (USB end first): VIN GND 13 12 14 27 26 25",
             "  33 32 35 34 39 36 EN",
             "ESP far row 16..30 (USB end first): 3V3 GND 15 2 4 16 17 5 18",
