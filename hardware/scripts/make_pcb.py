@@ -670,54 +670,115 @@ def parts():
     # C2 / D2 / C4 top to bottom.
     P.append(("C4", C805, 35.25, 57.00, 90.0,
               {"1": N("V5"), "2": N("GND")}, "100n", "F.Cu", 0))
-    # C13 moves east into the mid small-parts zone: it now sits at the head of the
-    # 3V3 pin (J10b pad 1, 6.0 mm away) instead of 25 mm away in the west column,
-    # which the vertical fuse courtyard owns.  1.04 mm south of C7, 2.95 mm north
-    # of the DevKit row (opposite face), inside the drawn mid zone; V3V3's rats
-    # nest drops from 62.2 mm to 40.1 mm.
-    P.append(("C13", C805, 48.60, 44.50, 0.0,
-              {"1": N("V3V3"), "2": N("GND")}, "100n", "F.Cu", 0))
+    # C13 (the 3V3 decoupler) now sits ON the mid lattice, in the column that
+    # runs under the DevKit's 3V3 pin (see the lattice table below); it used to
+    # hang in the aisle 1.04 mm under C7, which was the tightest joint on the
+    # board.  Its cell was picked for the pin, not for the chain: 7.59 mm from
+    # J10b-1 against 6.30 mm for the old off-grid seat, and V3V3's rats nest only
+    # pays 1.7 mm for it (47.9 -> 49.6).
 
-    # ---- signal conditioning, F.Cu, in the drawn mid small-parts zone
-    # (43.38 x 18.91, under the dev board that hangs below).
-    # ---- signal conditioning, F.Cu, in the drawn mid small-parts zone
-    # (43.38 x 18.91, under the dev board that hangs below).  Optocouplers are
-    # the SMD twin of the PC817 (Everlight EL357N, 4-pin SOP, 2.54 mm leads);
-    # both move onto the RX/CX column grid below (x 44.10 and 57.60) so the whole
-    # mid band reads as one lattice: an opto standing over its own column.
+    # ---- signal conditioning, F.Cu, in the drawn mid small-parts zone (43.38 x
+    # 18.91, under the dev board that hangs below).  Optocouplers are the SMD
+    # twin of the PC817 (Everlight EL357N, 4-pin SOP, 2.54 mm leads); they stand
+    # at the north end of the band, over the column they serve.
+    #
+    # The lattice: 6 columns x 5.40 mm, 3 rows x 4.34 mm (x 39.60..66.60, y
+    # 35.40..44.08), with a row of optos/TVS above it at y 30.50.  Rows 1-2 carry
+    # one signal chain per column, top to bottom (battery divider, ignition, the
+    # BAT_SNS hold and the fuel feed, the hall outputs, the coolant feed and the
+    # hall LED drive, the ldr feed); row 3 is the filter row, where each cap
+    # parks in the column under the DevKit pin it conditions.  Chosen by
+    # measurement, not taste:
+    #   - HAND SOLDER ROOM (the reason for the change).  The old grid was 4.50 x
+    #     3.00, which leaves 1.60 mm pad-to-pad across a column step and 1.55 mm
+    #     across a row step: an iron tip is 1.5-2 mm, so 51 of the 57 pad pairs
+    #     in the band were under 2.5 mm and you could not get between two joints.
+    #     At 5.40 x 4.34 the tightest pair in the band is 2.50 mm and nothing is
+    #     below it (measured over pad rectangles, scripts in hardware/scratch).
+    #   - RATS NEST.  Grouping by chain instead of by part type (the old grid was
+    #     "all resistors in two rows, all caps in one row") shortens the wiring,
+    #     measured as the Manhattan MST over every pad of a net (the same table
+    #     scripts/netsreport.py prints): over the fifteen nets that live in this
+    #     band, 671.1 -> 624.7 mm - LDR_SNS 81.3 -> 59.3, COOL_SNS 58.4 -> 44.0,
+    #     HALL_SIG 38.0 -> 19.8, FUEL_SNS 100.2 -> 92.8, IGN_12 60.4 -> 51.9,
+    #     HALL_OUT 16.2 -> 12.0.  It is not free: GND spreads 317.9 -> 335.2 and
+    #     HALL/HALL_LED gain 13.8/10.1 mm (the caps moved under their pins, away
+    #     from the opto side of their chain), BAT_DIV +3.3.  Whole board, all
+    #     nets: 2024.9 -> 1995.7 mm.
+    #   - R12 (TFT_BL) moves out of the band to the north strip beside C11 for
+    #     access and grid symmetry, not for wiring - that net was already running
+    #     north to J11 and its span only moves 55.4 -> 56.4 mm.  What it buys is
+    #     the lattice cell that C13 (and the 3V3 pin) needed.
+    #   - KiCad DRC stays at 0 violations / 115 unconnected / 0 footprint errors
+    #     (nothing routed).  Candidate lattices were built and DRC'd as whole
+    #     boards in hardware/scratch before this one was committed.
+    # The 7th column (x 66.60) still carries C11 in the north strip and D3 here.
     OPTO = "Package_SO:SO-4_4.4x3.9mm_P2.54mm"
-    P.append(("OK1", OPTO, 44.10, 30.50, 0.0,
-              {"1": N("IGN_LED"), "2": N("GND"),
-               "3": N("IGN_SENSE"), "4": N("V3V3")}, "EL357N-B", "F.Cu", 0))
-    P.append(("OK2", OPTO, 57.60, 30.50, 0.0,
-              {"1": N("HALL_LED"), "2": N("GND"),
-               "3": N("HALL_OUT"), "4": N("V3V3")}, "EL357N-B", "F.Cu", 0))
-
-    RX = [39.6, 44.1, 48.6, 53.1, 57.6, 62.1]
-    # the grid's 7th column, x 66.60, is used by C11 and D3 (and starts the spare
-    # header); the test-point row below sits on columns 1..5 of the same lattice
-    res = [("R2", "47k", "DC_12", "BAT_DIV", 35.5), ("R3", "10k", "BAT_DIV", "GND", 35.5),
-           ("R4", "1k", "BAT_DIV", "BAT_SNS", 35.5), ("R5", "220R", "V3V3", "FUEL_SNS", 35.5),
-           ("R6", "10k", "V3V3", "COOL_SNS", 35.5), ("R7", "10k", "V3V3", "LDR_SNS", 35.5),
-           ("R8", "1k", "IGN_12", "IGN_LED", 38.5), ("R9", "10k", "IGN_SENSE", "GND", 38.5),
-           ("R10", "1k", "HALL_SIG", "HALL_LED", 38.5), ("R11", "10k", "HALL_OUT", "GND", 38.5),
-           ("R12", "10k", "TFT_BL", "GND", 38.5), ("R13", "1k", "HALL_OUT", "HALL", 38.5)]
-    for i, (ref, val, a, b, y) in enumerate(res):
-        P.append((ref, R805, RX[i % 6], y, 0.0,
+    COLS = [39.60, 45.00, 50.40, 55.80, 61.20, 66.60]      # 5.40 pitch
+    ROWS = (35.40, 39.74, 44.08)                          # 4.34 pitch
+    YBIG = 30.50                                         # opto / TVS row
+    # (ref, footprint, value, pad1 net, pad2 net, column, row)
+    LATTICE = [
+        # col 0 (x 39.60) - battery divider, west end, next to Q1 / F1
+        ("R2", R805, "47k",  "DC_12",    "BAT_DIV",  0, 0),
+        ("R3", R805, "10k",  "BAT_DIV",  "GND",      0, 1),
+        ("R4", R805, "1k",   "BAT_DIV",  "BAT_SNS",  0, 2),
+        # col 1 (x 45.00) - ignition input: OK1 stands over it
+        ("R8",  R805, "1k",  "IGN_12",    "IGN_LED",   1, 0),
+        ("R9",  R805, "10k", "IGN_SENSE", "GND",       1, 1),
+        ("C9",  C805, "100n", "IGN_SENSE", "GND",      1, 2),
+        # col 2 (x 50.40) - BAT_SNS filter, the fuel excitation, and the 3V3
+        # bypass.  C13 is the one cell not chosen by its chain: a bypass cap has
+        # to sit next to the pin it protects, and the 3V3 pin (J10b-1) is at
+        # (45.91, 50.20) - this cell is 7.59 mm away, against 6.30 mm for the
+        # old off-grid seat.  Chosen by scanning every cell: the cheapest seat
+        # for C13 (the far east column) is 25 mm from the pin and only 12 mm
+        # cheaper on the rats nest, which is a bad trade for a decoupler.
+        ("C5",  C805, "100n", "BAT_SNS",  "GND",       2, 0),
+        ("R5",  R805, "220R", "V3V3",     "FUEL_SNS",  2, 1),
+        ("C13", C805, "100n", "V3V3",    "GND",        2, 2),
+        # col 3 (x 55.80) - hall outputs: OK2 stands over it.  The third row of
+        # the grid is not part of the column's chain: each filter sits in the
+        # column that runs under the DevKit pin it conditions (FUEL_SNS enters on
+        # J10a-8, x 68.77, so its cap stops one column west of that, between the
+        # pin and R5 on the next column over)
+        ("R11", R805, "10k", "HALL_OUT", "GND",        3, 0),
+        ("R13", R805, "1k",  "HALL_OUT", "HALL",       3, 1),
+        ("C6",  C805, "100n", "FUEL_SNS", "GND",       3, 2),
+        # col 4 (x 61.20) - coolant feed, then the hall LED drive
+        ("R6",  R805, "10k", "V3V3",     "COOL_SNS",   4, 0),
+        ("C7",  C805, "100n", "COOL_SNS", "GND",       4, 1),
+        ("R10", R805, "1k",  "HALL_SIG", "HALL_LED",   4, 2),
+        # col 5 (x 66.60) - ldr feed and the hall filter, which parks under the
+        # HALL pin (J10a-7, x 66.23); D3 stands over this column
+        ("R7",  R805, "10k", "V3V3",     "LDR_SNS",    5, 0),
+        ("C8",  C805, "100n", "LDR_SNS", "GND",        5, 1),
+        ("C10", C805, "100n", "HALL",     "GND",       5, 2),
+    ]
+    for ref, fp, val, a, b, ci, ri in LATTICE:
+        P.append((ref, fp, COLS[ci], ROWS[ri], 0.0,
                   {"1": N(a), "2": N(b)}, val, "F.Cu", 0))
 
-    CX = RX
-    caps = [("C5", "BAT_SNS"), ("C6", "FUEL_SNS"), ("C7", "COOL_SNS"),
-            ("C8", "LDR_SNS"), ("C9", "IGN_SENSE"), ("C10", "HALL")]
-    for i, (ref, net) in enumerate(caps):
-        P.append((ref, C805, CX[i], 41.5, 0.0, {"1": N(net), "2": N("GND")},
-                  "100n", "F.Cu", 0))
+    P.append(("OK1", OPTO, COLS[1], YBIG, 0.0,
+              {"1": N("IGN_LED"), "2": N("GND"),
+               "3": N("IGN_SENSE"), "4": N("V3V3")}, "EL357N-B", "F.Cu", 0))
+    P.append(("OK2", OPTO, COLS[3], YBIG, 0.0,
+              {"1": N("HALL_LED"), "2": N("GND"),
+               "3": N("HALL_OUT"), "4": N("V3V3")}, "EL357N-B", "F.Cu", 0))
+    # The two SO-4 courtyards are 6.50 mm wide, so the optos can only sit two
+    # columns apart (5.40 would overlap); D3 (P6SMB TVS on the HALL line) takes
+    # the next free slot east of OK2 at the band's east column.
+    P.append(("D3", "Diode_SMD:D_SMB", COLS[5], YBIG, 0.0,
+              {"1": N("HALL"), "2": N("GND")}, "P6SMB6V2A", "F.Cu", 0))
+
     # TRIP_BTN filter, right behind the north-edge J14 shell (which hangs below),
-    # on the grid's 7th column - same x as D3 under it.
+    # on the grid's 7th column - same x as D3 under it.  R12 (the TFT_BL pull
+    # down) joins it there: the backlight net runs north to J11 anyway, and that
+    # freed the lattice cell C13 needed for the 3V3 pin.
     P.append(("C11", C805, 66.60, 21.60, 0.0, {"1": N("TRIP_BTN"), "2": N("GND")},
               "100n", "F.Cu", 0))
-    P.append(("D3", "Diode_SMD:D_SMB", 66.60, 30.50, 0.0,
-              {"1": N("HALL"), "2": N("GND")}, "P6SMB6V2A", "F.Cu", 0))
+    P.append(("R12", R805, 58.98, 21.60, 0.0,
+              {"1": N("TFT_BL"), "2": N("GND")}, "10k", "F.Cu", 0))
 
     # ---- debug / spare: solder pads, not headers (the drawing's two
     # "Area for Spare and debug pads" zones). Pads are 1.7 x 1.0, 2.54 pitch.
