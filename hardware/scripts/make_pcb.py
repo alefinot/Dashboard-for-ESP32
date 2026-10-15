@@ -108,14 +108,23 @@ ESP_BODY = cadbox(8.80, 13.49, 58.80, 41.49)     # 36.20,23.49 .. 86.20,51.49
 # TFT display socket J3: drawn as a 1.00 x 35.00 slab standing 10.02 mm above
 # F.Cu at the board edge (u 1.99..2.99, v 7.00..42.00).  The drawing's block is
 # "Display header 14 pin", so J3 is a **1x14** socket, placed exactly as the CAD
-# mapping row says: pin 1 (VCC) y 17.99 -> pin 14 (T_DO) y 51.01, 33.02 = 13 x
-# 2.54, the header centred in the drawn slot.  Its 35.56 mm body stands 0.28 mm
-# past each end of the 35.00 mm slot - the earlier 1x16 reading of the module's
-# silks put 40.64 mm of socket 5.6 mm into the drawing's south gap, which is
-# what this corrects.  Only pins 1..8 are wired; 9..14 (SDO + the touch lines)
-# stay open - no MISO in the firmware, touch removed in 1.3.6.
-TFT = {"x": 92.51, "y1": 17.99, "pitch": 2.54, "pins": 14}  # pin 1 north
-TFT["y_end"] = TFT["y1"] + (TFT["pins"] - 1) * TFT["pitch"]  # 51.01
+# mapping row says: the pad row spans y 17.99 -> 51.01 (33.02 = 13 x 2.54), the
+# header centred in the drawn slot.  Its 35.56 mm body stands 0.28 mm past each
+# end of the 35.00 mm slot - the earlier 1x16 reading of the module's silks put
+# 40.64 mm of socket 5.6 mm into the drawing's south gap, which is what this
+# corrects.
+#
+# The socket is placed at its SOUTH end at rot 180 because the display numbers
+# its header the other way round from the LCDWiki pin table: on the module in
+# hand the pin printed **14 is VCC** (north, y 17.99) and pin **1 is T_IRQ**
+# (south, y 51.01).  Putting the footprint's pad 1 on that south pad keeps every
+# hole exactly where it is today - the row still spans 17.99..51.01, the body is
+# unchanged - and carries the library's square pad-1 and chamfer marker to the
+# pin-1 end instead of leaving them at the VCC end.  See TFT_MAP below: all 14
+# pads are named, six of them deliberately dead-ends.
+TFT = {"x": 92.51, "y1": 51.01, "y14": 17.99, "pitch": 2.54, "pins": 14}
+TFT["y_n"] = TFT["y14"]        # north end of the pad row (pad 14, VCC)
+TFT["y_s"] = TFT["y1"]         # south end of the pad row (pad 1, T_IRQ)
 
 # LM2596 step-down module, soldered to the BOTTOM face.
 # Drawn 21.00 x 43.00 (u 61.75..82.75, v 8.64..51.64) with silks `in +` / `-`
@@ -245,6 +254,12 @@ NETS = [
     "TFT_MOSI",         # GPIO23
     "TFT_RST",          # GPIO14
     "TFT_BL",           # GPIO12 backlight, MTDI: must be LOW at reset
+    "TFT_SDO",          # display SDO (MISO), socket pad 6 - open, no read path
+    "TFT_TCLK",         # touch SPI clock, pad 5 - open (touch removed 1.3.6)
+    "TFT_TCS",          # touch chip select, pad 4 - open
+    "TFT_TDIN",         # touch SPI data in, pad 3 - open
+    "TFT_TDO",          # touch SPI data out, pad 2 - open
+    "TFT_TPEN",         # touch T_IRQ / PEN, pad 1 - open
     "GPS_RX",           # GPIO16 <- GNSS module TX
     "GPS_TX",           # GPIO17 -> GNSS module RX (idle)
     "EN",               # DevKit EN (reset jumper)
@@ -443,9 +458,12 @@ def parts():
 
     # ---- TFT display socket J3, F.Cu, standing at the east board edge
     # (drawn 1.00 x 35.00 slab, 10.02 mm above F.Cu; the module is 14-way).
+    # Placed at pad 1 - the SOUTH pad, y 51.01 - at rot 180, so the row runs
+    # north and pad 14 (VCC) lands at y 17.99: the module's silks number the
+    # header from the touch end, the opposite way to the LCDWiki table.
     tft = {str(i + 1): n for i, n in enumerate(TFT_MAP)}
     P.append(("J3", "Connector_PinSocket_2.54mm:PinSocket_1x14_P2.54mm_Vertical",
-              TFT["x"], TFT["y1"], 0.0, tft, "TFT-ILI9488", "F.Cu", 0))
+              TFT["x"], TFT["y1"], 180.0, tft, "TFT-ILI9488", "F.Cu", 0))
 
     # ---- DC-DC step-down module, soldered to the BOTTOM face (custom fp).
     # Drawn 21 x 43 body, `in +`/`-` at the north end, `out +`/`-` at the south,
@@ -879,13 +897,29 @@ ESP_LABEL = {
 }
 
 # TFT 1x14 socket ("4.0'' TFT SPI 480X320 V1.1", the drawing's "Display header
-# 14 pin" block), pin 1..14 as read off the display's own silkscreen (plan
-# section 1). Only the LCD lines are connected: SDO and the touch pads stay
-# open (no MISO in firmware, touch removed in 1.3.6).
-TFT_MAP = ["V5", "GND", "TFT_CS", "TFT_RST", "TFT_DC", "TFT_MOSI", "TFT_SCK",
-           "TFT_BL", "NC", "NC", "NC", "NC", "NC", "NC"]
-TFT_LABEL = ["VCC", "GND", "CS", "RST", "DC", "SDI", "SCK", "LED", "SDO",
-             "T_CLK", "T_CS", "T_DIN", "TPEN", "T_DO"]
+# 14 pin" block).  TFT_MAP is indexed by KiCad **pad number 1..14**, and the pad
+# numbers follow the display's own silks, which run the other way from the
+# LCDWiki MSP4022-style pin table: pad 14 = VCC at the north end (y 17.99) down
+# to pad 1 = T_IRQ at the south end (y 51.01).  Every pad carries a name now.
+# Pads 1..6 - the XPT2046-style touch lines and the LCD's SDO - are single-pad
+# nets, unconnected on purpose (no MISO read path in the firmware, touch
+# removed in 1.3.6); naming them is what records *why* those six holes are
+# empty, where the old board left them as six nameless pads on no net at all.
+# The old list also ran the touch block at the wrong end of the row: it put TPEN
+# at pad 13 and T_DO at pad 14, where the module's own silks put T_IRQ at 1 and
+# T_DO at 2 (the row was read from the VCC end).
+TFT_MAP = ["TFT_TPEN", "TFT_TDO", "TFT_TDIN", "TFT_TCS", "TFT_TCLK", "TFT_SDO",
+           "TFT_BL", "TFT_SCK", "TFT_MOSI", "TFT_DC", "TFT_RST", "TFT_CS",
+           "GND", "V5"]
+# the label as printed on the display's own silkscreen, same pad order
+TFT_LABEL = ["T_IRQ", "T_DO", "T_DIN", "T_CS", "T_CLK", "SDO", "LED", "SCK",
+             "SDI", "DC", "RST", "CS", "GND", "VCC"]
+# and what the carrier prints beside the socket, one label per pad, pad order.
+# 2.54 mm pitch with 0.8 mm text takes at most three characters, so the touch
+# lines are shortened here and only here: T_CLK -> TCK, T_DIN -> TDI, T_IRQ ->
+# TPN (PINOUT.md section 4 carries the long forms).
+TFT_SILK = ["TPN", "TDO", "TDI", "TCS", "TCK", "SDO", "LED", "SCK", "SDI",
+            "DC", "RST", "CS", "GND", "VCC"]
 
 # silkscreen next to the vehicle / accessory headers: (ref, [labels per pin])
 # Per-pin silks for the 2.54 mm groups. The 2.00 mm JST-PH shells carry a
@@ -1060,11 +1094,17 @@ def build():
 
 # ------------------------------------------------------- silks / drawings --
 def _txt(x, y, text, layer="F.SilkS", size=0.8, thick=0.12, rot=0.0,
-         mirror=False):
-    # anchor = top-left corner of the text (KiCad centres fields by default)
+         mirror=False, align="left"):
+    # anchor = top-left corner of the text (KiCad centres fields by default).
+    # align="center" leaves the horizontal token out, which IS KiCad's centred
+    # case: it writes (justify top), not (justify center top) - the parser
+    # rejects "center" in that slot.  That puts a rotated per-pin label
+    # dead-centre on its pad without guessing the stroke-font width of every
+    # abbreviation (guessing came out up to 0.4 mm off at 2.54 mm pitch).
     x, y = _onsheet(x, y)
-    eff = '(effects (font (size %.2f %.2f) (thickness %.2f)) (justify left top%s))' % (
-        size, size, thick, " mirror" if mirror else "")
+    horiz = "" if align == "center" else align + " "
+    eff = '(effects (font (size %.2f %.2f) (thickness %.2f)) (justify %stop%s))' % (
+        size, size, thick, horiz, " mirror" if mirror else "")
     return ['(gr_text "%s" (at %.2f %.2f %.1f) (layer "%s") (uuid "%s") %s)'
             % (text, x, y, rot, layer, kf.uid(), eff)]
 
@@ -1096,10 +1136,29 @@ def silks():
     out += _txt(41.20, 26.00, "PIN 1 = USB END", size=0.8)
     out += _txt(KEEP[0] + 0.8, KEEP[1] + 0.8, "ANTENNA - NO COPPER", size=0.8)
 
-    # TFT socket, standing at the east edge (14-way, pin 1 = VCC to the north)
-    out += _txt(TFT["x"] - 4.2, TFT["y1"] - 0.5, "1", size=0.9)
-    out += _txt(TFT["x"] - 4.4, TFT["y_end"] - 0.5, "14", size=0.9)
-    out += _txt(TFT["x"] - 4.4, (TFT["y1"] + TFT["y_end"]) / 2.0 + 1.05,
+    # TFT socket, standing at the east edge (14-way).  The module numbers its
+    # header from the touch end, so pad 14 (VCC) is the north pad and pad 1
+    # (T_IRQ) the south one; the numbers and the per-pin names below follow that
+    # order.  Each name is printed west of its own pad, centred on it by KiCad's
+    # own justify (align="center": guessing the stroke-font width of each
+    # abbreviation came out up to 0.4 mm off, which at 2.54 mm pitch is
+    # visible).  At 2.54 mm pitch a label takes at most three 0.8 mm characters,
+    # which is why the touch lines read TCK / TCS / TDI / TDO / TPN here
+    # (TFT_SILK).  The column is anchored at x 89.80: the ink then measures
+    # 89.83..90.63, which is 0.55 mm clear of the socket's own body silks at
+    # x 91.18 and 1.03 mm clear of the pad edge at x 91.66 (measured off the
+    # F.Silkscreen gerber; DRC's silk checks stay at 0 violations).
+    for i, nm in enumerate(TFT_SILK):
+        out += _txt(89.80, TFT["y1"] - i * TFT["pitch"], nm,
+                    size=0.8, rot=90.0, align="center")
+    # The pin numbers sit a further 1.95 mm west of the name column: at x 88.31
+    # (where they were before the names existed) their boxes ran into the north
+    # label - DRC flagged silk_overlap between "14" and "VCC".  Pulled back to
+    # x 87.85 that clears by 0.66 mm, and the vertical "TFT" name at x 88.11 is
+    # mid-stack, nowhere near either end.
+    out += _txt(TFT["x"] - 4.66, TFT["y14"] - 0.45, "14", size=0.9)
+    out += _txt(TFT["x"] - 4.66, TFT["y1"] - 0.45, "1", size=0.9)
+    out += _txt(TFT["x"] - 4.4, (TFT["y14"] + TFT["y1"]) / 2.0 + 1.05,
                 "TFT", size=0.9, rot=90.0)
 
     # 12 V entry polarity: one label outside each XT30 pad, both centred on the
@@ -1196,8 +1255,8 @@ def silks():
                             " - board 95 x 55 mm", layer="Dwgs.User", size=1.2)
     out += _txt(10.5, 68.8, "BUILD NOTES (Dwgs.User - not on the board)",
                 layer="Dwgs.User", size=1.0)
-    docs = ["TFT 1..14: VCC GND CS RST DC SDI SCK LED SDO T_CLK T_CS",
-            "TFT cont: T_DIN TPEN T_DO",
+    docs = ["TFT pad 14..1 (north to south): VCC GND CS RST DC SDI SCK LED",
+            "TFT cont: SDO T_CLK T_CS T_DIN T_DO T_IRQ - pads 1..6 named, open",
             "ESP near row 1..15 (USB end first): VIN GND 13 12 14 27 26 25",
             "  33 32 35 34 39 36 EN",
             "ESP far row 16..30 (USB end first): 3V3 GND 15 2 4 16 17 5 18",
