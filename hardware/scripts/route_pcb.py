@@ -65,15 +65,26 @@ TURN = 0.06          # cost of a direction change, in grid units
 # experiment that does not leave every net routed, so the board can only ever
 # come out with fewer open legs than the greedy pass left it with.
 RIP = True           # run the pass (False = old greedy-only behaviour)
-RIP_TIERS = (1, 2, 4, 8)   # victim nets a single retry may pick up
-RIP_ROUNDS = 3       # passes over the still-open nets
-RIP_TRIES = 40       # cap on experiments per run (runtime guard)
-RIP_MAX_PER_NET = 3  # times one net may be picked up per run (anti-oscillation)
-RIP_MULT = {"power": 0.0, "gnd": 0.12, "hv": 0.6, "analog": 1.0,
+RIP_DEPTH = 3        # unused since the wall-cut rewrite, kept for the harness
+RIP_CUT = 2          # legs of one cut that may be lifted at once
+RIP_LIFTS = 24       # legs one retry may lift in total (runtime guard)
+RIP_ROUNDS = 4       # passes over the still-open nets
+RIP_TRIES = 16       # cap on retries per run (runtime guard)
+RIP_MAX_PER_NET = 8  # legs of one net that may be lifted per run
+RIP_ORDER = "route"   # which stranded net is asked first: route order or span
+CUT_MARGIN = 6.0     # mm, how far outside the pad-to-pad box a wall cut may go
+CUT_VIA = 0.6        # cost of one layer change inside a wall cut
+RIP_MULT = {"power": 0.35, "gnd": 0.30, "hv": 0.6, "analog": 1.0,
             "tft+gps": 1.0, "spares": 1.3, "debug": 1.3, "default": 1.15}
 #   how a victim is scored: frontier nodes it owns x this.  The rails are worth
-#   their corridors (power is never a candidate: 0.0 means never), ground is a
-#   last resort, and the short signal nets are cheap to pick up and put back.
+#   their corridors, ground is a last resort, and the short signal nets are cheap
+#   to pick up and put back.  Power used to be 0.0 (never a victim), which turned
+#   out to be wrong: the V5 curtain in front of J15 is power copper, and a net
+#   that has to reach J15 has to get past it somehow - a leg-level lift costs one
+#   A*, not a rail re-route, so it is allowed now, at the back of the queue.
+#   In the wall cut (_wall_cut) the same numbers are used the other way round:
+#   cutting through a group costs 1/mult, so ground and power copper are the
+#   expensive places to break and the spare/debug nets are the cheap ones.
 FLOOD_CAP = 150000   # nodes to explore when ranking victims
 MIN_SEG = 0.20       # mm, drop shorter stubs when simplifying a path.
                      # Every path point is a grid node, so the shortest honest
@@ -255,7 +266,9 @@ class Router:
             bm = bytearray(L.n)
             own = array("i", [-1]) * L.n if want_own else None
             for (ti, it) in enumerate(items):
-                if it.get("dead") or L.name not in it["layers"] or it["net"] == net:
+                if it["net"] == net or it.get("dead"):
+                    continue
+                if L.name not in it["layers"]:
                     continue
                 if want_own:
                     L.grow(bm, it["a"][0], it["a"][1], it["b"][0], it["b"][1],
@@ -661,32 +674,202 @@ class Router:
                         q.append((nli, nk))
         return counts, items
 
-    def _victims(self, net, half, legs):
-        """Foreign tracks / vias ranked by how much of this net's wall they own.
+    def _legmap(self):
+        """id(ent) -> (net, leg) for every leg of routed copper on the board.
+
+        The frontier ranks *items*, but a leg is what gets lifted and put back
+        (lifting one track of an L-shaped leg leaves the other half plus its via
+        as a stub, which DRC calls via_dangling), so the ranking has to be folded
+        onto legs before anything can act on it.
+        """
+        m = {}
+        for (n2, ls) in self.tree_legs.items():
+            for l in ls:
+                for e in l[2]:
+                    m[id(e)] = (n2, l)
+        return m
+
+    def _wall_legs(self, net, half, legs, skip):
+        """Legs of foreign copper ranked by how much of this net's wall they own.
 
         Pads and the keep-out own walls too, but they do not move, so only routed
-        copper is a candidate, and a group scored 0.0 is never one.  What a
-        candidate costs is one A* for its owner - the one leg that item carried,
-        see _repair - whichever net it belongs to, so even the ground tree is
-        fair game here: picking up one 0.60 mm rail is not re-routing 38 legs.
-        Ties break on net then position, so a run is reproducible.
+        copper is a candidate, and a group scored 0.0 is never one.  `skip` holds
+        the legs this search already lifted: they are off the board, so the
+        frontier cannot see them and they must not be picked again.  Ties break on
+        net then pad, so a run is reproducible.
         """
         counts, items = self._frontier(net, half, legs)
-        out = []
+        lmap = self._legmap()
+        agg = {}
         for (t, c) in counts.items():
             it = items[t]
             if it["kind"] not in ("tr", "via"):
                 continue
-            n2 = it["net"]
+            nl = lmap.get(id(it["ent"]))
+            if nl is None or id(nl[1]) in skip:
+                continue
+            (n2, l) = nl
             if self.rip_count.get(n2, 0) >= RIP_MAX_PER_NET:
                 continue
             m = RIP_MULT.get(self.rip_group.get(n2, "default"), 1.15)
             if m <= 0.0:
                 continue
-            out.append((c * m, n2, it["ent"]))
-        out.sort(key=lambda t: (-t[0], t[1], t[2]["cu"]["a"][0],
-                                t[2]["cu"]["a"][1]))
+            agg.setdefault(id(l), [0.0, n2, l])[0] += c * m
+        out = list(agg.values())
+        out.sort(key=lambda a: (-a[0], a[1], a[2][0]["ref"], str(a[2][0]["pad"]),
+                                a[2][1]["ref"], str(a[2][1]["pad"])))
         return out
+
+    def _wall_cut(self, net, half, pa, pb, skip):
+        """The cheapest set of foreign legs standing between a pad and its target.
+
+        A Dijkstra over the same node grid, but instead of asking "may this net
+        walk here" it prices what it would cost to *make* room: a node the net can
+        already use is nearly free, a node held by foreign copper costs what
+        lifting that leg would cost (a long leg costs more than a stub, and so
+        does a group the RIP_MULT weights say to leave alone), and a node held by
+        a pad, the keep-out, a drilled hole or the board edge costs infinity
+        because none of those move.  The cheapest route between the two pads is
+        then the thinnest wall between them, and the copper along it is the
+        rip-up list.
+
+        That is a far better guess than counting how many wall nodes a track
+        presents to a flood: a count measures perimeter, not use.  SPARE_D26 is
+        the proof - its stranded pad sits in a pocket walled by a 21 mm GND rail
+        with 12 flood hits, and one 5 mm DBG_RX stub ranked tenth by the same
+        count was the thing actually in its way.
+        """
+        (bms, owns, items) = self._build(net, half, want_own=True)
+        vbm = self._viabm(net)
+        lmap = self._legmap()
+        # what it costs to pick a leg up: roughly how much copper it is, because
+        # a lifted 30 mm diagonal has to be laid down again somewhere else and a
+        # 3 mm stub does not.  Pricing only the *node* being stepped on (the
+        # width of the copper there) made a 33 mm diagonal across the middle of
+        # the board as cheap to break as a stub, and the cuts came out as net
+        # wrecking balls - the cascade that followed always ran out of budget.
+        legc = {}
+        for (n2, l) in lmap.values():
+            if id(l) in legc:
+                continue
+            (ax2, ay2) = self._padxy(l[0])
+            (bx2, by2) = self._padxy(l[1])
+            legc[id(l)] = 0.5 + 0.35 * math.hypot(bx2 - ax2, by2 - ay2)
+        tc = self.cls(net)
+        L = self.layers
+        (fx0, fy0, fx1, fy1) = self.cfg["frame"]
+        (ax, ay) = self._padxy(pa)
+        (bx, by) = self._padxy(pb)
+        x0 = max(fx0, min(ax, bx) - CUT_MARGIN)
+        x1 = min(fx1, max(ax, bx) + CUT_MARGIN)
+        y0 = max(fy0, min(ay, by) - CUT_MARGIN)
+        y1 = min(fy1, max(ay, by) + CUT_MARGIN)
+        ka = L[0].idx(x0, y0)
+        kb = L[0].idx(x1, y1)
+        if ka is None or kb is None:
+            return []
+        (i0, j0) = L[0].ij(ka)
+        (i1, j1) = L[0].ij(kb)
+        nx = L[0].nx
+        dist = [dict(), dict()]
+        par = {}
+        heap = []
+        goal = set()
+        for (li, nm) in enumerate(self.route_layers):
+            if nm in pa["layers"]:
+                k = L[li].idx(ax, ay)
+                if k is not None:
+                    dist[li][k] = 0.0
+                    heap.append((0.0, li, k))
+            if nm in pb["layers"]:
+                k = L[li].idx(bx, by)
+                if k is not None:
+                    goal.add((li, k))
+        if not heap or not goal:
+            return []
+        heapq.heapify(heap)
+        best = None
+        while heap:
+            (c, li, k) = heapq.heappop(heap)
+            if dist[li].get(k, 1e18) < c - 1e-12:
+                continue
+            if (li, k) in goal:
+                best = (li, k)
+                break
+            (i, j) = L[li].ij(k)
+            for (di, dj, _w2) in DIRS:
+                (ni, nj) = (i + di, j + dj)
+                if not (i0 <= ni <= i1 and j0 <= nj <= j1):
+                    continue
+                nk = nj * nx + ni
+                step = 0.1
+                if bms[li][nk]:
+                    t = owns[li][nk]
+                    if t < 0:
+                        continue          # board edge, or someone's drilled hole
+                    it = items[t]
+                    if it["kind"] not in ("tr", "via"):
+                        continue          # a pad or the keep-out: it does not move
+                    nl = lmap.get(id(it["ent"]))
+                    if nl is None or self.rip_count.get(nl[0], 0) >= \
+                            RIP_MAX_PER_NET:
+                        continue          # not on the books, or already moved enough
+                    (n3, l3) = nl
+                    mm = RIP_MULT.get(self.rip_group.get(n3, "default"), 1.15)
+                    # ...charged per node of the band that leg occupies, so a
+                    # wall costs what lifting it costs once, not once per node
+                    # of wall it is thick enough to cover: a 0.6 mm rail dilates
+                    # to ~1.2 mm of blocked nodes (125 of them), and charging
+                    # each at full leg price made the GND wall around J15 look
+                    # unbreakable, which is where the search gave up
+                    band = 2.0 * (it["half"] + self.clear(tc, it["cls"]) + half)
+                    step = legc[id(l3)] / (max(mm, 0.05) *
+                                           max(1, int(band / GRID)))
+                nc = c + step
+                if nc < dist[li].get(nk, 1e18) - 1e-12:
+                    dist[li][nk] = nc
+                    par[(li, nk)] = (li, k)
+                    heapq.heappush(heap, (nc, li, nk))
+            o = 1 - li
+            nk = j * nx + i
+            if i0 <= i <= i1 and j0 <= j <= j1 and not vbm[nk]:
+                nc = c + CUT_VIA
+                if nc < dist[o].get(nk, 1e18) - 1e-12:
+                    dist[o][nk] = nc
+                    par[(o, nk)] = (li, k)
+                    heapq.heappush(heap, (nc, o, nk))
+        if best is None:
+            return []
+        out, seen = [], set()
+        cur = best
+        while cur in par:
+            (li, k) = cur
+            t = owns[li][k]
+            if t >= 0:
+                it = items[t]
+                if it["kind"] in ("tr", "via"):
+                    nl = lmap.get(id(it["ent"]))
+                    if nl is not None and id(nl[1]) not in skip and \
+                            id(nl[1]) not in seen:
+                        seen.add(id(nl[1]))
+                        out.append(nl)
+            cur = par[cur]
+        out.reverse()
+        return out
+
+    def _snap_one(self, net):
+        """Everything that describes one net's copper, for an undo."""
+        return (list(self.items_of.get(net, [])),
+                list(self.tree_legs.get(net, [])),
+                list(self.failed.get(net, [])),
+                self.open_of.get(net, 0), self.tree_ok.get(net, 0))
+
+    def _restore(self, net, s):
+        (es, legs, fl, op, tk) = s
+        self._lift(net)
+        self._put_back(net, es)
+        self.tree_legs[net], self.failed[net] = legs, fl
+        self.open_of[net], self.tree_ok[net] = op, tk
 
     def _repair(self, net, legs):
         """Re-route just the legs of `net` that the lifted items used to carry.
@@ -712,21 +895,215 @@ class Router:
         self.failed[net] = []
         return True
 
-    def ripup(self, by_net, order):
-        """Retry every stranded net by lifting a few foreign tracks out of it.
+    def _emit_leg(self, net, pa, pb, path, w):
+        """Put one leg's copper on the board and add it to the net's tree."""
+        mark = len(self.items_of.get(net, []))
+        self.emit(path, net, w)
+        leg = (pa, pb, self.items_of[net][mark:])
+        self.tree_legs.setdefault(net, []).append(leg)
+        return leg
 
-        For each open net: rank the foreign tracks that own its wall (frontier),
-        lift the top 1 / 2 / 3 / 5 / 8 of them, re-route the stranded net through
-        the gap, then re-route the one leg each lifted track used to carry.  The
-        attempt is kept only if every net came out whole; otherwise all the copper
-        goes back exactly as it was, so the run can only ever end with fewer open
-        legs than the greedy pass left behind.
+    def _settle(self, net, pa, pb):
+        """A debt is paid: that pair of pads is joined again, by one leg or two."""
+        fl = self.failed.get(net, [])
+        self.failed[net] = [x for x in fl if not (x[0] is pa and x[1] is pb)]
+        self.open_of[net] = max(0, self.open_of.get(net, 0) - 1)
+        self.tree_ok[net] = len(self.tree_legs.get(net, []))
+        self.gen += 1
+
+    def _linked(self, net, pa, pb):
+        """True if the net's *other* legs already join pa to pb.
+
+        A leg of a multi-pad net is an edge of a spanning tree, not a contract
+        between two pads: lift a redundant one and the net is still one piece, so
+        there is nothing to put back.  Worth checking before spending an A* on a
+        pad-to-pad re-route that was never needed.
+        """
+        par = {}
+
+        def find(x):
+            while par.get(x, x) != x:
+                x = par[x]
+            return x
+
+        for (a, b, _e) in self.tree_legs.get(net, []):
+            (ra, rb) = (find(id(a)), find(id(b)))
+            if ra != rb:
+                par[ra] = rb
+        return find(id(pa)) == find(id(pb))
+
+    def _attach(self, net, pa, pb, pts, w):
+        """Put a lifted leg back as two short stubs into the tree, not one line.
+
+        The ends of a lifted leg only have to find the rest of the net, not each
+        other.  For a GND leg between two adjacent connector pins that is the
+        difference between no way back at all - the single lane between two pin
+        rows fits exactly one track, and the net that wanted it there has now
+        taken it - and two stubs into the pads either side.  Returns
+        (padA, path, padB, path) or None.
+        """
+        cand = [q for q in pts if q is not pa and q is not pb]
+        if len(cand) < 2:
+            return None
+        live = self._live_pads(net)
+
+        def near(end):
+            (ex, ey) = self._padxy(end)
+            cand.sort(key=lambda q: ((id(q) not in live),
+                                     math.hypot(self._padxy(q)[0] - ex,
+                                                self._padxy(q)[1] - ey)))
+            return cand[:3]
+
+        for qa in near(pa):
+            pathA = self._leg(net, self._padxy(pa), self._padxy(qa),
+                              pa["layers"], qa["layers"], w)
+            if pathA is None:
+                continue
+            for qb in near(pb):
+                pathB = self._leg(net, self._padxy(pb), self._padxy(qb),
+                                  pb["layers"], qb["layers"], w)
+                if pathB is not None:
+                    return (qa, pathA, qb, pathB)
+        return None
+
+    def _live_pads(self, net):
+        """Pads of `net` that have copper attached right now."""
+        out = set()
+        for (pa, pb, _e) in self.tree_legs.get(net, []):
+            (out.add(id(pa)), out.add(id(pb)))
+        return out
+
+    def _pay(self, net, pa, pb, path, w, live):
+        """Place one leg of a net and update the books to match."""
+        self._emit_leg(net, pa, pb, path, w)
+        self._settle(net, pa, pb)
+
+    def _unpay(self, net, leg):
+        """Lift one leg of a net; it becomes a debt that has to be placed again.
+
+        Nothing marks the space it used to occupy.  A victim is allowed straight
+        back into its old lane, and the legality of that is guaranteed by the
+        search itself: the copper that displaced it is a hard obstacle by then,
+        because the debt that needed the room is paid *before* the victim is
+        asked to move (see _open_net).  Ghost copies of the lifted leg were tried
+        here and cost more than they bought - they fenced a net out of a lane it
+        was still entitled to, and whole cascades died of it.
+        """
+        (pa, pb, ents) = leg
+        self._lift(net, ents)
+        self.tree_legs[net] = [l for l in self.tree_legs.get(net, [])
+                               if l is not leg]
+        self.failed.setdefault(net, []).append((pa, pb))
+        self.open_of[net] = self.open_of.get(net, 0) + 1
+        self.tree_ok[net] = len(self.tree_legs.get(net, []))
+
+    def _open_net(self, net, by_net, key):
+        """Buy a stranded leg room, then pay for everything that had to move.
+
+        The greedy pass parks each net wherever it happens to fit, so a net that
+        goes last can be locked out completely - and the copper that locked it
+        out belongs to nets that had a way round somewhere else.  This settles
+        it the way a board router does: the missing leg goes on a debt list; a
+        debt is paid by routing that one leg; if it cannot route, the wall in
+        front of it is priced (_wall_cut) and the copper along the cheapest line
+        through it is lifted, each lifted leg becoming a new debt owned by its
+        own net; repeat until the list is empty or the lift budget runs out, and
+        if it runs out the whole experiment goes back exactly as it was.
+
+        The debt list is what makes this honest: copper may only be moved if
+        whatever it displaced gets placed again, so an attempt can never quietly
+        leave the board worse.  It also lets a net displace one *leg* of another
+        net - the thing the tier-by-tier pass could not do, which is why four
+        nets stayed locked out for so long: SPARE_D26 needed a corridor through
+        a GND rail, and GND would only give one if a *different* GND leg, the
+        one parked in front of J15, moved out of the way first.
+        """
+        w = self.cfg["widths"].get(net, 0.25)
+        self.rip_tries += 1
+        (snap, touched, lifted) = {}, [], []
+        snap[net] = self._snap_one(net)
+        touched.append(net)
+        debts = deque((net, a, b, False) for (a, b) in self.failed.get(net, []))
+        ok = False
+        for _step in range(RIP_LIFTS + len(debts) + 4):
+            if not debts:
+                ok = True
+                break
+            (n2, pa, pb, live) = debts.popleft()
+            w2 = self.cfg["widths"].get(n2, 0.25)
+            if live and self._linked(n2, pa, pb):
+                self._settle(n2, pa, pb)      # redundant leg: nothing to place
+                continue
+            path = self._leg(n2, self._padxy(pa), self._padxy(pb),
+                             pa["layers"], pb["layers"], w2)
+            if path is not None:
+                self._pay(n2, pa, pb, path, w2, live)
+                continue
+            att = self._attach(n2, pa, pb, by_net.get(n2, []), w2)
+            if att is not None:
+                (qa, pathA, qb, pathB) = att
+                self._emit_leg(n2, pa, qa, pathA, w2)
+                self._emit_leg(n2, pb, qb, pathB, w2)
+                self._settle(n2, pa, pb)
+                continue
+            if len(lifted) >= RIP_LIFTS:
+                break
+            cut = self._wall_cut(n2, w2 / 2.0, pa, pb, set())
+            if not cut:
+                break
+            bought = 0
+            for (n3, l3) in cut[:RIP_CUT]:
+                if self.rip_count.get(n3, 0) >= RIP_MAX_PER_NET:
+                    continue
+                if n3 not in snap:
+                    snap[n3] = self._snap_one(n3)
+                    touched.append(n3)
+                self._unpay(n3, l3)
+                lifted.append((n3, l3))
+                self.rip_count[n3] = self.rip_count.get(n3, 0) + 1
+                debts.append((n3, l3[0], l3[1], True))
+                bought += 1
+            if not bought:
+                break
+            # the debt that could not be paid is still owed: put it back at the
+            # *front*, so this net gets its copper down before the victims it
+            # displaced are asked to find room.  Asked the other way round, a
+            # victim walks straight back into the lane that was cleared for the
+            # debt and the same wall goes up again - the spin the ghost ban was
+            # invented to paper over
+            debts.appendleft((n2, pa, pb, live))
+        if not ok:
+            for n in sorted(touched, key=key):
+                self._restore(n, snap[n])
+            self.gen += 1
+        return ok
+
+    def ripup(self, by_net, order):
+        """Retry every stranded net, cheapest-to-move wall first.
+
+        Which net gets asked is by route order, so the nets that had first bite
+        of the board get asked first; each one gets one _open_net search per
+        round, and rounds repeat because a net that failed can succeed once a
+        neighbour has moved.  The pass can only ever end with fewer open legs
+        than the greedy pass left behind: every failed search is undone exactly.
         """
         order_of = {}
         for (gi, (grp, nets)) in enumerate(order):
             for (ni, n) in enumerate(nets):
                 order_of[n] = (gi, ni)
         key = lambda n: (order_of.get(n, (99, 99)), n)
+
+        def span(n):
+            pts = [self._padxy(p) for p in by_net.get(n, [])]
+            return max([math.hypot(a[0] - b[0], a[1] - b[1])
+                        for i, a in enumerate(pts) for b in pts[i + 1:]]
+                       or [0.0])
+
+        # asking order: by default whoever had first bite of the board asks
+        # first; "span" asks the longest stranded leg first, which is the one
+        # most likely to need a corridor others are sitting in
+        ask = (key if RIP_ORDER != "span"
+               else (lambda n: (-span(n), order_of.get(n, (99, 99)), n)))
         open0 = sum(self.open_of.values())
         self.log.append("  RIPUP  open legs %d" % open0)
         if not open0:
@@ -737,72 +1114,15 @@ class Router:
             before = sum(self.open_of.values())
             if not before or self.rip_tries >= RIP_TRIES:
                 break
-            for net in sorted(self.failed, key=key):
+            for net in sorted(self.failed, key=ask):
                 if not self.failed.get(net) or self.rip_tries >= RIP_TRIES:
                     continue
-                w = self.cfg["widths"].get(net, 0.25)
-                ranked = self._victims(net, w / 2.0, self.failed[net])
-                if not ranked:
-                    self.log.append("  RIPUP  no candidate wall for %s" % net)
-                    continue
-                for k in RIP_TIERS:
-                    if self.rip_tries >= RIP_TRIES:
-                        break
-                    cand = ranked[:k]
-                    mark = tuple(sorted((n2, tuple(e["cu"]["a"]),
-                                         tuple(e["cu"]["b"]))
-                                        for (_s, n2, e) in cand))
-                    if (net, mark) in self.rip_done:
-                        continue
-                    self.rip_done.add((net, mark))
-                    self.rip_tries += 1
-                    owners = sorted(set(n2 for (_s, n2, _e) in cand))
-                    for n2 in owners:
-                        self.rip_count[n2] = self.rip_count.get(n2, 0) + 1
-                    # a candidate item is only the *reason* to touch a net: what
-                    # actually gets lifted is every item of each leg it carries,
-                    # because a leg is repaired as a whole.  Lifting one track of
-                    # an L-shaped leg would leave the other half (and its via) as
-                    # a stub - DRC calls that via_dangling.
-                    cids = set(id(e) for (_s, _n2, e) in cand)
-                    broken = dict(
-                        (n2, [l for l in self.tree_legs.get(n2, [])
-                              if any(id(e) in cids for e in l[2])])
-                        for n2 in owners)
-                    # snapshot everything the experiment can touch, so a failed
-                    # attempt is undone to the last track end
-                    snap = {}
-                    for n2 in owners + [net]:
-                        snap[n2] = (list(self.items_of.get(n2, [])),
-                                    list(self.tree_legs.get(n2, [])),
-                                    list(self.failed.get(n2, [])),
-                                    self.open_of.get(n2, 0),
-                                    self.tree_ok.get(n2, 0))
-                    for n2 in owners:
-                        self._lift(n2, [e for l in broken[n2] for e in l[2]])
-                    self._lift(net)
-                    self.route_net(net, by_net[net], w)
-                    good = not self.failed.get(net)
-                    if good:
-                        for n2 in sorted(owners, key=key):
-                            if not self._repair(n2, broken[n2]):
-                                good = False
-                                break
-                    if good:
-                        kept += 1
-                        self.log.append("  RIPUP  round %d  %-10s through %s"
-                                        % (rnd, net, "+".join(owners)))
-                        break
-                    for n2 in owners + [net]:     # bought nothing: put it back
-                        (es, legs, fl, op, tk) = snap[n2]
-                        self._lift(n2)
-                        self._put_back(n2, es)
-                        self.tree_legs[n2], self.failed[n2] = legs, fl
-                        self.open_of[n2], self.tree_ok[n2] = op, tk
+                if self._open_net(net, by_net, key):
+                    kept += 1
             if sum(self.open_of.values()) == before:
                 break
         self.quiet = False
-        self.log.append("  RIPUP  rounds %d  tries %d  nets helped %d  open legs "
+        self.log.append("  RIPUP  rounds %d  tries %d  nets opened %d  open legs "
                         "%d -> %d" % (rnd, self.rip_tries, kept, open0,
                                       sum(self.open_of.values())))
         for net in sorted(self.failed, key=key):
@@ -810,7 +1130,6 @@ class Router:
                 self.log.append("  RIPUP  STILL OPEN  %-10s %s.%s -> %s.%s"
                                 % (net, pa["ref"], pa["pad"], pb["ref"],
                                    pb["pad"]))
-
     # ------------------------------------------------------------------ run --
     def run(self, order):
         by_net = {}
