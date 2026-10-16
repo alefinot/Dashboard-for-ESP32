@@ -276,6 +276,17 @@ def net_w(net):
     return NET_W.get(net, TRACE_W)
 
 
+def net_span(pads):
+    """Bounding-box perimeter of a net's pad centres, in mm - how much territory
+    the net needs.  Inside a route group the short local nets are routed first:
+    a 6 mm RC hop has to claim its own patch of copper before a 40 mm run of
+    the same group cuts through that patch - COOL_SNS (R6.2 to C7.1) ended up
+    in a pocket walled in by copper routed before it, 14 unconnected items."""
+    xs = [0.5 * (p["box"][0] + p["box"][2]) for p in pads]
+    ys = [0.5 * (p["box"][1] + p["box"][3]) for p in pads]
+    return (max(xs) - min(xs)) + (max(ys) - min(ys))
+
+
 def net_clr(net):
     return CLASS_CLEAR.get(CLASS_OF.get(net, "Default"), 0.25)
 
@@ -1670,7 +1681,8 @@ def main():
              keep=KEEP, classes=dict(CLASS_OF), clearance=CLASS_CLEAR,
              widths={n: net_w(n) for n in todo}, via=CLASS_VIA,
              route_layers=["F.Cu", "B.Cu"],
-             order=[(g, [n for n in group if n in todo])
+             order=[(g, sorted([n for n in group if n in todo],
+                               key=lambda n: net_span(have[n])))
                     for g, group in ROUTE_ORDER]))
     for line in log:
         print("  ROUTE        " + line)
