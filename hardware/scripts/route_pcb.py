@@ -1098,24 +1098,35 @@ class Router:
         if len(cand) < 2:
             return None
         live = self._live_pads(net)
+        # the two stubs only weld if they land one on each side of the cut: both
+        # into the same piece and the far end stays stranded, which is how a V5
+        # leg came back "paid" with the rail still in two halves
+        (roots, _att, _gr) = self._padroots(net)
+        (ca, cb) = (roots.get(id(pa), id(pa)), roots.get(id(pb), id(pb)))
+        if ca == cb:
+            return None
 
-        def near(end):
+        def near(end, want):
             (ex, ey) = self._padxy(end)
-            cand.sort(key=lambda q: ((id(q) not in live),
+            pool = [q for q in cand if roots.get(id(q), id(q)) == want]
+            pool.sort(key=lambda q: ((id(q) not in live),
                                      math.hypot(self._padxy(q)[0] - ex,
                                                 self._padxy(q)[1] - ey)))
-            return cand[:3]
+            return pool[:3]
 
-        for qa in near(pa):
-            pathA = self._leg(net, self._padxy(pa), self._padxy(qa),
-                              pa["layers"], qa["layers"], w)
-            if pathA is None:
-                continue
-            for qb in near(pb):
-                pathB = self._leg(net, self._padxy(pb), self._padxy(qb),
-                                  pb["layers"], qb["layers"], w)
-                if pathB is not None:
-                    return (qa, pathA, qb, pathB)
+        # pa into its own piece and pb into the other one is the shape that
+        # welds; the crossed variant is tried second because it is longer
+        for (wa, wb) in ((ca, cb), (cb, ca)):
+            for qa in near(pa, wa):
+                pathA = self._leg(net, self._padxy(pa), self._padxy(qa),
+                                  pa["layers"], qa["layers"], w)
+                if pathA is None:
+                    continue
+                for qb in near(pb, wb):
+                    pathB = self._leg(net, self._padxy(pb), self._padxy(qb),
+                                      pb["layers"], qb["layers"], w)
+                    if pathB is not None:
+                        return (qa, pathA, qb, pathB)
         return None
 
     def _live_pads(self, net):
@@ -1175,13 +1186,17 @@ class Router:
         w = self.cfg["widths"].get(net, 0.25)
         self.rip_tries += 1
         (snap, touched, lifted) = {}, [], []
-        why = "ran out of debts"
+        tried = set()           # wall legs already lifted for this net, no good
+        why = "step budget"
         last = None
         snap[net] = self._snap_one(net)
         touched.append(net)
         debts = deque((net, a, b, False) for (a, b) in self.failed.get(net, []))
         ok = False
-        for _step in range(RIP_LIFTS + len(debts) + 4):
+        # each lift costs a step, and so does the failed A* that comes with it,
+        # so the step bound has to be about twice the lift bound or the search
+        # stops with copper still unspent and the wall still standing
+        for _step in range(2 * RIP_LIFTS + 2 * len(debts) + 8):
             if not debts:
                 ok = True
                 break
@@ -1191,24 +1206,38 @@ class Router:
             if live and self._linked(n2, pa, pb):
                 self._settle(n2, pa, pb)      # redundant leg: nothing to place
                 continue
+            base = len(self.items_of.get(n2, []))
             path = self._leg(n2, self._padxy(pa), self._padxy(pb),
                              pa["layers"], pb["layers"], w2)
             if path is not None:
                 self._pay(n2, pa, pb, path, w2, live)
-                continue
+                if self._linked(n2, pa, pb):
+                    continue
+                # the search handed back copper that is not a connection: two
+                # points inside one pad, say, dropped as stubs by MIN_SEG.  Take
+                # back exactly what this payment laid - leaving it is not a
+                # violation (same net), but leaving the *debt closed* is how a
+                # cut rail hides under a paid book - and re-open the debt so the
+                # wall machinery below gets a chance at it.
+                self._lift(n2, self.items_of.get(n2, [])[base:])
+                self.failed.setdefault(n2, []).append((pa, pb))
+                self.open_of[n2] = self.open_of.get(n2, 0) + 1
             att = self._attach(n2, pa, pb, by_net.get(n2, []), w2)
             if att is not None:
+                base = len(self.items_of.get(n2, []))
                 (qa, pathA, qb, pathB) = att
                 self._emit_leg(n2, pa, qa, pathA, w2)
                 self._emit_leg(n2, pb, qb, pathB, w2)
-                self._settle(n2, pa, pb)
-                continue
+                if self._linked(n2, pa, pb):
+                    self._settle(n2, pa, pb)
+                    continue
+                self._lift(n2, self.items_of.get(n2, [])[base:])
             if len(lifted) >= RIP_LIFTS:
                 why = "lift budget %d" % RIP_LIFTS
                 break
-            cut = self._wall_cut(n2, w2 / 2.0, pa, pb, set())
+            cut = self._wall_cut(n2, w2 / 2.0, pa, pb, tried)
             if not cut:
-                why = "wall cannot be lifted (pads, keep-out or edge)"
+                why = "wall cannot be lifted (pads, keep-out, edge, or tried)"
                 break
             bought = 0
             for (n3, l3) in cut[:RIP_CUT]:
@@ -1218,6 +1247,7 @@ class Router:
                     snap[n3] = self._snap_one(n3)
                     touched.append(n3)
                 self._unpay(n3, l3)
+                tried.add(id(l3))
                 lifted.append((n3, l3))
                 self.rip_count[n3] = self.rip_count.get(n3, 0) + 1
                 debts.append((n3, l3[0], l3[1], True))
@@ -1237,10 +1267,12 @@ class Router:
                 self._restore(n, snap[n])
             self.gen += 1
             (n2, pa, pb) = last
-            self.log.append("  OPEN   FAIL %-10s %s.%s -> %s.%s: %s (lifts %d, "
-                            "tries %d)" % (net, pa["ref"], pa["pad"], pb["ref"],
-                                           pb["pad"], why, len(lifted),
-                                           self.rip_tries))
+            self.log.append("  OPEN   FAIL %-10s: debt %s %s.%s -> %s.%s: %s "
+                            "(lifts %d, tries %d)" % (net, n2, pa["ref"],
+                                                       pa["pad"], pb["ref"],
+                                                       pb["pad"], why,
+                                                       len(lifted),
+                                                       self.rip_tries))
         return ok
 
     def ripup(self, by_net, order):
@@ -1317,7 +1349,13 @@ class Router:
                                  pa["layers"], pb["layers"], w)
                 if path is None:
                     continue
+                base = len(self.items_of.get(net, []))
                 self._pay(net, pa, pb, path, w, None)
+                if not self._linked(net, pa, pb):
+                    # copper that does not join the two pads is not a weld: the
+                    # books say the leg is placed, the board says otherwise
+                    self._lift(net, self.items_of.get(net, [])[base:])
+                    continue
                 made += 1
                 got = True
                 break
@@ -1366,8 +1404,15 @@ class Router:
             for net in sorted(broken, key=key):
                 self.failed[net] = self._gaps(net, by_net[net],
                                               self._padroots(net)[0])
-                if self._open_net(net, by_net, key) and self._split(net) == 1:
-                    fixed += 1
+                if self._open_net(net, by_net, key):
+                    if self._split(net) == 1:
+                        fixed += 1
+                    else:
+                        # every debt the attempt owed came back connected, yet
+                        # the net is still cut: the pair it paid for was not the
+                        # pair the copper is split across
+                        self.log.append("  SEAL    PAID BUT CUT %s x%d"
+                                        % (net, self._split(net)))
             self.gen += 1
         # from here the books are rewritten off the copper, so what the log calls
         # "open" is what DRC is about to call unconnected
