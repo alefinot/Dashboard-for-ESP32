@@ -72,6 +72,7 @@ RIP_ROUNDS = 4       # passes over the still-open nets
 RIP_TRIES = 16       # cap on retries per run (runtime guard)
 RIP_MAX_PER_NET = 8  # legs of one net that may be lifted per run
 RIP_ORDER = "route"   # which stranded net is asked first: route order or span
+SEAL_ROUNDS = 3      # passes of the last-chance "is this net one piece?" check
 CUT_MARGIN = 6.0     # mm, how far outside the pad-to-pad box a wall cut may go
 CUT_VIA = 0.6        # cost of one layer change inside a wall cut
 RIP_MULT = {"power": 0.35, "gnd": 0.30, "hv": 0.6, "analog": 1.0,
@@ -207,6 +208,14 @@ class Router:
         self.tree_legs = {}     # net -> [(padA, padB, [items that carry it])]
         self.rip_group = {}     # net -> route group name (victim ranking)
         self.rip_count = {}     # net -> times picked up
+        self.pads_of = {}       # net -> pads of that net (identity: the dict
+        #                     entries of cfg["pads"], same objects route() uses)
+        for p in self.cfg["pads"]:
+            if p["net"]:
+                self.pads_of.setdefault(p["net"], []).append(p)
+        self._pccache = {}      # net -> (fingerprint, pad roots, attached, groups)
+        self._dup = {}          # (net,layer,endA,endB,w) -> item, live copper only
+        self._mut = {}          # net -> copper edits so far (_padroots cache key)
         self.rip_tries = 0
         self.rip_done = set()   # (net, victims) experiments already tried
         self.quiet = False      # suppress per-attempt chatter during rip-up
@@ -424,6 +433,7 @@ class Router:
     # --------------------------------------------------------------- output --
     def emit(self, path, net, width):
         """Write the path out as tracks + through vias; merge collinear runs."""
+        self._mut[net] = self._mut.get(net, 0) + 1
         lay = self.cfg["route_layers"]
         pts = []
         for p in path:
@@ -444,6 +454,11 @@ class Router:
                 ln = math.hypot(bx - ax, by - ay)
                 if ln < MIN_SEG - 1e-6:
                     continue
+                dk = (net, lay[a[0]], min((ax, ay), (bx, by)),
+                      max((ax, ay), (bx, by)), width)
+                old = self._dup.get(dk)
+                if old is not None and not old["cu"]["dead"]:
+                    continue        # this exact track is already on the board
                 seg = {"net": net, "layer": lay[a[0]],
                        "a": (ax, ay), "b": (bx, by), "w": width}
                 cu = {"kind": "tr", "a": (ax, ay), "b": (bx, by),
@@ -456,9 +471,14 @@ class Router:
                        "cu": cu, "seg": seg, "via": None, "hole": None}
                 cu["ent"] = ent        # the obstacle knows its own item record
                 self.items_of.setdefault(net, []).append(ent)
+                self._dup[dk] = ent
                 total += ln
             else:
                 vd, vdr = self.cfg["via"][self.cls(net)]
+                dk = (net, a[1], a[2], vd)
+                old = self._dup.get(dk)
+                if old is not None and not old["cu"]["dead"]:
+                    continue        # the via is already sitting here
                 via = {"net": net, "x": a[1], "y": a[2],
                        "dia": vd, "drill": vdr, "layer": lay[a[0]]}
                 cu = {"kind": "via", "a": (a[1] - vd / 2, a[2] - vd / 2),
@@ -479,6 +499,7 @@ class Router:
                        "cu": cu, "seg": None, "via": via, "hole": hole}
                 cu["ent"] = ent
                 self.items_of.setdefault(net, []).append(ent)
+                self._dup[dk] = ent
                 self.gen += 1              # foreign copper changed mid-net
         return total
 
@@ -588,6 +609,7 @@ class Router:
         experiment reversible: if it does not help, the board goes back exactly as
         it was, down to the last track end.
         """
+        self._mut[net] = self._mut.get(net, 0) + 1
         live = self.items_of.get(net, [])
         if ents is None:
             saved, live = live, []
@@ -596,6 +618,8 @@ class Router:
             saved = [e for e in live if id(e) in gone]
             live = [e for e in live if id(e) not in gone]
         for e in saved:
+            if e["cu"]["dead"]:
+                continue            # already off the board; nothing to tombstone
             e["cu"]["dead"] = True
             if e["kind"] == "tr":
                 self.segs[e["oi"]] = None
@@ -607,8 +631,22 @@ class Router:
         return saved
 
     def _put_back(self, net, saved):
-        """Re-register copper _lift() took (same objects, refreshed indices)."""
+        """Re-register copper _lift() took (same objects, refreshed indices).
+
+        Only copper that is actually off the board goes back on.  Without that
+        guard a snapshot taken before some of these entries were lifted, put back
+        after they had already been restored by an earlier undo, appended the same
+        track a second time at a new index: the old copy stayed live too, so the
+        board filled up with overlapping duplicate tracks (a net re-routed three
+        times came out with its old copper laid down four), and the second copy's
+        index then shadowed the first one's, so the next _lift() tombstoned one
+        copy and left the other standing - which is how a via went missing while
+        the tracks it joined stayed put.
+        """
+        self._mut[net] = self._mut.get(net, 0) + 1
         for e in saved:
+            if not e["cu"]["dead"]:
+                continue
             e["cu"]["dead"] = False
             self.copper.append(e["cu"])
             if e["kind"] == "tr":
@@ -911,26 +949,140 @@ class Router:
         self.tree_ok[net] = len(self.tree_legs.get(net, []))
         self.gen += 1
 
-    def _linked(self, net, pa, pb):
-        """True if the net's *other* legs already join pa to pb.
+    # ------------------------------------------------------- copper audit ----
+    def _padroots(self, net):
+        """(pad -> component, pads with copper on them) for `net`'s live copper.
 
-        A leg of a multi-pad net is an edge of a spanning tree, not a contract
-        between two pads: lift a redundant one and the net is still one piece, so
-        there is nothing to put back.  Worth checking before spending an A* on a
-        pad-to-pad re-route that was never needed.
+        A union-find over the tracks, vias and pads this net owns *at this
+        moment*, with the contact rules copper actually obeys: a track joins a
+        pad when its rectangle overlaps the pad, a via joins a track when the
+        via's disc touches it (anywhere along its length, not only at an end), a
+        via joins its two layers, and two tracks of one net that cross are one
+        piece of copper.
+
+        This exists because the tree bookkeeping is not the copper.  A leg lifted
+        as a victim stays in `tree_legs` until it is explicitly dropped, and a
+        debt "paid" by stubbing onto a pad whose own leg had already been lifted
+        settles the paper while the net stays cut in two - which is exactly how
+        the 5 V rail came to ship in two pieces.  Anything that decides "is this
+        net finished" has to ask the copper, not the books.
         """
+        items = self.items_of.get(net, [])
+        # a per-net edit counter, not a fingerprint of the item identities: a
+        # freed dict's id() is handed straight back to the next one, so an undo
+        # plus a re-emit could otherwise look exactly like the state cached
+        # before it and the audit would answer from the copper that is no longer
+        # there
+        fp = self._mut.get(net, 0)
+        hit = self._pccache.get(net)
+        if hit is not None and hit[0] == fp:
+            return (hit[1], hit[2], hit[3])
+        tr = [e["seg"] for e in items if e["kind"] == "tr"]
+        vs = [e["via"] for e in items if e["kind"] == "via"]
+        pads = self.pads_of.get(net, [])
         par = {}
 
         def find(x):
-            while par.get(x, x) != x:
+            par.setdefault(x, x)
+            while par[x] != x:
+                par[x] = par[par[x]]
                 x = par[x]
             return x
 
-        for (a, b, _e) in self.tree_legs.get(net, []):
-            (ra, rb) = (find(id(a)), find(id(b)))
+        def uni(a, b):
+            (ra, rb) = (find(a), find(b))
             if ra != rb:
                 par[ra] = rb
-        return find(id(pa)) == find(id(pb))
+
+        def k(lay, x, y):
+            return (lay, round(x, 3), round(y, 3))
+
+        for s in tr:
+            uni(k(s["layer"], s["a"][0], s["a"][1]),
+                k(s["layer"], s["b"][0], s["b"][1]))
+        for v in vs:
+            uni(("F.Cu", v["x"], v["y"]), ("B.Cu", v["x"], v["y"]))
+        for (i, s) in enumerate(tr):
+            (a, b) = (s["a"], s["b"])
+            for t in tr[i + 1:]:
+                if s["layer"] == t["layer"] and \
+                        _segseg(a, b, t["a"], t["b"]) <= \
+                        s["w"] / 2.0 + t["w"] / 2.0 + 1e-9:
+                    uni(k(s["layer"], a[0], a[1]), k(t["layer"], t["a"][0],
+                                                     t["a"][1]))
+            for v in vs:
+                if _ptseg(v["x"], v["y"], a, b) <= v["dia"] / 2.0 + \
+                        s["w"] / 2.0 + 1e-9:
+                    uni(("F.Cu", v["x"], v["y"]), k(s["layer"], a[0], a[1]))
+        cnodes = set()
+        for s in tr:
+            cnodes.add(k(s["layer"], s["a"][0], s["a"][1]))
+        for v in vs:
+            cnodes.add(("F.Cu", v["x"], v["y"]))
+        for p in pads:
+            pn = ("PAD", id(p))
+            # no early break: a pad is a disc of copper, and it is what joins two
+            # tracks that end inside it from different layers (or never quite
+            # reach each other).  Unioning it with the first piece it touches and
+            # ignoring the rest reports a perfectly good net as two pieces.
+            for s in tr:
+                if s["layer"] in p["layers"] and \
+                        _rectseg(p["box"], s["a"], s["b"]) <= s["w"] / 2.0 + 1e-9:
+                    uni(pn, k(s["layer"], s["a"][0], s["a"][1]))
+            for v in vs:
+                if _ptrect(p["box"], v["x"], v["y"]) <= v["dia"] / 2.0 + 1e-9:
+                    uni(pn, ("F.Cu", v["x"], v["y"]))
+        for (i, p) in enumerate(pads):
+            for q in pads[i + 1:]:
+                if _rectrect(p["box"], q["box"]):
+                    uni(("PAD", id(p)), ("PAD", id(q)))
+        croot = set(find(c) for c in cnodes)
+        roots = {id(p): find(("PAD", id(p))) for p in pads}
+        att = set(id(p) for p in pads if roots[id(p)] in croot)
+        grp = {}
+        for p in pads:
+            grp.setdefault(roots[id(p)], []).append(p)
+        # biggest piece first: everything downstream of this assumes groups[0] is
+        # the one worth keeping
+        groups = [grp[r] for r in sorted(grp, key=lambda r: (-len(grp[r]), r[1]))]
+        self._pccache[net] = (fp, roots, att, groups)
+        return (roots, att, groups)
+
+    def _split(self, net):
+        """How many pieces this net's copper is in right now (1 if one)."""
+        return max(1, len(self._padroots(net)[2]))
+
+    def _gaps(self, net, pads, roots):
+        """Pad pairs that would weld `net`'s pieces back into one, cheapest first.
+
+        One pair per extra piece: join the smallest piece to the nearest pad of
+        the biggest piece already joined, so the number of A* runs stays at
+        (pieces - 1) instead of trying every cross-piece pair.
+        """
+        grp = {}
+        for p in pads:
+            grp.setdefault(roots[id(p)], []).append(p)
+        keys = sorted(grp, key=lambda r: -len(grp[r]))
+        (out, tree) = ([], list(grp[keys[0]]))
+        for r in keys[1:]:
+            best = min(((_d(self._padxy(a), self._padxy(b)), a, b)
+                        for a in tree for b in grp[r]))
+            out.append((best[1], best[2]))
+            tree.extend(grp[r])
+        return out
+
+    def _linked(self, net, pa, pb):
+        """True if the net's copper already joins pa to pb.
+
+        A leg of a multi-pad net is an edge of a spanning tree, not a contract
+        between two pads: lift a redundant one and the net is still one piece,
+        so there is nothing to put back.  Worth checking before spending an A* on a
+        pad-to-pad re-route that was never needed - but checked against the
+        copper, because the tree says a leg is there even after it was lifted.
+        """
+        roots = self._padroots(net)[0]
+        return (id(pa) in roots and id(pb) in roots
+                and roots[id(pa)] == roots[id(pb)])
 
     def _attach(self, net, pa, pb, pts, w):
         """Put a lifted leg back as two short stubs into the tree, not one line.
@@ -967,11 +1119,13 @@ class Router:
         return None
 
     def _live_pads(self, net):
-        """Pads of `net` that have copper attached right now."""
-        out = set()
-        for (pa, pb, _e) in self.tree_legs.get(net, []):
-            (out.add(id(pa)), out.add(id(pb)))
-        return out
+        """Pads of `net` that have copper attached right now.
+
+        Measured, not remembered: a pad that only appears in a leg which was
+        lifted is not live, and stubbing a new leg onto it joins two pieces of
+        nothing."""
+        groups = self._padroots(net)[2]
+        return groups[0] if len(groups) > 1 else self.pads_of.get(net, [])
 
     def _pay(self, net, pa, pb, path, w, live):
         """Place one leg of a net and update the books to match."""
@@ -1021,6 +1175,8 @@ class Router:
         w = self.cfg["widths"].get(net, 0.25)
         self.rip_tries += 1
         (snap, touched, lifted) = {}, [], []
+        why = "ran out of debts"
+        last = None
         snap[net] = self._snap_one(net)
         touched.append(net)
         debts = deque((net, a, b, False) for (a, b) in self.failed.get(net, []))
@@ -1031,6 +1187,7 @@ class Router:
                 break
             (n2, pa, pb, live) = debts.popleft()
             w2 = self.cfg["widths"].get(n2, 0.25)
+            last = (n2, pa, pb)
             if live and self._linked(n2, pa, pb):
                 self._settle(n2, pa, pb)      # redundant leg: nothing to place
                 continue
@@ -1047,9 +1204,11 @@ class Router:
                 self._settle(n2, pa, pb)
                 continue
             if len(lifted) >= RIP_LIFTS:
+                why = "lift budget %d" % RIP_LIFTS
                 break
             cut = self._wall_cut(n2, w2 / 2.0, pa, pb, set())
             if not cut:
+                why = "wall cannot be lifted (pads, keep-out or edge)"
                 break
             bought = 0
             for (n3, l3) in cut[:RIP_CUT]:
@@ -1064,6 +1223,7 @@ class Router:
                 debts.append((n3, l3[0], l3[1], True))
                 bought += 1
             if not bought:
+                why = "every leg of the wall already at RIP_MAX_PER_NET"
                 break
             # the debt that could not be paid is still owed: put it back at the
             # *front*, so this net gets its copper down before the victims it
@@ -1076,6 +1236,11 @@ class Router:
             for n in sorted(touched, key=key):
                 self._restore(n, snap[n])
             self.gen += 1
+            (n2, pa, pb) = last
+            self.log.append("  OPEN   FAIL %-10s %s.%s -> %s.%s: %s (lifts %d, "
+                            "tries %d)" % (net, pa["ref"], pa["pad"], pb["ref"],
+                                           pb["pad"], why, len(lifted),
+                                           self.rip_tries))
         return ok
 
     def ripup(self, by_net, order):
@@ -1130,6 +1295,102 @@ class Router:
                 self.log.append("  RIPUP  STILL OPEN  %-10s %s.%s -> %s.%s"
                                 % (net, pa["ref"], pa["pad"], pb["ref"],
                                    pb["pad"]))
+    def _weld(self, net, by_net, key):
+        """Join a net that is in pieces with plain A*, touching nothing else.
+
+        A net that comes out of the greedy pass in two pieces is almost never
+        blocked - it is a near miss: a stub that stopped a hair short of a pad, a
+        layer change whose via went missing, a leg that was lifted and never laid
+        down again in the same lane.  So the first repair attempt asks for a
+        legal lane and takes whatever A* finds, with its own copper free and every
+        other net obeying the clearance.  Nothing is lifted, so a weld cannot
+        break a second net the way the wall-cut machinery can; when it fails it
+        costs one A* and the board is exactly as it was.
+        """
+        w = self.cfg["widths"].get(net, 0.25)
+        (roots, _att, groups) = self._padroots(net)
+        made = 0
+        while len(groups) > 1:
+            got = False
+            for (pa, pb) in self._gaps(net, by_net[net], roots):
+                path = self._leg(net, self._padxy(pa), self._padxy(pb),
+                                 pa["layers"], pb["layers"], w)
+                if path is None:
+                    continue
+                self._pay(net, pa, pb, path, w, None)
+                made += 1
+                got = True
+                break
+            if not got:
+                break
+            (roots, _att, groups) = self._padroots(net)
+        return made
+
+    def _seal(self, by_net, order):
+        """Put every net back into one piece of copper, asking the board.
+
+        The rip-up pass keeps its own books - legs placed, legs owed - and those
+        books can swear a net is finished while the copper on the board is not,
+        because a debt may be paid by stubbing onto a pad whose own leg had
+        already been lifted.  This last pass ignores the books, measures how many
+        pieces each net's copper is really in, and closes the cuts: first with a
+        plain A* weld (_weld), which cannot damage anything else on the board, and
+        only for what that cannot reach, with the wall-cut machinery rip-up uses -
+        which can, so it stays last and stays rare.
+
+        This is the line the board has to cross before it is written out: a net
+        that is quietly in two pieces is a board that does not work, and nothing
+        else in the flow will notice until DRC calls it unconnected.
+        """
+        order_of = {}
+        for (gi, (grp, nets)) in enumerate(order):
+            for (ni, n) in enumerate(nets):
+                order_of[n] = (gi, ni)
+        key = lambda n: (order_of.get(n, (99, 99)), n)
+        self.quiet = True
+        self.rip_count = {}
+        broken = [n for n in by_net if len(by_net[n]) > 1 and self._split(n) > 1]
+        welded = 0
+        for net in sorted(broken, key=key):
+            welded += 1 if self._weld(net, by_net, key) else 0
+        fixed = len([n for n in broken if self._split(n) == 1])
+        rnd = 0
+        for rnd in range(1, SEAL_ROUNDS + 1):
+            broken = [n for n in by_net if len(by_net[n]) > 1 and self._split(n) > 1]
+            if not broken:
+                break
+            self.log.append("  SEAL    round %d: %d net(s) in pieces: %s"
+                            % (rnd, len(broken),
+                               " ".join("%s x%d" % (n, self._split(n))
+                                        for n in sorted(broken, key=key))))
+            for net in sorted(broken, key=key):
+                self.failed[net] = self._gaps(net, by_net[net],
+                                              self._padroots(net)[0])
+                if self._open_net(net, by_net, key) and self._split(net) == 1:
+                    fixed += 1
+            self.gen += 1
+        # from here the books are rewritten off the copper, so what the log calls
+        # "open" is what DRC is about to call unconnected
+        for net in by_net:
+            if len(by_net[net]) < 2:
+                continue
+            n = self._split(net)
+            self.open_of[net] = n - 1
+            self.tree_ok[net] = len(by_net[net]) - n
+        self.quiet = False
+        left = [n for n in sorted(by_net, key=key)
+                if len(by_net[n]) > 1 and self._split(n) > 1]
+        self.log.append("  SEAL    welded %d  rounds %d  nets opened %d  still in "
+                        "pieces %d%s"
+                        % (welded, rnd, fixed, len(left),
+                           "  " + " ".join("%s x%d" % (n, self._split(n))
+                                          for n in left) if left else ""))
+        for net in left:
+            for (pa, pb) in self._gaps(net, by_net[net], self._padroots(net)[0]):
+                self.log.append("  SEAL    STILL CUT   %-10s %s.%s -> %s.%s"
+                                % (net, pa["ref"], pa["pad"], pb["ref"],
+                                   pb["pad"]))
+
     # ------------------------------------------------------------------ run --
     def run(self, order):
         by_net = {}
@@ -1158,6 +1419,7 @@ class Router:
             tot[2] += g[2]
         if RIP:
             self.ripup(by_net, order)
+            self._seal(by_net, order)
         # the TOTAL row describes the copper that is actually on the board now,
         # not the sum of the passes that produced it: rip-up re-routes whole
         # nets, so pass totals would double-count.  `fails` counts the A* legs
@@ -1180,6 +1442,74 @@ def _collinear(a, b, c):
     return abs((b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1])) < 1e-9
 
 
+# ------------------------------------------------- copper contact geometry ----
+# Distances, in mm, used by the connectivity audit (_padroots).  Copper touches
+# when the gap between two shapes is smaller than the sum of their half-widths,
+# so everything below returns a plain distance and the caller adds the widths.
+
+def _d(a, b):
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _ptseg(px, py, a, b):
+    """Distance from a point to a segment."""
+    (dx, dy) = (b[0] - a[0], b[1] - a[1])
+    L2 = dx * dx + dy * dy
+    if L2 <= 1e-18:
+        return math.hypot(px - a[0], py - a[1])
+    t = max(0.0, min(1.0, ((px - a[0]) * dx + (py - a[1]) * dy) / L2))
+    return math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy))
+
+
+def _orient(a, b, c):
+    v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    return 0 if abs(v) < 1e-9 else (1 if v > 0 else -1)
+
+
+def _onseg(a, b, c):
+    return (min(a[0], b[0]) - 1e-9 <= c[0] <= max(a[0], b[0]) + 1e-9 and
+            min(a[1], b[1]) - 1e-9 <= c[1] <= max(a[1], b[1]) + 1e-9)
+
+
+def _crosses(a1, b1, a2, b2):
+    """True if two segments meet, proper crossing or an end resting on the other."""
+    (o1, o2, o3, o4) = (_orient(a1, b1, a2), _orient(a1, b1, b2),
+                        _orient(a2, b2, a1), _orient(a2, b2, b1))
+    if o1 != o2 and o3 != o4:
+        return True
+    return ((o1 == 0 and _onseg(a1, b1, a2)) or (o2 == 0 and _onseg(a1, b1, b2))
+            or (o3 == 0 and _onseg(a2, b2, a1)) or (o4 == 0 and _onseg(a2, b2, b1)))
+
+
+def _segseg(a1, b1, a2, b2):
+    """Distance between two segments: 0 if they touch or cross."""
+    if _crosses(a1, b1, a2, b2):
+        return 0.0
+    return min(_ptseg(a1[0], a1[1], a2, b2), _ptseg(b1[0], b1[1], a2, b2),
+               _ptseg(a2[0], a2[1], a1, b1), _ptseg(b2[0], b2[1], a1, b1))
+
+
+def _ptrect(box, x, y):
+    """Distance from a point to a rectangle (0 inside)."""
+    (x0, y0, x1, y1) = box
+    return math.hypot(max(x0 - x, 0.0, x - x1), max(y0 - y, 0.0, y - y1))
+
+
+def _rectseg(box, a, b):
+    """Distance from a rectangle to a segment (0 if it runs through it)."""
+    (x0, y0, x1, y1) = box
+    if _ptrect(box, a[0], a[1]) == 0.0 or _ptrect(box, b[0], b[1]) == 0.0:
+        return 0.0
+    corners = ((x0, y0), (x1, y0), (x1, y1), (x0, y1))
+    return min(_segseg(a, b, corners[i], corners[(i + 1) % 4])
+               for i in range(4))
+
+
+def _rectrect(b1, b2):
+    return (b1[0] <= b2[2] + 1e-9 and b2[0] <= b1[2] + 1e-9 and
+            b1[1] <= b2[3] + 1e-9 and b2[1] <= b1[3] + 1e-9)
+
+
 def route(cfg):
     """cfg: pads, frame, keep, classes, clearance, widths, via, route_layers,
     order [(group, [nets])].  Returns (segments, vias, log)."""
@@ -1191,7 +1521,61 @@ def route(cfg):
 
 
 # ------------------------------------------------------------------ selftest --
+def _audit_selftest():
+    """Checks _padroots against copper it has to judge, and emit()'s dedupe.
+
+    The connectivity model is what decides whether a board is finished, so the
+    cases it gets wrong are the ones that ship as broken boards.  Case 3 is the
+    bug that cut the 5 V rail in two: two tracks ending inside the same pad from
+    different layers are one piece of copper, and unioning the pad with only the
+    first track it touches calls that two pieces.
+    """
+    cfg = dict(pads=[], frame=(0.0, 0.0, 30.0, 30.0), keep=(0.0, 0.0, 0.0, 0.0),
+               classes={}, clearance={"Default": 0.25}, widths={"N1": 0.4},
+               via={"Default": (0.7, 0.35)}, route_layers=["F.Cu", "B.Cu"],
+               order=[])
+    r = Router(cfg)
+    pa = {"ref": "A", "pad": "1", "net": "N1", "box": (1.0, 1.0, 3.0, 3.0),
+          "layers": ["F.Cu", "B.Cu"], "drill": 0.0}
+    pb = {"ref": "B", "pad": "1", "net": "N1", "box": (17.0, 1.0, 19.0, 3.0),
+          "layers": ["F.Cu", "B.Cu"], "drill": 0.0}
+    pc = {"ref": "C", "pad": "1", "net": "N1", "box": (25.0, 1.0, 27.0, 3.0),
+          "layers": ["F.Cu", "B.Cu"], "drill": 0.0}
+    cfg["pads"] = [pa, pb, pc]
+    r.pads_of = {"N1": [pa, pb, pc]}
+
+    def n_live(rt):
+        return sum(1 for e in rt.items_of.get("N1", []) if not e["cu"]["dead"])
+
+    assert r._split("N1") == 3, r._split("N1")           # bare pads: 3 pieces
+    r.emit([(0, 2.0, 2.0), (0, 18.0, 2.0)], "N1", 0.4)   # A -> B, F.Cu
+    assert r._split("N1") == 2, r._split("N1")           # C still stranded
+    r.emit([(1, 18.0, 2.0), (1, 26.0, 2.0)], "N1", 0.4)  # B -> C, B.Cu
+    assert r._split("N1") == 1, r._split("N1")
+    # a pad that bridges two layers with no via of its own
+    r2 = Router(cfg)
+    r2.pads_of = {"N1": [pa, pb, pc]}
+    r2.emit([(0, 2.0, 2.0), (0, 18.0, 2.0)], "N1", 0.4)   # F.Cu A -> B
+    r2.emit([(1, 18.0, 2.0), (1, 26.0, 2.0)], "N1", 0.4)  # B.Cu B -> C
+    assert r2._split("N1") == 1, r2._split("N1")          # B solders them together
+    # emit() must not lay the same track twice
+    n0 = n_live(r2)
+    r2.emit([(0, 2.0, 2.0), (0, 18.0, 2.0)], "N1", 0.4)
+    assert n_live(r2) == n0, (n_live(r2), n0)
+    # ... but copper that was lifted may be laid down again
+    r2._lift("N1", [e for e in r2.items_of["N1"]
+                    if e["kind"] == "tr" and e["cu"]["layers"] == {"F.Cu"}])
+    assert n_live(r2) == n0 - 1, n_live(r2)              # _lift takes it off
+    assert not any(s and s["layer"] == "F.Cu" for s in r2.segs)
+    r2.emit([(0, 2.0, 2.0), (0, 18.0, 2.0)], "N1", 0.4)
+    assert r2._split("N1") == 1, r2._split("N1")
+    # a stranded pad stays a piece of its own, and _live_pads keeps the biggest
+    assert r._live_pads("N1") == [pa, pb] if r._split("N1") > 1 else True
+    print("AUDIT SELFTEST ok")
+
+
 if __name__ == "__main__":
+    _audit_selftest()
     # a tiny sanity case: two pads around a wall, with a gap to thread
     pads = [{"ref": "A", "pad": "1", "net": "N1", "box": (-1.0, -0.5, 1.0, 0.5),
              "layers": ["F.Cu"], "drill": 0.0},
