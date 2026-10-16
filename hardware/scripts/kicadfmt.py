@@ -23,6 +23,34 @@ def uid():
     return str(uuid.uuid5(uuid.NAMESPACE_URL, "dpp/%d" % _uid_seq[0]))
 
 
+def uid_for(key):
+    """Id derived from a name instead of a counter.
+
+    `uid()` is a counter, so anything that changes the number of ids handed out
+    earlier (a routed track added, a label moved) renumbers everything written
+    after it.  For ids that belong to a named thing - a component on the board,
+    a footprint in the project library - naming the id keeps those diffs to the
+    thing that actually changed.
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "dpp/" + key))
+
+
+def reid(text, key):
+    """Re-id every child item of a footprint block from the block's own name.
+
+    Two instances of the same part cannot share the library's inner ids, and
+    re-iding them from the global counter means the project library copy changes
+    on every unrelated edit to the board.  Counting inside the block and keying
+    on the reference makes each child id depend only on that component.
+    """
+    seq = [0]
+
+    def sub(_m):
+        seq[0] += 1
+        return '(uuid "%s")' % uid_for("%s#%d" % (key, seq[0]))
+    return re.sub(r'\(uuid "[^"]*"\)', sub, text)
+
+
 _uid_seq = [0]
 
 
@@ -405,8 +433,7 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
                     g = g.replace('(layer "F.SilkS")', '(layer "F.Fab")')
         # inner ids come from the library file: two instances of the same part
         # would share them, so give every child item its own stable id
-        kept.append(re.sub(r'\(uuid "[^"]*"\)',
-                           lambda mm: '(uuid "%s")' % uid(), g))
+        kept.append(reid(g, ref))
 
     if layer == "B.Cu":
         # Bottom-side mounting: pads go to the back copper (module pads keep
@@ -437,7 +464,7 @@ def board_footprint(fp_id, at, rot, ref, value, netmap, layer="F.Cu",
     # reference on F.Fab, layer for bottom-mounted parts)
     out = ['(footprint "%s"' % to_local_lib(fp_id, kept, layer),
            '\t(layer "%s")' % layer,
-           '\t(uuid "%s")' % uid(),
+           '\t(uuid "%s")' % uid_for("board/" + ref),
            '\t(at %.4f %.4f %.1f)' % (x, y, rot)]
     # pcbnew saves a rotated part with the placement angle baked into every
     # child; the library copy keeps the children local (unrotated), which is
@@ -574,7 +601,7 @@ def custom_footprint(ref, value, at, rot, pads, layer="F.Cu",
         _local_mods[name] = "\n".join(head + body) + "\n)\n"
     out = ['(footprint "%s:%s"' % (LOCAL_LIB, name),
            '	(layer "%s")' % layer,
-           '	(uuid "%s")' % uid(),
+           '	(uuid "%s")' % uid_for("board/" + ref),
            '	(at %.4f %.4f %.1f)' % (x0, y0, rot)]
     out.extend([bake_rot(g, rot) for g in kept])
     return "\n".join(out) + "\n)"
