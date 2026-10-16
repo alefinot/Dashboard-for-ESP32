@@ -1637,7 +1637,13 @@ def silks():
     # per-pin text where there is room (2.54 mm pitch groups).  J8 / JP1 are
     # pads on the underside, so their labels go on B.SilkS, mirrored.
     # both 2.54 mm pad groups are labelled on their south side, one text strip
-    SIDE = {"J13": 1.2, "J15": 1.2, "J16": -1.25, "J18": 1.25}
+    # _txt hangs the glyph box BELOW its anchor (valign top), so a north-side
+    # label has to clear the pad's north edge plus its mask relief: at -1.25 the
+    # 'D13'/'GND' box reached y 19.27, i.e. 0.05 mm inside J16 pad 1/2's mask
+    # window (pad edge 19.22 + 0.05 relief) - DRC silk_over_copper.  -1.60 puts
+    # the box at y 18.12..18.92: 0.25 mm off the mask, still 3.5 mm clear of the
+    # GNSS pads' courtyard to the north (y 14.60).
+    SIDE = {"J13": 1.2, "J15": 1.2, "J16": -1.60, "J18": 1.25}
     BSIDE = {"J8": 1.9, "JP1": -2.6}
     for ent in parts():
         ref, x, y = ent[0], ent[2], ent[3]
