@@ -462,7 +462,7 @@ def to_local_lib(fp_id, kept, layer="F.Cu"):
                 '\t(version %s)' % MOD_VERSION, '\t(generator "%s")' % MOD_GEN,
                 '\t(generator_version "%s")' % MOD_GENVER,
                 '	(layer "%s")' % layer,
-                '\t(tstamp "%s")' % uid()]
+                '\t(tstamp "%s")' % uuid.uuid5(uuid.NAMESPACE_URL, LOCAL_LIB + "/" + name)]
         body = []
         for g in kept:
             g = re.sub(r'\(net \d+ "[^"]*"\)\s*', "", g)

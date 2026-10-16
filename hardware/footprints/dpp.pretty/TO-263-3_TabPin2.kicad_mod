@@ -3,7 +3,7 @@
 	(generator "make_pcb.py")
 	(generator_version "9.0")
 	(layer "F.Cu")
-	(tstamp "ca4791b7-3f80-5fb8-a5cc-80dd027531f3")
+	(tstamp "57ce1749-9e16-5f0b-a6e1-807d0ac7bed5")
 (descr "TO-263/D2PAK/DDPAK SMD package, http://www.infineon.com/cms/en/product/packages/PG-TO263/PG-TO263-3-1/")
 (tags "D2PAK DDPAK TO-263 D2PAK-3 TO-263-3 SOT-404")
 (property "Reference" "REF**"

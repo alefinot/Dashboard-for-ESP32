@@ -3,7 +3,7 @@
 	(generator "make_pcb.py")
 	(generator_version "9.0")
 	(layer "B.Cu")
-	(tstamp "9f1c6f4f-35b8-56e8-a337-81c1ef0311d5")
+	(tstamp "ad5ef090-4830-5935-81f3-5a03e3e1da1d")
 (descr "SMD capacitor, aluminum electrolytic, Vishay 1012, 10.0x12.5mm, http://www.vishay.com/docs/28395/150crz.pdf")
 (tags "capacitor electrolytic")
 (property "Reference" "REF**"
