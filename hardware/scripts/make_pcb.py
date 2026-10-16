@@ -1250,9 +1250,9 @@ TFT_LABEL = ["VCC", "GND", "CS", "RST", "DC", "SDI", "SCK", "LED", "SDO",
              "T_CLK", "T_CS", "T_DIN", "TPEN", "T_DO"]
 
 # silkscreen next to the vehicle / accessory headers: (ref, [labels per pin])
-# Per-pin silks for the 2.54 mm groups. The 2.00 mm JST-PH shells carry a
-# single two-circuit label instead (see silks()); pin order is fixed by the
-# footprint and documented in the README / PINOUT.
+# Per-pin silks for the 2.54 mm groups; the 2.00 mm JST-PH shells are named
+# separately, one word standing up beside every pad (see JST_PIN_SILK below and
+# silks()).  Pin order is fixed by the footprint and documented in PINOUT.
 PIN_SILK = {
     "J13": ["TX", "RX", "GND", "5V"],
     "J15": ["D26", "SDA", "SCL", "D19", "D15", "GND"],
@@ -1261,6 +1261,28 @@ PIN_SILK = {
     "J8": ["SDA", "SCL", "5V", "GND", "RX", "TX"],
     "JP1": ["5V", "SEL", "12V"],
 }
+
+# Every pad of the four JST-PH shells gets its own word, in pad order, using the
+# short forms PINOUT.md section 4 already prints (the eight GND pads used to be
+# the only unnamed pads on the board).
+JST_PIN_SILK = {
+    "J17": ["IGN", "GND", "COOL", "GND"],
+    "J14": ["TRIP", "GND", "EN", "GND"],
+    "J6": ["LDR", "GND", "FUEL", "GND"],
+    "J9": ["+V", "SIG", "G"],
+}
+# Distance from the inner edge of a shell's pad row to the centre of its words
+# (measured off the B.Silkscreen gerber, not estimated): the worst word lands
+# 0.43 mm clear of the shell's own courtyard and 0.53 mm off the DevKit pads.
+JST_BAND = 2.42
+# Ink length of each word along its own axis, measured off the plotted
+# B.Silkscreen at 0.80 mm glyphs (KiCad stroke font, 0.12 mm stroke: the plot
+# gives the stroke centre lines, so 0.12 mm is added).  The band the words stand
+# in is 3.86 mm tall, so the longest (COOL, 3.02 mm) leaves 0.84 mm of slack;
+# JST_INK is what the advisory note in silks() checks against.
+JST_INK = {"TRIP": 2.48, "GND": 2.25, "EN": 1.30, "IGN": 1.76, "COOL": 3.02,
+           "LDR": 2.02, "FUEL": 2.75, "+V": 1.53, "SIG": 1.76, "G": 0.62}
+JST_BAND_H = 3.86
 
 
 def build(copper=()):
@@ -1453,9 +1475,9 @@ def _txt(x, y, text, layer="F.SilkS", size=0.8, thick=0.12, rot=0.0,
 def silks():
     """Silkscreen + documentation marks, placed from the CAD geometry.
 
-    Text height 0.8 mm minimum (fab limit). Per-pin text is only used where the
-    2.54 mm pitch leaves room for it; the 2.00 mm JST-PH shells carry one
-    two-circuit label instead.
+    Text height 0.8 mm minimum (fab limit). Per-pin text is used wherever the
+    pitch takes it: flat words on the 2.54 mm groups, one word standing up
+    beside every pad of the 2.00 mm JST-PH shells.
     """
     out = []
 
@@ -1536,26 +1558,56 @@ def silks():
                       ("OUT+", outx + 1.2, outy + 1.6), ("OUT-", outx + 18.2, outy + 1.6)]:
         out += _txt(x, y, lab, layer="B.SilkS", size=0.9, mirror=True)
 
-    # JST-PH shells hang under the board, so every pin name is printed on the
-    # shell's own side - B.SilkS, mirrored, one word per named pin, centred on
-    # that pin's column and set just inside the pad row (B.SilkS anchor is the
-    # text's RIGHT edge).  Pads reach y 19.60 (north pair) and y 55.40 (south
-    # pair); the 10.2 mm-deep courtyards stop at y 20.60 / y 54.40; the DevKit
-    # rows run y 23.96..25.66 (J10a) and y 49.35..51.06 (J10b) and the DevKit
-    # body hanging underneath spans y 23.49..51.49 - so both text bands sit
-    # clear of plug, body, courtyard and copper.  C11 (the TRIP filter) is on the
-    # TOP side above the TRIP/EN words: opposite faces, so the silks still read
-    # from below.  Columns: J14 TRIP 64.00 / EN 68.00, J17 IGN_12 78.40 /
-    # COOL_SNS 82.40, J6 LDR_SNS 84.40 / FUEL_SNS 80.40, J9 HALL_SIG 67.00.
-    # Widths measured from the exported PDF at size 0.8 (KiCad stroke font).
-    W8 = {"TRIP": 2.59, "EN": 1.56, "IGN": 2.02, "COOL": 3.12,
-          "LDR": 2.25, "FUEL": 2.89, "HALL": 2.82}
-    for lab, cx, y in [("TRIP", 64.00, 21.00), ("EN", 68.00, 21.00),
-                       ("IGN", 78.40, 21.00), ("COOL", 82.40, 21.00),
-                       ("LDR", 84.40, 52.90), ("FUEL", 80.40, 52.90),
-                       ("HALL", 67.00, 52.90)]:
-        out += _txt(cx + W8[lab] / 2.0, y, lab, layer="B.SilkS", size=0.8,
-                    mirror=True)
+    # JST-PH shells hang under the board, so every pad is named on the shell's
+    # own face - B.SilkS, mirrored - with its own word STANDING UP beside it.
+    # rot 270 was checked, not guessed: the plotted ink of a standing word is a
+    # pure rotation of the old flat ink of the same word (identical stroke sets
+    # under (x,y)->(-y,x)), so nothing is mirrored, and the first letter lands at
+    # the south end of its column - which reads bottom-to-top from underneath.  Flat words cannot do this job: at 2.00 mm pitch the signal
+    # words are 1.30 mm (EN) to 2.48 mm (TRIP) of ink against a 2.00 mm column,
+    # so a flat word only pays for every other pad - which is exactly what these
+    # shells used to do, and it left 8 of their 15 pads (every GND among them,
+    # and all three of J9) with no name at all.  A standing word is glyph-height
+    # wide, 0.80 mm + 0.12 mm stroke = 0.92 mm, so neighbouring columns keep
+    # 1.08 mm of air (measured 1.20 mm centre-line to centre-line) and each word
+    # still stands on its own pad.
+    # Columns and pad edges come from pads_abs(), which un-mirrors the local
+    # library copy the way the board stores this copper - reading the dpp.pretty
+    # pads straight (pads_of) double-mirrors them and parks every word on top of
+    # the pad it names, 15 silk_over_copper hits, which is how this was caught.
+    # Reality, off KiCad's own report: J14 x 64.00/66.00/68.00/70.00 and J17 x
+    # 78.40/80.40/82.40/84.40 (pin 1 west), J6 x 84.40..78.40 and J9 x 69.00/
+    # 67.00/65.00 (pin 1 east, rot 180); their copper spans y 16.10..19.60 (north
+    # pair) and y 55.40..58.90 (south pair), the 10.2 mm courtyards stop at
+    # y 20.10 / y 54.90, and the DevKit rows run y 23.96..25.66 (J10a) / y
+    # 49.35..51.06 (J10b), the DevKit body hanging underneath over y 23.49..
+    # 51.49.  So the two text bands, y 20.10..23.96 and y 51.06..54.90 (3.86 mm
+    # each), sit clear of plug, body, courtyard and copper, and every word fits:
+    # measured off the plot, the words reach y 20.53..23.43 (COOL, the worst on
+    # the north band) and y 51.61..54.24 (FUEL, the worst on the south one):
+    # 0.43..1.67 mm off the courtyards, 0.53..0.55 mm off the DevKit pads (the
+    # DevKit's own underside edge at y 23.49 misses the longest word by 0.06 mm),
+    # and 0.93..2.17 mm off the pad copper each word names.
+    # C11 (the TRIP filter) and R12 stand over the north words on the TOP face:
+    # opposite faces, so the words still read from below, and what DRC weighs
+    # against them is the B.Cu copper under them (silk_over_copper).
+    # KiCad's own justify centres each word on its pad (0.04 mm off, measured) and
+    # in the middle of its band, so there is no stroke-font width maths here.
+    for ent in parts():
+        ref = ent[0]
+        if ref not in JST_PIN_SILK:
+            continue
+        sig = sorted((int(p[1]), p[4]) for p in pads_abs(ent) if p[1].isdigit())
+        for (num, box), lab in zip(sig, JST_PIN_SILK[ref]):
+            cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+            inb = 1.0 if cy < ESP_MID else -1.0      # toward the board's middle
+            out += _txt(cx, cy + inb * ((box[3] - box[1]) / 2.0 + JST_BAND),
+                        lab, layer="B.SilkS", size=0.8, rot=270.0, mirror=True,
+                        halign="center", valign="middle")
+            if JST_INK[lab] > JST_BAND_H:
+                print("  SILK TOO LONG %s.%d '%s': %.2f mm of ink against a "
+                      "%.2f mm band" % (ref, num, lab, JST_INK[lab],
+                                        JST_BAND_H))
 
     # GNSS pads sit under the board, so their label is mirrored silks too
     out += _txt(57.6 + 1.4, 12.9, "GNSS", layer="B.SilkS", size=0.8,
@@ -1617,7 +1669,7 @@ def silks():
             "ESP far row 16..30 (USB end first): 3V3 GND 15 2 4 16 17 5 18",
             "  19 21 3 1 22 23",
             "J17 IGN GND COOL GND   J14 TRIP GND EN GND",
-            "J6 LDR GND FUEL GND    J9 +V SIG GND",
+            "J6 LDR GND FUEL GND    J9 +V SIG G",
             "JST = right-angle SMD, bodies under the board; pin 1 is at the",
             "west end of the north pair, east end of the south pair (top view)",
             "no trip button on the carrier - trip comes in on J14 (pin 1)",
