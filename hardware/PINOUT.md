@@ -288,6 +288,46 @@ Rules are settled by **KiCad's own DRC** (`kicad-cli pcb drc`, run automatically
 of `make_pcb.py`; exit 0 and "Found 0 DRC violations" is the target). The bounding-box
 notes the script prints are hints only - they are approximations, never the referee.
 
+### Routing
+
+The board is **fully routed**: the run ends at `Found 0 DRC violations` and `Found 0
+unconnected pads`, with 533 track segments (2 564 mm of copper) and 188 vias on
+F.Cu/B.Cu. `scripts/route_pcb.py` gets there in three passes:
+
+1. **greedy** - one net at a time in `ROUTE_ORDER` (longest span first inside each
+   group), every leg a shortest path (A*) over a 0.10 mm node grid whose walls already
+   carry the class clearance to every other net's copper, pads and the antenna keep-out.
+2. **rip-up** - a net that cannot place a leg opens a *debt*. A debt that cannot be paid
+   prices the wall standing in front of it (a second search over "what would it cost to
+   move this", with legs priced by how much copper they are and by the `RIP_MULT` tier)
+   and lifts the cheapest ones, which become debts owned by their own net. An attempt
+   that cannot place all its debts is undone exactly - copper and books - so a failed
+   attempt can never leave the board worse than it found it.
+3. **seal** - the pass that decides whether the board is finished, because it ignores the
+   books and measures the copper: a union-find over the net's own tracks, vias and pads
+   under KiCad's contact rules (a track joins a pad when the two rectangles overlap, a
+   via joins a track when its disc touches it anywhere along the length, and two tracks
+   that end inside one pad are one piece of copper even from different layers). A net in
+   two pieces is welded with a plain A* first, which cannot damage anything else; only
+   what that cannot reach goes back through the wall machinery.
+
+The router's own count of nets in pieces and KiCad's `unconnected pads` are both zero, and
+that agreement is the point: the tree bookkeeping in passes 1-2 can swear a net is finished
+while its copper sits in two halves - which is how `V5` shipped cut between `JP1` and
+`J13` for several revisions, and how `DBG_TX` cut again later. Anything that asks "is this
+net done" now asks the copper (`_padroots`), and a debt only counts as paid when the
+placement actually joins the two pads. The audit is self-tested: `python
+hardware/scripts/route_pcb.py` runs synthetic copper through `_padroots` and the `emit()`
+dedupe (pad bridging two layers, a lifted leg laid down again, the same track emitted
+twice) before routing a two-pad circuit.
+
+Knobs that decide the outcome, not just the runtime: `RIP_LIFTS` (36) and
+`RIP_MAX_PER_NET` (12) bound how much copper one attempt may move. `SPARE_D26`'s last leg
+- `J10a.7` to `J15.1`, entering an SMD-only pad in the south `J13`/`J15` row, behind the
+0.80 mm `V5` rail that lies along y 59.90 in front of it - needed a deeper cascade than a
+24-lift attempt allowed, and came out once the cap went to 36. A full run is about 5
+minutes and is byte-for-byte reproducible (checked by running twice and diffing).
+
 The distances this sheet quotes come from KiCad's own transforms: `nets-report.md` for pad
 positions and sizes, the pad coordinates inside `drc-report.txt` for what a given rotation
 really produces, and the `CrtYd` graphics in the board file for courtyards (SMD courtyards

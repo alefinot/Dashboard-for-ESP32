@@ -67,10 +67,10 @@ TURN = 0.06          # cost of a direction change, in grid units
 RIP = True           # run the pass (False = old greedy-only behaviour)
 RIP_DEPTH = 3        # unused since the wall-cut rewrite, kept for the harness
 RIP_CUT = 2          # legs of one cut that may be lifted at once
-RIP_LIFTS = 24       # legs one retry may lift in total (runtime guard)
+RIP_LIFTS = 36       # legs one retry may lift in total (runtime guard)
 RIP_ROUNDS = 4       # passes over the still-open nets
 RIP_TRIES = 16       # cap on retries per run (runtime guard)
-RIP_MAX_PER_NET = 8  # legs of one net that may be lifted per run
+RIP_MAX_PER_NET = 12  # legs of one net that may be lifted per run
 RIP_ORDER = "route"   # which stranded net is asked first: route order or span
 SEAL_ROUNDS = 3      # passes of the last-chance "is this net one piece?" check
 CUT_MARGIN = 6.0     # mm, how far outside the pad-to-pad box a wall cut may go
