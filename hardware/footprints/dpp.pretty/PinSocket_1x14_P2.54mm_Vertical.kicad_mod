@@ -3,7 +3,7 @@
 	(generator "make_pcb.py")
 	(generator_version "9.0")
 	(layer "F.Cu")
-	(tstamp "62dbe9d4-05a7-51cf-a1f8-65ec8c2cbf9c")
+	(tstamp "919ab09c-5d8f-5114-b2db-886fda9b26d2")
 (descr "Through hole straight socket strip, 1x14, 2.54mm pitch, single row (from Kicad 4.0.7), script generated")
 (tags "Through hole socket strip THT 1x14 2.54mm single row")
 (property "Reference" "REF**"

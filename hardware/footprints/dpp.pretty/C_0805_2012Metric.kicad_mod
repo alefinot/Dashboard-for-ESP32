@@ -3,7 +3,7 @@
 	(generator "make_pcb.py")
 	(generator_version "9.0")
 	(layer "F.Cu")
-	(tstamp "d198f7d1-2623-5148-9364-87718cbc776d")
+	(tstamp "a80699f9-2012-51c8-9a41-20bddf8eadac")
 (descr "Capacitor SMD 0805 (2012 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf, https://docs.google.com/spreadsheets/d/1BsfQQcO9C6DZCsRaXUlFlo91Tg2WpOkGARC1WS5S8t0/edit?usp=sharing)")
 (tags "capacitor")
 (property "Reference" "REF**"

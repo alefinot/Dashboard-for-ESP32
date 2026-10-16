@@ -3,7 +3,7 @@
 	(generator "make_pcb.py")
 	(generator_version "9.0")
 	(layer "B.Cu")
-	(tstamp "8c1d8ecf-5710-510b-b17f-5f51f16f58f4")
+	(tstamp "1c84f021-90d6-5a65-8ae9-3477f9994e98")
 (descr "Connector XT30 Vertical Cable Male, https://www.tme.eu/Document/7d9d972ae3468777f69ec2ee99897652/XT30U-M.pdf")
 (tags "RC Connector XT30")
 (property "Reference" "REF**"
@@ -33,7 +33,7 @@
 		(unlocked yes)
 		(layer "B.Fab")
 		(hide yes)
-		(uuid "5e02a7ae-43a6-52db-bfa3-af948df4bdee")
+		(uuid "e4d1951b-2327-5cf4-a119-c54aa0af56f8")
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -46,7 +46,7 @@
 		(unlocked yes)
 		(layer "B.Fab")
 		(hide yes)
-		(uuid "3267745c-2a99-5935-a025-f8dceab28307")
+		(uuid "2dd7bfd6-d9ef-5186-9bad-bf514af257f2")
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -64,7 +64,7 @@
 			(type solid)
 		)
 		(layer "B.CrtYd")
-		(uuid "1c68776b-b171-5fc4-ab82-23cd9deb7fa3")
+		(uuid "3c0f68c7-19f0-5326-9a56-88e1a966bb5e")
 	)
 (fp_line
 		(start -3.1 1.8)
@@ -74,7 +74,7 @@
 			(type solid)
 		)
 		(layer "B.CrtYd")
-		(uuid "f82a8a79-9384-51af-97b1-1e2ec0a181bb")
+		(uuid "62ef6428-66f9-5e59-9909-6e5a78086128")
 	)
 (fp_line
 		(start -3.1 -1.8)
@@ -84,7 +84,7 @@
 			(type solid)
 		)
 		(layer "B.CrtYd")
-		(uuid "7bee206c-5f6c-565e-8fbe-04955f4b6e2b")
+		(uuid "f334e9df-3e7a-50e5-8cc2-8c21fa14ef8e")
 	)
 (fp_line
 		(start -1.4 3.1)
@@ -94,7 +94,7 @@
 			(type solid)
 		)
 		(layer "B.CrtYd")
-		(uuid "70034977-f130-57fb-a7f0-f0944a3915ff")
+		(uuid "6216afbd-519e-5c93-9ee2-f46b88706c64")
 	)
 (fp_line
 		(start -1.4 -3.1)
@@ -104,7 +104,7 @@
 			(type solid)
 		)
 		(layer "B.CrtYd")
-		(uuid "b9359b5c-d427-5c96-bd39-3b49d3696837")
+		(uuid "5a4a4090-562f-5ecd-b4aa-bc50604d3c95")
 	)
 (fp_line
 		(start 8.1 3.1)
@@ -114,7 +114,7 @@
 			(type solid)
 		)
 		(layer "B.CrtYd")
-		(uuid "ddd238e1-8867-5e1b-90a1-2d5d3287e40e")
+		(uuid "0050505c-ff2e-54db-9865-10f1989055a4")
 	)
 (fp_line
 		(start -2.6 1.3)
@@ -124,7 +124,7 @@
 			(type solid)
 		)
 		(layer "B.Fab")
-		(uuid "2f94a11e-4c60-5349-b530-513aba6a6c37")
+		(uuid "a2b16f42-8640-5baf-8e1e-8ca070d4b5fd")
 	)
 (fp_line
 		(start -2.6 1.3)
@@ -134,7 +134,7 @@
 			(type solid)
 		)
 		(layer "B.Fab")
-		(uuid "b04817b8-646d-588c-9953-a1ae7bcf22f4")
+		(uuid "dbdc401f-b1b7-5bd9-9755-09af96a52f13")
 	)
 (fp_line
 		(start -2.6 -1.3)
@@ -144,7 +144,7 @@
 			(type solid)
 		)
 		(layer "B.Fab")
-		(uuid "99dfc9fa-6f1b-5eb7-a635-c3bbed8e7981")
+		(uuid "affccee4-eddc-5c36-b8c3-9a58b3bab3e1")
 	)
 (fp_line
 		(start -0.9 2.6)
@@ -154,7 +154,7 @@
 			(type solid)
 		)
 		(layer "B.Fab")
-		(uuid "9baef441-c916-5922-b1e1-1321e8998851")
+		(uuid "27212595-dc1e-5cf7-b721-a9d6de74ad28")
 	)
 (fp_line
 		(start -0.9 -2.6)
@@ -164,7 +164,7 @@
 			(type solid)
 		)
 		(layer "B.Fab")
-		(uuid "c71a0144-76b2-5f70-98a1-2c580b54457c")
+		(uuid "37973262-bf35-55c0-870d-c37497e84327")
 	)
 (fp_line
 		(start 7.6 2.6)
@@ -174,7 +174,7 @@
 			(type solid)
 		)
 		(layer "B.Fab")
-		(uuid "c4f95ce3-35d5-572d-92d2-9b35b74ce947")
+		(uuid "f23fb11f-9ac9-564c-8876-ebbaec0ba8bf")
 	)
 (pad "1" thru_hole roundrect
 		(at 0 -0.0)
@@ -183,7 +183,7 @@
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 		(roundrect_rratio 0.2)
-		(uuid "af5e6b68-2173-5d88-aa12-ba3315fea460")
+		(uuid "9dea1c03-e326-5728-92b9-5365d8da5535")
 	)
 (pad "2" thru_hole circle
 		(at 5 -0.0)
@@ -191,7 +191,7 @@
 		(drill 2.7)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
-		(uuid "3196d0b7-4f51-5a48-b61d-7931ff030ab4")
+		(uuid "82ed3270-b485-52f0-a79c-c56754364c3f")
 	)
 (model "${KIPRJMOD}/footprints/dpp.3dshapes/AMASS_XT30U-M_1x02_P5.0mm_Vertical.step"
 		(offset

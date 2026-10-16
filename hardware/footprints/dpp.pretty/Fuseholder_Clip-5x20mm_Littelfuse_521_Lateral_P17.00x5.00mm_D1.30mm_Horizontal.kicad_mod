@@ -3,7 +3,7 @@
 	(generator "make_pcb.py")
 	(generator_version "9.0")
 	(layer "F.Cu")
-	(tstamp "b9d0a021-e85e-57e7-8f05-c7b8c774adee")
+	(tstamp "2ecdddb5-352d-520a-9957-5514ab9a68cb")
 (descr "Fuseholder Clips, 5x20mm Cylinder Fuse, Pins Inline, Horizontal, Littelfuse 521, https://www.littelfuse.com/~/media/electronics/datasheets/fuse_clips/littelfuse_fuse_clip_520_521_102071_datasheet.pdf.pdf")
 (tags "fuse clip open")
 (property "Reference" "REF**"
@@ -33,7 +33,7 @@
 		(unlocked yes)
 		(layer "F.Fab")
 		(hide yes)
-		(uuid "163af0c9-7085-5074-a5c0-12d649bf4eb4")
+		(uuid "1345cc87-0c43-5b4c-82c3-75c78583040e")
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -46,7 +46,7 @@
 		(unlocked yes)
 		(layer "F.Fab")
 		(hide yes)
-		(uuid "e6e2eb93-eaa8-5e81-91aa-92a842ffb169")
+		(uuid "eeba9974-f311-53d8-9344-e127206fd7d2")
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -64,7 +64,7 @@
 			(type solid)
 		)
 		(layer "F.SilkS")
-		(uuid "737486a6-e7a0-5aa6-9c97-e38f78ee2eb3")
+		(uuid "e1db76e1-8b09-576e-84d2-011215b3f58a")
 	)
 (fp_line
 		(start -1.4 0)
@@ -74,7 +74,7 @@
 			(type solid)
 		)
 		(layer "F.SilkS")
-		(uuid "77904694-6d97-5bc9-affb-ec557cd4e8ae")
+		(uuid "6176a098-e933-5993-94e5-d203652dde91")
 	)
 (fp_line
 		(start -1.4 5)
@@ -84,7 +84,7 @@
 			(type solid)
 		)
 		(layer "F.SilkS")
-		(uuid "2db93937-248b-5983-ac20-f8b14f0130dd")
+		(uuid "e8c99f73-5687-55f2-8677-79340fcbe86b")
 	)
 (fp_line
 		(start 2 0)
@@ -94,7 +94,7 @@
 			(type solid)
 		)
 		(layer "F.SilkS")
-		(uuid "36fc9102-fc76-5449-b81f-056c09080733")
+		(uuid "0ecc891d-76d9-51b4-ac4f-610197551008")
 	)
 (fp_line
 		(start 15 0)
@@ -104,7 +104,7 @@
 			(type solid)
 		)
 		(layer "F.SilkS")
-		(uuid "3f7c0ded-6484-53b2-a7ce-b13dcbab3cbd")
+		(uuid "d294903d-1a32-57c9-8db4-2c1b76b06e31")
 	)
 (fp_line
 		(start 15.6 0)
@@ -114,7 +114,7 @@
 			(type solid)
 		)
 		(layer "F.SilkS")
-		(uuid "7d9c3224-a32b-5499-ad39-769722389d5f")
+		(uuid "34047ef0-1269-523c-a0cc-4feb48db769d")
 	)
 (fp_line
 		(start 15.6 5)
@@ -124,7 +124,7 @@
 			(type solid)
 		)
 		(layer "F.SilkS")
-		(uuid "83127427-505d-51d4-b4e6-c5187172b050")
+		(uuid "46b95139-136c-587f-964f-c3a2520e1f6c")
 	)
 (fp_line
 		(start 18.4 0)
@@ -134,7 +134,7 @@
 			(type solid)
 		)
 		(layer "F.SilkS")
-		(uuid "ef229f85-dbaa-5e6b-9561-bc1a991ff132")
+		(uuid "c788e2d2-60e6-516d-8f10-7e45c3070b36")
 	)
 (fp_line
 		(start 18.4 5)
@@ -144,7 +144,7 @@
 			(type solid)
 		)
 		(layer "F.SilkS")
-		(uuid "5da40b5d-7ff9-5e35-9948-31ce0d924d5a")
+		(uuid "564b0a0f-1369-5eca-801b-1fae9c535d21")
 	)
 (fp_line
 		(start 19 0)
@@ -154,7 +154,7 @@
 			(type solid)
 		)
 		(layer "F.SilkS")
-		(uuid "70a54aa9-5069-546a-a429-893f6df80d5e")
+		(uuid "7bdc0e18-ad3a-5f9c-82b8-96472d26db19")
 	)
 (fp_line
 		(start -2.25 -1.4)
@@ -164,7 +164,7 @@
 			(type solid)
 		)
 		(layer "F.CrtYd")
-		(uuid "f5bb8432-d857-59fd-b4bb-c72101b4e698")
+		(uuid "3e9b1cd8-7018-5d8f-8e2e-3fec3c40efb8")
 	)
 (fp_line
 		(start -2.25 -1.4)
@@ -174,7 +174,7 @@
 			(type solid)
 		)
 		(layer "F.CrtYd")
-		(uuid "066cda65-4f99-56bf-802e-c8c45a2d5b52")
+		(uuid "c02d0dc9-fcc5-5834-9a57-c87dabc58890")
 	)
 (fp_line
 		(start 19.25 6.4)
@@ -184,7 +184,7 @@
 			(type solid)
 		)
 		(layer "F.CrtYd")
-		(uuid "650f27a4-7cac-5df1-bd44-19284303ede3")
+		(uuid "6b817d0e-01b9-5a4f-86b7-7dd1bc731351")
 	)
 (fp_line
 		(start 19.25 6.4)
@@ -194,7 +194,7 @@
 			(type solid)
 		)
 		(layer "F.CrtYd")
-		(uuid "16440b87-5482-588d-ab15-18045ad93a20")
+		(uuid "72ed542c-0ccc-55e0-b81b-c410641ac646")
 	)
 (fp_line
 		(start -2 0)
@@ -204,7 +204,7 @@
 			(type solid)
 		)
 		(layer "F.Fab")
-		(uuid "cb27ba9f-0b73-528e-9e7b-ac106419c168")
+		(uuid "de80817b-8c3c-5a31-bc6e-9dc18476c1b6")
 	)
 (fp_line
 		(start -2 5)
@@ -214,7 +214,7 @@
 			(type solid)
 		)
 		(layer "F.Fab")
-		(uuid "4f99d2a2-9d62-553b-ae95-a1add37d4682")
+		(uuid "dfa332c2-2db8-54c5-a4dc-c1dc851497eb")
 	)
 (fp_line
 		(start 2 0)
@@ -224,7 +224,7 @@
 			(type solid)
 		)
 		(layer "F.Fab")
-		(uuid "b9f863c8-1b3d-5882-b678-904f37ac4b20")
+		(uuid "7714c48f-d09c-58b1-9207-afabe75768ef")
 	)
 (fp_line
 		(start 15 0)
@@ -234,7 +234,7 @@
 			(type solid)
 		)
 		(layer "F.Fab")
-		(uuid "58b9e096-add3-5353-821c-bab75178ce2c")
+		(uuid "99105ef3-4174-5a24-8d02-e71022251566")
 	)
 (fp_line
 		(start 19 5)
@@ -244,7 +244,7 @@
 			(type solid)
 		)
 		(layer "F.Fab")
-		(uuid "9aa1c948-5a6f-534c-97ad-d5c32d7a95e8")
+		(uuid "771f5e32-22c9-5a5e-9a4f-9c5f64f749e9")
 	)
 (fp_line
 		(start 19 5)
@@ -254,7 +254,7 @@
 			(type solid)
 		)
 		(layer "F.Fab")
-		(uuid "6cfeb441-2c49-5836-90b0-2ed9912c66ae")
+		(uuid "4f4b5764-a112-58e1-9c14-646ea2f563fe")
 	)
 (pad "1" thru_hole roundrect
 		(at 0 0)
@@ -263,7 +263,7 @@
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 		(roundrect_rratio 0.25)
-		(uuid "bbeac546-0297-5e79-ba63-257d9b17c2cf")
+		(uuid "6edb52bf-6fbd-5e0c-ac97-76ec6cd6807f")
 	)
 (pad "1" thru_hole roundrect
 		(at 0 5)
@@ -272,7 +272,7 @@
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 		(roundrect_rratio 0.25)
-		(uuid "b3053671-1ee2-505b-81c8-a02b51a71610")
+		(uuid "89f98964-c5c4-52e7-930e-5ae19ddcf907")
 	)
 (pad "2" thru_hole circle
 		(at 17 0)
@@ -280,7 +280,7 @@
 		(drill 1.3)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
-		(uuid "f9f00639-5106-5a78-971f-b57ae4edb297")
+		(uuid "436e8665-ebc4-573c-b8f2-7f2528320bba")
 	)
 (pad "2" thru_hole circle
 		(at 17 5)
@@ -288,7 +288,7 @@
 		(drill 1.3)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
-		(uuid "9b787c65-0c2c-552b-b78a-0bf591658cc3")
+		(uuid "da92b72c-fbfd-5f02-8025-296f8fb8ac55")
 	)
 (model "${KIPRJMOD}/footprints/dpp.3dshapes/Fuseholder_Clip-5x20mm_Littelfuse_521_Lateral_P17.00x5.00mm_D1.30mm_Horizontal.step"
 		(offset

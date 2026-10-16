@@ -3,7 +3,7 @@
 	(generator "make_pcb.py")
 	(generator_version "9.0")
 	(layer "B.Cu")
-	(tstamp "3c7aeea5-83f9-54a5-ae2d-9a1e71238682")
+	(tstamp "1473f93d-84d3-5edb-a587-255008b1728c")
 (descr "JST PH series connector, S3B-PH-SM4-TB (http://www.jst-mfg.com/product/pdf/eng/ePH.pdf)")
 (tags "connector JST PH horizontal")
 (property "Reference" "REF**"

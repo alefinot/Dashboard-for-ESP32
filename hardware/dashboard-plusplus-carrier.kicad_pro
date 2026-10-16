@@ -147,12 +147,12 @@
       },
       "rules": {
         "max_error": 0.005,
-        "min_clearance": 0.0,
+        "min_clearance": 0.2,
         "min_connection": 0.0,
-        "min_copper_edge_clearance": 0.372,
+        "min_copper_edge_clearance": 0.3,
         "min_groove_width": 0.0,
-        "min_hole_clearance": 0.2,
-        "min_hole_to_hole": 0.25,
+        "min_hole_clearance": 0.33,
+        "min_hole_to_hole": 0.5,
         "min_microvia_diameter": 0.2,
         "min_microvia_drill": 0.1,
         "min_resolved_spokes": 1,
@@ -160,8 +160,8 @@
         "min_text_height": 0.8,
         "min_text_thickness": 0.08,
         "min_through_hole_diameter": 0.3,
-        "min_track_width": 0.0,
-        "min_via_annular_width": 0.075,
+        "min_track_width": 0.2,
+        "min_via_annular_width": 0.1,
         "min_via_diameter": 0.45,
         "solder_mask_to_copper_clearance": 0.0,
         "use_height_for_length_calcs": true
@@ -515,75 +515,59 @@
     "classes": [
       {
         "bus_width": 12,
-        "clearance": 0.13,
+        "clearance": 0.25,
         "diff_pair_gap": 0.25,
         "diff_pair_via_gap": 0.25,
         "diff_pair_width": 0.178,
         "line_style": 0,
-        "microvia_diameter": 0.3,
-        "microvia_drill": 0.1,
+        "microvia_diameter": 0.45,
+        "microvia_drill": 0.2,
         "name": "Default",
         "pcb_color": "rgba(0, 0, 0, 0.000)",
-        "priority": 2147483647,
+        "priority": 3,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.15,
+        "track_width": 0.25,
         "tuning_profile": "",
-        "via_diameter": 0.45,
-        "via_drill": 0.3,
+        "via_diameter": 0.7,
+        "via_drill": 0.35,
         "wire_width": 6
       },
       {
         "bus_width": 12,
-        "clearance": 0.2,
+        "clearance": 0.6,
         "diff_pair_gap": 0.25,
-        "diff_pair_width": 0.13,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.178,
         "line_style": 0,
-        "microvia_diameter": 0.3,
-        "microvia_drill": 0.1,
-        "name": "100ohm",
-        "pcb_color": "rgb(255, 0, 255)",
-        "priority": 0,
-        "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.127,
-        "tuning_profile": "",
-        "via_diameter": 0.45,
-        "via_drill": 0.3,
-        "wire_width": 6
-      },
-      {
-        "bus_width": 12,
-        "clearance": 0.13,
-        "diff_pair_gap": 0.25,
-        "diff_pair_width": 0.13,
-        "line_style": 0,
-        "microvia_diameter": 0.3,
-        "microvia_drill": 0.1,
-        "name": "50ohm",
-        "pcb_color": "rgb(255, 255, 0)",
+        "microvia_diameter": 0.45,
+        "microvia_drill": 0.2,
+        "name": "Power",
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
         "priority": 1,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.13,
+        "track_width": 0.8,
         "tuning_profile": "",
-        "via_diameter": 0.45,
-        "via_drill": 0.3,
+        "via_diameter": 1.3,
+        "via_drill": 0.6,
         "wire_width": 6
       },
       {
         "bus_width": 12,
-        "clearance": 0.2,
-        "diff_pair_gap": 0.154,
-        "diff_pair_width": 0.14,
+        "clearance": 0.6,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.178,
         "line_style": 0,
-        "microvia_diameter": 0.3,
-        "microvia_drill": 0.1,
-        "name": "90ohm",
-        "pcb_color": "rgb(0, 195, 0)",
+        "microvia_diameter": 0.45,
+        "microvia_drill": 0.2,
+        "name": "HV",
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
         "priority": 2,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.147,
+        "track_width": 0.25,
         "tuning_profile": "",
-        "via_diameter": 0.45,
-        "via_drill": 0.3,
+        "via_diameter": 0.7,
+        "via_drill": 0.35,
         "wire_width": 6
       }
     ],
@@ -594,36 +578,7 @@
       "GND": "rgb(122, 122, 122)"
     },
     "netclass_assignments": null,
-    "netclass_patterns": [
-      {
-        "netclass": "90ohm",
-        "pattern": "/*USB_*"
-      },
-      {
-        "netclass": "100ohm",
-        "pattern": "/*ETH_PI*"
-      },
-      {
-        "netclass": "100ohm",
-        "pattern": "/*HDMI_P*.D*"
-      },
-      {
-        "netclass": "100ohm",
-        "pattern": "/*DPHY0*"
-      },
-      {
-        "netclass": "90ohm",
-        "pattern": "/*PCIE*"
-      },
-      {
-        "netclass": "90ohm",
-        "pattern": "/*USB2*"
-      },
-      {
-        "netclass": "100ohm",
-        "pattern": "/*HDMI_P*.CK*"
-      }
-    ]
+    "netclass_patterns": []
   },
   "pcbnew": {
     "last_paths": {

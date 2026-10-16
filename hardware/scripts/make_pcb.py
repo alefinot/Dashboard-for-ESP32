@@ -21,6 +21,7 @@ import sys
 import kicadfmt as kf
 import model_frame as MF
 import pcbheader
+import route_pcb
 
 KICAD_CLI = os.environ.get(
     "KICAD_CLI",
@@ -218,6 +219,278 @@ KEEP = (ESP_ROWS["x_end"] - 8.6, ESP_ROWS["y_near"] + 2.0,
         ESP_BODY[2] + 0.6,       ESP_ROWS["y_far"] - 2.0)
 
 
+# ------------------------------------------------ routing: classes, widths --
+# Three copper classes:
+#
+#   Power   DC_IN DC_F DC_12 V5 V3V3 - the 1 A rails.  Outer layers are 1 oz:
+#           IPC-2221 external, 10 C rise -> 0.80 mm carries about 2.0 A, so
+#           0.80 mm is both the drawn width and the class minimum.  Clearance
+#           0.60 mm to any other class.
+#   HV      IGN_12 HALL_VCC MOS_G - 12 V referenced, milliamps.  Thin traces are
+#           fine (0.25 mm) but the 0.60 mm creepage to everything else is not
+#           negotiable.
+#   Default everything else, GND included: 0.25 / 0.25.  GND is drawn 0.60 mm
+#           anyway because it is the tree, not because it is power.
+#
+# Fab limits (JLCPCB 4-layer JLC04161H-7628): min track/space 0.127 mm (0.09 mm
+# extreme), PTH-to-track 0.33 mm, hole-to-hole 0.5 mm, via 0.2 mm drill on a
+# 0.45 mm pad.  They go into the project file (sync_project below).
+#
+# KiCad 10 no longer accepts a net_class block in the .kicad_pcb ("Expected at,
+# descr, ... or component_classes"), and it does not apply a class from the
+# project's netclass_patterns / netclass_assignments to DRC either - verified: a
+# 0.4 mm V5 track with a Power class at 2.0 mm clearance reported nothing.  So
+# the separation is enforced by the router itself (every net is inflated by
+# max(its own clearance, the neighbour's)) and cross-checked on the emitted
+# copper by classcheck() below.  The classes are still written into the project
+# so that anything drawn by hand in the GUI starts from the same numbers.
+POWER = ("DC_IN", "DC_F", "DC_12", "V5", "V3V3")
+HV = ("IGN_12", "HALL_VCC", "MOS_G")
+CLASS_OF = {n: "Power" for n in POWER}
+CLASS_OF.update({n: "HV" for n in HV})
+CLASS_CLEAR = {"Default": 0.25, "Power": 0.60, "HV": 0.60}
+CLASS_MINW = {"Default": 0.25, "Power": 0.80, "HV": 0.25}
+CLASS_VIA = {"Default": (0.70, 0.35), "Power": (1.30, 0.60), "HV": (0.70, 0.35)}
+#   0.25 mm -> ~0.9 A, 0.50 -> ~1.5 A, 0.80 -> ~2.0 A (1 oz outer, 10 C rise)
+NET_W = {n: 0.80 for n in POWER}
+NET_W["GND"] = 0.60
+TRACE_W = 0.25                       # class Default
+MIN_W = 0.20                         # board rule, fab limited
+
+# route order: the rails get the widest first bite, then the ground tree, then
+# the 12 V sensing legs, then the analogue chain, then the DevKit signals, then
+# the spares and the debug pair - they have room to spare, so they go last.
+ROUTE_ORDER = [("power", list(POWER)), ("gnd", ["GND"]), ("hv", list(HV)),
+               ("analog", ["IGN_LED", "IGN_SENSE", "HALL_LED", "HALL_SIG",
+                           "HALL_OUT", "HALL", "BAT_DIV", "BAT_SNS",
+                           "FUEL_SNS", "COOL_SNS", "LDR_SNS", "TRIP_BTN",
+                           "EN"]),
+               ("tft+gps", ["TFT_CS", "TFT_DC", "TFT_SCK", "TFT_MOSI",
+                            "TFT_RST", "TFT_BL", "GPS_RX", "GPS_TX"]),
+               ("spares", ["BOOT0", "SPARE_D26", "SPARE_D21", "SPARE_D22",
+                           "SPARE_D19", "SPARE_D15", "SPARE_D13", "SPARE_D2"]),
+               ("debug", ["DBG_TX", "DBG_RX"])]
+
+
+def net_w(net):
+    return NET_W.get(net, TRACE_W)
+
+
+def net_clr(net):
+    return CLASS_CLEAR.get(CLASS_OF.get(net, "Default"), 0.25)
+
+
+def net_via(net):
+    return CLASS_VIA.get(CLASS_OF.get(net, "Default"), CLASS_VIA["Default"])
+
+
+def route_pads():
+    """Every copper pad as the router wants it: box, layers, drill.
+
+    Mirrors pads_abs() (which build() already calls) but keeps the drill and the
+    layer list, and reports a THT pad on both outer layers: a drilled pad is
+    copper on every layer it passes through, which is what makes it the cheapest
+    way onto the inner ground planes (and the router's hole rules - hole to hole
+    0.5 mm, drilled hole to foreign copper 0.33 mm - are read off the same list).
+    """
+    out = []
+    for ent in parts():
+        ref, fp_id, x, y, rot, netmap, _value, layer = ent[:8]
+
+        def nm(v):
+            if isinstance(v, int):
+                return NETS[v - 1]
+            if isinstance(v, tuple):
+                return v[1]
+            return v
+
+        if fp_id is None:
+            raw = [(num, px, py, w, h, dr,
+                    nm(net) if net != "npth" else None) for (num, px, py, w, h,
+                                                              dr, net) in ent[5]]
+        else:
+            raw = []
+            for (num, px, py, w, h, dr, cu) in kf.pads_full(fp_id):
+                net = netmap.get(num)
+                if net == "NC":
+                    net = None
+                # an unbound pad is still copper.  J9 / J14 / J17's mounting
+                # tabs (Pad MP, no net) were skipped here, invisible to the
+                # router, and tracks and vias landed on them (DRC
+                # shorting_items "coll GND and <no net>").  Keep them with
+                # net None: add_static turns those into "keep"-class obstacles.
+                if layer == "B.Cu":
+                    cu = tuple("B.Cu" if c == "F.Cu" else c for c in cu)
+                raw.append((num, px, py, w, h, dr, nm(net) if net else None))
+        mir = pad_mirrored(ref, layer, fp_id)
+        for (num, px, py, w, h, dr, net) in raw:
+            bx1, by1, bx2, by2 = _padbox(px, -py if mir else py, w, h, rot, x, y)
+            out.append(dict(ref=ref, pad=str(num), net=net, drill=dr or 0.0,
+                            layers=("F.Cu", "B.Cu") if dr else (layer,),
+                            box=(bx1, by1, bx2, by2)))
+
+    # Sub-shapes of a pad are not separate obstacles.  TO-263-3_TabPin2 tiles its
+    # 9.4 x 10.8 tab (pad "2") with four unnumbered 4.55 x 5.25 paste sub-pads;
+    # an unnumbered pad carries no net, so the router saw them as four foreign
+    # "keep" obstacles covering the very tab it had to reach, and the DC_12 A* had
+    # nowhere to land (Q1's tab came out unconnected in DRC).  A pad that lies
+    # inside a bigger pad of the same footprint is a subdivision of that pad's
+    # copper, not something a track has to keep away from.
+    by_ref = {}
+    for p in out:
+        by_ref.setdefault(p["ref"], []).append(p)
+    drop = set()
+    for ref2, ps in by_ref.items():
+        big = [p["box"] for p in ps if p["net"] and p["drill"] == 0.0
+               and p["pad"] != ""]
+        for p in ps:
+            if p["net"]:
+                continue
+            x0, y0, x1, y1 = p["box"]
+            for (bx0, by0, bx1, by1) in big:
+                if (bx0 - 1e-6 <= x0 and x1 <= bx1 + 1e-6 and
+                        by0 - 1e-6 <= y0 and y1 <= by1 + 1e-6):
+                    drop.add(id(p))
+                    break
+    return [p for p in out if id(p) not in drop]
+
+
+def classcheck(segs, vias):
+    """Advisory check of the copper the router emitted, by class.
+
+    Not a clone of KiCad's DRC: it only looks at what this generator drew
+    (segment vs segment, segment vs pad) with axis-aligned gaps, so it can only
+    over-report.  Its job is to catch a mistake in the routing tables above - a
+    0.25 mm track on a 1 A rail, a 12 V leg that crept up to a ground trace -
+    which is exactly what KiCad cannot see, because KiCad 10 will not let a
+    generated board carry class assignments.
+    """
+    items = []
+    for s in segs:
+        (ax, ay), (bx, by) = s["a"], s["b"]
+        w = s["w"]
+        items.append(("tr", s["net"], s["layer"], min(ax, bx) - w / 2.0,
+                      min(ay, by) - w / 2.0, max(ax, bx) + w / 2.0,
+                      max(ay, by) + w / 2.0))
+    for v in vias:
+        items.append(("tr", v["net"], "F.Cu", v["x"] - v["dia"] / 2.0,
+                      v["y"] - v["dia"] / 2.0, v["x"] + v["dia"] / 2.0,
+                      v["y"] + v["dia"] / 2.0))
+        items.append(("tr", v["net"], "B.Cu", v["x"] - v["dia"] / 2.0,
+                      v["y"] - v["dia"] / 2.0, v["x"] + v["dia"] / 2.0,
+                      v["y"] + v["dia"] / 2.0))
+    for p in route_pads():
+        if not p["net"]:
+            continue
+        for lay in p["layers"]:
+            items.append(("pad", p["net"], lay, p["box"][0], p["box"][1],
+                          p["box"][2], p["box"][3]))
+    bad = 0
+    for i in range(len(items)):
+        ka, na, la, ax1, ay1, ax2, ay2 = items[i]
+        for j in range(i + 1, len(items)):
+            kb, nb, lb, bx1, by1, bx2, by2 = items[j]
+            if la != lb or na == nb or (ka == "pad" and kb == "pad"):
+                # pad-to-pad spacing is placement, and placement is what KiCad's
+                # courtyard/clearance DRC already polices; land patterns put
+                # their own neighbouring pads 0.3 mm apart on different nets by
+                # design (the DC-DC module's IN+ next to IN-), so comparing pads
+                # to pads only buries the routing faults this check exists for
+                continue
+            gx = max(bx1 - ax2, ax1 - bx2, 0.0)
+            gy = max(by1 - ay2, ay1 - by2, 0.0)
+            gap = max(gx, gy) if (gx == 0 or gy == 0) else (gx * gx + gy * gy) ** 0.5
+            need = max(net_clr(na), net_clr(nb))
+            if gap < need - 1e-3:
+                print("  CLASS GAP    %-10s %s %s / %-10s %s: gap %.2f < %.2f"
+                      % (na, la, (round(ax1, 2), round(ay1, 2), round(ax2, 2),
+                                  round(ay2, 2)), nb,
+                         (round(bx1, 2), round(by1, 2), round(bx2, 2),
+                          round(by2, 2)), gap, need))
+                bad += 1
+                if bad >= 12:
+                    print("  ... (more suppressed)")
+                    break
+        if bad >= 12:
+            break
+    print("  CLASS CHECK %s" % ("%d gaps under class clearance" % bad if bad
+                                else "ok - every class gap on the emitted copper"
+                                         " clears its class clearance"))
+    return bad
+
+
+def fmt_copper(segs, vias):
+    """KiCad 10 tokens for the routed copper.
+
+    KiCad 10 reads a flat (start / end / width / layer) segment; the older
+    (stroke (width ...)) form is rejected outright ("Expected start, end, width,
+    layer, ...; got 'stroke'"), and a via is (at / size / drill / layers).
+    """
+    out = []
+    for s in segs:
+        # the router works in the design frame (the numbers in PINOUT.md); the
+        # board file is drawn in the sheet frame - footprints, outlines, zones
+        # and silks all go through _onsheet(), and so must the copper, or every
+        # track floats 101 mm west / 67.5 mm north of the pads it was routed to
+        (ax, ay), (bx, by) = _onsheet(*s["a"]), _onsheet(*s["b"])
+        out.append('(segment (net %d) (start %.3f %.3f) (end %.3f %.3f)'
+                   ' (width %.3f) (layer "%s") (tstamp "%s"))'
+                   % (NETS.index(s["net"]) + 1, ax, ay, bx, by, s["w"],
+                      s["layer"], kf.uid()))
+    for v in vias:
+        (vx, vy) = _onsheet(v["x"], v["y"])
+        out.append('(via (net %d) (at %.3f %.3f) (size %.3f) (drill %.3f)'
+                   ' (layers "F.Cu" "B.Cu") (tstamp "%s"))'
+                   % (NETS.index(v["net"]) + 1, vx, vy, v["dia"],
+                      v["drill"], kf.uid()))
+    return out
+
+
+def sync_project(path):
+    """Push the class defaults and the fab limits into the .kicad_pro.
+
+    KiCad 9/10 keeps the net classes AND the design rules in the PROJECT file,
+    not the board - proved by experiment: setting the project Default clearance
+    to 5.0 mm reported 499 clearance violations on an untouched board, and the
+    .kicad_pcb has no design_settings block at all.  The generator writes them
+    here and leaves the rest of the file alone.
+    """
+    import json
+    try:
+        prj = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError):
+        print("  SYNC SKIPPED %s (no project file)" % os.path.basename(path))
+        return
+    ns = prj.setdefault("net_settings", {})
+    base = next((c for c in (ns.get("classes") or [])
+                 if c.get("name") == "Default"), {})
+    want = []
+    for name in ("Default", "Power", "HV"):
+        c = dict(base)
+        c["name"] = name
+        c["clearance"] = CLASS_CLEAR[name]
+        c["track_width"] = CLASS_MINW[name]
+        c["via_diameter"], c["via_drill"] = CLASS_VIA[name]
+        c["microvia_diameter"], c["microvia_drill"] = 0.45, 0.2
+        c["priority"] = {"Default": 3, "Power": 1, "HV": 2}[name]
+        want.append(c)
+    ns["classes"] = want
+    ns["netclass_patterns"] = []
+    r = (prj.setdefault("board", {}).setdefault("design_settings", {})
+         .setdefault("rules", {}))
+    r.update({"min_clearance": 0.20,        # JLC standard outer is 0.127 mm
+              "min_track_width": MIN_W,
+              "min_hole_clearance": 0.33,   # drilled hole to foreign copper
+              "min_hole_to_hole": 0.50,
+              "min_via_annular_width": 0.10,
+              "min_via_diameter": 0.45,
+              "min_through_hole_diameter": 0.30,
+              "min_copper_edge_clearance": 0.30})
+    json.dump(prj, open(path, "w", encoding="utf-8"), indent=2)
+    print("  PROJECT      %s: 3 net classes + fab limits"
+          % os.path.basename(path))
+
+
 def keepout_clear(bb):
     kx0, ky0, kx1, ky1 = KEEP
     return not (bb[0] < kx1 and kx0 < bb[2] and bb[1] < ky1 and ky0 < bb[3])
@@ -406,6 +679,24 @@ def _padbox(px, py, w, h, rot, ox, oy):
     return (cx + ox - ex, cy + oy - ey, cx + ox + ex, cy + oy + ey)
 
 
+def pad_mirrored(ref, layer, fp_id):
+    """True when a footprint's pad offsets are stored y-negated on the board.
+
+    kicadfmt.board_footprint mirrors a B.Cu part's children in y (bcu_flip) the
+    way KiCad's GUI stores an underside footprint.  When the pad pattern can
+    take a compensating placement angle (bcu_keep_pads, i.e. ref in
+    BCU_KEEP_PADS) it re-picks rot so the copper stays where the placement math
+    put it; for the four shells in BCU_FLIP - BCU_KEEP_PADS (J6, J9, J14, J17)
+    it cannot, so their copper really is at rot(px, -py) about the origin.
+    Anything that models those pads (the router's pad table, the sanity checks)
+    has to mirror too, or it routes to 5.7 mm of empty board and parks copper on
+    top of the connector - which is exactly what DRC reported as shorting_items
+    and 20-odd unconnected pads.
+    """
+    return (fp_id is not None and layer == "B.Cu" and ref in BCU_FLIP
+            and ref not in BCU_KEEP_PADS)
+
+
 def pads_abs(ent):
     """(ref, pad, net, copper-layers, box) for every bound pad of a part entry.
 
@@ -429,6 +720,7 @@ def pads_abs(ent):
             out.append((ref, num, nm(net) if net else None, cu,
                         _padbox(px, py, w, h, rot, x, y)))
     else:
+        mir = pad_mirrored(ref, layer, fp_id)
         for (num, px, py, w, h, dr, cu) in kf.pads_full(fp_id):
             net = netmap.get(num)
             if not net or net == "NC":
@@ -436,7 +728,7 @@ def pads_abs(ent):
             if layer == "B.Cu":
                 cu = {("B.Cu" if c == "F.Cu" else c) for c in cu}
             out.append((ref, num, nm(net), cu,
-                        _padbox(px, py, w, h, rot, x, y)))
+                        _padbox(px, -py if mir else py, w, h, rot, x, y)))
     return out
 
 # ------------------------------------------------------------- parts -------
@@ -836,6 +1128,21 @@ def parts():
     P.append(padgroup("J15", "SPARE", 62.10, 61.50,
                       PIN_SILK["J15"], ["SPARE_D26", "SPARE_D21", "SPARE_D22",
                                         "SPARE_D19", "SPARE_D15", "GND"]))
+    # D13 (J10a pin 3) and D2 (J10b pin 4) had nowhere to go: on the drawing they
+    # are spare DevKit pins with no second pad anywhere, so they were single-pad
+    # nets - unreachable, and DRC called them dangling.  They get their own 2-pad
+    # solder groups (signal + GND, same 1.7 x 1.0 pads and 2.54 pitch as
+    # J13/J15), each inside its own drawn spare zone and on the DevKit's own
+    # 2.54 lattice: J16 one lattice row north of the near row (y 19.72), J18 one
+    # row south of the far row (y 55.28).  Both clear: 2.46 mm to the socket
+    # courtyards (y 23.03 / 51.97), 4.48 mm to the GNSS pads (J8 courtyard y
+    # 14.60) and to the hall jumper (JP1 courtyard y 59.74), and the J16 labels
+    # print north of the pads in the gap to J8.  That puts D13 6.4 mm and D2
+    # 7.3 mm from their DevKit pad instead of 40.
+    P.append(padgroup("J16", "SPARE N", 45.91, 19.72,
+                      PIN_SILK["J16"], ["SPARE_D13", "GND"]))
+    P.append(padgroup("J18", "SPARE S", 48.45, 55.28,
+                      PIN_SILK["J18"], ["SPARE_D2", "GND"]))
 
     # ---- test points.  The row stands on the XT30's own pad line: y 13.99 is
     # J1's pad row, so the 12 V entry and the five probe points read as one row
@@ -921,14 +1228,19 @@ TFT_LABEL = ["VCC", "GND", "CS", "RST", "DC", "SDI", "SCK", "LED", "SDO",
 PIN_SILK = {
     "J13": ["TX", "RX", "GND", "5V"],
     "J15": ["D26", "SDA", "SCL", "D19", "D15", "GND"],
+    "J16": ["D13", "GND"],
+    "J18": ["D2", "GND"],
     "J8": ["SDA", "SCL", "5V", "GND", "RX", "TX"],
     "JP1": ["5V", "SEL", "12V"],
 }
 
 
-def build():
+def build(copper=()):
     nets = NETS
 
+    # no net_class block here: KiCad 10 rejects one ("Expected at, descr, ... or
+    # component_classes") - the classes live in the project file, see
+    # sync_project().
     out = [pcbheader.header([""] + nets)]
 
     # board outline
@@ -1080,6 +1392,11 @@ def build():
                       poly([(BOARD_X0, BOARD_Y0), (BOARD_X1, BOARD_Y0),
                             (BOARD_X1, BOARD_Y1), (BOARD_X0, BOARD_Y1),
                             (BOARD_X0, BOARD_Y0)]), poly(keep)))
+
+    # routed copper (scripts/route_pcb.py) - outer layers only.  In1.Cu and
+    # In2.Cu stay the ground planes: their pours do their own connecting, and a
+    # trace dropped between the planes would cut them into islands.
+    out += list(copper)
 
     out.append(")")
     return "\n".join(out) + "\n"
@@ -1240,7 +1557,7 @@ def silks():
     # per-pin text where there is room (2.54 mm pitch groups).  J8 / JP1 are
     # pads on the underside, so their labels go on B.SilkS, mirrored.
     # both 2.54 mm pad groups are labelled on their south side, one text strip
-    SIDE = {"J13": 1.2, "J15": 1.2}
+    SIDE = {"J13": 1.2, "J15": 1.2, "J16": -1.25, "J18": 1.25}
     BSIDE = {"J8": 1.9, "JP1": -2.6}
     for ent in parts():
         ref, x, y = ent[0], ent[2], ent[3]
@@ -1278,6 +1595,8 @@ def silks():
             "no trip button on the carrier - trip comes in on J14 (pin 1)",
             "SPARE / DEBUG PADS - see J13 (TX RX GND 5V) and J15",
             "J13 DEBUG  J15 SPARE (D26 SDA SCL D19 D15 GND)",
+            "J16 SPARE N (D13 GND) north of the near row,",
+            "J18 SPARE S (D2 GND) south of the far row",
             "TP1 IGN_SENSE  TP2 HALL  TP3 BAT_SNS  TP4 FUEL_SNS  TP5 GND",
             "their silks read out short forms: IGN HALL BAT FUEL GND"]
     y = 70.4
@@ -1333,8 +1652,34 @@ def write_footprint_lib():
 
 
 def main():
-    txt = build()
+    rp = route_pads()
+    have = {}
+    for p in rp:
+        if p["net"]:
+            have.setdefault(p["net"], []).append(p)
+    todo = [n for _, group in ROUTE_ORDER for n in group if len(have.get(n, [])) > 1]
+    left = sorted(n for n in have if len(have[n]) > 1 and n not in todo)
+    if left:
+        print("  ROUTE UNPLANNED %s (routed last, in net order)" % ", ".join(left))
+        todo += left
+    single = sorted(n for n in have if len(have[n]) < 2)
+    if single:
+        print("  ROUTE SINGLE-PAD %s (nothing to route to)" % ", ".join(single))
+    segs, vias, log = route_pcb.route(
+        dict(pads=rp, frame=(BOARD_X0, BOARD_Y0, BOARD_X1, BOARD_Y1),
+             keep=KEEP, classes=dict(CLASS_OF), clearance=CLASS_CLEAR,
+             widths={n: net_w(n) for n in todo}, via=CLASS_VIA,
+             route_layers=["F.Cu", "B.Cu"],
+             order=[(g, [n for n in group if n in todo])
+                    for g, group in ROUTE_ORDER]))
+    for line in log:
+        print("  ROUTE        " + line)
+    print("  COPPER       %d segments, %d vias" % (len(segs), len(vias)))
+    classcheck(segs, vias)
+
+    txt = build(copper=fmt_copper(segs, vias))
     open(OUT, "w", encoding="utf-8").write(txt)
+    sync_project(os.path.splitext(OUT)[0] + ".kicad_pro")
     names = write_footprint_lib()
     print("footprint library: %d footprints -> footprints/%s.pretty" % (len(names), kf.LOCAL_LIB))
     print("wrote", os.path.abspath(OUT), "(%d bytes)" % len(txt))
