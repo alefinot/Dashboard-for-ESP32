@@ -220,12 +220,25 @@ KEEP = (ESP_ROWS["x_end"] - 8.6, ESP_ROWS["y_near"] + 2.0,
 
 
 # ------------------------------------------------ routing: classes, widths --
-# Three copper classes:
+# Four copper classes:
 #
-#   Power   DC_IN DC_F DC_12 V5 V3V3 - the 1 A rails.  Outer layers are 1 oz:
+#   Power   DC_IN DC_F DC_12 V5 - the 1 A rails.  Outer layers are 1 oz:
 #           IPC-2221 external, 10 C rise -> 0.80 mm carries about 2.0 A, so
 #           0.80 mm is both the drawn width and the class minimum.  Clearance
 #           0.60 mm to any other class.
+#   Ref     V3V3 - the 3V3 that comes OUT of the DevKit's own AMS1117, loaded
+#           only by sensor references: OK1/OK2 input LEDs, the fuel excitation
+#           R5 (220R), the two 10k reference legs R6 R7, the C13 bypass.
+#           Worst case under 0.1 A, so 0.40 mm (about 1.2 A on the same IPC
+#           table), 0.30 mm clearance and a normal 0.70/0.35 via is the right
+#           size for it.  Not a cosmetic call: as a Power net its 1.30 mm via
+#           and 0.60 mm keep-away sat in the BAT_DIV column and walled C5.1 in
+#           on all four sides, and BAT_SNS refused to route at any resolution.
+#   HV      IGN_12 HALL_VCC MOS_G - 12 V referenced, milliamps.  Thin traces are
+#           fine (0.25 mm) but the 0.60 mm creepage to everything else is not
+#           negotiable.
+#   Default everything else, GND included: 0.25 / 0.25.  GND is drawn 0.60 mm
+#           anyway because it is the tree, not because it is power.
 #   HV      IGN_12 HALL_VCC MOS_G - 12 V referenced, milliamps.  Thin traces are
 #           fine (0.25 mm) but the 0.60 mm creepage to everything else is not
 #           negotiable.
@@ -244,23 +257,27 @@ KEEP = (ESP_ROWS["x_end"] - 8.6, ESP_ROWS["y_near"] + 2.0,
 # max(its own clearance, the neighbour's)) and cross-checked on the emitted
 # copper by classcheck() below.  The classes are still written into the project
 # so that anything drawn by hand in the GUI starts from the same numbers.
-POWER = ("DC_IN", "DC_F", "DC_12", "V5", "V3V3")
+POWER = ("DC_IN", "DC_F", "DC_12", "V5")
 HV = ("IGN_12", "HALL_VCC", "MOS_G")
+REF = ("V3V3",)   # DevKit 3V3 out -> sensor references, under 0.1 A
 CLASS_OF = {n: "Power" for n in POWER}
 CLASS_OF.update({n: "HV" for n in HV})
-CLASS_CLEAR = {"Default": 0.25, "Power": 0.60, "HV": 0.60}
-CLASS_MINW = {"Default": 0.25, "Power": 0.80, "HV": 0.25}
-CLASS_VIA = {"Default": (0.70, 0.35), "Power": (1.30, 0.60), "HV": (0.70, 0.35)}
+CLASS_OF.update({n: "Ref" for n in REF})
+CLASS_CLEAR = {"Default": 0.25, "Power": 0.60, "HV": 0.60, "Ref": 0.30}
+CLASS_MINW = {"Default": 0.25, "Power": 0.80, "HV": 0.25, "Ref": 0.40}
+CLASS_VIA = {"Default": (0.70, 0.35), "Power": (1.30, 0.60), "HV": (0.70, 0.35),
+             "Ref": (0.70, 0.35)}
 #   0.25 mm -> ~0.9 A, 0.50 -> ~1.5 A, 0.80 -> ~2.0 A (1 oz outer, 10 C rise)
 NET_W = {n: 0.80 for n in POWER}
 NET_W["GND"] = 0.60
+NET_W["V3V3"] = 0.40
 TRACE_W = 0.25                       # class Default
 MIN_W = 0.20                         # board rule, fab limited
 
 # route order: the rails get the widest first bite, then the ground tree, then
 # the 12 V sensing legs, then the analogue chain, then the DevKit signals, then
 # the spares and the debug pair - they have room to spare, so they go last.
-ROUTE_ORDER = [("power", list(POWER)), ("gnd", ["GND"]), ("hv", list(HV)),
+ROUTE_ORDER = [("power", list(POWER) + list(REF)), ("gnd", ["GND"]), ("hv", list(HV)),
                ("analog", ["IGN_LED", "IGN_SENSE", "HALL_LED", "HALL_SIG",
                            "HALL_OUT", "HALL", "BAT_DIV", "BAT_SNS",
                            "FUEL_SNS", "COOL_SNS", "LDR_SNS", "TRIP_BTN",
@@ -476,14 +493,14 @@ def sync_project(path):
     base = next((c for c in (ns.get("classes") or [])
                  if c.get("name") == "Default"), {})
     want = []
-    for name in ("Default", "Power", "HV"):
+    for name in ("Default", "Power", "HV", "Ref"):
         c = dict(base)
         c["name"] = name
         c["clearance"] = CLASS_CLEAR[name]
         c["track_width"] = CLASS_MINW[name]
         c["via_diameter"], c["via_drill"] = CLASS_VIA[name]
         c["microvia_diameter"], c["microvia_drill"] = 0.45, 0.2
-        c["priority"] = {"Default": 3, "Power": 1, "HV": 2}[name]
+        c["priority"] = {"Default": 4, "Power": 1, "HV": 2, "Ref": 3}[name]
         want.append(c)
     ns["classes"] = want
     ns["netclass_patterns"] = []
@@ -498,7 +515,7 @@ def sync_project(path):
               "min_through_hole_diameter": 0.30,
               "min_copper_edge_clearance": 0.30})
     json.dump(prj, open(path, "w", encoding="utf-8"), indent=2)
-    print("  PROJECT      %s: 3 net classes + fab limits"
+    print("  PROJECT      %s: 4 net classes + fab limits"
           % os.path.basename(path))
 
 
