@@ -59,3 +59,11 @@ hardware/_probe/
 hardware/board_*.png
 hardware/crop_*.png
 hardware/check_*.png
+
+# Third-party tools installed locally (AGENTS rule 1 approval, 2026-10-17):
+#   hardware/tools/freerouting/freerouting-cli.exe - Freerouting v2.5.0 native
+#   Windows x64 CLI (sha256 verified against the release's checksums.txt, kept
+#   beside it).  49 MB binary, regenerable by downloading the release; used only
+#   as the external yardstick in step 5 of the stackup plan, never in the
+#   generation pipeline.
+hardware/tools/
