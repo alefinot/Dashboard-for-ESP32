@@ -2,9 +2,19 @@
 
   from make_pcb.py:   segs, vias, log = route_pcb.route(cfg)
 
-The board is routed on the two outer layers only (F.Cu / B.Cu); In1.Cu and
-In2.Cu are solid GND planes, and every via is a through hole, so each via also
-stitches those two planes.
+Layer model (stackup plan §4/§5, task 2)
+  * every via here is a through hole: it joins the two OUTER faces (F.Cu / B.Cu)
+    and nothing else.  A through via has no annular ring on an inner layer, so
+    the A* layer graph has exactly ONE switchable pair of layers;
+  * In2.Cu is a *pad-entry* layer: a track reaches it only at a drilled pad of
+    its own net (that pad's copper crosses every layer) and leaves the same way.
+    That is what lets a power rail use the inner layer with no phantom via;
+  * In1.Cu is off-limits to tracks: it is the solid GND plane, and no via on the
+    board could reach it anyway.  make_pcb never puts it in route_layers;
+  * which layers a net may use is decided by make_pcb.layers_for() and handed in
+    as cfg["layers_of"] - a layer outside that set is BLOCKED outright, not
+    discouraged.  cfg["inner_widths"] gives the inner rails their own (IPC) width
+    and their own obstacle inflation, per layer.
 
 Nothing here predicts KiCad's verdict - the obstacle model is a *conservative*
 inflation of pads, vias, the board edge and the antenna keep-out, and KiCad's own
@@ -54,6 +64,20 @@ VIA_COST = 2.0       # cost of one layer change, in grid units.  It was 4.5
                      # costs the fab nothing (plan "carrier autorouter - rip-up
                      # pass for the last 7 open legs").
 TURN = 0.06          # cost of a direction change, in grid units
+LAYER_PEN = 0.35     # extra cost per step on a layer the net does NOT prefer,
+                     # in grid units.  This is how the §2 layer map is enforced
+                     # for the signal groups: as a price, not a wall.  With the
+                     # map as a hard mask (the first task-2 attempt) the board
+                     # came out with 11 OPEN legs - TFT_CS/SCK/MOSI/RST,
+                     # GPS_RX/TX, DBG_TX/RX, SPARE_D22, and BAT_SNS in three
+                     # pieces: the groups' preferred face is real, but it is also
+                     # the crowded face, and no amount of rip-up invents copper
+                     # that is not there.  A step on the preferred face costs 1.0,
+                     # on the other 1.35, so a net accepts up to a third more
+                     # length (or two extra corners) to stay where it belongs and
+                     # crosses only rather than strand a leg.  The rules that are
+                     # physics - In1 never, In2 power-only, V3V3 on the clean
+                     # side - stay hard walls: see make_pcb.layers_for.
 
 # ---- rip-up and retry -------------------------------------------------------
 # The greedy pass is one-way: whoever asks first keeps the corridor.  Measured
@@ -67,12 +91,24 @@ TURN = 0.06          # cost of a direction change, in grid units
 RIP = True           # run the pass (False = old greedy-only behaviour)
 RIP_DEPTH = 3        # unused since the wall-cut rewrite, kept for the harness
 RIP_CUT = 2          # legs of one cut that may be lifted at once
-RIP_LIFTS = 36       # legs one retry may lift in total (runtime guard)
+RIP_LIFTS = 72       # legs one retry may lift in total (runtime guard).  36 was
+                     # right for two route layers and too small for three: with
+                     # the stackup policy in, measured 2026-10-17, 36 left 1 OPEN
+                     # leg (DBG_RX J10b.12 -> J13.2 - the repair wanted 37 lifts
+                     # and was refused), 72 closed all 10 open legs.  It also made
+                     # the run FASTER: 611 s against 956 s, because the pass
+                     # converges instead of thrashing three rounds and five seal
+                     # passes around a refusal.
 RIP_ROUNDS = 4       # passes over the still-open nets
 RIP_TRIES = 16       # cap on retries per run (runtime guard)
-RIP_MAX_PER_NET = 12  # legs of one net that may be lifted per run
+RIP_MAX_PER_NET = 20  # legs of one net that may be lifted per run (was 12: the
+                      # same measurement - a net walled in by three layers needs
+                      # more than 12 of its own legs off the board at once)
 RIP_ORDER = "route"   # which stranded net is asked first: route order or span
-SEAL_ROUNDS = 3      # passes of the last-chance "is this net one piece?" check
+SEAL_ROUNDS = 5      # passes of the last-chance "is this net one piece?" check
+                     # (was 3: with the old lift budget the seal burned 434 s of a
+                     # 956 s run without ever closing the cut; with the budget
+                     # raised it welds the last piece in 1.4 s)
 CUT_MARGIN = 6.0     # mm, how far outside the pad-to-pad box a wall cut may go
 CUT_VIA = 0.6        # cost of one layer change inside a wall cut
 RIP_MULT = {"power": 0.35, "gnd": 0.30, "hv": 0.6, "analog": 1.0,
@@ -192,6 +228,25 @@ class Router:
         oy = fy0 - ((ny - 1) * GRID - (fy1 - fy0)) / 2.0
         self.layers = [Layer(n, nx, ny, ox, oy) for n in cfg["route_layers"]]
         self.route_layers = list(cfg["route_layers"])
+        # a via joins the outer pair of faces and nothing else, so the layer
+        # graph is built from names, not from "layer index +- 1": with three
+        # route layers that old arithmetic made In2 (index 1) switchable to F.Cu
+        # (index 0), which is a via the fab cannot drill and DRC would call a
+        # disconnected inner track.
+        self.outer = [li for (li, nm) in enumerate(self.route_layers)
+                      if nm in ("F.Cu", "B.Cu")]
+        self.via_partner = {}
+        if len(self.outer) == 2:
+            (a, b) = self.outer
+            self.via_partner[a] = b
+            self.via_partner[b] = a
+        # per-net layer policy and per-net inner widths (task 2 of the stackup
+        # plan); absent = today's behaviour, every route layer allowed, one width
+        self.layers_of = cfg.get("layers_of", {})
+        # "layers_of" is the hard mask: what may legally exist on each layer (§5).
+        # "prefer_of" is the §2 layer map, enforced as a price (LAYER_PEN).
+        self.prefer_of = cfg.get("prefer_of", {})
+        self.inner_w = cfg.get("inner_widths", {})
         self.static = []        # pads, keep-out, mounting holes: never changes
         self.copper = []        # routed tracks / vias; grows net by net
         self.holes = []         # (x, y, drill, net) drilled pads, for via checks
@@ -239,6 +294,30 @@ class Router:
         return max(self.cfg["clearance"].get(a, 0.25),
                    self.cfg["clearance"].get(b, 0.25))
 
+    def allowed(self, net):
+        """Layer INDICES this net's tracks may occupy - the policy, as a mask.
+
+        A layer that is not in the list is blocked node-for-node in _build(), so
+        "no tracks on In1" and "signals never on the inner power layer" are
+        properties of the router rather than hopes about the output.
+        """
+        names = self.layers_of.get(net, self.route_layers)
+        return [li for (li, nm) in enumerate(self.route_layers) if nm in names]
+
+    def is_inner(self, li):
+        return self.route_layers[li] not in ("F.Cu", "B.Cu")
+
+    def w_of(self, net, li, default):
+        """Width of this net's copper on layer index li (inner rails are wider)."""
+        if self.is_inner(li):
+            return self.inner_w.get(net, default)
+        return default
+
+    def halves(self, net, width):
+        """Half-width per route layer for a track of `width` on the outer faces."""
+        return tuple(self.w_of(net, li, width) / 2.0
+                     for li in range(len(self.layers)))
+
     def add_static(self, pads, keep):
         for p in pads:
             x0, y0, x1, y1 = p["box"]
@@ -265,15 +344,36 @@ class Router:
         and live copper).  Only asked for by the victim ranking in ripup().
         """
         tc = self.cls(net)
-        extra = half if via_r is None else via_r      # radius of the moving thing
-        inset = EDGE + extra + SLACK
+        # inflation is PER LAYER: the same net may carry a 2.5 mm rail on In2 and
+        # a 0.8 mm track on F.Cu, and each has to keep its own clearance.  One
+        # shared `extra` inflated the inner rail like an outer track (which let
+        # inner copper sit closer to foreign copper than the class rule allows) or
+        # wasted outer corridors the plan is trying to free.
+        halves = list(half) if isinstance(half, (tuple, list)) else \
+            [half] * len(self.layers)
+        allowed = self.allowed(net)
         # one shared obstacle list, so a tag means the same obstacle on both
         # faces (dead / own-net entries stay in it and are simply never tagged)
         items = self.static + self.copper
         bms, owns = [], []
-        for L in self.layers:
+        for (li, L) in enumerate(self.layers):
             bm = bytearray(L.n)
             own = array("i", [-1]) * L.n if want_own else None
+            if li not in allowed:
+                if via_r is None:
+                    # a TRACK may not run on a layer this net is masked out of
+                    bm[:] = b"\x01" * L.n     # off-limits for this net: blocked, full
+                    bms.append(bm)
+                    if want_own:
+                        owns.append(own)
+                    continue
+                # a VIA is different: it does not run on this layer, it is
+                # PLATED THROUGH it.  Its barrel (and, as DRC measures it, its
+                # pad diameter) is copper here, so foreign copper on a layer the
+                # via merely crosses still has to keep its clearance.  Masking
+                # the layer in via mode would block every via on the board.
+            extra = halves[li] if via_r is None else via_r   # moving thing radius
+            inset = EDGE + extra + SLACK
             for (ti, it) in enumerate(items):
                 if it["net"] == net or it.get("dead"):
                     continue
@@ -311,7 +411,8 @@ class Router:
     def _maps(self, net, half, via_r=None):
         """Blocked bitmap per layer for one task (net + track half width, or for
         a via of radius via_r).  Cached until foreign copper changes."""
-        key = (net, half, via_r)
+        key = (net, tuple(half) if isinstance(half, (tuple, list)) else half,
+               via_r)
         if getattr(self, "_ck", None) == key and \
                 getattr(self, "_cg", -1) == self.gen:
             return self._cm
@@ -330,8 +431,21 @@ class Router:
         came from, e.g. a GND via 0.12 mm off an IGN_SENSE pad.)
         """
         vr = self.cfg["via"][self.cls(net)][0] / 2.0
-        a, b = self._maps(net, 0.0, via_r=vr)
-        return bytearray(x | y for x, y in zip(a, b))
+        # A via's pads are on the outer faces and its barrel goes through the
+        # inner ones, so EVERY layer decides where a via may sit: the faces for
+        # its pads, the inner layers for what its barrel passes.  (The old code
+        # OR-ed only the two outer faces on the argument that "no via reaches
+        # the inner layers" - true while In2 carried no copper of ours.  With
+        # the stackup policy in, the 2.5 mm DC_IN rail on In2.Cu sits under a
+        # GND via's declared F.Cu-B.Cu span and DRC reported six
+        # clearance/shorting violations there.  In1.Cu is not a route layer and
+        # holds no items of ours: its anti-pad around a via is the GND pour's
+        # clearance, which the fill computes and DRC polices on the filled copy.)
+        bms = self._maps(net, 0.0, via_r=vr)
+        acc = bms[0]
+        for bm in bms[1:]:
+            acc = bytearray(x | y for x, y in zip(acc, bm))
+        return acc
 
     # ------------------------------------------------------------------ A* --
     def astar(self, net, half, pa, pb, la=None, lb=None):
@@ -347,12 +461,28 @@ class Router:
         bms = [bytearray(b) for b in self._maps(net, half)]
         vbm = self._viabm(net)
         nl = len(L)
+        ok = self.allowed(net)
         sli = (list(range(nl)) if la is None else
                [self.route_layers.index(n) for n in la
-                if n in self.route_layers])
+                if n in self.route_layers and
+                self.route_layers.index(n) in ok])
         gli = (list(range(nl)) if lb is None else
                [self.route_layers.index(n) for n in lb
-                if n in self.route_layers])
+                if n in self.route_layers and
+                self.route_layers.index(n) in ok])
+        # An inner layer is only worth entering if the far end can be reached on
+        # it too.  No via reaches an inner layer, so a path can leave one only at
+        # a pad whose copper crosses it - i.e. at a start or a goal.  Without this
+        # the search fans out over the whole inner layer from every drilled pad
+        # of a power net whose other end is an SMD pad, exhausts it and reports
+        # failure: that is most of the task-2 slowdown (the DC_IN leg from a THT
+        # pad to a fuse pad searched ~3x the board for nothing).
+        if sli and gli:
+            inner = set(li for li in range(nl) if self.is_inner(li))
+            sli = [li for li in sli if li not in inner or li in set(gli)]
+            gli = [li for li in gli if li not in inner or li in set(sli)]
+        if not sli or not gli:
+            return None
         sidx = [(li, L[li].idx(*pa)) for li in sli]
         gidx = [(li, L[li].idx(*pb)) for li in gli]
         sidx = [t for t in sidx if t[1] is not None]
@@ -361,6 +491,26 @@ class Router:
             return None
         gnodes = set(k for (_, k) in gset)
         gxy = [L[0].ij(k) for (_, k) in gset]
+        # §2's layer map, priced (see LAYER_PEN).  The order of a net's list IS
+        # the price ladder: the first layer it likes is free, the second costs
+        # one LAYER_PEN per step, the third two, and a layer the list does not
+        # mention one more than that.  Order matters and is not cosmetic - for a
+        # power net (In2, B.Cu, F.Cu) that means "live inside, hop out only where
+        # a pad of mine forces it out", while B.Cu is still cheaper than F.Cu for
+        # the last hop.  With In2 and B.Cu priced the SAME (the first attempt)
+        # the rails stayed outside: 3% of the power copper went in, 90% stayed on
+        # B.Cu, because a through pad reaches both at no extra cost and B.Cu is
+        # nearer the pads.  §2's "power in the middle" only happens if the middle
+        # is cheaper than the outside.  GND has no list, so it pays nothing.
+        pref = list(self.prefer_of.get(net, ()))
+        penli = {}
+        if pref:
+            for (rank, nm) in enumerate(pref):
+                if nm in self.route_layers:
+                    penli[self.route_layers.index(nm)] = LAYER_PEN * rank
+            rest = LAYER_PEN * max(1, len(pref))
+            for li in self.allowed(net):
+                penli.setdefault(li, rest)
 
         def heur(i, j):
             best = 1e18
@@ -400,18 +550,20 @@ class Router:
                 nk = nj * L[li].nx + ni
                 if bms[li][nk]:
                     continue
-                nc = c + w + (TURN if dprev not in (None, (di, dj)) else 0.0)
+                nc = c + w + (TURN if dprev not in (None, (di, dj)) else 0.0) \
+                    + penli.get(li, 0.0)
                 if nc < cost.get((li, nk), 1e18) - 1e-9:
                     cost[(li, nk)] = nc
                     par[(li, nk)] = (li, k)
                     heapq.heappush(heap, (nc + heur(ni, nj), nc, li, nk, (di, dj)))
-            nli = 1 - li                        # through via: F.Cu <-> B.Cu
-            nk = j * L[nli].nx + i
-            if not vbm[nk] and cost.get((nli, nk), 1e18) > c + VIA_COST + 1e-9:
-                cost[(nli, nk)] = c + VIA_COST
-                par[(nli, nk)] = (li, k)
-                heapq.heappush(heap, (c + VIA_COST + heur(i, j),
-                                      c + VIA_COST, nli, nk, None))
+            nli = self.via_partner.get(li)   # through via: F.Cu <-> B.Cu only
+            if nli is not None:
+                nk = j * L[nli].nx + i
+                vc = c + VIA_COST + penli.get(nli, 0.0)
+                if not vbm[nk] and cost.get((nli, nk), 1e18) > vc + 1e-9:
+                    cost[(nli, nk)] = vc
+                    par[(nli, nk)] = (li, k)
+                    heapq.heappush(heap, (vc + heur(i, j), vc, nli, nk, None))
         if found is None:
             if not self.quiet:
                 self.log.append("  A* exhausted after %d nodes for %s" % (pops, net))
@@ -454,15 +606,20 @@ class Router:
                 ln = math.hypot(bx - ax, by - ay)
                 if ln < MIN_SEG - 1e-6:
                     continue
+                # the width is per layer: an inner rail is drawn at the IPC width
+                # the plan asked for, an outer track at its net width (and a
+                # separate variable, so an inner segment cannot leak its 2.5 mm
+                # into the outer segment that follows it in the same path)
+                wlay = self.w_of(net, a[0], width)
                 dk = (net, lay[a[0]], min((ax, ay), (bx, by)),
-                      max((ax, ay), (bx, by)), width)
+                      max((ax, ay), (bx, by)), wlay)
                 old = self._dup.get(dk)
                 if old is not None and not old["cu"]["dead"]:
                     continue        # this exact track is already on the board
                 seg = {"net": net, "layer": lay[a[0]],
-                       "a": (ax, ay), "b": (bx, by), "w": width}
+                       "a": (ax, ay), "b": (bx, by), "w": wlay}
                 cu = {"kind": "tr", "a": (ax, ay), "b": (bx, by),
-                      "half": width / 2.0, "net": net,
+                      "half": wlay / 2.0, "net": net,
                       "cls": self.cls(net), "layers": {lay[a[0]]}, "dead": False}
                 self.segs.append(seg)
                 self.copper.append(cu)
@@ -587,7 +744,7 @@ class Router:
         _viabm() only knows about other nets' copper, so the check is here and
         the offending via gets banned as a phantom hole for the retry.
         """
-        path = self.astar(net, width / 2.0, xa, xb, la, lb)
+        path = self.astar(net, self.halves(net, width), xa, xb, la, lb)
         for _ in range(3):
             if path is None:
                 return None
@@ -597,7 +754,7 @@ class Router:
                 return path
             self.holes.append((hot[0], hot[1], vdr, net))
             self.gen += 1
-            path = self.astar(net, width / 2.0, xa, xb, la, lb)
+            path = self.astar(net, self.halves(net, width), xa, xb, la, lb)
         return path
 
     def _lift(self, net, ents=None):
@@ -705,11 +862,12 @@ class Router:
                                 counts[t] = counts.get(t, 0) + 1
                             continue
                         q.append((li, nk))
-                    nli = 1 - li                     # reachable through a via
-                    nk = j * L[nli].nx + i
-                    if not vbm[nk] and not seen[nli][nk]:
-                        seen[nli][nk] = 1
-                        q.append((nli, nk))
+                    nli = self.via_partner.get(li)   # reachable through a via
+                    if nli is not None:
+                        nk = j * L[nli].nx + i
+                        if not vbm[nk] and not seen[nli][nk]:
+                            seen[nli][nk] = 1
+                            q.append((nli, nk))
         return counts, items
 
     def _legmap(self):
@@ -809,7 +967,7 @@ class Router:
         (i0, j0) = L[0].ij(ka)
         (i1, j1) = L[0].ij(kb)
         nx = L[0].nx
-        dist = [dict(), dict()]
+        dist = [dict() for _ in self.route_layers]
         par = {}
         heap = []
         goal = set()
@@ -860,7 +1018,9 @@ class Router:
                     # to ~1.2 mm of blocked nodes (125 of them), and charging
                     # each at full leg price made the GND wall around J15 look
                     # unbreakable, which is where the search gave up
-                    band = 2.0 * (it["half"] + self.clear(tc, it["cls"]) + half)
+                    band = 2.0 * (it["half"] + self.clear(tc, it["cls"]) +
+                                  (max(half) if isinstance(half, (tuple, list))
+                                   else half))
                     step = legc[id(l3)] / (max(mm, 0.05) *
                                            max(1, int(band / GRID)))
                 nc = c + step
@@ -868,9 +1028,10 @@ class Router:
                     dist[li][nk] = nc
                     par[(li, nk)] = (li, k)
                     heapq.heappush(heap, (nc, li, nk))
-            o = 1 - li
+            o = self.via_partner.get(li)
             nk = j * nx + i
-            if i0 <= i <= i1 and j0 <= j <= j1 and not vbm[nk]:
+            if o is not None and i0 <= i <= i1 and j0 <= j <= j1 and \
+                    not vbm[nk]:
                 nc = c + CUT_VIA
                 if nc < dist[o].get(nk, 1e18) - 1e-12:
                     dist[o][nk] = nc

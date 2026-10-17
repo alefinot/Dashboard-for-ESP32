@@ -13,6 +13,7 @@ Sides:
   F.Cu  = display side.  The 4.0" TFT module plugs in here and lies flat.
   B.Cu  = ESP32 side.    The DevKit plugs in here and lies flat.
 """
+import math
 import os
 import re
 import shutil
@@ -307,6 +308,162 @@ def net_w(net):
     return NET_W.get(net, TRACE_W)
 
 
+# ---------------------------------------------------------- layer policy ----
+# IPC-2221 / IPC-2152 base graph, internal conductor (plan §3).  The published
+# form is  I = k * dT^0.44 * A^0.725  with A the cross-section in circular mils
+# and k = 0.024 for an INTERNAL layer (0.048 outer); Qorvo's calculator and the
+# PG50 chart agree on the constants.  Inner copper here is 15 um = 0.5906 mil,
+# and width_mil = A / thickness_mil.
+IPC_K_INNER = 0.024
+IPC_RISE_C = 10.0        # allowed temperature rise
+IPC_CU_UM = 15.0         # inner layers are 0.5 oz on JLC04161H-7628
+
+
+def ipc_inner_w(current_a, rise_c=IPC_RISE_C, cu_um=IPC_CU_UM):
+    """Track width (mm) that carries `current_a` on a 15 um inner layer."""
+    area_cmil = (current_a / (IPC_K_INNER * rise_c ** 0.44)) ** (1.0 / 0.725)
+    return area_cmil * (25.4 / (cu_um / 25.4)) / 1000.0
+
+
+# The drawn inner rail: plan §3 settled on 2.5 mm ("~1.26 A at a 10 C rise"),
+# and that is exactly what the formula gives for 1.25 A rounded to a whole 0.1
+# mm - so the number is derived, not typed in.  The widest continuous current on
+# this board is the DC_IN feed to the DC-DC (0.6 A typical, ~1 A headroom).
+INNER_RAIL_A = 1.25
+INNER_RAIL_W = round(ipc_inner_w(INNER_RAIL_A) * 10.0) / 10.0
+
+
+def print_ipc_table():
+    """The §3 table, recomputed from the formula every run (not a copy)."""
+    print("  IPC-2152     internal widths, %.0f um copper, %.0f C rise "
+          "(k=%.3f):" % (IPC_CU_UM, IPC_RISE_C, IPC_K_INNER))
+    for (a, want) in ((0.5, 0.70), (1.0, 1.82), (1.5, 3.19), (2.0, 4.74)):
+        w = ipc_inner_w(a)
+        print("               %4.2f A -> %5.2f mm  (plan §3 says %.2f mm%s)" %
+              (a, w, want, "" if abs(w - want) < 0.02 else "  ** MISMATCH **"))
+    print("               drawn inner rail: %.2f A -> %.2f mm (IPC) -> %.1f mm "
+          "drawn" % (INNER_RAIL_A, ipc_inner_w(INNER_RAIL_A), INNER_RAIL_W))
+
+
+# Which layers a net's TRACKS may occupy (§2 / §4 rule 1 of the stackup plan).
+# In1.Cu is absent from ROUTE_LAYERS on purpose: every via on this board is a
+# through hole joining the two outer faces, so a track on In1 could not be
+# reached at all, and it would slice the solid GND reference.  In2.Cu IS in the
+# list because a *drilled* pad's copper crosses it (the board's 50 THT pads are
+# layers "*.Cu") - that is the only legal way onto the layer, and route_pcb
+# blocks the layer outright for any net whose mask does not name it.
+ROUTE_LAYERS = ["F.Cu", "In2.Cu", "B.Cu"]
+INNER = "In2.Cu"
+OUTER = ("F.Cu", "B.Cu")
+
+# §2's intent, by net.  Anything not listed keeps both outer faces.
+CLEAN = ("BAT_DIV", "BAT_SNS", "FUEL_SNS", "COOL_SNS", "LDR_SNS", "HALL",
+         "HALL_SIG", "HALL_OUT", "IGN_SENSE", "TRIP_BTN", "EN") + REF
+NOISY = ("TFT_CS", "TFT_DC", "TFT_SCK", "TFT_MOSI", "TFT_RST", "TFT_BL",
+         "GPS_RX", "GPS_TX", "DBG_TX", "DBG_RX", "BOOT0", "SPARE_D26",
+         "SPARE_D21", "SPARE_D22", "SPARE_D19", "SPARE_D15", "SPARE_D13",
+         "SPARE_D2", "IGN_LED", "HALL_LED") + HV
+LAYER_INTENT = {n: ("F.Cu",) for n in CLEAN}
+LAYER_INTENT.update({n: ("B.Cu",) for n in NOISY})
+LAYER_INTENT.update({n: (INNER, "B.Cu") for n in POWER})
+LAYER_INTENT["GND"] = OUTER
+POLICY_NOTES = []
+
+# The §2 split is enforced in two strengths, and the difference matters:
+#   layers_for()  = a HARD mask.  Only the rules that are physics or fab: In1
+#                   does not exist as a route layer, In2 exists for power nets
+#                   alone and only where drilled copper welds it, a power rail
+#                   does not run on F.Cu at all unless its own pad is there, and
+#                   V3V3 never leaves the clean side (§4 rule 7).
+#   prefer_for()  = the clean/noisy half of §2 as a PRICE (route_pcb.LAYER_PEN).
+#                   Measured 2026-10-17: as a hard mask the same map left 11 OPEN
+#                   legs (TFT_CS/SCK/MOSI/RST, GPS_RX/TX, DBG_TX/RX, SPARE_D22,
+#                   BAT_SNS in three pieces) - the preferred face is also the
+#                   crowded one, and a wall there strands the net instead of
+#                   moving it.  As a price the split holds wherever there is
+#                   copper for it and pays a detour where there is not.
+HARD_SINGLE = {n: ("F.Cu",) for n in REF}    # §4 rule 7
+
+
+def layers_for(net, pads):
+    """HARD layer mask for one net, in ROUTE_LAYERS order (§4/§5 physics).
+
+    In2 is opened for a power net only when it has at least two DRILLED pads:
+    inner copper has to be welded at both ends by copper that really reaches the
+    layer, and a through via does not reach it (no annular ring there), so a rail
+    with one drilled pad could not be built at all.  F.Cu is opened for a power
+    net only where that net has a pad of its own on F.Cu - §2's "never carries a
+    power rail except the last hop into an F-side pad".
+    """
+    if net in HARD_SINGLE:
+        allowed = set(HARD_SINGLE[net])
+    elif INNER in LAYER_INTENT.get(net, ()):
+        th = sum(1 for p in pads if p["drill"] > 0)
+        allowed = {"B.Cu"}
+        if th >= 2:
+            allowed.add(INNER)
+        else:
+            POLICY_NOTES.append(
+                "NO INNER %-9s §2 wants an In2 rail, but %d drilled pad(s) "
+                "cannot weld one" % (net, th))
+        if any(p["drill"] == 0 and "F.Cu" in p["layers"] for p in pads):
+            allowed.add("F.Cu")
+    else:
+        allowed = set(OUTER)
+    if net not in LAYER_INTENT:
+        POLICY_NOTES.append("UNPLANNED %-9s no §2 entry - both outer faces" % net)
+    return tuple(l for l in ROUTE_LAYERS if l in allowed)
+
+
+def prefer_for(net):
+    """§2's preferred layers for one net; priced, never a wall (see above).
+
+    GND gets no preference: a ground tree that refuses a face is worse than a
+    ground tree that uses both, and §2 lists GND on F.Cu and B.Cu together.
+    """
+    return () if net == "GND" else LAYER_INTENT.get(net, ())
+
+
+SPLIT_OF = {"clean": (CLEAN, "F.Cu"), "noisy": (NOISY, "B.Cu"),
+            "power": (POWER, INNER)}
+
+
+def layer_split(segs):
+    """Where each §2 category's copper actually went, in mm of track length.
+
+    This is §2 measured on the finished routing rather than claimed in the plan:
+    the split is a price, so the honest report is the share that stayed on the
+    intended face.  scripts/test_layer_policy.py asserts the shares.
+    """
+    tot = {}
+    for s in segs:
+        cat = "other"
+        for (name, (nets, _)) in SPLIT_OF.items():
+            if s["net"] in nets:
+                cat = name
+                break
+        d = tot.setdefault(cat, {})
+        d[s["layer"]] = d.get(s["layer"], 0.0) + math.hypot(
+            s["b"][0] - s["a"][0], s["b"][1] - s["a"][1])
+    out = []
+    for name in ("clean", "noisy", "power", "other"):
+        if name not in tot:
+            continue
+        want = SPLIT_OF.get(name, ((), None))[1]
+        t = sum(tot[name].values())
+        out.append((name, t, tot[name].get(want, 0.0) if want else t,
+                    tot[name]))
+    return out
+
+
+def print_layer_split(segs):
+    for (name, t, on, per) in layer_split(segs):
+        lay = ", ".join("%s %.1f" % (l, v)
+                       for (l, v) in sorted(per.items(), key=lambda kv: -kv[1]))
+        print("  LAYER SPLIT  %-6s %7.1f mm  %3.0f%% on the §2 face   [%s]"
+              % (name, t, 100.0 * on / t if t else 0.0, lay))
+
+
 def net_span(pads):
     """Bounding-box perimeter of a net's pad centres, in mm - how much territory
     the net needs.  Inside a route group the short local nets are routed first:
@@ -330,10 +487,12 @@ def route_pads():
     """Every copper pad as the router wants it: box, layers, drill.
 
     Mirrors pads_abs() (which build() already calls) but keeps the drill and the
-    layer list, and reports a THT pad on both outer layers: a drilled pad is
-    copper on every layer it passes through, which is what makes it the cheapest
-    way onto the inner ground planes (and the router's hole rules - hole to hole
-    0.5 mm, drilled hole to foreign copper 0.33 mm - are read off the same list).
+    layer list.  A drilled pad that carries a net is copper on every layer it
+    passes through - F.Cu, In2.Cu and B.Cu - which is what makes it the only way
+    for a track to reach the inner layer at all (§4 rule 2), and the router's
+    hole rules (hole to hole 0.5 mm, drilled hole to foreign copper 0.33 mm) are
+    read off the same list.  A drilled pad with NO net is a mounting hole: it is
+    not copper, so it keeps the old F/B model and is handled as a hole.
     """
     out = []
     for ent in parts():
@@ -368,7 +527,8 @@ def route_pads():
         for (num, px, py, w, h, dr, net) in raw:
             bx1, by1, bx2, by2 = _padbox(px, -py if mir else py, w, h, rot, x, y)
             out.append(dict(ref=ref, pad=str(num), net=net, drill=dr or 0.0,
-                            layers=("F.Cu", "B.Cu") if dr else (layer,),
+                            layers=(("F.Cu", INNER, "B.Cu") if net
+                                    else ("F.Cu", "B.Cu")) if dr else (layer,),
                             box=(bx1, by1, bx2, by2)))
 
     # Sub-shapes of a pad are not separate obstacles.  TO-263-3_TabPin2 tiles its
@@ -418,12 +578,19 @@ def classcheck(segs, vias):
                       min(ay, by) - w / 2.0, max(ax, bx) + w / 2.0,
                       max(ay, by) + w / 2.0))
     for v in vias:
-        items.append(("tr", v["net"], "F.Cu", v["x"] - v["dia"] / 2.0,
-                      v["y"] - v["dia"] / 2.0, v["x"] + v["dia"] / 2.0,
-                      v["y"] + v["dia"] / 2.0))
-        items.append(("tr", v["net"], "B.Cu", v["x"] - v["dia"] / 2.0,
-                      v["y"] - v["dia"] / 2.0, v["x"] + v["dia"] / 2.0,
-                      v["y"] + v["dia"] / 2.0))
+        # A through via is policed on EVERY copper layer its plated barrel
+        # crosses, not just the two it is declared between.  Proved by the
+        # filled-board DRC on 2026-10-17: a 2.5 mm DC_IN rail on In2.Cu and a
+        # GND via declared F.Cu-B.Cu, 1.8 mm centre-to-centre, reported as
+        # `clearance (netclass "Power" 0.6000 mm; reale 0.2000 mm)` - which is
+        # the via's 0.7 mm PAD measured against the rail on the layer the via
+        # merely passes through.  This audit put the via box on F.Cu and B.Cu
+        # only, so it stayed silent about all six of those violations while DRC
+        # caught them; that is the exact disagreement this file exists to close.
+        for lay in ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"):
+            items.append(("tr", v["net"], lay, v["x"] - v["dia"] / 2.0,
+                          v["y"] - v["dia"] / 2.0, v["x"] + v["dia"] / 2.0,
+                          v["y"] + v["dia"] / 2.0))
     for p in route_pads():
         if not p["net"]:
             continue
@@ -510,7 +677,16 @@ def sync_project(path):
     base = next((c for c in (ns.get("classes") or [])
                  if c.get("name") == "Default"), {})
     want = []
-    for name in ("Default", "Power", "HV", "Ref"):
+    # Keep the order the file already uses.  KiCad rewrites the project itself
+    # when it runs (it sorts the classes alphabetically: Default, HV, Power,
+    # Ref), while the generator emits them by priority - so a run that touched
+    # KiCad and a run that did not alternated the same two lines back and forth
+    # in git for no reason.  Order carries no meaning here (each class states its
+    # own priority), so adopt whatever is already on disk and stay quiet.
+    seen = [c.get("name") for c in (ns.get("classes") or [])
+            if c.get("name") in CLASS_CLEAR]
+    seen += [n for n in ("Default", "Power", "HV", "Ref") if n not in seen]
+    for name in seen:
         c = dict(base)
         c["name"] = name
         c["clearance"] = CLASS_CLEAR[name]
@@ -1843,8 +2019,14 @@ def filled_drc(board_path):
     return viol, unc, fperr
 
 
-def main():
-    rp = route_pads()
+def route_all(rp=None):
+    """Route every net: returns (segs, vias, log, pads) for build() to embed.
+
+    Split out of main() so scripts/test_layer_policy.py can ask the router what
+    it produced (which layers it used, how wide the inner rails came out) without
+    paying for the board write and the filled-DRC gate.
+    """
+    rp = route_pads() if rp is None else rp
     have = {}
     for p in rp:
         if p["net"]:
@@ -1857,18 +2039,42 @@ def main():
     single = sorted(n for n in have if len(have[n]) < 2)
     if single:
         print("  ROUTE SINGLE-PAD %s (nothing to route to)" % ", ".join(single))
+    print_ipc_table()
+    del POLICY_NOTES[:]
+    lmap = {n: layers_for(n, have[n]) for n in todo}
+    pmap = {n: prefer_for(n) for n in todo}
+    print("  LAYER POLICY %d net(s): %s on In2, %d off it"
+          % (len(todo), sum(1 for m in lmap.values() if INNER in m),
+             len(todo) - sum(1 for m in lmap.values() if INNER in m)))
+    for note in POLICY_NOTES:
+        print("  POLICY       " + note)
     segs, vias, log = route_pcb.route(
         dict(pads=rp, frame=(BOARD_X0, BOARD_Y0, BOARD_X1, BOARD_Y1),
              keep=KEEP, classes=dict(CLASS_OF), clearance=CLASS_CLEAR,
              widths={n: net_w(n) for n in todo}, via=CLASS_VIA,
-             route_layers=["F.Cu", "B.Cu"],
+             route_layers=list(ROUTE_LAYERS),
+             layers_of=lmap,
+             prefer_of={n: v for n, v in pmap.items() if v},
+             inner_widths={n: INNER_RAIL_W for n in todo
+                           if CLASS_OF.get(n) == "Power"},
              order=[(g, sorted([n for n in group if n in todo],
                                key=lambda n: net_span(have[n])))
                     for g, group in ROUTE_ORDER]))
+    print_layer_split(segs)
+    return segs, vias, log, rp
+
+
+def main():
+    segs, vias, log, rp = route_all()
     for line in log:
         print("  ROUTE        " + line)
     print("  COPPER       %d segments, %d vias" % (len(segs), len(vias)))
     classcheck(segs, vias)
+    inner = [s for s in segs if s["layer"] == INNER]
+    print("  INNER        %s carries %d track(s): %s" % (
+        INNER, len(inner),
+        ", ".join("%s %.2f mm" % (n, max(s["w"] for s in inner if s["net"] == n))
+                  for n in sorted(set(s["net"] for s in inner))) or "-"))
 
     txt = build(copper=fmt_copper(segs, vias))
     open(OUT, "w", encoding="utf-8").write(txt)
