@@ -15,6 +15,7 @@ Sides:
 """
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -23,11 +24,10 @@ import model_frame as MF
 import pcbheader
 import route_pcb
 
-KICAD_CLI = os.environ.get(
-    "KICAD_CLI",
-    r"C:/Users/Kurose AE/AppData/Local/Programs/KiCad/10.0/bin/kicad-cli")
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
-                   "dashboard-plusplus-carrier.kicad_pcb")
+KICAD_CLI = kf.KICAD_CLI
+KICAD_PY = kf.KICAD_PY
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, os.pardir, "dashboard-plusplus-carrier.kicad_pcb")
 
 # ------------------------------------------------------------- geometry ----
 # The drawing's envelope is 85.0 x 55.0 (x 10.0 -> 95.0).  BOARD_X0 is pulled
@@ -271,6 +271,13 @@ CLASS_OF = {n: "Power" for n in POWER}
 CLASS_OF.update({n: "HV" for n in HV})
 CLASS_OF.update({n: "Ref" for n in REF})
 CLASS_CLEAR = {"Default": 0.25, "Power": 0.60, "HV": 0.60, "Ref": 0.30}
+# The GND pours' clearance to foreign copper = the widest class gap in the
+# design, because every Power/HV via that crosses a plane on its way F.Cu->B.Cu
+# gets an anti-pad of exactly this size.  At 0.50 the fill produced 44
+# `netclass "Power"/"HV" clearance 0.6000 mm; reale 0.5005 mm` violations
+# (22 vias x 2 planes, measured 2026-10-17 with scripts/test_plane_fill.py);
+# at max(class clearances) the filled board comes out clean.
+POUR_CLEAR = max(CLASS_CLEAR.values())
 CLASS_MINW = {"Default": 0.25, "Power": 0.80, "HV": 0.25, "Ref": 0.40}
 CLASS_VIA = {"Default": (0.70, 0.35), "Power": (1.30, 0.60), "HV": (0.70, 0.35),
              "Ref": (0.70, 0.35)}
@@ -1455,14 +1462,18 @@ def build(copper=()):
                    ' (copperpour not_allowed)) %s)'
                    % (lay, kf.uid(), poly(keep)))
 
-    # GND pours on the two inner planes (filled by KiCad at export time)
+    # GND pours on the two inner planes.  The committed file keeps them UNFILLED
+    # (small, diff-friendly); scripts/fill_zones.py pours them on a scratch copy
+    # and filled_drc() lets kicad-cli judge that copy - §6.2 of the stackup plan.
+    # The connect_pads/clearance token IS the pour's clearance to foreign copper
+    # (POUR_CLEAR above); the gaps inside the fill are thermal_gap.
     gnd = NETS.index("GND") + 1
     for lay in ("In1.Cu", "In2.Cu"):
         out.append('(zone (net %d) (net_name "GND") (layer "%s") (uuid "%s") (hatch edge 0.5)'
-                   ' (connect_pads (clearance 0.5)) (min_thickness 0.2)'
+                   ' (connect_pads (clearance %.2f)) (min_thickness 0.2)'
                    ' (fill yes (thermal_gap 0.5) (thermal_bridge_width 0.5))'
                    ' %s %s)'
-                   % (gnd, lay, kf.uid(),
+                   % (gnd, lay, kf.uid(), POUR_CLEAR,
                       poly([(BOARD_X0, BOARD_Y0), (BOARD_X1, BOARD_Y0),
                             (BOARD_X1, BOARD_Y1), (BOARD_X0, BOARD_Y1),
                             (BOARD_X0, BOARD_Y0)]), poly(keep)))
@@ -1761,6 +1772,77 @@ def write_footprint_lib():
     return names
 
 
+def filled_drc(board_path):
+    """Fill the zones of a scratch copy with KiCad's own filler, then DRC that copy.
+
+    The committed board ships its zones UNFILLED on purpose (small file, the
+    Gerber/plot step fills them anyway), but DRC must judge a board that
+    actually has the planes in it: a pour's anti-pads, its island removal and
+    its edge clearance only exist once the copper is real.  Measured 2026-10-17:
+    an unfilled In1/In2 Gerber is 9.7 KB of pad rings, a filled one 275 KB.
+
+    The scratch copy needs the project file beside it under the SAME basename
+    (kicad-cli otherwise makes up its own design settings - a stray default
+    project once turned a clean board into 13 errors) and the footprint library
+    reachable from its fp-lib-table.  Returns (violations, unconnected,
+    footprint errors) and leaves the human-readable report at drc-report.txt.
+    """
+    hw = os.path.abspath(os.path.dirname(board_path))
+    d = os.path.join(hw, "out", "drc-check")
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    base = os.path.splitext(os.path.basename(board_path))[0]
+
+    def with_project(dst_board):
+        """KiCad pairs a board with its project by BASENAME, so every copy of the
+        board gets one.  The filler needs the project too, not only the DRC step:
+        the net-class clearances in it are what size a pour's anti-pads.  Measured
+        2026-10-17: the same bytes filled to 3950.0 mm2 per plane with no project
+        beside them, 4004.8 mm2 with it.
+        """
+        for ext in (".kicad_pro", ".kicad_prl"):
+            src = os.path.splitext(board_path)[0] + ext
+            if os.path.isfile(src):
+                shutil.copy(src, os.path.splitext(dst_board)[0] + ext)
+
+    unfilled = os.path.join(d, base + ".kicad_pcb")
+    shutil.copy(board_path, unfilled)
+    with_project(unfilled)
+    for extra in ("fp-lib-table", "footprints"):
+        src = os.path.join(hw, extra)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(d, extra), dirs_exist_ok=True)
+        elif os.path.isfile(src):
+            shutil.copy(src, d)
+    filled = os.path.join(d, base + "-filled.kicad_pcb")
+    r = subprocess.run([KICAD_PY, os.path.join(HERE, "fill_zones.py"),
+                        unfilled, filled], capture_output=True, text=True)
+    for line in (r.stdout + r.stderr).splitlines():
+        if not line.startswith("Adding duplicate"):
+            print("  FILL " + line)
+    if r.returncode:
+        raise SystemExit("zone fill failed (exit %d) - the planes are not "
+                         "produced, so nothing is being polished" % r.returncode)
+    with_project(filled)
+    rep = os.path.join(hw, "drc-report.txt")
+    r = subprocess.run([KICAD_CLI, "pcb", "drc", "--severity-all",
+                        "-o", rep, filled], capture_output=True, text=True)
+    print("DRC (filled) exit", r.returncode, (r.stderr or "").strip()[:200])
+    txt = open(rep, encoding="utf-8", errors="replace").read() \
+        if os.path.exists(rep) else ""
+    num = lambda pat: int(re.search(pat, txt).group(1)) if txt else -1
+    viol = num(r"Found (\d+) DRC violation")
+    unc = num(r"Found (\d+) unconnected")
+    fperr = num(r"Found (\d+) Footprint errors")
+    print("violations:", viol, "| unconnected:", unc,
+          "| footprint errors:", fperr)
+    for line in txt.splitlines():
+        if line.startswith("["):
+            print("  ", line)
+    print("report:", rep, "(board judged: %s)" % os.path.relpath(filled, hw))
+    return viol, unc, fperr
+
+
 def main():
     rp = route_pads()
     have = {}
@@ -1794,19 +1876,13 @@ def main():
     names = write_footprint_lib()
     print("footprint library: %d footprints -> footprints/%s.pretty" % (len(names), kf.LOCAL_LIB))
     print("wrote", os.path.abspath(OUT), "(%d bytes)" % len(txt))
-    r = subprocess.run([KICAD_CLI, "pcb", "drc", "--severity-all",
-                        "-o", "drc-report.txt", OUT], capture_output=True, text=True)
-    print("DRC exit", r.returncode, (r.stderr or "").strip()[:400])
-    if os.path.exists("drc-report.txt"):
-        rep = open("drc-report.txt", encoding="utf-8", errors="replace").read()
-        viol = re.search(r"Found (\d+) DRC violation", rep)
-        unc = re.search(r"Found (\d+) unconnected", rep)
-        print("violations:", viol.group(1) if viol else "?",
-              "| unconnected:", unc.group(1) if unc else "?")
-        for line in rep.splitlines():
-            if line.startswith("["):
-                print("  ", line)
-    print("report: drc-report.txt")
+    # The referee, on a board that has its planes in it (plan §6.2).  A non-zero
+    # DRC here fails the run: this project's discipline is that KiCad's own
+    # checker - not a home-made model of it - decides whether the board is clean.
+    viol, unc, fperr = filled_drc(OUT)
+    if (viol, unc, fperr) != (0, 0, 0):
+        raise SystemExit("DRC on the FILLED board is not clean - stopping here "
+                         "(report: hardware/drc-report.txt)")
 
 
 if __name__ == "__main__":

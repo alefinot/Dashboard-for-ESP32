@@ -15,6 +15,34 @@ KICAD = os.environ.get("KICAD_ROOT",
 SYM_DIR = os.path.join(KICAD, "share", "kicad", "symbols")
 FP_DIR = os.path.join(KICAD, "share", "kicad", "footprints")
 
+# The two KiCad executables a gate needs: the CLI (DRC, plots) and KiCad's own
+# interpreter (the only place pcbnew lives, so the only way to run its zone
+# filler).  Both overridable for a machine with KiCad installed elsewhere.
+KICAD_CLI = os.environ.get("KICAD_CLI", os.path.join(KICAD, "bin", "kicad-cli"))
+KICAD_PY = os.environ.get("KICAD_PY", os.path.join(KICAD, "bin", "python.exe"))
+
+
+def layer_table(text):
+    """layer name -> layer number, from a board's (layers ...) block.
+
+    The board file declares its copper planes with legacy numbers (0 F.Cu,
+    4 In1.Cu, 6 In2.Cu, 2 B.Cu).  pcbnew's ZONE.GetLayer() hands exactly those
+    numbers back, while ZONE.GetLayerName() answers "F.Cu" for all four - so
+    anything that has to NAME a plane reads this table instead of the getter.
+    """
+    out, inblock = {}, False
+    for line in text.splitlines():
+        if not inblock:
+            if line.startswith("\t(layers"):
+                inblock = True
+            continue
+        if line.startswith("\t)"):
+            break
+        m = re.match(r'\t\t\((\d+) "([^"]+)" (?:signal|user)', line)
+        if m:
+            out[m.group(2)] = int(m.group(1))
+    return out
+
 
 def uid():
     """Stable id: regenerating the board keeps the same uuids, so rerunning the
