@@ -134,6 +134,23 @@ HOLE_MIN = 0.50      # mm hole-to-hole (JLC 4-layer capability)
 COPPER_HOLE = 0.33   # mm drilled hole to foreign copper (JLC PTH vs track)
 KEEP_CLR = 0.50      # mm keep-away band around the antenna keep-out / unbound
                      # pads; the zone itself is blocked by its own outline
+MOAT_EDGE = 1.0      # mm, §4 rule 3 of the stackup plan: once a power rail is
+                     # drawn on an inner layer, its copper inflated by this band
+                     # is off-limits to signal nets on the face that face hangs
+                     # under.  Not a DRC rule (the two are on different layers and
+                     # never touch) - it is a return-path rule: the signals on
+                     # B.Cu use the In2 pour as their reference, and the rail has
+                     # already cut a moat through that pour, so a signal running
+                     # over the rail runs over a hole in its own ground.
+MOAT_FACE = {"In2.Cu": "B.Cu", "In1.Cu": "F.Cu"}
+MOAT_EXEMPT = ("Power",)
+                     # ^ nets allowed to sit in the band: the rails themselves (and
+                     # a rail crossing another rail's moat is policed by the Power
+                     # class 0.60 mm clearance anyway).  HV and Ref are NOT
+                     # exempt - IGN_12 / HALL_VCC / MOS_G / V3V3 are sensed or
+                     # referenced lines, so a clean return is exactly what they
+                     # need.
+MOAT_REPAIR = 3      # rounds of the after-the-fact moat repair (see _moat_fix)
 SQ2 = math.sqrt(2.0)
 
 DIRS = ((1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
@@ -378,6 +395,25 @@ class Router:
                 if it["net"] == net or it.get("dead"):
                     continue
                 if L.name not in it["layers"]:
+                    # §4 rule 3, the projected moat: this obstacle is not ON this
+                    # layer, but the inner rail it belongs to pushes a keep-away
+                    # band onto the face it feeds.  Tracks AND vias: a via landing
+                    # in the band puts its pad on that face and its plated barrel
+                    # through the plane the rail is welded into, and the track that
+                    # feeds such a via then ends inside the band by construction -
+                    # which is why blocking the track alone never converged (two
+                    # nets kept being lifted and re-laid in the same spot).
+                    mo = it.get("moat")
+                    if mo is None or tc in MOAT_EXEMPT or \
+                            L.name not in mo["layers"]:
+                        continue
+                    need = it["half"] + mo["edge"] + extra
+                    if want_own:
+                        L.grow(bm, it["a"][0], it["a"][1], it["b"][0],
+                               it["b"][1], need, own, ti)
+                    else:
+                        L.grow(bm, it["a"][0], it["a"][1], it["b"][0],
+                               it["b"][1], need)
                     continue
                 if want_own:
                     L.grow(bm, it["a"][0], it["a"][1], it["b"][0], it["b"][1],
@@ -621,6 +657,11 @@ class Router:
                 cu = {"kind": "tr", "a": (ax, ay), "b": (bx, by),
                       "half": wlay / 2.0, "net": net,
                       "cls": self.cls(net), "layers": {lay[a[0]]}, "dead": False}
+                if lay[a[0]] in MOAT_FACE and self.cls(net) in MOAT_EXEMPT:
+                    # an inner power rail: mark the face it feeds as off-limits to
+                    # signals for the whole length of this segment (see MOAT_EDGE)
+                    cu["moat"] = {"layers": {MOAT_FACE[lay[a[0]]]},
+                                  "edge": MOAT_EDGE}
                 self.segs.append(seg)
                 self.copper.append(cu)
                 ent = {"kind": "tr", "ci": len(self.copper) - 1,
@@ -1597,6 +1638,99 @@ class Router:
                                 % (net, pa["ref"], pa["pad"], pb["ref"],
                                    pb["pad"]))
 
+    # ------------------------------------------------- §4 rule 3, after the fact --
+    def _moat_offenders(self):
+        """Live signal tracks and via pads sitting inside a band some inner rail
+        projects.
+
+        The projection in _build() only helps a net that is routed AFTER the rail
+        exists, and rip-up re-orders that: a net lifted in a later round is put
+        back down without waiting for its rail, and a rail re-emitted in a rip-up
+        round can land over copper that was placed earlier.  So this measures the
+        copper actually on the board - exactly what the plan's rule 3 forbids -
+        using the same segment geometry the connectivity audit already uses.
+        """
+        rails = [cu for cu in self.copper if not cu.get("dead") and cu.get("moat")]
+        bad = []
+        for cu in self.copper:
+            if cu.get("dead") or cu["kind"] != "tr" or cu.get("moat"):
+                continue
+            if cu["cls"] in MOAT_EXEMPT:
+                # the same asymmetry the cost map uses (see _build): the exemption
+                # is about WHO is allowed to sit in the band, not about what makes
+                # it.  A B.Cu power run - DC_12, V5 - is an exempt neighbour of an
+                # In2 rail (they are welded to the same rail, and the Power class
+                # clearance keeps them apart); flagging them here would lift and
+                # re-route power nets that the router is allowed to place there,
+                # forever.
+                continue
+            for r in rails:
+                if r["net"] == cu["net"]:
+                    continue
+                if not (r["moat"]["layers"] & cu["layers"]):
+                    continue
+                if cu["kind"] == "via":
+                    # a via belongs in the band's way as much as a track does:
+                    # its pad is copper on the face the rail feeds, and being a
+                    # plated-through hole in this design its barrel goes down
+                    # through the very plane the rail is welded into - the pad's
+                    # anti-pad in that plane next to the rail is a slot in the
+                    # return path, which is the thing rule 3 exists to prevent.
+                    rad = (cu["b"][0] - cu["a"][0]) / 2.0
+                    c = ((cu["a"][0] + cu["b"][0]) / 2.0,
+                         (cu["a"][1] + cu["b"][1]) / 2.0)
+                    need = r["half"] + rad + r["moat"]["edge"]
+                    if _ptseg(c[0], c[1], r["a"], r["b"]) < need - 1e-9:
+                        bad.append((cu["net"], cu["ent"], r["net"]))
+                    continue
+                if cu["kind"] != "tr":
+                    continue        # pads are placement, and step 2 is over
+                need = r["half"] + cu["half"] + r["moat"]["edge"]
+                if _segseg(cu["a"], cu["b"], r["a"], r["b"]) < need - 1e-9:
+                    bad.append((cu["net"], cu["ent"], r["net"]))
+        return bad
+
+    def _moat_fix(self, by_net, rounds=MOAT_REPAIR):
+        """Lift what is in a band and route that net again with the band present.
+
+        Same shape as the rip-up pass - lift a whole net, put it back - because
+        route_net() plans against the copper that already exists, so the half of
+        a net left standing would become an obstacle to its own other half (that
+        is what happened when this pass lifted only the offending segments: three
+        tree legs came back unplaceable).  It runs before _seal() on purpose: if
+        a repair re-route leaves a net in pieces, seal is the machinery that
+        welds it back.
+
+        Nothing DRC can see is policed here: a B.Cu track over an In2 rail never
+        touches, so no checker on the finished board will report it.  That is
+        exactly why the rule needs its own pass.
+        """
+        moved = 0
+        for rnd in range(1, rounds + 1):
+            bad = self._moat_offenders()
+            if not bad:
+                if rnd > 1:
+                    self.log.append("  MOAT   clean after %d repair round(s), "
+                                    "%d segment(s) moved" % (rnd - 1, moved))
+                return (0, rnd - 1)
+            nets = sorted({b[0] for b in bad})
+            moved += len(bad)
+            for net in nets:
+                who = ", ".join(sorted({b[2] for b in bad if b[0] == net}))
+                self.log.append("  MOAT   RIP %-10s %d segment(s) in the band of "
+                                "%s - net lifted" % (
+                                    net, len([b for b in bad if b[0] == net]),
+                                    who))
+                self._lift(net)
+            for net in nets:
+                self.route_net(net, by_net[net],
+                               self.cfg["widths"].get(net, 0.25))
+                self.gen += 1               # foreign copper changed
+        left = len(self._moat_offenders())
+        self.log.append("  MOAT   %d offender(s) left after %d repair round(s)%s"
+                        % (left, rounds, "" if left else " - clean"))
+        return (left, rounds)
+
     # ------------------------------------------------------------------ run --
     def run(self, order):
         by_net = {}
@@ -1625,6 +1759,13 @@ class Router:
             tot[2] += g[2]
         if RIP:
             self.ripup(by_net, order)
+        # §4 rule 3 after the passes that move copper around (their re-ordering is
+        # what defeats the projection), but before _seal(): the band is invisible
+        # to DRC - different layers, the two never touch - and the 0.1 mm grid
+        # cannot promise it, so this pass makes the rule true on the finished
+        # copper and seal() still gets the last word on keeping nets in one piece.
+        (moat_left, moat_rounds) = self._moat_fix(by_net)
+        if RIP:
             self._seal(by_net, order)
         # the TOTAL row describes the copper that is actually on the board now,
         # not the sum of the passes that produced it: rip-up re-routes whole
@@ -1641,6 +1782,7 @@ class Router:
         self.log.append("  TOTAL          edges %3d  fails %d  open %d  "
                         "length %7.1f mm   vias %d"
                         % (edges, fails, openl, length, nv))
+        self.moat = (moat_left, moat_rounds)
         return [edges, fails, length, openl, nv]
 
 

@@ -2016,6 +2016,20 @@ def filled_drc(board_path):
         if line.startswith("["):
             print("  ", line)
     print("report:", rep, "(board judged: %s)" % os.path.relpath(filled, hw))
+    # The return-path audit (stackup plan rulebook rule 5) runs on the SAME filled
+    # copy DRC just judged: it asks a question DRC never asks - is there GND copper
+    # under every track, on the plane that faces it?  It reads KiCad's own filled
+    # polygons (arcs, anti-pads, moats and the antenna window all included), so it
+    # measures the real copper instead of a model of it.  A crash here is fatal on
+    # purpose: an audit that silently stops measuring is worse than no audit.
+    r = subprocess.run([KICAD_PY, os.path.join(HERE, "return_path.py"), filled,
+                        "--json", os.path.join(hw, "out", "return-path.json")],
+                       capture_output=True, text=True)
+    for line in (r.stdout + r.stderr).splitlines():
+        print("  " + line)
+    if r.returncode:
+        raise SystemExit("return-path audit failed (exit %d) - nothing was "
+                         "measured, so nothing is proven" % r.returncode)
     return viol, unc, fperr
 
 
