@@ -597,7 +597,40 @@
       "GND": "rgb(122, 122, 122)"
     },
     "netclass_assignments": null,
-    "netclass_patterns": []
+    "netclass_patterns": [
+      {
+        "netclass": "Power",
+        "pattern": "DC_IN"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "DC_F"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "MOS_G"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "DC_12"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "V5"
+      },
+      {
+        "netclass": "Ref",
+        "pattern": "V3V3"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "IGN_12"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "HALL_VCC"
+      }
+    ]
   },
   "pcbnew": {
     "last_paths": {

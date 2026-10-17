@@ -249,14 +249,21 @@ KEEP = (ESP_ROWS["x_end"] - 8.6, ESP_ROWS["y_near"] + 2.0,
 # extreme), PTH-to-track 0.33 mm, hole-to-hole 0.5 mm, via 0.2 mm drill on a
 # 0.45 mm pad.  They go into the project file (sync_project below).
 #
-# KiCad 10 no longer accepts a net_class block in the .kicad_pcb ("Expected at,
-# descr, ... or component_classes"), and it does not apply a class from the
-# project's netclass_patterns / netclass_assignments to DRC either - verified: a
-# 0.4 mm V5 track with a Power class at 2.0 mm clearance reported nothing.  So
-# the separation is enforced by the router itself (every net is inflated by
-# max(its own clearance, the neighbour's)) and cross-checked on the emitted
-# copper by classcheck() below.  The classes are still written into the project
-# so that anything drawn by hand in the GUI starts from the same numbers.
+# KiCad 10 no longer accepts a net_class block in the .kicad_pcb - measured:
+# loading a board that carries one fails with "Failed to load board: ...
+# Expected ''symbol'' in ...[130]" - so the classes and their net membership
+# live in the PROJECT: sync_project() writes net_settings.classes plus the
+# netclass_patterns that attach each net to a class, and `kicad-cli pcb drc`
+# does police them (a V5 track pulled to 0.10 mm from a GND track reports
+# `netclass "Power" clearance 0.6000 mm; reale 0.1000 mm`).  An earlier note
+# here claimed the project patterns were ignored; that test appended the test
+# segments AFTER the board's closing paren, so KiCad never read them.  The gate
+# that keeps this honest is scripts/test_drc_classes.py.
+# A class in the project format carries a default track_width but no MINIMUM
+# width (a 0.25 mm V5 track under the Power class at 0.8 mm raises no width
+# violation), so the width half of the separation is still enforced by the
+# router (every net is inflated by max(its own clearance, the neighbour's)) and
+# cross-checked on the emitted copper by classcheck() below.
 POWER = ("DC_IN", "DC_F", "DC_12", "V5")
 HV = ("IGN_12", "HALL_VCC", "MOS_G")
 REF = ("V3V3",)   # DevKit 3V3 out -> sensor references, under 0.1 A
@@ -388,10 +395,13 @@ def classcheck(segs, vias):
 
     Not a clone of KiCad's DRC: it only looks at what this generator drew
     (segment vs segment, segment vs pad) with axis-aligned gaps, so it can only
-    over-report.  Its job is to catch a mistake in the routing tables above - a
-    0.25 mm track on a 1 A rail, a 12 V leg that crept up to a ground trace -
-    which is exactly what KiCad cannot see, because KiCad 10 will not let a
-    generated board carry class assignments.
+    over-report.  Its job is the half KiCad cannot police from a generated
+    project - the per-class MINIMUM WIDTH (a project net class carries a
+    default track_width, no minimum) - so it catches a mistake in the routing
+    tables above: a 0.25 mm track on a 1 A rail, a 12 V leg that crept up to a
+    ground trace.  The clearances are policed by DRC itself now that the nets
+    are attached to classes (sync_project); scripts/test_drc_classes.py proves
+    that referee fires.
     """
     items = []
     for s in segs:
@@ -503,7 +513,20 @@ def sync_project(path):
         c["priority"] = {"Default": 4, "Power": 1, "HV": 2, "Ref": 3}[name]
         want.append(c)
     ns["classes"] = want
-    ns["netclass_patterns"] = []
+    # A class is only a rule if a net belongs to one, and in KiCad 10 that
+    # membership is carried here (there is no net_class block in a 10.x board
+    # file - see the note at CLASS_OF).  A pattern matches the whole net name
+    # top-down: a leading "/" would mean "net under sheet path X", and this
+    # board is flat, so the bare name is the exact form.  With this list empty
+    # - what used to be written - every net is graded against Default and the
+    # numbers above are decoration; scripts/test_drc_classes.py fails if that
+    # ever happens again.
+    # What the project format cannot express is a per-class MINIMUM width: a
+    # class has a default track_width only (measured - a 0.25 mm V5 track under
+    # the Power class at 0.8 mm raises no width violation), so classcheck()
+    # stays the width referee and rules.min_track_width below is the floor.
+    ns["netclass_patterns"] = [{"netclass": CLASS_OF[n], "pattern": n}
+                               for n in NETS if n in CLASS_OF]
     r = (prj.setdefault("board", {}).setdefault("design_settings", {})
          .setdefault("rules", {}))
     r.update({"min_clearance": 0.20,        # JLC standard outer is 0.127 mm
@@ -515,8 +538,9 @@ def sync_project(path):
               "min_through_hole_diameter": 0.30,
               "min_copper_edge_clearance": 0.30})
     json.dump(prj, open(path, "w", encoding="utf-8"), indent=2)
-    print("  PROJECT      %s: 4 net classes + fab limits"
-          % os.path.basename(path))
+    print("  PROJECT      %s: %d net classes, %d nets attached to them, "
+          "fab limits" % (os.path.basename(path), len(want),
+                          len(ns["netclass_patterns"])))
 
 
 def keepout_clear(bb):
