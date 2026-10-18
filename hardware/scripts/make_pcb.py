@@ -24,6 +24,7 @@ import kicadfmt as kf
 import model_frame as MF
 import pcbheader
 import route_pcb
+import stitch_pcb
 
 KICAD_CLI = kf.KICAD_CLI
 KICAD_PY = kf.KICAD_PY
@@ -272,13 +273,34 @@ CLASS_OF = {n: "Power" for n in POWER}
 CLASS_OF.update({n: "HV" for n in HV})
 CLASS_OF.update({n: "Ref" for n in REF})
 CLASS_CLEAR = {"Default": 0.25, "Power": 0.60, "HV": 0.60, "Ref": 0.30}
-# The GND pours' clearance to foreign copper = the widest class gap in the
-# design, because every Power/HV via that crosses a plane on its way F.Cu->B.Cu
-# gets an anti-pad of exactly this size.  At 0.50 the fill produced 44
-# `netclass "Power"/"HV" clearance 0.6000 mm; reale 0.5005 mm` violations
-# (22 vias x 2 planes, measured 2026-10-17 with scripts/test_plane_fill.py);
-# at max(class clearances) the filled board comes out clean.
-POUR_CLEAR = max(CLASS_CLEAR.values())
+# The GND pours' clearance to foreign copper.  This token is a FLOOR for
+# Default/Ref-class copper only: the filler never goes below the net-class
+# clearance of the item it pours around, so Power/HV copper always keeps its
+# 0.60 mm class gap whatever this says.  Measured on the filled board
+# (2026-10-18, scripts/return_path.py + `kicad-cli pcb drc --severity-all`):
+#
+#   token   In1 fill   In2 fill   pieces   return-path gap under signals   DRC
+#   0.60    3792 mm2   3602 mm2   1 / 1    227.1 mm  = 7.74 %              0/0
+#   0.45      -          -        1 / 1     67.8 mm  = 2.31 %              0/0
+#   0.35    4077 mm2   3887 mm2   1 / 1     25.1 mm  = 0.86 %              0/0
+#   0.30    4133 mm2   3942 mm2   2 / 2 !   21.6 mm  = 0.74 %              0/0
+#
+# i.e. the 0.60 mm token saw the pour's own anti-pads merge into chains and cut
+# 7.7 % of the routed-signal length away from its reference plane (worst hit:
+# LDR_SNS/HALL_SIG/FUEL_SNS ran 76-84 % of their length over a slot).  0.35 mm
+# buys the whole gain that is available: 0.86 % of gap, +285/+285 mm2 of plane,
+# and both planes stay ONE piece.  0.30 mm is better on paper but splits each
+# plane into 2 pieces, which scripts/test_plane_fill.py rejects - a slotted
+# reference plane costs more than the slot it removes.
+#
+# Fab margin (JLC 4-layer process: inner-layer via edge to copper plane >=
+# 0.30 mm): at 0.35 the tightest ring of GND copper left anywhere is 0.545 mm
+# (Signal-class hole), 0.785 mm near HV, 0.960 mm near Power; the moat around
+# the In2 rails stays 0.610 mm.  At 0.60 those were 0.785/0.785/0.960/0.610.
+# The old note about 44 `Power/HV clearance` violations at a 0.50 token (the
+# 2026-10-17 run) does not reproduce: the filler keeps the class clearance at
+# those holes, and the 0.35 run is clean.
+POUR_CLEAR = 0.35
 CLASS_MINW = {"Default": 0.25, "Power": 0.80, "HV": 0.25, "Ref": 0.40}
 CLASS_VIA = {"Default": (0.70, 0.35), "Power": (1.30, 0.60), "HV": (0.70, 0.35),
              "Ref": (0.70, 0.35)}
@@ -359,6 +381,22 @@ OUTER = ("F.Cu", "B.Cu")
 # §2's intent, by net.  Anything not listed keeps both outer faces.
 CLEAN = ("BAT_DIV", "BAT_SNS", "FUEL_SNS", "COOL_SNS", "LDR_SNS", "HALL",
          "HALL_SIG", "HALL_OUT", "IGN_SENSE", "TRIP_BTN", "EN") + REF
+# A3's band applies to the SUBSET of CLEAN that is a high-impedance measured
+# node, not to all of it, and the difference is physics rather than convenience:
+#   V3V3  is the sensors' 3.3 V REFERENCE.  It is a low-impedance rail (decouped
+#         at every plug, on the inner layer per §2), it cannot be a victim of
+#         capacitive injection the way a 10 k node can, and its copper is wide -
+#         banding it put a 0.5 mm-priced moat around a 2.5 mm rail that runs the
+#         length of the clean side and roughly doubled the routing cost of every
+#         foreign net.  Its own protection is the plane work (A2) and §4's rules.
+#   HALL  is the digital speed line after the opto (R13 1 k series, D3 clamp,
+#         IO33 with a 150 us glitch filter in firmware - README "Hall filter
+#         chain").  It is a hardened switching input, not an ADC node.
+# What remains (BAT_DIV, BAT_SNS, FUEL_SNS, COOL_SNS, LDR_SNS, HALL_SIG,
+# HALL_OUT, IGN_SENSE, TRIP_BTN, EN) is what the interference budget of the
+# sensor-silence plan protects: divider / ADC nodes at 10 k and their inputs.
+QUIET = tuple(n for n in CLEAN if n not in ("V3V3", "HALL"))
+
 NOISY = ("TFT_CS", "TFT_DC", "TFT_SCK", "TFT_MOSI", "TFT_RST", "TFT_BL",
          "GPS_RX", "GPS_TX", "DBG_TX", "DBG_RX", "BOOT0", "SPARE_D26",
          "SPARE_D21", "SPARE_D22", "SPARE_D19", "SPARE_D15", "SPARE_D13",
@@ -2033,6 +2071,13 @@ def filled_drc(board_path):
     return viol, unc, fperr
 
 
+# The router's own log is long (per-net rows, rip-up, the moat repair, the
+# quiet-band count, the TOTAL row) and the stage costs 10-20 minutes. Echo it
+# live with an elapsed column instead of dumping it when the stage is over, so a
+# slow pass is visible while it runs (see Router._say).
+ROUTE_ECHO = True
+
+
 def route_all(rp=None):
     """Route every net: returns (segs, vias, log, pads) for build() to embed.
 
@@ -2071,6 +2116,13 @@ def route_all(rp=None):
              prefer_of={n: v for n, v in pmap.items() if v},
              inner_widths={n: INNER_RAIL_W for n in todo
                            if CLASS_OF.get(n) == "Power"},
+             # A3 of the sensor-silence plan: the sensed half of the board keeps a
+             # band of route_pcb.QUIET_EDGE that foreign routed copper may not
+             # enter on the same layer (measured on the board at 00fc7175: BAT_SNS
+             # 20 mm parallel to DBG_RX at 0.55 mm, COOL_SNS 0.35 mm from the
+             # backlight PWM).  See route_pcb.QUIET_EDGE for the whole argument.
+             quiet=list(QUIET),
+             echo=ROUTE_ECHO,
              order=[(g, sorted([n for n in group if n in todo],
                                key=lambda n: net_span(have[n])))
                     for g, group in ROUTE_ORDER]))
@@ -2080,9 +2132,38 @@ def route_all(rp=None):
 
 def main():
     segs, vias, log, rp = route_all()
-    for line in log:
-        print("  ROUTE        " + line)
+    if not ROUTE_ECHO:
+        for line in log:
+            print("  ROUTE        " + line)
     print("  COPPER       %d segments, %d vias" % (len(segs), len(vias)))
+    # ---- ground stitching (scripts/stitch_pcb.py) --------------------------
+    # Before this step the board had 36 GND vias against 235 signal vias, and a
+    # signal via crossing the plane pair had its nearest GND hole a median 5.1 mm
+    # away (p90 9.8, worst 18.5): the return current detoured centimetres around
+    # every layer change, and In1 was bonded to In2 only where a GND pad happened
+    # to land.  Stitching adds a GND hole next to every layer change, a band
+    # around the antenna slot and a ~5 mm lattice, all at the via size already on
+    # the board (0.70/0.35) so no new fab feature appears.  It is geometry only:
+    # it never touches connectivity, and classcheck() below plus KiCad's DRC on
+    # the filled board remain the referees.
+    st, stt = stitch_pcb.place((BOARD_X0, BOARD_Y0, BOARD_X1, BOARD_Y1), KEEP,
+                               rp, segs, vias, net_clr)
+    vias = vias + st
+    print("  STITCH     %d new GND vias: %d pinned to a signal via, %d around the "
+          "antenna slot, %d lattice (%d lattice cells blocked by copper)"
+          % (stt["total"], stt["companions"], stt["fence"], stt["lattice"],
+             stt["blocked"]))
+    print("             signal via to nearest GND via after stitching: median "
+          "%.2f, p90 %.2f, worst %.2f mm (was 5.10 / 9.80 / 18.50)"
+          % (stt["median"], stt["p90"], stt["worst"]))
+    if stt["unpaired"]:
+        print("             %d via(s) found no legal GND companion within %.1f mm "
+              "(dense power corner: the 0.60 mm class clearance leaves no room "
+              "there): %s"
+              % (len(stt["unpaired"]), stitch_pcb.COMPANION_MAX,
+                 ", ".join("%s@%.1f,%.1f" % u for u in stt["unpaired"][:8])))
+    print("  COPPER       now %d vias (%d GND)" % (len(vias),
+                                                   sum(1 for v in vias if v["net"] == "GND")))
     classcheck(segs, vias)
     inner = [s for s in segs if s["layer"] == INNER]
     print("  INNER        %s carries %d track(s): %s" % (
