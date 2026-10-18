@@ -43,6 +43,8 @@ produces different copper on the next run.
 """
 import heapq
 import math
+import sys
+import time
 from array import array
 from collections import deque
 
@@ -151,6 +153,52 @@ MOAT_EXEMPT = ("Power",)
                      # referenced lines, so a clean return is exactly what they
                      # need.
 MOAT_REPAIR = 3      # rounds of the after-the-fact moat repair (see _moat_fix)
+QUIET_EDGE = 0.5     # mm, A3 of Implementation plans/SENSOR-SILENCE-ADC-
+                     # ACCURACY-PLAN-2026-10-18.md: the distance a sensed line
+                     # (make_pcb hands its QUIET set in as cfg["quiet"]) keeps
+                     # from FOREIGN ROUTED copper on the SAME layer - a band this
+                     # wide is measured around its copper, and scripts/test_crosstalk
+                     # .py fails the board when foreign routed copper sits inside it.  Measured
+                     # on the board as committed at 00fc7175: BAT_SNS ran 20 mm
+                     # parallel to DBG_RX at 0.55 mm, FUEL_SNS 6 mm parallel to EN
+                     # at 0.35 mm, COOL_SNS sat 0.35 mm from the 1 kHz backlight
+                     # PWM - the injection path §2 root cause 4 names, into nodes
+                     # of 10 k.  Not a DRC rule: those pairs are legal at the class
+                     # clearance and only the interference budget objects.
+                     # Pads are deliberately NOT band-carrying: a sensed line has
+                     # to land on a module pin whose neighbour is a loud pin (the
+                     # 2.54 mm row leaves 0.84 mm pad-to-pad), and a run has an
+                     # area while a landing has essentially none.
+                     # The band is MEASURED, never enforced.  run() prints how
+                     # many foreign pairs ended up inside it, and
+                     # scripts/test_crosstalk.py holds the board to it (edge
+                     # clearance AND parallel run length).  Both attempts to make
+                     # the router obey it are measured here, 2026-10-18:
+                     #   wall  - QUIET_EDGE rasterised as blocked cells in
+                     #           _gap_need(): the build ran 34 minutes, 15 of them
+                     #           one rip-up pass; the repair lifted and re-laid the
+                     #           same nets for three rounds without converging;
+                     #           TFT_DC / TFT_RST / TFT_SCK came back in pieces;
+                     #           and the board still had 100+ offender pairs.  A
+                     #           0.5 mm wall around 462 mm of sensed copper closes
+                     #           corridors the whole board needs.
+                     #   price - band cells priced into the A* cost (6 per step,
+                     #           24 in a repair re-route): routing fell to 4
+                     #           minutes only because the price fights the
+                     #           heuristic - A* burns 50k+ nodes per leg and then
+                     #           calls GPS_RX, GPS_TX and six SPARE_* unrouteable,
+                     #           which seal() welds back with welded_via() at the
+                     #           old clearance.  Finished board: 32 offending pairs
+                     #           against the 33 that motivated A3, 2620 mm of track
+                     #           instead of 2573 mm, BAT_SNS~HALL now 16 mm
+                     #           parallel.  Strictly worse, on every axis.
+                     # The layout is the reason, not the cost function: BAT_SNS,
+                     # HALL, FUEL_SNS and SPARE_* leave J10a/J10b through corridors
+                     # one lane wide, so the second net in a corridor hugs the
+                     # first at the class clearance no matter what it is charged.
+                     # Closing that means moving components (§8 puts that out of
+                     # scope) or giving up spacing as the mechanism and doing it
+                     # with guarding and filtering instead (§6 A4, §4 C7).
 SQ2 = math.sqrt(2.0)
 
 DIRS = ((1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
@@ -187,7 +235,7 @@ class Layer:
     def xy(self, i, j):
         return (self.ox + i * GRID, self.oy + j * GRID)
 
-    def grow(self, bm, x0, y0, x1, y1, d, own=None, tag=-1):
+    def grow(self, bm, x0, y0, x1, y1, d, own=None, tag=-1, val=1):
         """Block every node inside the rectangle [x0,x1]x[y0,y1] grown by d.
 
         With `own` given, each blocked node also records `tag` - the index of the
@@ -212,7 +260,7 @@ class Layer:
         for j in range(j0, j1 + 1):
             base = j * self.nx
             for i in range(i0, i1 + 1):
-                bm[base + i] = 1
+                bm[base + i] = val
                 if own is not None:
                     own[base + i] = tag
 
@@ -235,6 +283,13 @@ class Router:
     def __init__(self, cfg):
         self.cfg = cfg
         self.log = []
+        # Echo the routing log as it happens (make_pcb sets echo=True).
+        # A 12-minute stage that prints nothing until it ends is not
+        # debuggable: two builds on 2026-10-18 ran 20 and 34 minutes with no
+        # output at all, and the only way to tell 'still routing' from 'hung'
+        # was to watch CPU time in another window.
+        self.echo = bool(cfg.get("echo"))
+        self._t0 = time.time()
         fx0, fy0, fx1, fy1 = cfg["frame"]
         # the grid covers the whole board (pad centres sit right up against the
         # edge band, so they have to be nodes), with the frame snapped outward to
@@ -264,6 +319,17 @@ class Router:
         # "prefer_of" is the §2 layer map, enforced as a price (LAYER_PEN).
         self.prefer_of = cfg.get("prefer_of", {})
         self.inner_w = cfg.get("inner_widths", {})
+        # A3: the sensed half of the board.  A net in this set keeps a band of
+        # QUIET_EDGE around its copper that foreign routed copper may not enter
+        # (and it stays out of theirs), see QUIET_EDGE.
+        # This is a SET of net names.  It shares no name with self.muted below on
+        # purpose: when both roles were called self.quiet, the rip-up code's
+        # `self.quiet = False` replaced the set and the band silently stopped
+        # existing (crash surfaced as `net in False`, 2026-10-18).
+        self.quiet = set(cfg.get("quiet", ()))
+        # ...and it only MEASURES against that set: everything that reads
+        # self.quiet from here on is a report, not a constraint (QUIET_EDGE
+        # carries the measurements of the two attempts to make it one).
         self.static = []        # pads, keep-out, mounting holes: never changes
         self.copper = []        # routed tracks / vias; grows net by net
         self.holes = []         # (x, y, drill, net) drilled pads, for via checks
@@ -290,7 +356,21 @@ class Router:
         self._mut = {}          # net -> copper edits so far (_padroots cache key)
         self.rip_tries = 0
         self.rip_done = set()   # (net, victims) experiments already tried
-        self.quiet = False      # suppress per-attempt chatter during rip-up
+        self.muted = False      # suppress per-attempt chatter during rip-up; NOT
+                                # the quiet-net set above - see the note there
+
+    def _say(self, line):
+        """One line of the routing log: stored, and printed now if echoing.
+
+        The elapsed-seconds column is the point of echoing - a stage that takes
+        20 minutes has to say when each pass started, or the only measurement
+        available is wall clock watched from outside.
+        """
+        self.log.append(line)
+        if self.echo:
+            sys.stdout.write("  ROUTE  t+%5.0fs%s\n"
+                             % (time.time() - self._t0, line))
+            sys.stdout.flush()
 
     # ---------------------------------------------------------------- rules --
     def cls(self, net):
@@ -352,6 +432,37 @@ class Router:
                                 "layers": {L.name}})
 
     # ------------------------------------------------------------ bitmaps ---
+    def _pair_need(self, na, ca, nb, cb, ha, hb, band=False):
+        """Edge-to-edge distance two copper items of nets `na`/`nb` must keep.
+
+        Half-widths `ha`/`hb` are added by the caller, so this returns the
+        clearance itself: the class rule, plus - only when the caller asks with
+        band=True - the A3 quiet band (see QUIET_EDGE) for a pair where exactly
+        one of the two nets is sensed.  band=False is what placement uses: the
+        band is measured, never enforced, and QUIET_EDGE records what happened
+        both times it was enforced.  One function for both questions so the
+        audit and any future rule cannot drift apart.
+        """
+        need = self.clear(ca, cb)
+        if band and self.quiet and na != nb and na != "GND" and nb != "GND" and \
+                (na in self.quiet) != (nb in self.quiet):
+            need = max(need, QUIET_EDGE)
+        return need + ha + hb
+
+    def _gap_need(self, net, tc, it, extra):
+        """How far the moving thing (radius `extra`) stays from obstacle `it`.
+
+        This is the HARD distance: the class rule only.  The A3 band is not in
+        it - a 0.5 mm wall around the sensed copper closed the corridors the
+        rest of the board needs (34 minutes of build, 100+ offenders still
+        hugging, three nets in pieces), and pricing the same band instead made
+        A* give up on nine legs and left the board with MORE parallel run
+        (QUIET_EDGE carries both measurements).  The band is audited after the
+        fact, by _quiet_offenders() and scripts/test_crosstalk.py.
+        """
+        return self._pair_need(net, tc, it["net"], it["cls"],
+                               extra, it["half"], band=False)
+
     def _build(self, net, half, via_r=None, want_own=False):
         """Fresh blocked bitmaps for one task; optionally, who owns each wall.
 
@@ -415,13 +526,13 @@ class Router:
                         L.grow(bm, it["a"][0], it["a"][1], it["b"][0],
                                it["b"][1], need)
                     continue
+                need = self._gap_need(net, tc, it, extra)
                 if want_own:
                     L.grow(bm, it["a"][0], it["a"][1], it["b"][0], it["b"][1],
-                           self.clear(tc, it["cls"]) + extra + it["half"],
-                           own, ti)
+                           need, own, ti)
                 else:
                     L.grow(bm, it["a"][0], it["a"][1], it["b"][0], it["b"][1],
-                           self.clear(tc, it["cls"]) + extra + it["half"])
+                           need)
             fx0, fy0, fx1, fy1 = self.cfg["frame"]
             L.block_ring(bm, fx0 + inset, fy0 + inset, fx1 - inset, fy1 - inset)
             if via_r is not None:
@@ -477,6 +588,9 @@ class Router:
         # clearance/shorting violations there.  In1.Cu is not a route layer and
         # holds no items of ours: its anti-pad around a via is the GND pour's
         # clearance, which the fill computes and DRC polices on the filled copy.)
+        # Via sites come from the blocked maps only: the band is a measurement
+        # over finished copper, so a via sitting inside one shows up in the
+        # offender list run() counts, like any other pair.
         bms = self._maps(net, 0.0, via_r=vr)
         acc = bms[0]
         for bm in bms[1:]:
@@ -494,7 +608,8 @@ class Router:
         None.
         """
         L = self.layers
-        bms = [bytearray(b) for b in self._maps(net, half)]
+        maps = self._maps(net, half)
+        bms = [bytearray(b) for b in maps]
         vbm = self._viabm(net)
         nl = len(L)
         ok = self.allowed(net)
@@ -601,8 +716,8 @@ class Router:
                     par[(nli, nk)] = (li, k)
                     heapq.heappush(heap, (vc + heur(i, j), vc, nli, nk, None))
         if found is None:
-            if not self.quiet:
-                self.log.append("  A* exhausted after %d nodes for %s" % (pops, net))
+            if not self.muted:
+                self._say("  A* exhausted after %d nodes for %s" % (pops, net))
             return None
         path = []
         cur = found
@@ -662,6 +777,10 @@ class Router:
                     # signals for the whole length of this segment (see MOAT_EDGE)
                     cu["moat"] = {"layers": {MOAT_FACE[lay[a[0]]]},
                                   "edge": MOAT_EDGE}
+                if net in self.quiet:
+                    cu["quiet"] = True   # A3: sensed copper, so _quiet_offenders()
+                                         # measures a band around it; the band is
+                                         # never enforced - see QUIET_EDGE
                 self.segs.append(seg)
                 self.copper.append(cu)
                 ent = {"kind": "tr", "ci": len(self.copper) - 1,
@@ -683,6 +802,9 @@ class Router:
                       "b": (a[1] + vd / 2, a[2] + vd / 2),
                       "half": 0.0, "net": net, "cls": self.cls(net),
                       "layers": {l.name for l in self.layers}, "dead": False}
+                if net in self.quiet:
+                    cu["quiet"] = True   # A3: the same marker rides the via's pad
+                                         # rings, which sit on every layer
                 hole = (a[1], a[2], vdr, net)
                 self.vias.append(via)
                 self.copper.append(cu)
@@ -755,8 +877,8 @@ class Router:
             if path is None:
                 fails += 1
                 self.failed[net].append((pts[i][2], pts[j][2]))
-                if not self.quiet:
-                    self.log.append(
+                if not self.muted:
+                    self._say(
                         "  UNROUTABLE  %-10s %s.%s -> %s.%s  %.2f mm straight"
                         % (net, pts[i][2]["ref"], pts[i][2]["pad"],
                            pts[j][2]["ref"], pts[j][2]["pad"], d))
@@ -1469,7 +1591,7 @@ class Router:
                 self._restore(n, snap[n])
             self.gen += 1
             (n2, pa, pb) = last
-            self.log.append("  OPEN   FAIL %-10s: debt %s %s.%s -> %s.%s: %s "
+            self._say("  OPEN   FAIL %-10s: debt %s %s.%s -> %s.%s: %s "
                             "(lifts %d, tries %d)" % (net, n2, pa["ref"],
                                                        pa["pad"], pb["ref"],
                                                        pb["pad"], why,
@@ -1504,10 +1626,10 @@ class Router:
         ask = (key if RIP_ORDER != "span"
                else (lambda n: (-span(n), order_of.get(n, (99, 99)), n)))
         open0 = sum(self.open_of.values())
-        self.log.append("  RIPUP  open legs %d" % open0)
+        self._say("  RIPUP  open legs %d" % open0)
         if not open0:
             return
-        self.quiet = True
+        self.muted = True
         kept = rnd = 0
         for rnd in range(1, RIP_ROUNDS + 1):
             before = sum(self.open_of.values())
@@ -1520,13 +1642,13 @@ class Router:
                     kept += 1
             if sum(self.open_of.values()) == before:
                 break
-        self.quiet = False
-        self.log.append("  RIPUP  rounds %d  tries %d  nets opened %d  open legs "
+        self.muted = False
+        self._say("  RIPUP  rounds %d  tries %d  nets opened %d  open legs "
                         "%d -> %d" % (rnd, self.rip_tries, kept, open0,
                                       sum(self.open_of.values())))
         for net in sorted(self.failed, key=key):
             for (pa, pb) in self.failed[net]:
-                self.log.append("  RIPUP  STILL OPEN  %-10s %s.%s -> %s.%s"
+                self._say("  RIPUP  STILL OPEN  %-10s %s.%s -> %s.%s"
                                 % (net, pa["ref"], pa["pad"], pb["ref"],
                                    pb["pad"]))
     def _weld(self, net, by_net, key):
@@ -1587,7 +1709,7 @@ class Router:
             for (ni, n) in enumerate(nets):
                 order_of[n] = (gi, ni)
         key = lambda n: (order_of.get(n, (99, 99)), n)
-        self.quiet = True
+        self.muted = True
         self.rip_count = {}
         broken = [n for n in by_net if len(by_net[n]) > 1 and self._split(n) > 1]
         welded = 0
@@ -1599,7 +1721,7 @@ class Router:
             broken = [n for n in by_net if len(by_net[n]) > 1 and self._split(n) > 1]
             if not broken:
                 break
-            self.log.append("  SEAL    round %d: %d net(s) in pieces: %s"
+            self._say("  SEAL    round %d: %d net(s) in pieces: %s"
                             % (rnd, len(broken),
                                " ".join("%s x%d" % (n, self._split(n))
                                         for n in sorted(broken, key=key))))
@@ -1613,7 +1735,7 @@ class Router:
                         # every debt the attempt owed came back connected, yet
                         # the net is still cut: the pair it paid for was not the
                         # pair the copper is split across
-                        self.log.append("  SEAL    PAID BUT CUT %s x%d"
+                        self._say("  SEAL    PAID BUT CUT %s x%d"
                                         % (net, self._split(net)))
             self.gen += 1
         # from here the books are rewritten off the copper, so what the log calls
@@ -1624,17 +1746,17 @@ class Router:
             n = self._split(net)
             self.open_of[net] = n - 1
             self.tree_ok[net] = len(by_net[net]) - n
-        self.quiet = False
+        self.muted = False
         left = [n for n in sorted(by_net, key=key)
                 if len(by_net[n]) > 1 and self._split(n) > 1]
-        self.log.append("  SEAL    welded %d  rounds %d  nets opened %d  still in "
+        self._say("  SEAL    welded %d  rounds %d  nets opened %d  still in "
                         "pieces %d%s"
                         % (welded, rnd, fixed, len(left),
                            "  " + " ".join("%s x%d" % (n, self._split(n))
                                           for n in left) if left else ""))
         for net in left:
             for (pa, pb) in self._gaps(net, by_net[net], self._padroots(net)[0]):
-                self.log.append("  SEAL    STILL CUT   %-10s %s.%s -> %s.%s"
+                self._say("  SEAL    STILL CUT   %-10s %s.%s -> %s.%s"
                                 % (net, pa["ref"], pa["pad"], pb["ref"],
                                    pb["pad"]))
 
@@ -1710,14 +1832,14 @@ class Router:
             bad = self._moat_offenders()
             if not bad:
                 if rnd > 1:
-                    self.log.append("  MOAT   clean after %d repair round(s), "
+                    self._say("  MOAT   clean after %d repair round(s), "
                                     "%d segment(s) moved" % (rnd - 1, moved))
                 return (0, rnd - 1)
             nets = sorted({b[0] for b in bad})
             moved += len(bad)
             for net in nets:
                 who = ", ".join(sorted({b[2] for b in bad if b[0] == net}))
-                self.log.append("  MOAT   RIP %-10s %d segment(s) in the band of "
+                self._say("  MOAT   RIP %-10s %d segment(s) in the band of "
                                 "%s - net lifted" % (
                                     net, len([b for b in bad if b[0] == net]),
                                     who))
@@ -1727,11 +1849,75 @@ class Router:
                                self.cfg["widths"].get(net, 0.25))
                 self.gen += 1               # foreign copper changed
         left = len(self._moat_offenders())
-        self.log.append("  MOAT   %d offender(s) left after %d repair round(s)%s"
+        self._say("  MOAT   %d offender(s) left after %d repair round(s)%s"
                         % (left, rounds, "" if left else " - clean"))
         return (left, rounds)
 
-    # ------------------------------------------------------------------ run --
+    # ------------------------------------------------ A3: same-layer crosstalk --
+    @staticmethod
+    def _cu_geo(cu):
+        """A routed copper item as a thick segment: ax,ay - bx,by and half-width.
+
+        A via is not a segment: its pad is a disc, so it becomes a degenerate
+        segment (a fat point) whose half-width is the pad radius.  That is the
+        same shape _build inflates on the bitmap, so the audit and the router
+        measure the identical thing.
+        """
+        if cu["kind"] == "tr":
+            return cu["a"][0], cu["a"][1], cu["b"][0], cu["b"][1], cu["half"]
+        cx, cy = (cu["a"][0] + cu["b"][0]) / 2.0, (cu["a"][1] + cu["b"][1]) / 2.0
+        r = (cu["b"][0] - cu["a"][0]) / 2.0
+        return cx, cy, cx, cy, r
+
+    def _cu_gap(self, p, q):
+        """Edge-to-edge distance between two routed copper items (mm)."""
+        ax, ay, bx, by, ha = self._cu_geo(p)
+        cx, cy, dx, dy, hb = self._cu_geo(q)
+        if ha < 0.0:
+            ha = 0.0
+        if hb < 0.0:
+            hb = 0.0
+        if ax == bx and ay == by:
+            if cx == dx and cy == dy:
+                g = math.hypot(ax - cx, ay - cy)
+            else:
+                g = _ptseg(ax, ay, (cx, cy), (dx, dy))
+        elif cx == dx and cy == dy:
+            g = _ptseg(cx, cy, (ax, ay), (bx, by))
+        else:
+            g = _segseg((ax, ay), (bx, by), (cx, cy), (dx, dy))
+        return g - ha - hb
+
+    def _quiet_offenders(self):
+        """Finished-copper pairs where foreign routed copper sits inside the A3
+        quiet band of a sensed line: returns (foreign, sensed, gap_mm).
+
+        Same after-the-fact shape as _moat_offenders, and for the same reason -
+        the only thing that can be said about the band is what the settled copper
+        does, since rip-up and re-ordering move it around.  Nothing acts on this
+        list except the log line in run() and scripts/test_crosstalk.py.  Only
+        foreign ROUTED copper counts: a pad is placement, and a sensed line has
+        to land on a module pin next to a loud pin (see QUIET_EDGE).
+        """
+        live = [cu for cu in self.copper if not cu.get("dead")]
+        bad = []
+        for i in range(len(live)):
+            p = live[i]
+            if not p.get("quiet"):
+                continue
+            for q in live[i + 1:]:
+                if q.get("quiet") or q["net"] == p["net"] or q["net"] == "GND":
+                    continue
+                if not (p["layers"] & q["layers"]):
+                    continue
+                need = self._pair_need(p["net"], p["cls"], q["net"], q["cls"],
+                                       self._cu_geo(p)[4], self._cu_geo(q)[4],
+                                       band=True)
+                g = self._cu_gap(p, q)
+                if g < need - 1e-9:
+                    bad.append((q["net"], p["net"], g))
+        return bad
+
     def run(self, order):
         by_net = {}
         for p in self.cfg["pads"]:
@@ -1752,7 +1938,7 @@ class Router:
                 g[1] += f
                 g[2] += ln
                 self.gen += 1                  # foreign copper changed
-            self.log.append("  %-14s edges %3d  fails %d  length %7.1f mm"
+            self._say("  %-14s edges %3d  fails %d  length %7.1f mm"
                             % (group, g[0], g[1], g[2]))
             tot[0] += g[0]
             tot[1] += g[1]
@@ -1765,6 +1951,21 @@ class Router:
         # cannot promise it, so this pass makes the rule true on the finished
         # copper and seal() still gets the last word on keeping nets in one piece.
         (moat_left, moat_rounds) = self._moat_fix(by_net)
+        # A3 of the sensor-silence plan, MEASURED ONLY: how many foreign pairs
+        # ended up inside QUIET_EDGE of sensed copper, and which pair is closest.
+        # DRC never sees this (the pairs are legal at the class clearance), and
+        # both attempts to make the router obey it are recorded at QUIET_EDGE -
+        # so the router reports the number on every build, which is what tells the
+        # next person whether anything moved, and scripts/test_crosstalk.py holds
+        # the board to the rule.
+        q = self._quiet_offenders()
+        self._say("  QUIET   %d foreign pair(s) inside %.2f mm of sensed copper -"
+                  " measured, not enforced" % (len(q), QUIET_EDGE))
+        cl = {}
+        for (na, nb, d) in q:
+            cl[(na, nb)] = min(d, cl.get((na, nb), 9e9))
+        for (k, d) in sorted(cl.items(), key=lambda kv: kv[1])[:8]:
+            self._say("  QUIET   %-12s ~ %-12s %.2f mm" % (k[0], k[1], d))
         if RIP:
             self._seal(by_net, order)
         # the TOTAL row describes the copper that is actually on the board now,
@@ -1779,10 +1980,12 @@ class Router:
         length = sum(math.hypot(s["b"][0] - s["a"][0], s["b"][1] - s["a"][1])
                      for s in self.segs if s is not None)
         nv = sum(1 for v in self.vias if v is not None)
-        self.log.append("  TOTAL          edges %3d  fails %d  open %d  "
+        self._say("  TOTAL          edges %3d  fails %d  open %d  "
                         "length %7.1f mm   vias %d"
                         % (edges, fails, openl, length, nv))
         self.moat = (moat_left, moat_rounds)
+        self.quiet_stat = len(q)     # pair(s) measured inside the band; the verdict
+                                     # on the finished board is scripts/test_crosstalk.py
         return [edges, fails, length, openl, nv]
 
 

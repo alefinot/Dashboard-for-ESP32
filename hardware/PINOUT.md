@@ -291,7 +291,7 @@ notes the script prints are hints only - they are approximations, never the refe
 ### Routing
 
 The board is **fully routed**: the run ends at `Found 0 DRC violations` and `Found 0
-unconnected pads`, with 533 track segments (2 564 mm of copper) and 188 vias on
+unconnected pads`, with 740 track segments (2 935 mm of copper) and 271 vias on
 F.Cu/B.Cu. `scripts/route_pcb.py` gets there in three passes:
 
 1. **greedy** - one net at a time in `ROUTE_ORDER` (longest span first inside each
@@ -325,8 +325,51 @@ Knobs that decide the outcome, not just the runtime: `RIP_LIFTS` (36) and
 `RIP_MAX_PER_NET` (12) bound how much copper one attempt may move. `SPARE_D26`'s last leg
 - `J10a.7` to `J15.1`, entering an SMD-only pad in the south `J13`/`J15` row, behind the
 0.80 mm `V5` rail that lies along y 59.90 in front of it - needed a deeper cascade than a
-24-lift attempt allowed, and came out once the cap went to 36. A full run is about 5
-minutes and is byte-for-byte reproducible (checked by running twice and diffing).
+24-lift attempt allowed, and came out once the cap went to 36. A full run is about 12½
+minutes (the filled-board DRC on top of it) and is byte-for-byte reproducible (checked by
+running the routing twice and diffing).
+
+#### The copper planes: stitching (2026-10-18)
+
+The two inner layers are a GND pour each (`In1.Cu` below the sensors, `In2.Cu` under the
+logic), joined to the outside by the stitched plane. The pour's `connect_pads clearance`
+is **0.35 mm** (`make_pcb.POUR_CLEAR`) - the shortest route from a pad's copper to plane
+copper, JLC asks for 0.25 - and every hole the stitch pass adds is sized so its shortest
+route to any foreign copper is at or over that number, which is why adding the stitching
+did not move a single track: the board's own copper is byte-identical to the pre-stitch
+routing. `scripts/stitch_pcb.py` runs after routing, before emission, and adds 181 GND
+holes (217 GND vias on the board in total): one companion next to every signal via that
+has no GND neighbour - which puts a GND reference under 97% of layer changes, against 18%
+before - and a 10 mm lattice over the plane body for the plane's own bonding. Two holes
+ever sit 0.50 mm apart (different nets), 0.650 mm measured as the tightest.
+
+What it is measured by, on the filled board (`make_pcb.py` prints it; the audit walks
+`In1` and `In2` only and only along copper edges): **25.1 mm** of plane edge exposed to a
+foreign net, 0.9% of the perimeter, and **1 plane piece** on each inner layer - against
+227.4 mm / 8.6% and 5 pieces before (the numbers from the pre-A2 board, measured the same
+way, are written into `make_pcb.py`'s comment because DRC counts from the pre-fill board
+and cannot be compared). `scripts/test_stitch.py` keeps those numbers from rotting: it
+re-checks the pour clearance, the hole count, the fab hole limits, and the distance from
+ every signal via to its nearest GND hole (median 1.77 mm against 5.10 mm unstitched).
+
+#### Quiet pairs: measured, and spacing is not what fixes them (2026-10-18)
+
+The plan wanted 0.5 mm of edge clearance between a sensed line and foreign routed copper
+(the class clearance alone - 0.25 mm, or 0.35 mm for the rails next to a plane - is legal
+and still couples). It was attempted twice on this board and both times the measurement
+said no: with the band as a hard wall, the 10 mm corridor north out of `J10a`/`J10b` (one
+lane wide once the `DBG_TX`/`DBG_RX` pair is placed at its required 0.254 mm spacing) lost
+`TFT_DC`, `TFT_RST` and `TFT_SCK` to unrouted pieces and 100+ pairs still hugged; with the
+band priced into the search, the routed length went 2 935 → 3 334 mm and the parallel run
+got *worse* (`BAT_SNS` next to `DBG_RX` for 48 mm, `TFT_CS` next to `TRIP_BTN` for 33 mm)
+while the hugging count moved 33 → 32. So the router no longer enforces the band: it
+reports the offenders it sees while routing (the `QUIET ...` line in the run summary), and
+`scripts/test_crosstalk.py` measures the shipped board and caps the debt at 40 pairs (33
+measured today, the same count as before any of this work). A PASS there means "the hugging
+did not get worse", never "the sensors are quiet": what buys sensor precision on this
+board is guarding and stitching alongside the sensor runs, and getting the excitation out
+of the aggressors' switching band - the firmware/ADC side of
+`Implementation plans/SENSOR-SILENCE-ADC-ACCURACY-PLAN-2026-10-18.md`.
 
 The distances this sheet quotes come from KiCad's own transforms: `nets-report.md` for pad
 positions and sizes, the pad coordinates inside `drc-report.txt` for what a given rotation
