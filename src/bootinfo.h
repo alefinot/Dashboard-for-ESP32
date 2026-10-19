@@ -18,6 +18,11 @@
 // from NVS, latches the fast-reboot storm, and prints the boot banner.
 void bootinfo_init();
 
+// Call every main-loop iteration. Once this boot has survived the 120 s storm
+// window it marks that in RTC RAM, so the next boot's storm latch can tell a
+// healthy session from a fast-reboot storm.
+void bootinfo_tick();
+
 // Call BEFORE every intentional ESP.restart(). Persists the reboot reason +
 // free heap to NVS so the next boot's /api/boot / serial banner says why the
 // previous clean reboot happened. Cheap (one NVS write per reboot).

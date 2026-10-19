@@ -497,6 +497,7 @@ void loop() {
   }
 
   unsigned long now = millis();
+  bootinfo_tick();
 
   // Diagnostic build markers: verifies the new firmware is running and gives a
   // rolling baseline (boot banner once, heartbeat every 10s).

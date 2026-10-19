@@ -12,8 +12,12 @@
 
 // RTC_NOINIT_ATTR: survives ESP.restart() (not a full power cycle), which is
 // exactly what lets us detect a fast-reboot storm at boot.
+RTC_NOINIT_ATTR static uint32_t bootStateMagic;
 RTC_NOINIT_ATTR static uint32_t bootCount;
-RTC_NOINIT_ATTR static uint32_t bootStampSec;
+RTC_NOINIT_ATTR static uint32_t prevBootWasLong;
+
+static const uint32_t BOOTINFO_STATE_MAGIC = 0x424F4F54;  // "BOOT"
+static const uint32_t BOOTINFO_CLEAN_MS = 120000;         // clean-boot threshold
 
 static bool s_stormActive = false;
 static uint32_t s_bootCountNow = 0;
@@ -99,16 +103,23 @@ void bootinfo_init() {
   }
 
   // Fast-reboot storm latch (moved here from main.cpp so it lives with the
-  // forensics). A boot >120 s after the previous one is "clean" (counter
-  // resets); otherwise the counter rises and >=4 marks a storm.
-  uint32_t nowSec = (uint32_t)(esp_timer_get_time() / 1000000ULL);
-  bootCount++;
-  if (bootStampSec == 0 || bootCount > 10 || nowSec - bootStampSec > 120) {
-    bootCount = 1;
+  // forensics). A reboot within 120 s of boot counts as fast; >=4 fast boots
+  // in a row are a storm. The previous design compared esp_timer_get_time()
+  // stamps across a reboot, but that clock restarts at 0 on every boot, so
+  // the subtraction underflowed into "clean" every time - boot# stayed 1 and
+  // the latch never armed. No RTC-side clock survives a reboot, so instead
+  // bootinfo_tick() marks a long-surviving boot in RTC RAM while it runs, and
+  // the next boot reads that mark to decide whether to continue the count.
+  if (bootStateMagic != BOOTINFO_STATE_MAGIC) {  // cold boot / RTC RAM not ours
+    bootStateMagic = BOOTINFO_STATE_MAGIC;
+    bootCount = 0;
+    prevBootWasLong = 0;
   }
+  bootCount++;
+  if (prevBootWasLong || bootCount > 10) bootCount = 1;
   s_bootCountNow = bootCount;
   s_stormActive = (bootCount >= 4);
-  bootStampSec = nowSec;
+  prevBootWasLong = 0;  // this boot has not survived long yet
 
   logPrintf(
       "BOOTINFO: reset=%s boot#%u storm=%d lastRebootTag='%s' "
@@ -135,6 +146,16 @@ void bootinfo_tag_reboot(const char *why) {
 }
 
 bool bootinfo_storm_active() { return s_stormActive; }
+
+// Called from the main loop: once this boot has survived past the clean
+// threshold, mark that in RTC RAM so the next boot resets the storm counter.
+void bootinfo_tick() {
+  static bool marked = false;
+  if (!marked && millis() >= BOOTINFO_CLEAN_MS) {
+    marked = true;
+    prevBootWasLong = 1;
+  }
+}
 
 uint32_t bootinfo_boot_count() { return s_bootCountNow; }
 
