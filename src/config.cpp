@@ -207,6 +207,9 @@ int ODO_DEC_DIGITS = 1;
 
 int TARGET_FPS = 60;
 int BACKLIGHT_BRIGHTNESS = 100;
+// Backlight LEDC PWM frequency, Hz (1-40 kHz). The 12 kHz default sits above
+// the audible range - the old fixed 1 kHz made the panel and its wiring whine.
+int BL_PWM_HZ = 12000;
 bool ENABLE_AUTO_BRIGHTNESS = true;
 int LIGHT_SENSOR_DARK_VAL = 432;
 int LIGHT_SENSOR_BRIGHT_VAL = 2851;
@@ -534,6 +537,8 @@ static const CfgParam CFG_TABLE[] = {
   { &TARGET_FPS, "TARGET_FPS", "TGT_FPS", nullptr, 5, 120, 60, 0.0f, 0.0f, 0.0f, 0, CK_INT },
 
   { &BACKLIGHT_BRIGHTNESS, "BACKLIGHT_BRIGHTNESS", "BL_BRIGHT", nullptr, 0, 100, 100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &BL_PWM_HZ, "BL_PWM_HZ", "BL_PWM", nullptr, 1000, 40000, 12000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
 
   { &ENABLE_AUTO_BRIGHTNESS, "ENABLE_AUTO_BRIGHTNESS", "EN_AUTO_BL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
 

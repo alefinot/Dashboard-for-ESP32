@@ -26,7 +26,7 @@ bool pendingInvertDisplay = false;
 int pendingBacklightValue = -1;
 int currentBrightnessTarget = 0;
 
-// The backlight LEDC channel is 8-bit (ledcAttach(BL_DISPLAY, 1000, 8)) while
+// The backlight LEDC channel is 8-bit (ledcAttach(BL_DISPLAY, BL_PWM_HZ, 8)) while
 // every caller works in percent. Before this, percent->duty was open-coded in
 // four places and nothing limited it: a BACKLIGHT_BRIGHTNESS outside 0..100
 // (an old NVS write, or a POST that bypassed validation) reached ledcWrite
@@ -254,9 +254,13 @@ void setup() {
   digitalWrite(CS_DISPLAY, HIGH);
   // arduino-esp32 3.x: ledcSetup/ledcAttachPin are gone - ledcAttach merges them
   // (first arg is the pin, returns bool; the channel is allocated internally).
-  // Pin BL_DISPLAY = GPIO12.
-  bool _ledcOk = ledcAttach(BL_DISPLAY, 1000, 8);
-  logPrintf("ledcAttach pin=%d ok=%d\n", BL_DISPLAY, (int)_ledcOk);
+  // Pin BL_DISPLAY = GPIO12. The frequency is the stored BL_PWM_HZ (default
+  // 12 kHz, above hearing; the old fixed 1 kHz whined). processConfig(0) above
+  // already loaded it, and a config save retunes the live channel in
+  // processConfigApply().
+  bool _ledcOk = ledcAttach(BL_DISPLAY, (uint32_t)BL_PWM_HZ, 8);
+  logPrintf("ledcAttach pin=%d ok=%d freq=%u Hz\n", BL_DISPLAY, (int)_ledcOk,
+            (unsigned)BL_PWM_HZ);
   if (!_ledcOk) logPrintf("*** LEDC SETUP FAILED ***\n");
   ledcWrite(BL_DISPLAY, 0);
   pinMode(SPI_RST, OUTPUT);
@@ -392,16 +396,25 @@ void setup() {
   logPrintf("Setup done\n");
 }
 
-// Panel-bus reconfiguration and CPU-frequency switching requested by a config
-// save. These used to run inside the POST /api/config handler on core 0 while
-// this core was drawing: _bus_instance.config() on a live bus during a
-// LovyanGFX transaction (corrupted frames at best), and an APB/clock change
-// under an in-flight SPI transfer. Both are applied here, at the frame gap,
-// before anything is drawn (issue #10).
+// Panel-bus reconfiguration (SPI clock + backlight PWM frequency) and
+// CPU-frequency switching requested by a config save. These used to run inside
+// the POST /api/config handler on core 0 while this core was drawing:
+// _bus_instance.config() on a live bus during a LovyanGFX transaction
+// (corrupted frames at best), and an APB/clock change under an in-flight SPI
+// transfer. Both are applied here, at the frame gap, before anything is drawn
+// (issue #10).
 static void processConfigApply() {
   if (pendingApplyBusConfig) {
     pendingApplyBusConfig = false;
     display.applyBusConfig();
+    // The backlight PWM frequency rides with the panel-bus config: this flag
+    // is set on every config save, so the retune happens here at the frame
+    // gap. The duty is re-asserted right after - ledcChangeFrequency() stops
+    // and restarts the channel, and without the rewrite the panel would sit
+    // dark until the next backlight write.
+    if (!ledcChangeFrequency(BL_DISPLAY, (uint32_t)BL_PWM_HZ, 8))
+      logPrintf("*** LEDC freq change failed (%u Hz) ***\n", (unsigned)BL_PWM_HZ);
+    ledcWrite(BL_DISPLAY, constrain(currentBrightnessTarget, 0, 255));
     forceFullRedraw = true;
   }
   if (pendingCpuReeval) {

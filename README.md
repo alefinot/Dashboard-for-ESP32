@@ -114,7 +114,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | :--- | :--- | :--- | :--- |
 | **Microcontroller** | ESP32-WROOM-32 | Xtensa 32-bit LX6 | Dual-core 240 MHz, 520 KB SRAM, 4 MB SPI Flash, RTC IO |
 | **Display Panel** | ILI9488 TFT LCD (4.0") | SPI3 (16-bit RGB565) — SCLK GPIO18, MOSI GPIO23, CS GPIO5, DC GPIO27, RST GPIO14 (no MISO) | 480×320 pixels, 60 MHz SPI bus speed (clamped to 1–80 MHz), hardware CS/DC/RST |
-| **Display Backlight** | LED Backlight (`BL_DISPLAY`, GPIO12) | LEDC PWM — pin-based `ledcAttach(BL_DISPLAY, 1000, 8)` | 1 kHz hardware PWM, 8-bit resolution (256 brightness levels), logarithmic fading; the LEDC channel is assigned by the arduino-esp32 3.x wrapper |
+| **Display Backlight** | LED Backlight (`BL_DISPLAY`, GPIO12) | LEDC PWM — pin-based `ledcAttach(BL_DISPLAY, BL_PWM_HZ, 8)` | hardware PWM at `BL_PWM_HZ` (default **12 kHz** — above the audible range — configurable 1–40 kHz), 8-bit resolution (256 brightness levels), logarithmic fading; the LEDC channel is assigned by the arduino-esp32 3.x wrapper |
 | **GNSS Module** | BZGNSS P25 Pro (u-blox M10) | UART2 (RX=GPIO16, TX=GPIO17) | 115200 baud (configurable), UBX NAV-PVT / NMEA 0183 stream (module is preconfigured — the firmware is receive-only), 10 Hz update rate, multi-constellation (GPS/GLONASS/BDS/Galileo), UTC epoch time synchronization |
 | **Wheel Speed Sensor** | Hall Effect Interrupt | GPIO33 (Input Pullup) | Any-edge ISR stamps the edges; interval/filter logic runs on the sensor task, microsecond timing |
 | **Fuel Level Sensor** | Marine Resistive Sender (capacitive touch removed in v1.3.6) | GPIO32 (ADC1_CH4) | Voltage divider behind an excitation resistor, ohm-domain calibration table (up to 20 points), oversampling + EMA smoothing, open/short detection |
@@ -137,7 +137,7 @@ The system leverages the ESP32's Xtensa dual-core processor via FreeRTOS tasks t
 | **GPIO3** | Console RX | Debug Console | Input | Same `Serial.setPins(1, 3)` call |
 | **GPIO4** | `POWER_SENSE_PIN` | Power Sense | Input (No Pull) | Ignition sense line; triggers EXT0 RTC wake up from deep sleep |
 | **GPIO5** | `CS_DISPLAY` | SPI Chip Select | Output | Hardware SPI CS for ILI9488 Display |
-| **GPIO12** | `BL_DISPLAY` | Backlight PWM | Output | Pin-based `ledcAttach(BL_DISPLAY, 1000, 8)` — 1 kHz PWM, 8-bit resolution |
+| **GPIO12** | `BL_DISPLAY` | Backlight PWM | Output | Pin-based `ledcAttach(BL_DISPLAY, BL_PWM_HZ, 8)` — frequency is the `BL_PWM_HZ` knob (default 12 kHz, above hearing), 8-bit resolution |
 | **GPIO14** | `SPI_RST` | Display Reset | Output | Active-Low hardware reset line for ILI9488 |
 | **GPIO16** | `GNSS_UART2_RX_PIN` | GPS Serial RX (UART2) | Input | Connected to the GNSS module TX pin. Receive-only: the firmware never transmits to the module |
 | **GPIO17** | `GNSS_UART2_TX_PIN` | GPS Serial TX (UART2) | Output | Connected to the GNSS module RX pin; configured but idle - no UBX command is ever sent |
@@ -507,6 +507,7 @@ ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely �
 #### Display & Visual Design
 - `DISPLAY_ROTATION` (default=3): Screen rotation (0, 1, 2, 3).
 - `BACKLIGHT_BRIGHTNESS` (default=100): Backlight duty cycle (**0–100%**, clamped on load/save). The percent is turned into the 8-bit LEDC duty in one place (`backlightDuty()` / `applyBacklight()` in `src/main.cpp`), so no path — WebUI slider, night mode, boot splash, sleep/wake fade or auto-brightness — can put an out-of-range duty on the panel (issue #20).
+- `BL_PWM_HZ` (default=12000): Backlight LEDC PWM frequency in Hz (**1000–40000**, clamped on load/save). The 12 kHz default sits above the audible range — the old fixed 1 kHz was audible as a whine off the panel wiring. Boot attaches with the stored value; a config save retunes the live channel at a frame gap (`ledcChangeFrequency()` in `processConfigApply()`, `src/main.cpp`) and re-asserts the duty, so the panel never blinks off mid-save. Shown in the Web UI in kHz (1–40).
 - `NIGHT_BACKLIGHT` (default=29): Night-mode backlight duty cycle (0–100%), applied while night mode is active.
 - `ENABLE_ANTIALIASING` (default=true): Anti-aliased line rendering toggle.
 - `AA_SHARPNESS` (default=1.0): Anti-aliasing gamma correction factor.

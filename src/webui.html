@@ -1561,6 +1561,7 @@ const DEFAULTS = {
     DISPLAY_HEIGHT: 320,
     TARGET_FPS: 60,
     BACKLIGHT_BRIGHTNESS: 100,
+    BL_PWM_HZ: 12000,
     ENABLE_AUTO_BRIGHTNESS: true,
     LIGHT_SENSOR_DARK_VAL: 432,
     LIGHT_SENSOR_BRIGHT_VAL: 2851,
@@ -1776,6 +1777,7 @@ const FIRMWARE_LIMITS = {
     DISPLAY_HEIGHT: [16, 2048],
     TARGET_FPS: [5, 120],
     BACKLIGHT_BRIGHTNESS: [0, 100],
+    BL_PWM_HZ: [1000, 40000],
     LIGHT_SENSOR_DARK_VAL: [0, 4095],
     LIGHT_SENSOR_BRIGHT_VAL: [0, 4095],
     AUTO_BRIGHT_DARK: [0, 100],
@@ -1954,6 +1956,7 @@ function metricFromDisplay(key, val) {
 // (scale on collect, imperial on the whole payload) assumes exactly that.
 const UNIT_SCALE = {
     SPI_BUS_SPEED: 1000000,    // Hz in NVS, MHz in the box
+    BL_PWM_HZ: 1000,           // Hz in NVS, kHz in the box
     POWER_SENSE_OFF_MS: 1000   // ms in NVS, seconds in the box
 };
 
@@ -2152,6 +2155,7 @@ const configMap = [
             { id: "DISPLAY_WIDTH", label: "Display Width", unit: "px", advanced: true },
             { id: "DISPLAY_HEIGHT", label: "Display Height", unit: "px", advanced: true },
             { id: "SPI_BUS_SPEED", label: "SPI Bus Frequency", unit: "MHz", min: 1, max: 80, step: 1, advanced: true },
+            { id: "BL_PWM_HZ", label: "Backlight PWM Frequency", unit: "kHz", min: 1, max: 40, step: 1, advanced: true },
             { id: "DISPLAY_INVERT_COLORS", label: "Invert Display Colors", advanced: true },
             { id: "ENABLE_ANTIALIASING", label: "Enable Anti-Aliased Rendering", advanced: true },
             { id: "AA_SHARPNESS", label: "AA Sharpness", type: "range", min: 0.2, max: 1.0, step: 0.1, advanced: true },
