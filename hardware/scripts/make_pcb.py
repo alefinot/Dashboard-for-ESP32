@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 
+import guard_pcb
 import kicadfmt as kf
 import model_frame as MF
 import pcbheader
@@ -2237,6 +2238,31 @@ def main():
               "there): %s"
               % (len(stt["unpaired"]), stitch_pcb.COMPANION_MAX,
                  ", ".join("%s@%.1f,%.1f" % u for u in stt["unpaired"][:8])))
+    # ---- A4 grounded guards (scripts/guard_pcb.py) -------------------------
+    # The crosstalk ratchet (test_crosstalk.py, 33 sensed/foreign pairs) cannot
+    # be bought back by re-routing: the A5 experiments on 2026-10-19 either left
+    # nets cut (GND/DBG_RX in out/a5-e1.log) or took the band count from 40 to
+    # 277/430 item pairs (out/a5-e2.log).  So the plan's other mechanism runs:
+    # a 0.20 mm GND fence beside each sensed run where a legal slot exists,
+    # bonded to GND at both ends (existing copper when a 0.70 mm via cannot fit;
+    # these corridors are one lane wide).  Measured coverage is what it is; every
+    # emitted piece is legal and bonded, and the report names the blocked rest.
+    gs, gv, grep = guard_pcb.place((BOARD_X0, BOARD_Y0, BOARD_X1, BOARD_Y1),
+                                   KEEP, rp, segs, vias, net_clr, QUIET)
+    segs = segs + gs
+    vias = vias + gv
+    gtot = sum(r["len"] for r in grep["nets"].values())
+    gcov = sum(r["cov"] for r in grep["nets"].values())
+    print("  GUARD      %d stitched GND piece(s): %.1f mm of 0.20 mm fence "
+          "beside %.1f of %.1f mm of sensed run (%.0f%%), %.1f mm spur, "
+          "%d new GND via(s)"
+          % (grep["pieces"], grep["guard_mm"], gcov, gtot,
+             100.0 * gcov / gtot if gtot else 0.0, grep["spur_mm"],
+             grep["vias"]))
+    print("             per net: %s"
+          % ", ".join("%s %.0f%%" % (n, 100.0 * r["cov"] / r["len"]
+                                     if r["len"] else 0.0)
+                      for n, r in sorted(grep["nets"].items())))
     print("  COPPER       now %d vias (%d GND)" % (len(vias),
                                                    sum(1 for v in vias if v["net"] == "GND")))
     classcheck(segs, vias)

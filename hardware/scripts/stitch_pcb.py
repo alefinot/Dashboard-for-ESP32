@@ -127,12 +127,18 @@ class Placer:
         self.by_layer = {lay: [o for o in self.obs if o[1] == lay] for lay in LAYERS}
         self.placed = []       # (x, y) of the stitch holes chosen so far
 
-    def legal(self, x, y, dia=VIA_DIA, net="GND", drill=VIA_DRILL, safe=SAFE):
+    def legal(self, x, y, dia=VIA_DIA, net="GND", drill=VIA_DRILL, safe=SAFE,
+              layers=None):
         """True if a `dia` mm pad of net `net` may sit at (x, y).
 
         `safe` is the extra margin demanded on top of the class clearance;
         scripts/test_stitch.py audits an already-generated board with safe=0,
         i.e. exactly the rule KiCad's DRC will apply.
+
+        `layers` restricts the copper check to those layers (default: all four,
+        correct for a through via).  A TRACK only has to clear copper on its own
+        layer - guard_pcb.py passes its single layer, because a F.Cu guard over
+        B.Cu copper is legal and the DRC will say so.
         """
         x0, y0, x1, y1 = x - dia / 2.0, y - dia / 2.0, x + dia / 2.0, y + dia / 2.0
         fx0, fy0, fx1, fy1 = self.frame
@@ -145,7 +151,7 @@ class Placer:
                     y0 > ky1 + KEEP_MARGIN or y1 < ky0 - KEEP_MARGIN):
                 return False          # sits in the antenna slot
         need_self = self.clr(net)
-        for lay in LAYERS:
+        for lay in (layers if layers is not None else LAYERS):
             inner = lay in INNER
             for (onet, _lay, ox0, oy0, ox1, oy1) in self.by_layer[lay]:
                 if onet == net:

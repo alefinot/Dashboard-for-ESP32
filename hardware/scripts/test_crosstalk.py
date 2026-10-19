@@ -34,8 +34,12 @@ broke the band before any of A2/A3 existed, and neither enforcement attempt got
 the number down - wall: three nets in pieces and 100+ pairs; priced band: 32 pairs
 and more parallel run (route_pcb.QUIET_EDGE carries both).  The corridors out of
 J10a/J10b are one lane wide, so on this placement spacing is not the mechanism
-that buys silence; guarding and filtering (§6 A4, §4 C7) are.  Read a PASS as
-"the hugging did not get worse", never as "the sensors are quiet".
+that buys silence; guarding and filtering (§6 A4, §4 C7) are.  Re-measured
+2026-10-19: re-routing with the sensed nets first (A5, out/a5-e1.log and
+out/a5-e2.log) either cut nets or multiplied the hug count, so the routing is
+unchanged and the ceiling was lowered to the measured 33.  The A4 guards
+(guard_pcb.py) are GND and exempt here - PASS still never means the sensors are
+quiet.
 
 Run:  "<KiCad python>" hardware/scripts/test_crosstalk.py [board-file]
 """
@@ -184,15 +188,23 @@ def main(argv):
     # 32 and longer parallel runs; routing with the band as a wall left
     # TFT_DC/TFT_RST/TFT_SCK in pieces and 100+ pairs still hugging
     # (route_pcb.QUIET_EDGE holds both measurements).  The reason is the layout:
-    # the corridors out of J10a/J10b are one lane wide.  So the number is capped
-    # where the board stands, fails if it grows, and is meant to be lowered when
-    # the layout moves or when the guard/filter work (§6 A4, §4 C7) makes these
-    # pairs moot - which is the work that actually buys sensor precision.
-    OFFENDER_MAX = 40
+    # the corridors out of J10a/J10b are one lane wide.  On 2026-10-19 the A5
+    # experiments re-ordered the route (sensed nets first) and measured it
+    # instead of assuming: out/a5-e1.log got BAT_SNS from 180.4 to 91.3 mm but
+    # left GND and DBG_RX cut and took the route log's quiet count from 40 to
+    # 277 item pairs; out/a5-e2.log both missed the length target and took it to
+    # 430.  So the shipped routing is unchanged and the ceiling is pinned at the
+    # measured 33 - the guards (guard_pcb.py, §6 A4) run beside 15 % of the
+    # sensed runs where a legal, grounded slot exists and are GND, i.e. exempt
+    # here, so they cannot move this number.  It fails if it grows, and is meant
+    # to be lowered when the layout moves - the only place the remaining pairs
+    # can be bought back (the sensed runs need shorter, straighter corridors).
+    OFFENDER_MAX = 33
     check(len(offenders) <= OFFENDER_MAX,
-          "%d sensed/foreign pair(s) inside the %.2f mm band (ceiling %d; 33 at "
-          "00fc7175). This is NOT the plan's target met - the spacing rule holds "
-          "only where the corridors leave room: %s"
+          "%d sensed/foreign pair(s) inside the %.2f mm band (ceiling %d = the "
+          "measured count; 33 at 00fc7175). This is NOT the plan's target met - "
+          "the spacing rule holds only where the corridors leave room, and the "
+          "2026-10-19 A5 re-route experiments made it worse, not better: %s"
           % (len(offenders), route_pcb.QUIET_EDGE, OFFENDER_MAX,
              ["%s~%s %.2fmm par%.0f" % o for o in
               sorted(offenders, key=lambda o: o[2])[:8]]))
