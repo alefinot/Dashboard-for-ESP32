@@ -1089,6 +1089,25 @@ def parts():
         P.append((ref, fp, x, y, rot, {k: N(v) for k, v in nm.items()}, val,
                   "B.Cu", 0))
 
+    # ---- car-environment protection: TVS across the ignition input.
+    # IGN_12 comes straight from the car harness into R8 (1 k) and OK1's LED
+    # (~11 mA at 12 V); the LED's 6 V reverse rating is the only thing standing
+    # between a miswired or load-dumped ignition line and a dead sense channel.
+    # D4 is the same 33 V class as D2 on the 12 V rail (standoff rides out a
+    # 24 V jump start, clamp sits safely behind R8's 1 k), but the SMB package
+    # of the approved P6SMB33A fits nowhere near J17: every connector-adjacent
+    # pocket is sealed by neighbouring pads and via walls (J17.1 itself sits
+    # in a 1.0 mm channel, below the 1.45 mm an HV tie needs) - measured
+    # exhaustively on 2026-10-19.  So the TVS moves to the wire it protects:
+    # SOD-123FL (SMF4L33A, 400 W class), rot 0 at (45.35, 14.40), pad 1 fully
+    # ON IGN_12's own F.Cu trunk (x 44.10) and pad 2 tied to the GND rail
+    # (x 48.40) by the one short tie main() appends after routing.  The router
+    # does not see D4 at all (route_all drops D4's pads), so the step-6
+    # solution and every quality gate are reproduced exactly.  The face here
+    # is free of fixed parts; the GNSS module (J8) is on B.Cu under this spot.
+    P.append(("D4", "Diode_SMD:D_SOD-123F", 45.35, 14.40, 0.0,
+              {"1": N("IGN_12"), "2": N("GND")}, "SMF4L33A", "F.Cu", 0))
+
     # ---- GNSS J8: six bare solder pads (no header, no drill) inside the drawn
     # 22.99 x 7.00 zone - the module sits under the board and is soldered in.
     gx = (GNSS_ZONE[0] + GNSS_ZONE[2]) / 2 - 5 * 2.54 / 2      # 41.35
@@ -2162,8 +2181,16 @@ def route_all(rp=None):
     paying for the board write and the filled-DRC gate.
     """
     rp = route_pads() if rp is None else rp
+    # D4 is placed ON copper that already exists (see parts()): pad 1 lands
+    # fully on IGN_12's F.Cu trunk and pad 2 gets the one tie main() appends
+    # after routing.  So the router must not see D4's pads at all - with them
+    # filtered out, its input is exactly the step-6 pad list, the step-6
+    # solution is reproduced bit for bit, and the quality gates keep their
+    # measured values.  Stitching and guards still receive the FULL rp from
+    # main(), so no GND via or fence can ever land on D4's pads.
+    rt = [p for p in rp if p["ref"] != "D4"]
     have = {}
-    for p in rp:
+    for p in rt:
         if p["net"]:
             have.setdefault(p["net"], []).append(p)
     todo = [n for _, group in ROUTE_ORDER for n in group if len(have.get(n, [])) > 1]
@@ -2184,7 +2211,7 @@ def route_all(rp=None):
     for note in POLICY_NOTES:
         print("  POLICY       " + note)
     segs, vias, log = route_pcb.route(
-        dict(pads=rp, frame=(BOARD_X0, BOARD_Y0, BOARD_X1, BOARD_Y1),
+        dict(pads=rt, frame=(BOARD_X0, BOARD_Y0, BOARD_X1, BOARD_Y1),
              keep=KEEP, classes=dict(CLASS_OF), clearance=CLASS_CLEAR,
              widths={n: net_w(n) for n in todo}, via=CLASS_VIA,
              route_layers=list(ROUTE_LAYERS),
@@ -2212,6 +2239,15 @@ def main():
         for line in log:
             print("  ROUTE        " + line)
     print("  COPPER       %d segments, %d vias" % (len(segs), len(vias)))
+    # ---- D4, the ignition TVS (SMF4L33A) ------------------------------------
+    # The only copper D4 adds to the board: one 0.50 mm F.Cu tie from pad 2's
+    # centre to the GND rail's centreline at (48.40, 14.40) - a T-joint, the
+    # form KiCad's connectivity accepts.  Pad 1 needs no tie: it sits fully on
+    # IGN_12's trunk, which the router drew there on its own (route_all skips
+    # D4's pads, so this run's routing is the step-6 solution unchanged).
+    # Emitted before stitching and guards so both see it as existing copper.
+    segs = segs + [dict(net="GND", layer="F.Cu", a=(46.75, 14.40),
+                        b=(48.40, 14.40), w=0.50)]
     # ---- ground stitching (scripts/stitch_pcb.py) --------------------------
     # Before this step the board had 36 GND vias against 235 signal vias, and a
     # signal via crossing the plane pair had its nearest GND hole a median 5.1 mm

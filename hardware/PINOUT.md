@@ -177,7 +177,9 @@ clearance - DRC remains 0 violations, 115 unconnected, 0 footprint errors.
 ## 6. Small parts, what each one is for
 
 Packages as placed: every `R`/`C` (except `C1`/`C3`) is **0805**, `C1`/`C3` are **SMD
-aluminium cans 10 × 12.5 mm**, `D1` is **SOD-123**, `D2`/`D3` are **SMB**, `OK1`/`OK2`
+aluminium cans 10 × 12.5 mm**, `D1` is **SOD-123**, `D2`/`D3` are **SMB**, `D4` is
+**SOD-123FL** (the SMB body of `D2`/`D3` does not fit anywhere at `J17` — measured
+2026-10-19), `OK1`/`OK2`
 are **SO-4 (4.4 × 3.9)**, `Q1` is **TO-263 / D²PAK**, `F1` is a **lateral 5 × 20 clip
 holder** (THT). Everything except `F1` and `J3` is surface-mount; the `R`/`C`/`D`/`OK`/`Q1`
 group sits on the top face, the plugs, the module and the two bulk cans `C1`/`C3`
@@ -216,6 +218,7 @@ under the pin it conditions, and its optocoupler standing over that column.
 | `R7` | 10 k | `LDR_SNS` `GND` | LDR divider |
 | `C8` | 100 n | `LDR_SNS` `GND` | filter |
 | `R8` | 1 k | `IGN_12` `IGN_LED` | opto-1 LED series |
+| `D4` | SMF4L33A (SOD-123FL) | `IGN_12` `GND` | ignition-line TVS — (45.35, 14.40) rot 0 on the wire's own mid-board run: pad 1 sits fully on the `IGN_12` F.Cu trunk (x 44.10), pad 2 is bonded to the GND rail (x 48.40) by one 0.50 mm tie — the connector pockets at `J17` were measured on 2026-10-19 and cannot take an SMB part (J17.1 sits in a 1.0 mm pad channel), so the class moved into the small package instead |
 | `R9` | 10 k | `IGN_SENSE` `GND` | pull-down |
 | `C9` | 100 n | `IGN_SENSE` `GND` | filter |
 | `OK1` | EL357N-B (SO-4) | `IGN_LED` `GND` `IGN_SENSE` `V3V3` | ignition isolation |
@@ -366,8 +369,9 @@ band priced into the search, the routed length went 2 935 → 3 334 mm and the p
 got *worse* (`BAT_SNS` next to `DBG_RX` for 48 mm, `TFT_CS` next to `TRIP_BTN` for 33 mm)
 while the hugging count moved 33 → 32. So the router no longer enforces the band: it
 reports the offenders it sees while routing (the `QUIET ...` line in the run summary), and
-`scripts/test_crosstalk.py` measures the shipped board and caps the debt at 40 pairs (33
-measured today, the same count as before any of this work). A PASS there means "the hugging
+`scripts/test_crosstalk.py` measures the shipped board and caps the debt at 33 pairs
+(the `OFFENDER_MAX` cap is the measured count and is never raised; it is the same
+count as before any of this work). A PASS there means "the hugging
 did not get worse", never "the sensors are quiet": what buys sensor precision on this
 board is guarding and stitching alongside the sensor runs, and getting the excitation out
 of the aggressors' switching band - the firmware/ADC side of
