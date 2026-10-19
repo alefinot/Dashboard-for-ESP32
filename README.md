@@ -817,6 +817,29 @@ In Demo Mode:
 
 ## Changelog
 
+### V1.4.3 — TLS handshakes can no longer starve IDLE0: the cloud-OTA check stops boot-looping the board (firmware)
+
+A networked unit rebooted forever: every boot joined Wi-Fi, started the once-per-boot cloud update check, and ~5 s later the task watchdog aborted the chip. This release fixes the starvation, and the anti-boot-loop latch that should have caught it.
+
+**What the serial log showed** — `OTA Pull: checking …` → DNS ok → ~5.07 s later `task_wdt: IDLE0 (CPU 0)` → `Aborting` → `rst:0xc (SW_CPU_RESET)` → the same cycle again. The abort backtrace, decoded with `xtensa-esp32-elf-addr2line`, sat in the mbedTLS client handshake (`ssl_write_client_key_exchange` → `ecdh_calc_secret_internal` → `mbedtls_ecp_mul_restartable` → `ecp_modp` → `mbedtls_mpi_cmp_mpi`): P-256 ECDH runs as one CPU-bound burst with no yield points of its own.
+
+**Root cause** — `OtaPullTask` was created at priority 1 on core 0, above IDLE0, which is the watchdog feeder for that core. A multi-second EC burst with no blocking calls starves IDLE0 past the 5 s task-watchdog limit, and the IDF aborts by design. The check fires once per boot on Wi-Fi connect (`startOtaPull(false, true)` in `src/web.cpp`), so the unit could never finish a boot.
+
+**The fix**
+- `OtaPullTask` now runs at `tskIDLE_PRIORITY` (0): FreeRTOS time-slices it against IDLE0, the watchdog stays fed, and the handshake simply takes longer. On the bench the same manifest GET completed in 8,635 ms — `OTA Pull: manifest GET 200 in 8635ms (heap=50012)`, the new timing line — with the dashboard at 60 fps and no watchdog hits.
+- `WeatherFetchTask` gets the same priority: `WEATHER_*` may point at an https URL, which is the identical multi-second TLS burst on the same core.
+- The manifest GET now logs its duration and free heap, so a slow pull is visible in the serial log instead of looking like a hang.
+
+**Boot/reboot forensics: the storm latch finally latches** — the RTC-persistent fast-reboot counter could never rise above `boot#1`: it subtracted `esp_timer_get_time()` stamps across a reboot, but that clock restarts at 0 on every boot, so the subtraction underflowed into the "clean boot" branch every time (`boot#1 storm=0` on every banner — exactly the case where the anti-boot-loop latch was supposed to help). The stamps are replaced by an RTC mark that `bootinfo_tick()` sets once the running boot survives 120 s, and the next boot reads it to tell a clean session from a fast reboot. Verified on hardware: three quick reboots climbed `boot#1` → `#2` → `#3` → `#4` with `storm=1` latching at the fourth, and a reboot after 130 s of healthy uptime came back as `boot#1 storm=0`.
+
+**Also shipped since V1.4.2**
+- **Sensor noise bench** — `GET/POST /api/noisematrix`: four background runs (`idle`, `tft`, `bl10`, `bl90`), 4000 samples at 1 kS/s per channel, mean / sigma / peak-to-peak in mV and ADC codes (see *Noise Bench*). The WebUI card runs it and shows the table on the device — no PC or serial needed.
+- **`BL_PWM_HZ`** — backlight LEDC frequency knob (1–40 kHz, default 12 kHz, above the audible range), retuned live on save without blinking the panel.
+- **`TFT_DRIVE`** — display-ribbon pad drive strength (0–3, default 0 = chip default; 5/10/20 mA drivers as an emissions tool, bench-gated).
+- **`WEATHER_WIDTH` / `WEATHER_HEIGHT`** — resizable weather card; stats wrap onto extra rows instead of dropping.
+
+**Size and tooling** — `RAM 25.7 %` (84,204 B of 327,680 B), `Flash 89.5 %` (1,701,767 B of the 1,900,544 B OTA slot, ~199 KB headroom). Firmware `1.4.3` signed for the cloud pull (`firmware.bin.sig`, verified with `scripts/ota_sign.py`).
+
 ### V1.4.2 — live readings that never skip a second (firmware + Web UI)
 
 The settings page's live cells (ambient light, odometer, fuel ohms/state, coolant temp, battery volts) used to advance every 1 s on a good moment and every 2 s on a tired one. They now come from one request per second and cannot miss a tick.
