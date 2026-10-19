@@ -2071,6 +2071,81 @@ def filled_drc(board_path):
     return viol, unc, fperr
 
 
+# The fab package (gerbers + drill) is exported at the END of the gate run,
+# from the very copy DRC just judged: the committed board ships its zones
+# UNFILLED on purpose, so the planes exist only in out/drc-check - a plot of
+# the committed file would ship pad rings instead of copper.  Until 2026-10-19
+# this export was a manual kicad-cli invocation remembered by a human, which is
+# exactly how the out/gerbers/ set once sat stale for a week after the board had
+# grown 10 mm.  Same discipline as every other gate: the run does it, or it
+# does not pass.
+GERBER_LAYERS = ("F.Cu", "B.Cu", "In1.Cu", "In2.Cu", "F.Paste", "B.Paste",
+                 "F.Silkscreen", "B.Silkscreen", "F.Mask", "B.Mask",
+                 "F.Adhesive", "B.Adhesive", "F.Fab", "B.Fab", "Edge.Cuts",
+                 "User.Drawings", "User.Comments", "User.Eco1", "User.Eco2")
+
+
+def fab_export():
+    """Plot gerbers + drill from the filled copy, then swap out/gerbers/.
+
+    The plot runs on a copy named like the board itself (not "...-filled"): fab
+    files are named after their board, and a package whose gerbers say "filled"
+    invites the wrong question at the fab.  All output lands in out/gerbers.new/
+    and only replaces out/gerbers/ once every export succeeded, so a half-written
+    package can never masquerade as current.  Any failing kicad-cli call stops
+    the run - a package that exists but is wrong is worse than none.
+    """
+    hw = os.path.dirname(os.path.abspath(OUT))
+    base = os.path.splitext(os.path.basename(OUT))[0]
+    filled = os.path.join(hw, "out", "drc-check", base + "-filled.kicad_pcb")
+    if not os.path.isfile(filled):
+        raise SystemExit("fab export: %s is missing - the DRC step must run "
+                         "first" % os.path.relpath(filled, hw))
+    stage = os.path.join(hw, "out", "fab")
+    shutil.rmtree(stage, ignore_errors=True)
+    os.makedirs(stage)
+    src = os.path.join(stage, base + ".kicad_pcb")
+    shutil.copy(filled, src)
+    new = os.path.join(hw, "out", "gerbers.new")
+    shutil.rmtree(new, ignore_errors=True)
+    os.makedirs(new)
+    r = subprocess.run([KICAD_CLI, "pcb", "export", "gerbers",
+                        "--output", new, "--layers", ",".join(GERBER_LAYERS),
+                        src], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit("gerber export failed (exit %d): %s"
+                         % (r.returncode, (r.stderr or "").strip()[:300]))
+    r = subprocess.run([KICAD_CLI, "pcb", "export", "drill",
+                        "--format", "excellon", "--excellon-separate-th",
+                        "--excellon-units", "mm", "--generate-map",
+                        "--map-format", "gerberx2", "--output", new, src],
+                       capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit("drill export failed (exit %d): %s"
+                         % (r.returncode, (r.stderr or "").strip()[:300]))
+    files = sorted(os.listdir(new))
+    drl = [f for f in files if f.endswith(".drl")]
+
+    def hits(name):
+        p = os.path.join(new, name)
+        if not os.path.isfile(p):
+            return -1
+        return sum(1 for ln in open(p, encoding="utf-8", errors="replace")
+                   if ln.startswith("X"))
+
+    counted = [(f, hits(f)) for f in drl]
+    dst = os.path.join(hw, "out", "gerbers")
+    shutil.rmtree(dst, ignore_errors=True)
+    os.rename(new, dst)
+    print("FAB          %s: %d file(s), %d drill file(s): %s"
+          % (os.path.relpath(dst, hw), len(files), len(drl),
+             ", ".join("%s %d hit(s)" % (f.replace(base + "-", "")
+                                         .replace(".drl", ""), h)
+                       for f, h in counted)))
+    print("             plot of %s (filled copy, the one DRC judged)"
+          % os.path.relpath(src, hw))
+
+
 # The router's own log is long (per-net rows, rip-up, the moat repair, the
 # quiet-band count, the TOTAL row) and the stage costs 10-20 minutes. Echo it
 # live with an elapsed column instead of dumping it when the stage is over, so a
@@ -2184,6 +2259,9 @@ def main():
     if (viol, unc, fperr) != (0, 0, 0):
         raise SystemExit("DRC on the FILLED board is not clean - stopping here "
                          "(report: hardware/drc-report.txt)")
+    # Only a board that passed the referee gets a fab package (see fab_export):
+    # gerbers and drill are plotted from the exact copy DRC just judged.
+    fab_export()
 
 
 if __name__ == "__main__":
