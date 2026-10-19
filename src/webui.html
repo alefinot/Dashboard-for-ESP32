@@ -1387,6 +1387,35 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 .fuel-point { display: flex; align-items: center; gap: 6px; }
 .fuel-point input { width: 100%; }
 
+/* Noise bench: one compact table per run, stacked so a phone never scrolls
+   sideways. Only the extra wobble over the quiet baseline is coloured. */
+.nb-run { margin-top: 10px; }
+.nb-run-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+.nb-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.nb-table th {
+    color: var(--text-dim);
+    font-weight: 600;
+    text-align: right;
+    padding: 2px 4px;
+    border-bottom: 1px solid var(--border-color);
+}
+.nb-table th:first-child, .nb-table td:first-child { text-align: left; }
+.nb-table td {
+    padding: 3px 4px;
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-muted);
+}
+.nb-table td:first-child { font-family: 'Outfit', sans-serif; color: var(--text-main); }
+.nb-table tr + tr td { border-top: 1px solid rgba(255, 255, 255, 0.05); }
+.nb-ok { color: var(--accent-emerald); }
+.nb-warn { color: var(--accent-amber); }
+
 /* Small leftovers that were inline in the renderer: the fuel-table point
    index, the fixed spacer that lines color swatches up, a monospace value, the
    checkbox slot in a toggle card, and the 11px label above the fuel table. */
@@ -2270,6 +2299,18 @@ const configMap = [
             { id: "HALL_PERIOD_GUARD", label: "Hall Period Guard (1 = off)" },
             { id: "HALL_PULSE_MIN_US", label: "Hall Min Pulse Width (10-1000)", unit: "us" },
             { id: "GPS_DEBUG_DEFAULT", label: "Show GPS Debug Overlay", advanced: true },
+            { type: "card_header", label: "Noise Bench", content: `
+        <div class="cfg-help" style="margin-bottom:8px;">
+            Measures how steady the four sensor inputs are: 4,000 readings per input under four normal
+            running conditions - quiet, screen repainting, backlight 10% and backlight 90%. Takes about 17 s.
+            The dashboard keeps drawing, but its sensor values hold still while the test runs; that is how the
+            inputs are reserved for the measurement. No PC needed - the run happens on the device.
+        </div>
+        <div class="cfg-toolbar" style="margin-bottom:6px;">
+            <button id="nbRunBtn" class="btn-secondary btn-sm" onclick="startNoiseBench()">Run Noise Test</button>
+            <span id="nbStatus" class="cfg-help">Not run yet.</span>
+        </div>
+        <div id="nbResult"></div>` },
         ]
     },
     {
@@ -2675,6 +2716,7 @@ function renderForm(d) {
     const advCb = document.getElementById('ADV_MODE');
     if (advCb) advCb.checked = advModeOn;
     applyAdvancedMode();
+    nbRefresh();
 }
 
 let advModeOn = false;
@@ -4081,6 +4123,129 @@ function updateLivePollRow() {
                ' ms, ' + devSlowIters + ' slow iterations';
     }
     det.textContent = txt;
+}
+
+// ---------------------------------------------------------------------------
+// Noise bench (master plan step 8). The measurement runs on the device; this
+// panel starts it and polls /api/noisematrix. Plain fetch on purpose: laneFetch
+// is reserved for the 1 Hz live poll, and a test start must never lose that
+// race.
+// ---------------------------------------------------------------------------
+const NB_RUN_LABELS = { idle: 'Quiet', tft: 'Screen repainting', bl10: 'Backlight 10%', bl90: 'Backlight 90%' };
+const NB_CH_LABELS = { bat: 'Battery', cool: 'Coolant', ldr: 'Light', fuel: 'Fuel' };
+let nbPolling = false;
+
+function nbSetStatus(text) {
+    const el = document.getElementById('nbStatus');
+    if (el) el.textContent = text;
+}
+
+function nbNum(v, digits) {
+    return (typeof v === 'number' && isFinite(v)) ? v.toFixed(digits) : '--';
+}
+
+function nbRender(d) {
+    const box = document.getElementById('nbResult');
+    if (!box) return;
+    const status = (d && d.status) || 'never';
+    const btn = document.getElementById('nbRunBtn');
+    if (btn) btn.disabled = (status === 'running');
+    if (status === 'running') {
+        const done = (d && d.runs) || 0;
+        const next = ['idle', 'tft', 'bl10', 'bl90'][Math.min(done, 3)];
+        nbSetStatus('Measuring run ' + Math.min(done + 1, 4) + ' of 4 - ' +
+                    (NB_RUN_LABELS[next] || next) + '...');
+    } else if (status === 'done') {
+        nbSetStatus('Done in ' + (((d && d.job_ms) || 0) / 1000).toFixed(1) +
+                    ' s. Sensor readings resume now.');
+    } else {
+        nbSetStatus('Not run yet.');
+    }
+    const list = (d && d.list) || [];
+    if (!list.length) { box.innerHTML = ''; return; }
+    const idle = list.find(r => r.id === 'idle');
+    let html = '';
+    list.forEach(run => {
+        const isIdle = run.id === 'idle';
+        html += '<div class="nb-run"><div class="nb-run-title">' +
+                (NB_RUN_LABELS[run.id] || run.id) + (isIdle ? ' - baseline' : '') + '</div>' +
+                '<table class="nb-table"><thead><tr><th>Input</th><th>Mean</th>' +
+                '<th>Wobble &sigma;</th><th>Extra vs quiet</th><th>Worst jump</th></tr></thead><tbody>';
+        (run.ch || []).forEach(ch => {
+            const base = (idle && !isIdle) ? (idle.ch || []).find(c => c.id === ch.id) : null;
+            let delta = null;
+            if (base && typeof ch.sigma_mv === 'number' && typeof base.sigma_mv === 'number') {
+                delta = ch.sigma_mv - base.sigma_mv;
+            }
+            let deltaCell = '&mdash;';
+            if (!isIdle && delta !== null) {
+                const cls = delta > 0.4 ? 'nb-warn' : 'nb-ok';
+                deltaCell = '<span class="' + cls + '">' + (delta >= 0 ? '+' : '') +
+                            delta.toFixed(2) + ' mV</span>';
+            }
+            html += '<tr><td>' + (NB_CH_LABELS[ch.id] || ch.id) + '</td><td>' +
+                    nbNum(ch.mean_mv, 1) + ' mV</td><td>' + nbNum(ch.sigma_mv, 2) +
+                    ' mV</td><td>' + deltaCell + '</td><td>' + nbNum(ch.pp_mv, 1) +
+                    ' mV</td></tr>';
+        });
+        html += '</tbody></table></div>';
+    });
+    html += '<div class="cfg-help" style="margin-top:10px;">Wobble (&sigma;) is how much a reading ' +
+            'jumps around; the worst jump is the largest single swing in 4,000 readings. Target: the ' +
+            'extra wobble over the quiet baseline stays at or below 0.40 mV (0.5 ADC count).</div>';
+    box.innerHTML = html;
+}
+
+function nbFetch(url, opts) {
+    return fetch(url, opts).then(r => r.json());
+}
+
+function nbPoll() {
+    if (nbPolling) return;
+    nbPolling = true;
+    const tick = () => {
+        nbFetch('/api/noisematrix').then(d => {
+            nbRender(d);
+            if (d && d.status === 'running') {
+                setTimeout(tick, 800);
+            } else {
+                nbPolling = false;
+            }
+        }).catch(() => {
+            nbPolling = false;
+            nbSetStatus('Lost the connection - press Run to try again.');
+            const btn = document.getElementById('nbRunBtn');
+            if (btn) btn.disabled = false;
+        });
+    };
+    tick();
+}
+
+function startNoiseBench() {
+    const btn = document.getElementById('nbRunBtn');
+    if (btn) btn.disabled = true;
+    nbSetStatus('Starting...');
+    nbFetch('/api/noisematrix', { method: 'POST' }).then(d => {
+        if (d && (d.status === 'started' || d.status === 'busy')) {
+            nbPoll();
+        } else {
+            nbSetStatus('The device could not start the test.');
+            if (btn) btn.disabled = false;
+        }
+    }).catch(() => {
+        nbSetStatus('Could not reach the device.');
+        if (btn) btn.disabled = false;
+    });
+}
+
+// Page load (and any form re-render): show the last matrix and resume polling
+// if a job is still running. The result lives in RAM, so after a reboot this
+// reads "never" again.
+function nbRefresh() {
+    nbFetch('/api/noisematrix').then(d => {
+        nbRender(d);
+        if (d && d.status === 'running') nbPoll();
+    }).catch(() => {});
 }
 
 // Fuel sender helpers (issue #18). The calibration table lives in ohms - the

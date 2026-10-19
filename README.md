@@ -477,28 +477,32 @@ The sensor task pauses its own ADC reads while a job runs (ADC1 has one
 converter), so the dashboard keeps animating but its sensor values hold for the
 ~17 s duration. Nothing is written to NVS; the result is transient.
 
-**Procedure**
+**Before you start:** power the board as it will run in the vehicle (12 V on J1,
+real sensors on their connectors — the battery divider is on-board, the coolant
+NTC, LDR and fuel sender plug into theirs). If no fuel sender is wired, fit a
+resistor across `FUEL_SNS` to GND (100 Ω is a sane reference) so the pin is not
+floating. Do not change settings or touch the power wiring during a job — a
+brightness change or a connector wiggle is itself a disturbance.
 
-1. Power the board as it will run in the vehicle (12 V on J1, real sensors on
-   their connectors — the battery divider is on-board, the coolant NTC, LDR and
-   fuel sender plug into theirs). If no fuel sender is wired, fit a resistor
-   across `FUEL_SNS` to GND (100 Ω is a sane reference) so the pin is not
-   floating.
-2. Put the device on WiFi so it has an IP address (the Web UI works over the
-   `Dashboard_Config` AP or your LAN).
-3. Start a job: `Invoke-RestMethod -Method Post -Uri http://<ip>/api/noisematrix`
-   (or `curl -X POST http://<ip>/api/noisematrix`).
-4. Poll `Invoke-RestMethod http://<ip>/api/noisematrix` until `status` is
-   `done`, or watch the serial log on COM7 at 115200 baud — the job prints one
-   `NB <run> <channel>: …` line per channel per run, then `NB DONE`.
-5. Read the matrix. `sigma_mv` is the wobble (the number to compare between
-   runs); `pp_mv` is the worst single jump. The `_lsb` fields are the same
-   statistics in ADC code counts (1 count ≈ 3.3 V / 4095 ≈ 0.806 mV — this is
-   the "LSB" the sensor conversions use, not a calibrated eFuse value).
-   `interval_ms` reports the sampling period actually achieved.
+**From the WebUI (no PC needed):** open the dashboard page from any browser on
+the device's AP or LAN, expand **Sensors Tuning** and press **Run Noise Test**
+in the Noise Bench card. The card shows progress and then the full table — per
+input, the mean, the wobble (σ), the extra wobble against the quiet baseline
+(green at the target, amber above it) and the worst jump. The result lives in
+RAM, so it is gone after a reboot.
 
-Do not touch the Web UI or the power wiring during a job — a brightness change
-or a connector wiggle is itself a disturbance.
+**From the API / serial (automation):** put the device on WiFi so it has an IP
+address, start a job with `Invoke-RestMethod -Method Post -Uri
+http://<ip>/api/noisematrix` (or `curl -X POST http://<ip>/api/noisematrix`),
+then poll `Invoke-RestMethod http://<ip>/api/noisematrix` until `status` is
+`done` — or watch the serial log on COM7 at 115200 baud: the job prints one
+`NB <run> <channel>: …` line per channel per run, then `NB DONE`.
+
+**Reading the numbers:** `sigma_mv` is the wobble (the number to compare
+between runs); `pp_mv` is the worst single jump. The `_lsb` fields are the same
+statistics in ADC code counts (1 count ≈ 3.3 V / 4095 ≈ 0.806 mV — this is the
+"LSB" the sensor conversions use, not a calibrated eFuse value). `interval_ms`
+reports the sampling period actually achieved.
 
 **Pass target (sensor plan D3, pin-referred):** a run's wobble (`sigma`) should
 add no more than 0.5 ADC counts ≈ 0.40 mV on any pin compared with `idle`. This
