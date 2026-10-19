@@ -210,6 +210,11 @@ int BACKLIGHT_BRIGHTNESS = 100;
 // Backlight LEDC PWM frequency, Hz (1-40 kHz). The 12 kHz default sits above
 // the audible range - the old fixed 1 kHz made the panel and its wiring whine.
 int BL_PWM_HZ = 12000;
+// Display-ribbon pad drive strength (0 = chip default, 1..3 = GPIO_DRIVE_CAP_0
+// ..CAP_2). The panel lines are the loudest on-board aggressor; weaker drivers
+// mean slower edges and less coupling into the analog corridor. Bench knob -
+// 0 ships as the default so nothing changes until a level is proven.
+int TFT_DRIVE = 0;
 bool ENABLE_AUTO_BRIGHTNESS = true;
 int LIGHT_SENSOR_DARK_VAL = 432;
 int LIGHT_SENSOR_BRIGHT_VAL = 2851;
@@ -539,6 +544,8 @@ static const CfgParam CFG_TABLE[] = {
   { &BACKLIGHT_BRIGHTNESS, "BACKLIGHT_BRIGHTNESS", "BL_BRIGHT", nullptr, 0, 100, 100, 0.0f, 0.0f, 0.0f, 0, CK_INT },
 
   { &BL_PWM_HZ, "BL_PWM_HZ", "BL_PWM", nullptr, 1000, 40000, 12000, 0.0f, 0.0f, 0.0f, 0, CK_INT },
+
+  { &TFT_DRIVE, "TFT_DRIVE", "TFT_DRV", nullptr, 0, 3, 0, 0.0f, 0.0f, 0.0f, 0, CK_INT },
 
   { &ENABLE_AUTO_BRIGHTNESS, "ENABLE_AUTO_BRIGHTNESS", "EN_AUTO_BL", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
 

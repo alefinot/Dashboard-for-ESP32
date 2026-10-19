@@ -284,6 +284,7 @@ extern bool DISPLAY_INVERT_COLORS;
 extern int TARGET_FPS;
 extern int BACKLIGHT_BRIGHTNESS;
 extern int BL_PWM_HZ;
+extern int TFT_DRIVE;
 extern bool ENABLE_AUTO_BRIGHTNESS;
 extern int LIGHT_SENSOR_DARK_VAL;
 extern int LIGHT_SENSOR_BRIGHT_VAL;

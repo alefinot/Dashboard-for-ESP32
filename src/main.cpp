@@ -50,6 +50,23 @@ void applyBacklight(int percent) {
   ledcWrite(BL_DISPLAY, duty);
 }
 
+// Display-ribbon drive strength (bench knob, default off). The panel lines are
+// the loudest on-board aggressor the analog corridor runs beside, and the
+// radiated edge rate scales with the pad driver current. TFT_DRIVE levels 1..3
+// select GPIO_DRIVE_CAP_0 (5 mA), CAP_1 (10 mA), CAP_2 (20 mA) on the five
+// ribbon outputs; 0 leaves the chip default in place, which ships. Applied
+// after display.init() and after every bus reconfig - both run the pin setup
+// the knob has to follow.
+static const int TFT_DRIVE_PINS[5] = {18, 23, SPI_DC, CS_DISPLAY, SPI_RST};
+
+static void applyTftDrive() {
+  if (TFT_DRIVE < 1) return;
+  gpio_drive_cap_t cap = (gpio_drive_cap_t)(TFT_DRIVE - 1);
+  for (int i = 0; i < 5; i++)
+    gpio_set_drive_capability((gpio_num_t)TFT_DRIVE_PINS[i], cap);
+  logPrintf("TFT drive: ribbon pins at level %d\n", TFT_DRIVE);
+}
+
 // Config-save handoff (issue #10): the web task parses and writes the config,
 // the display loop applies the panel-bus and CPU-frequency changes at a frame
 // gap, and no frame is painted while the parameter group is being rewritten.
@@ -287,6 +304,7 @@ void setup() {
   logPrintf("display.init() start\n");
   bool initOk = display.init();
   logPrintf("display.init() done ok=%d\n", (int)initOk);
+  applyTftDrive();
   display.setRotation(DISPLAY_ROTATION);
   logPrintf("setRotation done\n");
 
@@ -415,6 +433,9 @@ static void processConfigApply() {
     if (!ledcChangeFrequency(BL_DISPLAY, (uint32_t)BL_PWM_HZ, 8))
       logPrintf("*** LEDC freq change failed (%u Hz) ***\n", (unsigned)BL_PWM_HZ);
     ledcWrite(BL_DISPLAY, constrain(currentBrightnessTarget, 0, 255));
+    // applyBusConfig() re-runs the bus pin setup, so the (possibly changed)
+    // drive-strength knob has to be re-asserted after it.
+    applyTftDrive();
     forceFullRedraw = true;
   }
   if (pendingCpuReeval) {
