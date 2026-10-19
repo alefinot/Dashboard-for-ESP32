@@ -451,6 +451,8 @@ The management portal features a modern grouped card-based layout:
 | `/api/sensors` | `GET` | Reads calibrated battery voltage (`v`) and coolant temperature (`t`) | None | `application/json` |
 | `/api/fuel` | `GET` | Reads the fuel input: `raw` averaged ADC code, `liters`, `pct`, `ohm` sender resistance, `st` input state (0 = disabled, 1 = ok, 2 = open circuit, 3 = shorted) | None | `application/json` |
 | `/api/live` | `GET` | Single 1 Hz snapshot for the Web UI's live readings: `ambient`, `odo` (km), `fuel_raw`, `fuel_ohm`, `fuel_st`, `volts`, `temp`. One response feeds all five cells, so they always show the same instant | None | `application/json` |
+| `/api/noisematrix` | `GET` | Noise-bench snapshot: `status` (`never` / `running` / `done`), completed runs, and per run / per channel `mean`, `sigma` and peak-to-peak in mV and ADC codes (`_mv` / `_lsb`) | None | `application/json` |
+| `/api/noisematrix` | `POST` | Starts the four-run sensor noise bench (`idle`, `tft`, `bl10`, `bl90`); runs in the background for ~17 s, so poll the `GET`. Answers `409` while a job is running | None | `application/json` |
 | `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `application/json` (`{"status":"ok"\|"saved-ram-only","value":N}` — `saved-ram-only` means the value is applied but the NVS write failed) |
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `application/json` (same shape as `cal-dark`) |
 | `/api/ota` | `POST` | Over-The-Air firmware binary upload | Binary `.bin` payload | `multipart/form-data` |
@@ -460,6 +462,49 @@ The management portal features a modern grouped card-based layout:
 | `/api/perf` | `GET` | Live telemetry (CPU, Heap, task stack headroom, FPS, WiFi, partitions), plus the web task's own timing: `web_serve_ms_last` / `web_serve_ms_max` (what one `handleClient()` pass costs) and `web_slow_iters` (loop iterations over 100 ms) | None | `application/json` |
 | `/api/health` | `GET` | Health probe: heap, FPS, partition layout and the NVS entry budget (`nvs_bytes`, `nvs_entries_used` / `_available` / `_total`) | None | `application/json` |
 | `/api/boot` | `GET` | Boot/reboot forensics (reset reason, storm, last-reboot tag, heap watermark). `reset_reason` covers the whole core enum — `POWERON`, `EXT`, `SW (clean restart)`, `PANIC (crash/abort)`, `INT_WDT`, `TASK_WDT`, `WDT (other)`, `DEEP_SLEEP_WAKE`, `BROWNOUT`, `SDIO`, `USB`, `JTAG`, `EFUSE_ERR`, `PWR_GLITCH`, `CPU_LOCKUP`, `UNKNOWN`; anything unmapped prints `RST_<n>` (issue #42) | None | `application/json` |
+
+### Noise Bench
+
+A bench instrument (master plan step 8) that answers "how steady are the sensor
+readings, and what on the board makes them wobble?" It samples the four real
+sensor inputs — `BAT_SNS`/GPIO35, `COOL_SNS`/GPIO36, `LDR_SNS`/GPIO34,
+`FUEL_SNS`/GPIO32 — 4,000 times per channel at ~1 kS/s and reports mean,
+standard deviation and peak-to-peak in millivolts and ADC code counts. The four
+runs are normal running conditions only: `idle`, `tft` (full-frame repaint on
+every display tick), `bl10` and `bl90` (backlight held at 10 % / 90 %).
+
+The sensor task pauses its own ADC reads while a job runs (ADC1 has one
+converter), so the dashboard keeps animating but its sensor values hold for the
+~17 s duration. Nothing is written to NVS; the result is transient.
+
+**Procedure**
+
+1. Power the board as it will run in the vehicle (12 V on J1, real sensors on
+   their connectors — the battery divider is on-board, the coolant NTC, LDR and
+   fuel sender plug into theirs). If no fuel sender is wired, fit a resistor
+   across `FUEL_SNS` to GND (100 Ω is a sane reference) so the pin is not
+   floating.
+2. Put the device on WiFi so it has an IP address (the Web UI works over the
+   `Dashboard_Config` AP or your LAN).
+3. Start a job: `Invoke-RestMethod -Method Post -Uri http://<ip>/api/noisematrix`
+   (or `curl -X POST http://<ip>/api/noisematrix`).
+4. Poll `Invoke-RestMethod http://<ip>/api/noisematrix` until `status` is
+   `done`, or watch the serial log on COM7 at 115200 baud — the job prints one
+   `NB <run> <channel>: …` line per channel per run, then `NB DONE`.
+5. Read the matrix. `sigma_mv` is the wobble (the number to compare between
+   runs); `pp_mv` is the worst single jump. The `_lsb` fields are the same
+   statistics in ADC code counts (1 count ≈ 3.3 V / 4095 ≈ 0.806 mV — this is
+   the "LSB" the sensor conversions use, not a calibrated eFuse value).
+   `interval_ms` reports the sampling period actually achieved.
+
+Do not touch the Web UI or the power wiring during a job — a brightness change
+or a connector wiggle is itself a disturbance.
+
+**Pass target (sensor plan D3, pin-referred):** a run's wobble (`sigma`) should
+add no more than 0.5 ADC counts ≈ 0.40 mV on any pin compared with `idle`. This
+is a design target to establish the baseline, not a hard failure; record the
+numbers before and after a board change (respin, new harness) and compare.
+
 
 ---
 

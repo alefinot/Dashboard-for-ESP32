@@ -1,6 +1,8 @@
 #include "dashboard.h"
 #include "bootinfo.h"
+#include "noisebench.h"
 #include "otasign.h"
+#include <stdarg.h>
 #include <ArduinoOTA.h>
 #include <Update.h>
 #include <ESPmDNS.h>
@@ -1996,6 +1998,68 @@ static void liveGetHandler() {
   server.send(200, "application/json", buf);
 }
 
+// ----------------------------------------------------------------------------
+// Noise bench (master plan step 8): POST starts a four-run measurement job on
+// the four sensor ADC pins, GET reports progress and the finished matrix. The
+// job runs in its own core-0 task, so neither request blocks the web server.
+// Bench instrument only: no config, no NVS, no WebUI. See README "Noise bench".
+// ----------------------------------------------------------------------------
+static void nbCatf(char *buf, size_t cap, size_t *used, const char *fmt, ...) {
+  if (*used >= cap - 1) return;
+  va_list args;
+  va_start(args, fmt);
+  int n = vsnprintf(buf + *used, cap - *used, fmt, args);
+  va_end(args);
+  if (n <= 0) return;
+  *used += (size_t)n;
+  if (*used > cap - 1) *used = cap - 1;
+}
+
+static void noiseMatrixGetHandler() {
+  NoiseBenchResult res;
+  noiseBenchSnapshot(&res);
+  static char buf[4096];  // web task is the only caller (rule 14: static)
+  size_t used = 0;
+  const char *status = res.state == NOISE_BENCH_RUNNING ? "running"
+                       : res.state == NOISE_BENCH_DONE  ? "done"
+                                                        : "never";
+  nbCatf(buf, sizeof(buf), &used,
+         "{\"status\":\"%s\",\"runs\":%u,\"job_ms\":%lu,\"list\":[", status,
+         (unsigned)res.completed, (unsigned long)res.jobMs);
+  for (uint8_t i = 0; i < res.completed; i++) {
+    const NoiseBenchRun &run = res.run[i];
+    nbCatf(buf, sizeof(buf), &used,
+           "%s{\"id\":\"%s\",\"samples\":%lu,\"interval_ms\":%.2f,\"ch\":[",
+           i ? "," : "", run.id, (unsigned long)run.samples,
+           (double)run.intervalMs);
+    for (uint8_t c = 0; c < NOISE_BENCH_CHANNELS; c++) {
+      const NoiseBenchChannel &ch = run.ch[c];
+      nbCatf(buf, sizeof(buf), &used,
+             "%s{\"id\":\"%s\",\"mean_mv\":%.2f,\"sigma_mv\":%.2f,"
+             "\"pp_mv\":%.2f,\"mean_lsb\":%.2f,\"sigma_lsb\":%.2f,"
+             "\"pp_lsb\":%.0f}",
+             c ? "," : "", ch.id, (double)ch.meanMv, (double)ch.sigmaMv,
+             (double)ch.ppMv, (double)ch.meanLsb, (double)ch.sigmaLsb,
+             (double)ch.ppLsb);
+    }
+    nbCatf(buf, sizeof(buf), &used, "]}");
+  }
+  nbCatf(buf, sizeof(buf), &used, "]}");
+  server.send(200, "application/json", buf);
+}
+
+static void noiseMatrixPostHandler() {
+  uint8_t r = noiseBenchStart();
+  if (r == NOISE_BENCH_START_OK) {
+    server.send(200, "application/json",
+                "{\"status\":\"started\",\"runs\":4,\"samples\":4000}");
+  } else if (r == NOISE_BENCH_START_BUSY) {
+    server.send(409, "application/json", "{\"status\":\"busy\"}");
+  } else {
+    server.send(500, "application/json", "{\"status\":\"failed\"}");
+  }
+}
+
 static void ambientCalDarkPostHandler() {
   LIGHT_SENSOR_DARK_VAL = ambientLightValue;
   bool saved = false;
@@ -2473,6 +2537,11 @@ void webServerTask(void *pvParameters) {
 
   // One combined snapshot for the WebUI's live readings - see liveGetHandler.
   server.on("/api/live", HTTP_GET, liveGetHandler);
+
+  // Noise bench (master plan step 8): POST starts a job on the four sensor ADC
+  // pins, GET returns progress / the finished matrix. No config, no NVS.
+  server.on("/api/noisematrix", HTTP_GET, noiseMatrixGetHandler);
+  server.on("/api/noisematrix", HTTP_POST, noiseMatrixPostHandler);
 
   server.on("/api/ambient/cal-dark", HTTP_POST, ambientCalDarkPostHandler);
 

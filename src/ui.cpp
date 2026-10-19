@@ -1,4 +1,5 @@
 #include "dashboard.h"
+#include "noisebench.h"
 // Font data lives in gfx.cpp only (loadVLWFont / getVLWData120); this file
 // never touches the arrays, so the font headers are not included here.
 
@@ -2254,7 +2255,9 @@ void checkNightMode(const SensorSnapshot &snap) {
       // percent->duty conversion and the 0..100 limit, and it keeps
       // currentBrightnessTarget aligned so the sleep/wake fades ramp from the
       // level night mode actually left the panel at.
-      applyBacklight(isNightModeActive ? NIGHT_BACKLIGHT : BACKLIGHT_BRIGHTNESS);
+      // The noise bench holds an explicit backlight level for bl10/bl90.
+      if (!noiseBenchHoldBl)
+        applyBacklight(isNightModeActive ? NIGHT_BACKLIGHT : BACKLIGHT_BRIGHTNESS);
     }
   }
 }

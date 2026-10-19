@@ -1,5 +1,6 @@
 #include "dashboard.h"
 #include "bootinfo.h"
+#include "noisebench.h"
 #include <stdarg.h>
 
 char logBuf[LOG_BUF_SIZE];
@@ -463,7 +464,8 @@ void loop() {
     pendingBacklightValue = -1;
   }
 
-  if (ENABLE_AUTO_BRIGHTNESS) {
+  // The noise bench holds an explicit backlight level for its bl10/bl90 runs.
+  if (ENABLE_AUTO_BRIGHTNESS && !noiseBenchHoldBl) {
     static int autoBrightTarget = -1;
     static float autoBrightPwmF = -1.0f;
     static unsigned long lastAutoBrightMs = 0;
@@ -618,6 +620,9 @@ void loop() {
     }
     lastSensorTickSeen = g_sensorLastTickMs;
   }
+
+  // Noise bench condition "tft": every display tick repaints the whole panel.
+  if (noiseBenchTft) forceFullRedraw = true;
 
   // DISPLAY_REFRESH_MS can never be 0: TARGET_FPS is band-checked to 5..120
   // (issue #36), so the old "unlimited" special case was dead code.

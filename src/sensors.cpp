@@ -1,4 +1,5 @@
 #include "dashboard.h"
+#include "noisebench.h"
 #include "esp_rom_sys.h"
 #include "driver/gpio.h"
 #include "soc/gpio_reg.h"
@@ -2139,20 +2140,25 @@ void sensorTask(void *pvParameters) {
     if (ENABLE_DEMO_MODE)
       simulateRawSensors(); // synthetic hall pulses; the analog
                            // read sites inject their own simulated raw values
-    {
-      unsigned long tStage = millis();
-      processLightSensor();
-      sensorStageDiag("light", tStage);
-    }
-    {
-      unsigned long tStage = millis();
-      processFuelSensor();
-      sensorStageDiag("fuel", tStage);
-    }
-    {
-      unsigned long tStage = millis();
-      processTemperatureSensor();
-      sensorStageDiag("temp", tStage);
+    // The noise bench owns ADC1 while a job runs: concurrent conversions would
+    // corrupt both streams, so the analog stages pause (the job's wrapper at
+    // the bottom of this file sets the flag for its whole duration).
+    if (!noiseBenchAdcHold) {
+      {
+        unsigned long tStage = millis();
+        processLightSensor();
+        sensorStageDiag("light", tStage);
+      }
+      {
+        unsigned long tStage = millis();
+        processFuelSensor();
+        sensorStageDiag("fuel", tStage);
+      }
+      {
+        unsigned long tStage = millis();
+        processTemperatureSensor();
+        sensorStageDiag("temp", tStage);
+      }
     }
     updateAccelTimer();
     processTripResetButton();
@@ -2162,7 +2168,7 @@ void sensorTask(void *pvParameters) {
     unsigned long nowSensor = millis();
     if (nowSensor - lastSlowRead >= 500) {
       lastSlowRead = nowSensor;
-      processBatterySensor();
+      if (!noiseBenchAdcHold) processBatterySensor();
     }
     if (nowSensor - lastVerySlowRead >= 1000) {
       lastVerySlowRead = nowSensor;
