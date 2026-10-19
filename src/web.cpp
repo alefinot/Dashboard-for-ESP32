@@ -1018,8 +1018,12 @@ bool startWeatherFetch() {
   weatherTaskStartedMs = millis();
   weatherAbort = false;
   weatherAbandoned = false;
+  // tskIDLE_PRIORITY for the same reason as OtaPullTask: if WEATHER_* points at
+  // an https URL, the TLS handshake is a multi-second CPU-bound burst that
+  // would starve IDLE0 on core 0 and trip the task watchdog.
   BaseType_t res = xTaskCreatePinnedToCore(weatherFetchTask, "WeatherFetchTask",
-                                           8192, NULL, 1, &weatherTaskHandle, 0);
+                                           8192, NULL, tskIDLE_PRIORITY,
+                                           &weatherTaskHandle, 0);
   if (res != pdPASS) {
     logPrintf("Weather: task creation failed, will retry\n");
     weatherTaskRunning = false;
@@ -1052,8 +1056,16 @@ void startOtaPull(bool manual, bool skipThrottle) {
   otaPullManualFlag = manual;
   otaPullTaskRunning = true;
   uint32_t args = (uint32_t)(manual ? 1 : 0) | (uint32_t)(skipThrottle ? 2 : 0);
+  // tskIDLE_PRIORITY on purpose. The TLS handshake this task performs (mbedTLS
+  // EC math in WiFiClientSecure::connect) is a multi-second CPU-bound burst
+  // with no yield points inside it. At priority 1 on core 0 it starved IDLE0
+  // past the IDF task-watchdog limit, and the watchdog aborted the chip: the
+  // once-per-boot OTA check on WiFi join turned every boot into a boot loop.
+  // At priority 0 FreeRTOS time-slices it against IDLE0, so the watchdog stays
+  // fed and the handshake just takes longer (HTTP timeout bounds the wait).
   BaseType_t res = xTaskCreatePinnedToCore(otaPullTask, "OtaPullTask", 16384,
-                                           (void *)(uintptr_t)args, 1, NULL, 0);
+                                           (void *)(uintptr_t)args,
+                                           tskIDLE_PRIORITY, NULL, 0);
   if (res != pdPASS) {
     logPrintf("OTA Pull: task creation failed\n");
     otaPullTaskRunning = false;
@@ -1290,7 +1302,10 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
           // GitHub API gzips responses by default, which the ESP32 cannot decode
           http.addHeader("Accept-Encoding", "identity");
 
+          unsigned long getStartMs = millis();
           httpCode = http.GET();
+          logPrintf("OTA Pull: manifest GET %d in %lums (heap=%lu)\n", httpCode,
+                    millis() - getStartMs, (unsigned long)ESP.getFreeHeap());
           if (httpCode == HTTP_CODE_OK) {
             payload = http.getString();
             logPrintf("OTA Pull: manifest %d bytes, heap free=%lu\n", payload.length(),
