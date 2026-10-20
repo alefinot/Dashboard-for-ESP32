@@ -16,9 +16,13 @@ __pycache__/
 
 # Impeccable design context (local only). PRODUCT.md is the product record an
 # init interview produced (positioning, audience, open decisions); .impeccable/
-# holds its workflow config. Strategy notes, not firmware - same no-push policy
-# as Implementation plans/ and site/. The MIT grant in LICENSE is the public half.
+# holds its workflow config plus the generated design.json sidecar; DESIGN.md is
+# the visual-system reference extracted from src/webui.html for agents to read.
+# All three are reference for whoever (or whatever) works here next, not firmware
+# - same no-push policy as Implementation plans/ and site/. The MIT grant in
+# LICENSE is the public half.
 PRODUCT.md
+DESIGN.md
 .impeccable/
 
 # graphify knowledge-graph tooling and outputs (local only)
