@@ -1243,7 +1243,10 @@ static int repairFuelTable(const char *when) {
 static void fillFuelTableFromOhms(const char *why) {
   const int n = constrain(FUEL_TOUCH_POINTS, 2, MAX_TOUCH_POINTS);
   float e = FUEL_OHM_EMPTY, f = FUEL_OHM_FULL;
-  if (!(fabsf(f - e) > 0.5f)) f = e + 170.0f;  // degenerate range guard
+  if (!(fabsf(f - e) > 0.5f)) {
+    f = e + 170.0f;
+    FUEL_OHM_FULL = f;
+  }
   for (int i = 0; i < n; i++)
     fuelCalOhms[i] = e + (f - e) * (float)i / (float)(n - 1);
   logPrintf("Fuel: %d-point table rebuilt as a linear ramp (%s, %.1f..%.1f "
@@ -1301,6 +1304,12 @@ void sanitizeConfigPairs() {
     logPrintf("Config: FUEL_WARN_RED=%d above FUEL_WARN_YEL=%d, lowered\n",
               FUEL_WARN_RED, FUEL_WARN_YEL);
     FUEL_WARN_RED = FUEL_WARN_YEL;
+  }
+  if (!(fabsf(FUEL_OHM_FULL - FUEL_OHM_EMPTY) > 0.5f)) {
+    logPrintf("Config: FUEL_OHM_FULL=%.1f too close to FUEL_OHM_EMPTY=%.1f, "
+              "using %.1f\n",
+              FUEL_OHM_FULL, FUEL_OHM_EMPTY, FUEL_OHM_EMPTY + 170.0f);
+    FUEL_OHM_FULL = FUEL_OHM_EMPTY + 170.0f;
   }
   // Automatic brightness compares the light sensor against these two values.
   if (LIGHT_SENSOR_DARK_VAL >= LIGHT_SENSOR_BRIGHT_VAL) {
