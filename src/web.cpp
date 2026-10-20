@@ -1095,6 +1095,28 @@ struct OtaHeapGuard {
   }
 };
 
+// Bounds a body read to the Content-Length reported by http.getSize(). The
+// connection is keep-alive, so the raw TLS stream never reaches EOF on its own;
+// this makes the end of the manifest explicit for the streaming JSON parser.
+class LimitedStream : public Stream {
+public:
+  LimitedStream(Stream *stream, size_t limit)
+      : _stream(stream), _left(limit) {}
+  int available() override { return _left ? _stream->available() : 0; }
+  int read() override {
+    if (_left == 0) return -1;
+    int c = _stream->read();
+    if (c >= 0) _left--;
+    return c;
+  }
+  int peek() override { return _left ? _stream->peek() : -1; }
+  size_t write(uint8_t) override { return 0; }
+
+private:
+  Stream *_stream;
+  size_t _left;
+};
+
 // A refused connection is often a rate limiter or the CDN telling us to back
 // off. Rapid retries only burn connections (and lwIP pbufs) and make the
 // refusal last longer, so throttle any check to one per minute.
@@ -1284,7 +1306,23 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
       logPrintf("OTA Pull: DNS FAILED for %s\n", host);
     }
 
-    String payload;
+    // Parse straight off the TLS stream instead of buffering the body:
+    // HTTPClient::getString() reserves the whole body after the handshake,
+    // where the largest free block is only a few KB. Its reserve() then fails
+    // silently and returns an empty String, which surfaced as "invalid
+    // manifest JSON" for GitHub's ~8 KB release JSON (a 12 KB body reproduced
+    // it; 8 KB happened to fit). Incremental parsing needs no body buffer, and
+    // the filter keeps the JsonDocument small.
+    JsonDocument doc;
+    JsonDocument filter;
+    filter["version"] = true;
+    filter["firmware_url"] = true;
+    filter["tag_name"] = true;
+    filter["assets"][0]["name"] = true;
+    filter["assets"][0]["browser_download_url"] = true;
+    bool manifestParsed = false;
+    int manifestSize = -1;
+    DeserializationError manifestErr;
     int httpCode = 0;
     bool beginFailed = false;
 
@@ -1296,7 +1334,9 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
         if (!http.begin(*client, OTA_PULL_URL)) {
           beginFailed = true;
         } else {
-          http.setTimeout(10000);
+          // The TLS handshake alone can take ~9 s on a weak link; 10 s left no
+          // room for the body.
+          http.setTimeout(20000);
           http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
           http.addHeader("Cache-Control", "no-cache");
           // GitHub API gzips responses by default, which the ESP32 cannot decode
@@ -1307,9 +1347,25 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
           logPrintf("OTA Pull: manifest GET %d in %lums (heap=%lu)\n", httpCode,
                     millis() - getStartMs, (unsigned long)ESP.getFreeHeap());
           if (httpCode == HTTP_CODE_OK) {
-            payload = http.getString();
-            logPrintf("OTA Pull: manifest %d bytes, heap free=%lu\n", payload.length(),
-                      (unsigned long)ESP.getFreeHeap());
+            manifestSize = http.getSize();
+            DeserializationError err;
+            if (manifestSize > 0) {
+              LimitedStream body(http.getStreamPtr(), manifestSize);
+              err = deserializeJson(doc, body,
+                                    DeserializationOption::Filter(filter));
+            } else {
+              // No Content-Length (chunked): getString() decodes the framing.
+              // Custom manifests are tiny, so the reserve path is fine.
+              String payload = http.getString();
+              err = deserializeJson(doc, payload,
+                                    DeserializationOption::Filter(filter));
+            }
+            manifestErr = err;
+            manifestParsed = !err;
+            logPrintf("OTA Pull: manifest size=%d parse=%s heap=%lu maxAlloc=%lu\n",
+                      manifestSize, err.c_str(),
+                      (unsigned long)ESP.getFreeHeap(),
+                      (unsigned long)ESP.getMaxAllocHeap());
           } else {
             logPrintf("OTA Pull: attempt %d/%d -> HTTP %d (%s)\n", attempt + 1, 3,
                       httpCode, HTTPClient::errorToString(httpCode).c_str());
@@ -1327,7 +1383,7 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
         setOtaPullStatus(("error: connection begin failed" + diag).c_str());
         return;
       }
-      if (httpCode == HTTP_CODE_OK) break;
+      if (manifestParsed) break;
       if (attempt < 2) delay(2000);
     }
 
@@ -1340,32 +1396,24 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
       return;
     }
 
-    String latestVersion;
-    String firmwareUrl;
-    {
-      // JsonDocument scoped: freed right after the manifest is parsed.
-      JsonDocument doc;
-      DeserializationError err = deserializeJson(doc, payload);
-      if (err) {
-        logPrintf("OTA Pull: JSON parse error: %s\n", err.c_str());
-        setOtaPullStatus("error: invalid manifest JSON");
-        return;
-      }
+    if (!manifestParsed) {
+      logPrintf("OTA Pull: manifest parse failed: %s\n", manifestErr.c_str());
+      setOtaPullStatus(("error: manifest " + String(manifestErr.c_str())).c_str());
+      return;
+    }
 
-      latestVersion = doc["version"] | doc["tag_name"] | "";
-      firmwareUrl = doc["firmware_url"] | "";
+    String latestVersion = doc["version"] | doc["tag_name"] | "";
+    String firmwareUrl = doc["firmware_url"] | "";
 
-      if (firmwareUrl.length() == 0) {
-        JsonArray assets = doc["assets"].as<JsonArray>();
-        for (JsonObject asset : assets) {
-          if (String(asset["name"] | "").endsWith(".bin")) {
-            firmwareUrl = asset["browser_download_url"] | "";
-            break;
-          }
+    if (firmwareUrl.length() == 0) {
+      JsonArray assets = doc["assets"].as<JsonArray>();
+      for (JsonObject asset : assets) {
+        if (String(asset["name"] | "").endsWith(".bin")) {
+          firmwareUrl = asset["browser_download_url"] | "";
+          break;
         }
       }
     }
-    payload = String();   // drop the manifest body buffer now that it is parsed
 
     if (latestVersion.length() == 0 || firmwareUrl.length() == 0) {
       logPrintf("OTA Pull: invalid manifest (missing version/firmware_url)\n");
