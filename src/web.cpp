@@ -2488,7 +2488,7 @@ void webServerTask(void *pvParameters) {
   // config server is up, so the config page is reachable via the AP within
   // ~1s of boot even while the ESP keeps trying to join a LAN network.
   const int MAX_WIFI_NETS = 5;
-  struct WifiNetwork { const char *ssid; const char *pass; };
+  struct WifiNetwork { const char *ssid; const char *pass; int slot; };
   WifiNetwork wifiNets[MAX_WIFI_NETS];
   int wifiNetCount = 0;
 
@@ -2500,11 +2500,11 @@ void webServerTask(void *pvParameters) {
   // boundaries, where staNetIdx restarts at 0, so indices never shift mid-cycle.
   auto buildWifiList = [&]() {
     wifiNetCount = 0;
-    wifiNets[wifiNetCount++] = {WIFI_SSID, WIFI_PASSWORD};
-    if (WIFI_SSID_1[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_1, WIFI_PASSWORD_1};
-    if (WIFI_SSID_2[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_2, WIFI_PASSWORD_2};
-    if (WIFI_SSID_3[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_3, WIFI_PASSWORD_3};
-    if (WIFI_SSID_4[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_4, WIFI_PASSWORD_4};
+    wifiNets[wifiNetCount++] = {WIFI_SSID, WIFI_PASSWORD, 0};
+    if (WIFI_SSID_1[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_1, WIFI_PASSWORD_1, 1};
+    if (WIFI_SSID_2[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_2, WIFI_PASSWORD_2, 2};
+    if (WIFI_SSID_3[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_3, WIFI_PASSWORD_3, 3};
+    if (WIFI_SSID_4[0] != 0) wifiNets[wifiNetCount++] = {WIFI_SSID_4, WIFI_PASSWORD_4, 4};
   };
   buildWifiList();
 
@@ -2800,8 +2800,12 @@ void webServerTask(void *pvParameters) {
         staFinalized = false;
         staPhase = STA_INIT;
       } else {
-      int want = s_wifiSearchIdx;
-      if (want < 0 || want >= wifiNetCount || strlen(wifiNets[want].ssid) == 0) want = 0;
+      int want = 0;
+      if (s_wifiSearchIdx >= 0) {
+        for (int i = 0; i < wifiNetCount; i++) {
+          if (wifiNets[i].slot == s_wifiSearchIdx) { want = i; break; }
+        }
+      }
       if (staConnected && want == staNetIdx) {
         logPrintf("WiFi: %s is already the connected network\n", wifiNets[staNetIdx].ssid);
       } else {
@@ -2963,7 +2967,7 @@ void webServerTask(void *pvParameters) {
           // instead of walking a hand-ordered primary/fallback list.
           strncpy(s_joinedSsid, wifiNets[staNetIdx].ssid, sizeof(s_joinedSsid) - 1);
           s_joinedSsid[sizeof(s_joinedSsid) - 1] = 0;
-          wifiRotateToTop(staNetIdx);
+          wifiRotateToTop(wifiNets[staNetIdx].slot);
           // The rotation moved this network to slot 0, and wifiNets[] points at
           // the globals, so the connected network is now index 0. Keeping the
           // old index would make later logs and the picker name the wrong row.
