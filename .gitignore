@@ -14,6 +14,13 @@ __pycache__/
 # Agent session/tooling dirs (local only)
 .pi/
 
+# Impeccable design context (local only). PRODUCT.md is the product record an
+# init interview produced (positioning, audience, open decisions); .impeccable/
+# holds its workflow config. Strategy notes, not firmware - same no-push policy
+# as Implementation plans/ and site/. The MIT grant in LICENSE is the public half.
+PRODUCT.md
+.impeccable/
+
 # graphify knowledge-graph tooling and outputs (local only)
 graphify-out/
 graphify-watch.bat
