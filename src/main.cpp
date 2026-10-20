@@ -305,6 +305,7 @@ void setup() {
   logPrintf("display.init() start\n");
   bool initOk = display.init();
   logPrintf("display.init() done ok=%d\n", (int)initOk);
+  if (initOk) display.invertDisplay(DISPLAY_INVERT_COLORS);
   applyTftDrive();
   display.setRotation(DISPLAY_ROTATION);
   logPrintf("setRotation done\n");
