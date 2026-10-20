@@ -493,6 +493,11 @@ static void wifiJoinPostHandler() {
                 "{\"status\":\"error\",\"error\":\"passphrase too long\"}");
     return;
   }
+  if (passLen > 0 && passLen < 8) {
+    server.send(400, "application/json",
+                "{\"status\":\"error\",\"error\":\"passphrase must be 8-63 characters\"}");
+    return;
+  }
 
   int slot = -1, freeSlot = -1;
   bool matchedExisting = false;
