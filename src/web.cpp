@@ -989,17 +989,18 @@ void weatherFetchTask(void *pvParameters) {
   updateWeather();
   // Only clear the flag if this task still owns it: a finishing fetch must
   // not wipe the flag/handle of a fetch started while it was winding down.
-  xSemaphoreTake(weatherFetchMutex, portMAX_DELAY);
+  if (weatherFetchMutex) xSemaphoreTake(weatherFetchMutex, portMAX_DELAY);
   if (weatherTaskHandle == xTaskGetCurrentTaskHandle()) {
     weatherTaskRunning = false;
     weatherTaskHandle = NULL;
     weatherAbandoned = false;  // this fetch is done, abandon-request cleared with it
   }
-  xSemaphoreGive(weatherFetchMutex);
+  if (weatherFetchMutex) xSemaphoreGive(weatherFetchMutex);
   vTaskDelete(NULL);
 }
 
 bool startWeatherFetch() {
+  if (!weatherFetchMutex) return false;
   xSemaphoreTake(weatherFetchMutex, portMAX_DELAY);
   if (weatherTaskRunning) {
     // Issue #23 fallback: a fetch that was told to abort and has not come back
@@ -2454,6 +2455,10 @@ static void healthGetHandler() {
 void webServerTask(void *pvParameters) {
   otaStatusMutex = xSemaphoreCreateMutex();
   weatherFetchMutex = xSemaphoreCreateMutex();
+  if (!otaStatusMutex)
+    logPrintf("OTA: status mutex allocation failed - status updates may race\n");
+  if (!weatherFetchMutex)
+    logPrintf("Weather: mutex allocation failed - weather fetch disabled\n");
   WiFi.mode(WIFI_AP_STA);
   // Take the reconnect away from the WiFi core: with its default auto-reconnect
   // a fresh attempt is always armed on the network that just failed, which is
@@ -3062,14 +3067,16 @@ void webServerTask(void *pvParameters) {
       // the unit into SAFE MODE. The HTTP timeouts inside updateWeather() are 8 s,
       // so this request is normally answered within one checkpoint; if it is not,
       // the slot stays occupied and startWeatherFetch() refuses to stack another.
-      xSemaphoreTake(weatherFetchMutex, portMAX_DELAY);
-      if (weatherTaskRunning && !weatherAbandoned &&
-          millis() - weatherTaskStartedMs > 30000) {
-        logPrintf("Weather: fetch task stuck >30s, requesting abort (task not deleted)\n");
-        weatherAbort = true;
-        weatherAbandoned = true;
+      if (weatherFetchMutex) {
+        xSemaphoreTake(weatherFetchMutex, portMAX_DELAY);
+        if (weatherTaskRunning && !weatherAbandoned &&
+            millis() - weatherTaskStartedMs > 30000) {
+          logPrintf("Weather: fetch task stuck >30s, requesting abort (task not deleted)\n");
+          weatherAbort = true;
+          weatherAbandoned = true;
+        }
+        xSemaphoreGive(weatherFetchMutex);
       }
-      xSemaphoreGive(weatherFetchMutex);
       if (lastWeatherCheck == 0) {
         lastWeatherCheck = millis();
       }
