@@ -577,11 +577,13 @@ void setOdometerKm(double km) {
   odoMarkSaved(km);
   // The snapshot copy belongs to the g_stateMutex-protected block, so a display
   // frame cannot read the new odometer next to half-updated sensor fields.
+  bool locked = false;
   if (g_stateMutex)
-    xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(50));
-  g_sensorData.totalDistanceKm = km;
-  if (g_stateMutex)
+    locked = (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(50)) == pdTRUE);
+  if (locked) {
+    g_sensorData.totalDistanceKm = km;
     xSemaphoreGive(g_stateMutex);
+  }
   if (prefsMux)
     xSemaphoreTake(prefsMux, portMAX_DELAY);
   preferences.begin("dashboard", false);
