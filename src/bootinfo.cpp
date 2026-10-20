@@ -116,7 +116,10 @@ void bootinfo_init() {
     prevBootWasLong = 0;
   }
   bootCount++;
-  if (prevBootWasLong || bootCount > 10) bootCount = 1;
+  if (prevBootWasLong)
+    bootCount = 1;
+  else if (bootCount > 10)
+    bootCount = 10;
   s_bootCountNow = bootCount;
   s_stormActive = (bootCount >= 4);
   prevBootWasLong = 0;  // this boot has not survived long yet
