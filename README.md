@@ -829,6 +829,7 @@ A networked unit rebooted forever: every boot joined Wi-Fi, started the once-per
 - `OtaPullTask` now runs at `tskIDLE_PRIORITY` (0): FreeRTOS time-slices it against IDLE0, the watchdog stays fed, and the handshake simply takes longer. On the bench the same manifest GET completed in 8,635 ms — `OTA Pull: manifest GET 200 in 8635ms (heap=50012)`, the new timing line — with the dashboard at 60 fps and no watchdog hits.
 - `WeatherFetchTask` gets the same priority: `WEATHER_*` may point at an https URL, which is the identical multi-second TLS burst on the same core.
 - The manifest GET now logs its duration and free heap, so a slow pull is visible in the serial log instead of looking like a hang.
+- **The manifest read itself** — with the starvation gone, the pull then failed with `error: invalid manifest JSON`. `HTTPClient::getString()` reserves the whole body *after* the TLS handshake, where the largest free block is only a few KB; a failed `reserve()` silently returns an empty `String`. GitHub's ~8 KB release JSON sat on that boundary (a 12 KB test body reproduced the empty read exactly, 8 KB fit). The manifest is now parsed incrementally off the TLS stream (`LimitedStream` bounds it to `Content-Length`) through an ArduinoJson filter that keeps only `version`, `firmware_url`, `tag_name` and the first asset's `name`/`browser_download_url`, so no body-sized allocation is needed. Retries now key off the parse result rather than the HTTP code, the timeout is 20 s (the handshake alone can take ~9 s), and the log line reports `size/parse/heap/maxAlloc`.
 
 **Boot/reboot forensics: the storm latch finally latches** — the RTC-persistent fast-reboot counter could never rise above `boot#1`: it subtracted `esp_timer_get_time()` stamps across a reboot, but that clock restarts at 0 on every boot, so the subtraction underflowed into the "clean boot" branch every time (`boot#1 storm=0` on every banner — exactly the case where the anti-boot-loop latch was supposed to help). The stamps are replaced by an RTC mark that `bootinfo_tick()` sets once the running boot survives 120 s, and the next boot reads it to tell a clean session from a fast reboot. Verified on hardware: three quick reboots climbed `boot#1` → `#2` → `#3` → `#4` with `storm=1` latching at the fourth, and a reboot after 130 s of healthy uptime came back as `boot#1 storm=0`.
 
@@ -838,7 +839,7 @@ A networked unit rebooted forever: every boot joined Wi-Fi, started the once-per
 - **`TFT_DRIVE`** — display-ribbon pad drive strength (0–3, default 0 = chip default; 5/10/20 mA drivers as an emissions tool, bench-gated).
 - **`WEATHER_WIDTH` / `WEATHER_HEIGHT`** — resizable weather card; stats wrap onto extra rows instead of dropping.
 
-**Size and tooling** — `RAM 25.7 %` (84,204 B of 327,680 B), `Flash 89.5 %` (1,701,767 B of the 1,900,544 B OTA slot, ~199 KB headroom). Firmware `1.4.3` signed for the cloud pull (`firmware.bin.sig`, verified with `scripts/ota_sign.py`).
+**Size and tooling** — `RAM 25.7 %` (84,204 B of 327,680 B), `Flash 89.8 %` (1,707,163 B of the 1,900,544 B OTA slot, ~193 KB headroom). Firmware `1.4.3` signed for the cloud pull (`firmware.bin.sig`, verified with `scripts/ota_sign.py`).
 
 ### V1.4.2 — live readings that never skip a second (firmware + Web UI)
 
