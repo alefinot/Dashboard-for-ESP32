@@ -816,7 +816,7 @@ void sensorTask(void *pvParameters);
 // ----------------------------------------------------------------------------
 void webServerTask(void *pvParameters);
 void checkForFirmwareUpdate(bool manual = false, bool skipThrottle = false);
-void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion);
+void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion, size_t fwSize);
 void startOtaPull(bool manual, bool skipThrottle = false);
 void processOtaMemRelease();
 extern volatile bool otaMemReleaseRequested;

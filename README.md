@@ -817,6 +817,22 @@ In Demo Mode:
 
 ## Changelog
 
+### V1.4.5 — Cloud pull survives a mid-download stall (firmware)
+
+A unit on a weak link hit `error: update.begin failed` after the download stalled and the pull tried to restart. The restart's `Update.begin()` could not allocate its 4 KB flash buffer, even though the log reported ~43 KB free.
+
+**Root cause** — the failure was masked by the diagnostic: `ESP.getMaxAllocHeap()` reports the largest block across `MALLOC_CAP_INTERNAL`, which includes IRAM, so it showed 32,756 B while the 8-bit heap had no contiguous 4 KB. A probe `malloc(4096)` returned `NULL` at the failure point. The first `Update.begin()` succeeded (681 KB written); after the stall, the abandoned TLS context left the 8-bit heap fragmented and the restart could not begin. `HTTPClient::end()` also only stops the socket when it still looks connected, so a dropped TLS session leaked its mbedTLS contexts and kept ~10 KB of the largest block unavailable for the retry's certificate verification (RSA `-0x4290`, MPI allocation failure).
+
+**The fix**
+- The manifest's firmware asset `size` (or `firmware_size`/`size` field) is captured and passed to `performFirmwareUpdate()`, so `totalSize` is known before the first GET instead of only after it.
+- The flash session is opened **before** the firmware TLS connection, and `totalSize` is kept across a signed restart, so the 4 KB `Update` buffer is allocated while the heap is still compact. This also restarts cleanly if the server ignores a `Range` request.
+- The TLS client is stopped unconditionally before deletion (download, signature and manifest paths), releasing mbedTLS contexts even after a mid-body drop.
+- The `Update.begin()` retry log now includes `err`, `running` and session state; setup has no test hooks.
+
+**Verified** — forced stall at 681 KB: signed restart, full 1,738,416-byte re-download, `signature VALID`, reboot into the new image. Transient certificate-verification failures during the retry backoff are absorbed by the existing five-attempt loop.
+
+**Size and tooling** — `RAM 25.7 %` (84,220 B of 327,680 B), `Flash 89.9 %` (1,709,043 B of the 1,900,544 B OTA slot, ~191 KB headroom). Firmware `1.4.5` signed for the cloud pull (`firmware.bin.sig`).
+
 ### V1.4.4 — WiFi slot rotation, calibration boundaries and cross-core fixes (firmware)
 
 Nine findings from a full code audit, fixed together. The two most user-visible: joining a network from the picker could rotate the wrong stored slot when the five slots had a gap, and a unit with `DISPLAY_INVERT_COLORS` enabled booted non-inverted until the next config save.

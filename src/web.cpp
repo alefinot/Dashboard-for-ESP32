@@ -1235,6 +1235,7 @@ static size_t fetchSignatureAsset(const char *firmwareUrl, uint8_t *buf,
         http.end();
       }
     }
+    client->stop();
     delete client;
     if (got > 0 && got <= cap) {
       logPrintf("OTA Pull: signature asset %zu bytes\n", got);
@@ -1286,6 +1287,7 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
 
   char fwUrl[256] = "";
   char newVer[32] = "";
+  size_t fwSize = 0;
   {
     // Everything allocated by the manifest phase (host, payload, JsonDocument,
     // version Strings) lives in this block and is destroyed before the
@@ -1324,8 +1326,11 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
     filter["version"] = true;
     filter["firmware_url"] = true;
     filter["tag_name"] = true;
+    filter["size"] = true;
+    filter["firmware_size"] = true;
     filter["assets"][0]["name"] = true;
     filter["assets"][0]["browser_download_url"] = true;
+    filter["assets"][0]["size"] = true;
     bool manifestParsed = false;
     int manifestSize = -1;
     DeserializationError manifestErr;
@@ -1381,6 +1386,7 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
         }
       }
 
+      client->stop();
       delete client;
 
       if (beginFailed) {
@@ -1410,12 +1416,14 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
 
     String latestVersion = doc["version"] | doc["tag_name"] | "";
     String firmwareUrl = doc["firmware_url"] | "";
+    fwSize = (size_t)(doc["firmware_size"] | doc["size"] | 0);
 
     if (firmwareUrl.length() == 0) {
       JsonArray assets = doc["assets"].as<JsonArray>();
       for (JsonObject asset : assets) {
         if (String(asset["name"] | "").endsWith(".bin")) {
           firmwareUrl = asset["browser_download_url"] | "";
+          fwSize = (size_t)(asset["size"] | 0);
           break;
         }
       }
@@ -1460,10 +1468,10 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
   }
   // All manifest-phase heap allocations are gone and the freed TLS region has
   // coalesced. Download with a compacted heap.
-  performFirmwareUpdate(fwUrl, newVer);
+  performFirmwareUpdate(fwUrl, newVer, fwSize);
 }
 
-void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
+void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion, size_t fwSize) {
   logPrintf("OTA Pull: downloading %s\n", firmwareUrl);
   logPrintf("OTA Pull: heap free=%lu maxAlloc=%lu\n",
             (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap());
@@ -1521,7 +1529,7 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
   const unsigned long READ_STALL_MS = 10000; // no data this long -> reconnect
   const int MAX_OTA_ATTEMPTS = 5;
 
-  int totalSize = 0;        // firmware Content-Length (from the first 200)
+  int totalSize = (fwSize > 0 && fwSize <= 0x7FFFFFFFUL) ? (int)fwSize : 0;
   size_t written = 0;       // bytes flashed so far (across resumes)
   bool updateOpen = false;
   bool stalled = false;
@@ -1534,8 +1542,10 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
   auto openFlash = [](size_t sz) -> bool {
     for (int b = 0; b < 3; b++) {
       if (otaFlashOpen(sz)) return true;
-      logPrintf("OTA Pull: Update.begin failed (try %d/3) heap=%lu maxAlloc=%lu\n",
-                b + 1, (unsigned long)ESP.getFreeHeap(),
+      logPrintf("OTA Pull: Update.begin failed (try %d/3) err=%u (%s) running=%d open=%d heap=%lu maxAlloc=%lu\n",
+                b + 1, (unsigned)Update.getError(), Update.errorString(),
+                (int)Update.isRunning(), (int)otaFlashSessionOpen,
+                (unsigned long)ESP.getFreeHeap(),
                 (unsigned long)ESP.getMaxAllocHeap());
       if (!heap_caps_check_integrity_all(true))
         logPrintf("OTA Pull: HEAP CORRUPTED\n");
@@ -1549,6 +1559,22 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
     // needs time to recover, and back-to-back TLS reconnects were hammering a
     // socket still closing out (and OOMing the handshake under fragmentation).
     if (attempt > 0) vTaskDelay(pdMS_TO_TICKS(500L + (1UL << attempt) * 1000L));
+
+    // Open the flash session before the firmware TLS connection. Update.begin's
+    // 4 KB buffer must come from the 8-bit heap; a fresh TLS context leaves no
+    // contiguous 4 KB block there after a stalled download, even though the
+    // internal heap still reports ~43 KB free (the 32 KB "max" is IRAM).
+    if (!updateOpen && totalSize > 0) {
+      if (!openFlash((size_t)totalSize)) {
+        setOtaPullStatus("error: update.begin failed");
+        break;
+      }
+      updateOpen = true;
+      otaImageHashBegin();
+      logPrintf("OTA Pull: flash open before TLS, %d bytes, heap=%lu maxAlloc=%lu\n",
+                totalSize, (unsigned long)ESP.getFreeHeap(),
+                (unsigned long)ESP.getMaxAllocHeap());
+    }
 
     WiFiClient *client = newHttpClient(firmwareUrl);
 
@@ -1587,6 +1613,7 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
                                ? "error: connection to update server failed"
                                : (("error: download HTTP " + String(httpCode)).c_str()));
           http.end();
+          client->stop();
           delete client;
           continue;
         }
@@ -1599,6 +1626,7 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
           logPrintf("OTA Pull: server sent no Content-Length, refusing\n");
           setOtaPullStatus("error: missing content-length");
           http.end();
+          client->stop();
           delete client;
           break;
         }
@@ -1606,12 +1634,14 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
           logPrintf("OTA Pull: HEAP CORRUPTED before Update.begin\n");
           setOtaPullStatus("error: heap corrupt");
           http.end();
+          client->stop();
           delete client;
           break;
         }
         if (!openFlash((size_t)totalSize)) {
           setOtaPullStatus("error: update.begin failed");
           http.end();
+          client->stop();
           delete client;
           break;
         }
@@ -1621,17 +1651,33 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
                   (unsigned long)totalSize, (unsigned long)ESP.getFreeHeap(),
                   (unsigned long)ESP.getMaxAllocHeap());
       } else if (httpCode == HTTP_CODE_OK) {
-        // Server ignored the Range header and re-sent the whole body. The only
-        // safe response is to restart the flash write and stream from zero.
-        otaFlashAbort();
-        if (!openFlash((size_t)totalSize)) {
-          setOtaPullStatus("error: update.begin failed");
+        if (written > 0) {
+          // Server ignored the Range header and re-sent the whole body. Close
+          // this connection and let the next attempt reopen the flash session
+          // before TLS; beginning on top of this connection can exhaust the
+          // fragmented 8-bit heap.
+          logPrintf("OTA Pull: server ignored Range at %zu bytes, restarting\n", written);
+          otaFlashAbort();
+          updateOpen = false;
+          written = 0;
           http.end();
+          client->stop();
           delete client;
-          break;
+          continue;
         }
-        written = 0;
-        otaImageHashBegin();
+        // written == 0: the already-open session matches this full body.
+        int gotSize = http.getSize();
+        if (gotSize > 0 && (size_t)gotSize != (size_t)totalSize) {
+          logPrintf("OTA Pull: size changed %d -> %d, restarting\n", totalSize, gotSize);
+          otaFlashAbort();
+          updateOpen = false;
+          written = 0;
+          totalSize = gotSize;
+          http.end();
+          client->stop();
+          delete client;
+          continue;
+        }
       } else if (httpCode != HTTP_CODE_PARTIAL_CONTENT) {
         logPrintf("OTA Pull: resume HTTP %d (%s)\n", httpCode,
                   HTTPClient::errorToString(httpCode).c_str());
@@ -1682,6 +1728,11 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
       if (written >= (size_t)totalSize) stalled = false; // finished, not stalled
       http.end();
     }
+    // HTTPClient::end() only stops the socket when it still looks connected.
+    // After a mid-body TLS drop it does not, which would leak the mbedTLS
+    // contexts and leave the heap too fragmented for the next handshake's
+    // certificate verification (RSA -0x4290). Stop unconditionally.
+    client->stop();
     delete client;
 
     if (!stalled) break;
@@ -1694,7 +1745,8 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion) {
       otaFlashAbort();
       updateOpen = false;
       written = 0;
-      totalSize = 0;
+      // Keep totalSize: the next attempt re-opens the flash session before the
+      // new TLS connection, while the heap still has a contiguous 4 KB block.
     } else if (written < (size_t)totalSize) {
       // Unsigned (bench) builds keep the byte-range resume behaviour.
       logPrintf("OTA Pull: reconnecting to resume at %lu/%lu (heap=%lu maxAlloc=%lu)\n",
