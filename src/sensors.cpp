@@ -498,6 +498,28 @@ static constexpr unsigned long DEBOUNCE_US = 12000UL;
 volatile int heldSpeedSourceMode = 0;
 
 double tripDistanceKm = 0.0;
+static portMUX_TYPE tripDistMux = portMUX_INITIALIZER_UNLOCKED;
+
+static double tripDistanceGet() {
+  double km;
+  portENTER_CRITICAL(&tripDistMux);
+  km = tripDistanceKm;
+  portEXIT_CRITICAL(&tripDistMux);
+  return km;
+}
+
+static void tripDistanceAdd(double dKm) {
+  portENTER_CRITICAL(&tripDistMux);
+  tripDistanceKm += dKm;
+  portEXIT_CRITICAL(&tripDistMux);
+}
+
+static void tripDistanceReset() {
+  portENTER_CRITICAL(&tripDistMux);
+  tripDistanceKm = 0.0;
+  portEXIT_CRITICAL(&tripDistMux);
+}
+
 float tripStartFuelLiters = -1.0f;
 float tripFuelConsumedLiters = 0.0f;
 float instantKml = 0.0f;
@@ -531,7 +553,7 @@ volatile bool pendingTripReset = false;
 // reset. The odometer and the session peak speed (maxSpeed) deliberately stay
 // where they are.
 void resetTripStats(const char *reason) {
-  tripDistanceKm = 0.0;
+  tripDistanceReset();
   tripFuelConsumedLiters = 0.0f;
   tripStartFuelLiters = -1.0f;  // re-arms from the next fuel reading
   movingTimeMs = 0;
@@ -540,7 +562,7 @@ void resetTripStats(const char *reason) {
   unsigned long nowMs = millis();
   lastMovingTimeCheck = nowMs;
   lastInstSampleTime = nowMs;
-  lastInstDistKm = tripDistanceKm;
+  lastInstDistKm = tripDistanceGet();
   lastInstFuelLiters = fuelLiters;
   averageKml = 0.0f;
   instantKml = 0.0f;
@@ -1452,7 +1474,7 @@ void updateGPSOdometer() {
 
   if (useHallDistance && pulses > 0) {
     double dKm = (double)pulses * WHEEL_DIST_PER_PULSE_KM;
-    tripDistanceKm += dKm;
+    tripDistanceAdd(dKm);
     if (hallRollingNow && isGpsValid && getFilteredSpeed() >= GPS_START_KMH) {
       if (driftStartMs == 0)
         driftStartMs = millis();
@@ -1470,7 +1492,7 @@ void updateGPSOdometer() {
           TinyGPSPlus::distanceBetween(fixLat, fixLon, lastLat, lastLon);
       if (distanceMeters < 500.0) {
         double dKm = (distanceMeters / 1000.0);
-        tripDistanceKm += dKm;
+        tripDistanceAdd(dKm);
         if (isDemo) {
           demoOdoKm += dKm;
         } else {
@@ -1554,19 +1576,20 @@ void processFuelConsumption() {
   // too, so a parked dashboard advertised 99.9 km/L - the best possible number -
   // instead of nothing. The cap is now reachable only through a real
   // computation; a trip with no distance or no fuel reads 0.
+  const double tripDist = tripDistanceGet();
   const bool hasTripData =
-      (tripDistanceKm > 0.05 && tripFuelConsumedLiters > 0.01f);
+      (tripDist > 0.05 && tripFuelConsumedLiters > 0.01f);
   float avgL100 = hasTripData
-                      ? (float)((tripFuelConsumedLiters / tripDistanceKm) * 100.0)
+                      ? (float)((tripFuelConsumedLiters / tripDist) * 100.0)
                       : 0.0f;
   averageKml = !hasTripData ? 0.0f
                             : ((avgL100 > 1.001f) ? (100.0f / avgL100) : 99.9f);
 
   if (millis() - lastInstSampleTime >= 3000) {
     lastInstSampleTime = millis();
-    double dDist = tripDistanceKm - lastInstDistKm;
+    double dDist = tripDist - lastInstDistKm;
     float dFuel = lastInstFuelLiters - fuelLiters;
-    lastInstDistKm = tripDistanceKm;
+    lastInstDistKm = tripDist;
     lastInstFuelLiters = fuelLiters;
     if (getFilteredSpeed() > 0.0f && dDist > 0.005 && dFuel > 0.001f) {
       // Same L/100km intermediate as the average above, then km/L. The 99.9
@@ -1591,9 +1614,10 @@ void updateAverageSpeed() {
   }
   lastMovingTimeCheck = nowMs;
 
+  const double tripDist = tripDistanceGet();
   float movingHours = movingTimeMs / 3600000.0f;
-  averageSpeed = (tripDistanceKm > 0.05 && movingHours > 0.001f)
-                     ? (float)(tripDistanceKm / movingHours)
+  averageSpeed = (tripDist > 0.05 && movingHours > 0.001f)
+                     ? (float)(tripDist / movingHours)
                      : 0.0f;
   if (averageSpeed > 299.9f)
     averageSpeed = 299.9f;
