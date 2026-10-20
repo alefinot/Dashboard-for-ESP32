@@ -2126,10 +2126,20 @@ static void noiseMatrixPostHandler() {
 
 static void ambientCalDarkPostHandler() {
   LIGHT_SENSOR_DARK_VAL = ambientLightValue;
+  bool brightAdjusted = false;
+  if (LIGHT_SENSOR_DARK_VAL >= LIGHT_SENSOR_BRIGHT_VAL) {
+    if (LIGHT_SENSOR_DARK_VAL >= 4095) LIGHT_SENSOR_DARK_VAL = 4094;
+    LIGHT_SENSOR_BRIGHT_VAL = LIGHT_SENSOR_DARK_VAL + 1;
+    brightAdjusted = true;
+  }
   bool saved = false;
   { NvsSession s("cfg", false);
-    if (s.opened())
-      saved = !nvsWriteFailed("LIGHT_DARK", s.nvs.putInt("LIGHT_DARK", LIGHT_SENSOR_DARK_VAL)); }
+    if (s.opened()) {
+      saved = !nvsWriteFailed("LIGHT_DARK", s.nvs.putInt("LIGHT_DARK", LIGHT_SENSOR_DARK_VAL));
+      if (brightAdjusted &&
+          nvsWriteFailed("LIGHT_BRIGHT", s.nvs.putInt("LIGHT_BRIGHT", LIGHT_SENSOR_BRIGHT_VAL)))
+        saved = false;
+    } }
   char buf[64];
   // The calibration is live in RAM either way; say when it did not reach NVS
   // so the Web UI can warn instead of letting the user assume it persisted.
@@ -2140,10 +2150,20 @@ static void ambientCalDarkPostHandler() {
 
 static void ambientCalBrightPostHandler() {
   LIGHT_SENSOR_BRIGHT_VAL = ambientLightValue;
+  bool darkAdjusted = false;
+  if (LIGHT_SENSOR_BRIGHT_VAL <= LIGHT_SENSOR_DARK_VAL) {
+    if (LIGHT_SENSOR_BRIGHT_VAL <= 0) LIGHT_SENSOR_BRIGHT_VAL = 1;
+    LIGHT_SENSOR_DARK_VAL = LIGHT_SENSOR_BRIGHT_VAL - 1;
+    darkAdjusted = true;
+  }
   bool saved = false;
   { NvsSession s("cfg", false);
-    if (s.opened())
-      saved = !nvsWriteFailed("LIGHT_BRIGHT", s.nvs.putInt("LIGHT_BRIGHT", LIGHT_SENSOR_BRIGHT_VAL)); }
+    if (s.opened()) {
+      saved = !nvsWriteFailed("LIGHT_BRIGHT", s.nvs.putInt("LIGHT_BRIGHT", LIGHT_SENSOR_BRIGHT_VAL));
+      if (darkAdjusted &&
+          nvsWriteFailed("LIGHT_DARK", s.nvs.putInt("LIGHT_DARK", LIGHT_SENSOR_DARK_VAL)))
+        saved = false;
+    } }
   char buf[64];
   snprintf(buf, sizeof(buf), "{\"status\":\"%s\",\"value\":%d}",
            saved ? "ok" : "saved-ram-only", LIGHT_SENSOR_BRIGHT_VAL);
