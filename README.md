@@ -817,6 +817,23 @@ In Demo Mode:
 
 ## Changelog
 
+### V1.4.4 — WiFi slot rotation, calibration boundaries and cross-core fixes (firmware)
+
+Nine findings from a full code audit, fixed together. The two most user-visible: joining a network from the picker could rotate the wrong stored slot when the five slots had a gap, and a unit with `DISPLAY_INVERT_COLORS` enabled booted non-inverted until the next config save.
+
+**Fixes**
+- **WiFi slot rotation (#60)** — `wifiNets[]` is compacted (empty slots removed), but `wifiRotateToTop()` was called with the compacted index as if it were the raw NVS slot, so a gap in the five slots made it rotate the wrong network. Each entry now carries its raw slot, and both the manual search request and the successful-join rotation map through it.
+- **Trip distance (#61)** — `tripDistanceKm` was updated from the GNSS task (core 0) and the sensor task (core 1) and read unlocked for the averages. All accesses now go through a spinlock-backed accessor, and each average samples the distance once per pass instead of reading it mid-update.
+- **Display inversion (#62)** — `DISPLAY_INVERT_COLORS` was captured by the display constructor before `processConfig()` loaded NVS, so the stored value only took effect after the next config save. `setup()` now applies it right after `display.init()`.
+- **Weather mutex (#63)** — `weatherFetchMutex` was created without checking the allocation and used unconditionally. Creation failure is now logged, `startWeatherFetch()` refuses to run, and the task/loop takes are guarded.
+- **Ambient calibration (#64)** — the dark/bright calibration endpoints wrote the measured value straight to NVS, bypassing the `dark < bright` rule enforced on config save. Each endpoint now repairs the counterpart and persists both when clamped, so the pair is valid immediately.
+- **Odometer snapshot (#65)** — `setOdometerKm()` took `g_stateMutex` with a 50 ms timeout but wrote the snapshot even when the take failed. The write now happens only under a successful take; the sensor task refreshes the snapshot from the locked odometer on its next tick.
+- **Fuel sender range (#66)** — `fillFuelTableFromOhms()` repaired a degenerate empty/full ohm range only in a local, so the ramp was right but `FUEL_OHM_FULL` stayed bad. The repair is written back to the config, and `sanitizeConfigPairs()` repairs the pair on load/save so it persists.
+- **WiFi passphrases (#67)** — `/api/wifi/join` accepted 1–7 character passphrases that the WiFi stack refuses, leaving a stored network that could never connect. They are now rejected with the 400/error path the WebUI already displays; an empty passphrase (open network / keep stored) is still accepted.
+- **Reboot storm latch (#68)** — the fast-reboot counter reset to 1 once it passed 10, so a long storm periodically dropped below the four-boot threshold and disarmed the latch. It now saturates at 10; only a long-surviving boot clears it.
+
+**Size and tooling** — `RAM 25.7 %` (84,220 B of 327,680 B), `Flash 89.9 %` (1,707,983 B of the 1,900,544 B OTA slot, ~192 KB headroom). Firmware `1.4.4` signed for the cloud pull (`firmware.bin.sig`, verified with `scripts/ota_sign.py`).
+
 ### V1.4.3 — TLS handshakes can no longer starve IDLE0: the cloud-OTA check stops boot-looping the board (firmware)
 
 A networked unit rebooted forever: every boot joined Wi-Fi, started the once-per-boot cloud update check, and ~5 s later the task watchdog aborted the chip. This release fixes the starvation, and the anti-boot-loop latch that should have caught it.
