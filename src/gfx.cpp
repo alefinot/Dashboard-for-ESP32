@@ -693,6 +693,26 @@ void updateSplashProgress(int targetProgress) {
   }
 }
 
+// The sleep path parks the panel in reset and the backlight off with RTC pad
+// holds, and enables the digital-pad auto-hold for the whole sleep. Those
+// latches live in the RTC domain and survive the wake-up reset, so on the next
+// boot every digital write to those pads is ignored: the backlight stays dark
+// and the panel stays in reset while the rest of the firmware (WiFi, web UI)
+// runs normally. Release the holds and route the pins back to the digital GPIO
+// mux before anything else touches them.
+void releaseSleepPinHolds() {
+  const gpio_num_t pins[] = {
+      (gpio_num_t)BL_DISPLAY, (gpio_num_t)SPI_RST,
+      (gpio_num_t)CS_DISPLAY, (gpio_num_t)SPI_DC,
+      (gpio_num_t)POWER_SENSE_PIN,
+  };
+  for (gpio_num_t pin : pins) {
+    rtc_gpio_hold_dis(pin);
+    rtc_gpio_deinit(pin);
+  }
+  gpio_deep_sleep_hold_dis();
+}
+
 void showGoodbyeScreen(bool isSleep) {
   if (prefsMux)
     xSemaphoreTake(prefsMux, portMAX_DELAY);

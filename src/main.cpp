@@ -173,6 +173,14 @@ void setup() {
   Serial.begin(115200);
   delay(50);
 
+  // Deep-sleep pad holds survive the wake-up reset (see releaseSleepPinHolds).
+  // Until they are released the backlight and panel control lines cannot be
+  // driven, so the unit boots with a dark screen even though everything else
+  // comes up normally.
+  releaseSleepPinHolds();
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0)
+    logPrintf("Wake from deep sleep (EXT0) - released panel pin holds\n");
+
   processConfig(0);
   // Factory-default seeding (supersedes the CFG_VER 1..4 migrations): any
   // unit whose config has not yet been seeded (CFG_VER < 5, including a

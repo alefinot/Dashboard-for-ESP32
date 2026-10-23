@@ -770,6 +770,7 @@ void resetVLWFontCache();
 void initFilesystem();
 void drawSplashBase();
 void updateSplashProgress(int targetProgress);
+void releaseSleepPinHolds();
 void showGoodbyeScreen(bool isSleep);
 void showUpdatingScreen();
 void updateOTAProgress(int progress, int total);
