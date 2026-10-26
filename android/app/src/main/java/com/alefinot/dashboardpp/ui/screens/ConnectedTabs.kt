@@ -24,6 +24,7 @@ import com.alefinot.dashboardpp.api.EspApiLane
 import com.alefinot.dashboardpp.service.TripLogService
 import com.alefinot.dashboardpp.trips.RecorderSettings
 import com.alefinot.dashboardpp.trips.TripsEnabled
+import com.alefinot.dashboardpp.webview.WebUiHolder
 import com.alefinot.dashboardpp.viewmodel.ConnectionUiState
 import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
 import com.alefinot.dashboardpp.viewmodel.TripRow
@@ -59,7 +60,16 @@ fun ConnectedTabs(
 ) {
     val context = LocalContext.current
     val activity = context as? android.app.Activity
+    // One page per connection, kept alive across tab switches, so re-entering
+    // ESP SETTINGS is a paint rather than the 1.55 s reload measured before
+    // (see WebUiHolder). The WebView itself is built lazily: someone who never
+    // opens the tab never costs the ESP a page fetch.
+    val webUi = remember(conn.ip) { activity?.let { WebUiHolder(it, conn.ip, connection) } }
     var tab by remember { mutableStateOf(AppTab.LIVE) }
+    // Has the page been opened at all this connection? After that it stays
+    // composed behind the other tabs instead of being torn down, which is what
+    // makes coming back to it instant.
+    var webSeen by remember(conn.ip) { mutableStateOf(false) }
     var openTrip by remember { mutableStateOf<TripRow?>(null) }
 
     val tripsAvailable = TripsEnabled.forFirmware(conn.version)
@@ -79,13 +89,30 @@ fun ConnectedTabs(
         }
     }
 
-    // The Web UI fetches /api/live itself; while it is on screen it is the only
-    // HTTP client and the recorder stands down (plan §4.3).
+    // The Web UI page fetches /api/live itself; while it is on screen it is the
+    // only HTTP client and the recorder stands down (plan §4.3). Since the page
+    // now stays alive between tabs, its own 1 Hz tick must be stopped while it
+    // is hidden - otherwise two pollers would hit the dashboard at once. Counted
+    // at the socket layer with `ss`: with the page hidden the app opens no
+    // connection to the ESP at all, while the page on screen opens about two per
+    // second (it fetches more than one endpoint per tick).
     LaunchedEffect(tab) {
-        EspApiLane.webUiVisible = tab == AppTab.WEB
+        val visible = tab == AppTab.WEB
+        if (visible) webSeen = true
+        EspApiLane.webUiVisible = visible
+        if (visible) {
+            webUi?.setInteractive(true)
+            webUi?.onShow()
+        } else {
+            webUi?.setInteractive(false)
+            webUi?.onHide()
+        }
     }
-    DisposableEffect(Unit) {
-        onDispose { EspApiLane.webUiVisible = false }
+    DisposableEffect(webUi) {
+        onDispose {
+            EspApiLane.webUiVisible = false
+            webUi?.release()
+        }
     }
 
     Column(Modifier.fillMaxSize().background(HudColors.Bg)) {
@@ -102,21 +129,31 @@ fun ConnectedTabs(
             TabButton("APP SETTINGS", tab == AppTab.SETTINGS) { tab = AppTab.SETTINGS }
         }
 
-        when (tab) {
-            AppTab.LIVE -> LiveTab(ip = conn.ip, active = true)
-            AppTab.WEB -> {
-                if (activity != null) {
-                    DashboardWebScreen(activity = activity, vm = connection, ip = conn.ip)
-                }
+        Box(Modifier.fillMaxSize()) {
+            // Composed once it has been opened, and kept that way: the native
+            // tabs above are opaque, so this is invisible while they are up.
+            // Letting Compose remove it is what costs the user time - the View
+            // leaves the hierarchy, Chromium drops its rendering surface, and the
+            // tab then opens as a black hole until a new surface and a first
+            // frame arrive: 0.6-1.1 s measured, even with the page still loaded.
+            // Covered instead of removed, its last frame stays warm and the tab
+            // is simply there again - filmed at 10 fps, the frame that carries
+            // the tab switch already shows the finished page.
+            if (webSeen && webUi != null) {
+                DashboardWebScreen(webUi)
             }
-            AppTab.TRIPS -> TripsTab(trips) { row -> openTrip = row }
-            AppTab.SETTINGS -> SettingsScreen(
-                vm = connection,
-                ip = conn.ip,
-                version = conn.version,
-                trips = trips,
-                tripsAvailable = tripsAvailable,
-            )
+            when (tab) {
+                AppTab.WEB -> Unit    // the page below is the content
+                AppTab.LIVE -> LiveTab(ip = conn.ip, active = true)
+                AppTab.TRIPS -> TripsTab(trips) { row -> openTrip = row }
+                AppTab.SETTINGS -> SettingsScreen(
+                    vm = connection,
+                    ip = conn.ip,
+                    version = conn.version,
+                    trips = trips,
+                    tripsAvailable = tripsAvailable,
+                )
+            }
         }
     }
 
