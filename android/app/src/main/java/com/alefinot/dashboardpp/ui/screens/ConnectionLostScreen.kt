@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.dp
 import com.alefinot.dashboardpp.ui.components.HudButton
 import com.alefinot.dashboardpp.ui.theme.HudColors
 import com.alefinot.dashboardpp.ui.theme.HudeBody
-import com.alefinot.dashboardpp.ui.theme.HudeDisplaySmall
+import com.alefinot.dashboardpp.ui.theme.HudeHeading
 import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
 
 @Composable
@@ -27,14 +27,16 @@ fun ConnectionLostScreen(vm: ConnectionViewModel, reason: String) {
         ) {
             Text(
                 "CONNECTION LOST",
+                // the state color is the point here, so the h2 keeps its own
+                // weight and size and drops the heading's gradient fill.
                 color = HudColors.Red,
-                style = HudeDisplaySmall,
+                style = HudeHeading(),
             )
             Spacer(Modifier.height(16.dp))
             Text(
                 reason,
                 color = HudColors.TextDim,
-                style = HudeBody,
+                style = HudeBody(),
             )
             Spacer(Modifier.height(32.dp))
             HudButton("SCAN AGAIN") { vm.rescan() }

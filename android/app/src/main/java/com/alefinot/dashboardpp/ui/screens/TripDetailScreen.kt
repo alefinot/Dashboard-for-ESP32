@@ -2,8 +2,6 @@ package com.alefinot.dashboardpp.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,12 +21,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.alefinot.dashboardpp.trips.TripSample
 import com.alefinot.dashboardpp.trips.TripSummary
 import com.alefinot.dashboardpp.ui.components.HudButton
+import com.alefinot.dashboardpp.ui.components.HudButtonStyle
+import com.alefinot.dashboardpp.ui.components.HudConfirmDialog
 import com.alefinot.dashboardpp.ui.components.Sparkline
 import com.alefinot.dashboardpp.ui.components.bucketMax
 import com.alefinot.dashboardpp.ui.components.hudDuration
@@ -36,11 +36,16 @@ import com.alefinot.dashboardpp.ui.components.hudNum
 import com.alefinot.dashboardpp.ui.components.StatCell
 import com.alefinot.dashboardpp.ui.map.RouteMap
 import com.alefinot.dashboardpp.ui.theme.HudColors
-import com.alefinot.dashboardpp.ui.theme.HudeDisplaySmall
-import com.alefinot.dashboardpp.ui.theme.HudeLabel
-import com.alefinot.dashboardpp.ui.theme.HudeSmall
-import com.alefinot.dashboardpp.ui.theme.HudMonoText
-import com.alefinot.dashboardpp.viewmodel.TripDetail
+import com.alefinot.dashboardpp.ui.theme.HudBrushes
+import com.alefinot.dashboardpp.ui.theme.HudeHeading
+import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
+import com.alefinot.dashboardpp.ui.theme.HudeCfgHelp
+import com.alefinot.dashboardpp.ui.theme.HudeCfgNote
+import com.alefinot.dashboardpp.ui.theme.HudePerfValue
+import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
+import com.alefinot.dashboardpp.ui.theme.HudeSectionCaps
+import com.alefinot.dashboardpp.ui.theme.HudRadius
+import com.alefinot.dashboardpp.ui.theme.hudCard
 import com.alefinot.dashboardpp.viewmodel.TripRow
 import com.alefinot.dashboardpp.viewmodel.TripsViewModel
 import org.osmdroid.util.GeoPoint
@@ -64,19 +69,21 @@ fun TripDetailScreen(row: TripRow, vm: TripsViewModel, onDismiss: () -> Unit) {
     BackHandler { onDismiss() }
 
     if (detail == null) {
-        Column(Modifier.fillMaxSize().background(HudColors.Bg).padding(16.dp)) {
-            Text("TRIP UNREADABLE", color = HudColors.Red, style = HudeDisplaySmall)
+        Column(
+            Modifier.fillMaxSize().background(HudColors.Bg).padding(16.dp),
+        ) {
+            Text("TRIP UNREADABLE", color = HudColors.Red, style = HudeSectionTitle())
             Spacer(Modifier.height(12.dp))
             Text(
                 "The file could not be parsed. It may have been removed or " +
                     "corrupted; it is still on disk unless you delete it.",
                 color = HudColors.TextDim,
-                style = HudeSmall,
+                style = HudeCfgNote(),
             )
             Spacer(Modifier.height(16.dp))
-            HudButton("DELETE FILE") { vm.delete(row); onDismiss() }
+            HudButton("DELETE FILE", style = HudButtonStyle.DANGER) { vm.delete(row); onDismiss() }
             Spacer(Modifier.height(8.dp))
-            HudButton("CLOSE", onClick = onDismiss)
+            HudButton("CLOSE", style = HudButtonStyle.SECONDARY, onClick = onDismiss)
         }
         return
     }
@@ -84,15 +91,16 @@ fun TripDetailScreen(row: TripRow, vm: TripsViewModel, onDismiss: () -> Unit) {
     val s = detail.summary
     val samples = detail.samples
 
-    Column(
-        Modifier.fillMaxSize().background(HudColors.Bg)
-            .verticalScroll(rememberScrollState()).padding(16.dp),
-    ) {
+    // The screen sits on the page's flat black; `.card` frames the map and
+    // `.perf-card` frames each chart.
+    Box(Modifier.fillMaxSize().background(HudColors.Bg)) {
+      Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+      ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(s.startMs)),
-                color = HudColors.Cyan,
-                style = HudeDisplaySmall,
+                style = HudeHeading().copy(brush = HudBrushes.titleGradient()),
             )
         }
         Spacer(Modifier.height(4.dp))
@@ -112,8 +120,8 @@ fun TripDetailScreen(row: TripRow, vm: TripsViewModel, onDismiss: () -> Unit) {
                     append(" s lost)")
                 }
             },
-            color = HudColors.TextDim,
-            style = HudeSmall,
+            color = HudColors.TextMuted,
+            style = HudeCfgHelp(),
         )
         Spacer(Modifier.height(16.dp))
 
@@ -121,12 +129,19 @@ fun TripDetailScreen(row: TripRow, vm: TripsViewModel, onDismiss: () -> Unit) {
             samples.filter { it.snapshot.hasPosition }
                 .map { GeoPoint(it.snapshot.lat, it.snapshot.lon) }
         }
+        // The map gets a glass frame; tiles are clipped to the same 12px corners.
         if (points.size >= 2) {
-            Box(Modifier.fillMaxWidth().height(260.dp).border(1.dp, HudColors.CyanDim)) {
-                RouteMap(points, Modifier.fillMaxSize())
+            Box(
+                Modifier.fillMaxWidth().height(260.dp).hudCard().padding(2.dp),
+            ) {
+                RouteMap(points, Modifier.fillMaxSize().clip(HudRadius.CardShape))
             }
         } else {
-            Box(Modifier.fillMaxWidth().height(140.dp).border(1.dp, HudColors.CyanDim).background(HudColors.Panel).padding(12.dp)) {
+            Box(
+                Modifier.fillMaxWidth().height(140.dp)
+                    .hudCard(fill = HudColors.Msg)
+                    .padding(12.dp),
+            ) {
                 Text(
                     if (points.isEmpty()) {
                         "No positions in this trip — the GNSS never had a fix, so " +
@@ -134,8 +149,8 @@ fun TripDetailScreen(row: TripRow, vm: TripsViewModel, onDismiss: () -> Unit) {
                     } else {
                         "Only one position: the fix arrived once. Nothing to draw a route from."
                     },
-                    color = HudColors.TextDim,
-                    style = HudeSmall,
+                    color = HudColors.TextMuted,
+                    style = HudeCfgNote(),
                 )
             }
         }
@@ -172,24 +187,28 @@ fun TripDetailScreen(row: TripRow, vm: TripsViewModel, onDismiss: () -> Unit) {
         Spacer(Modifier.height(16.dp))
         HudButton("SHARE CSV") { context.startActivity(vm.shareCsv(row)) }
         Spacer(Modifier.height(8.dp))
-        HudButton("SHARE GPX") { context.startActivity(vm.shareGpx(row)) }
+        HudButton("SHARE GPX", style = HudButtonStyle.SECONDARY) { context.startActivity(vm.shareGpx(row)) }
         Spacer(Modifier.height(8.dp))
-        if (!confirmDelete) {
-            HudButton("DELETE THIS TRIP") { confirmDelete = true }
-        } else {
-            Row(Modifier.fillMaxWidth()) {
-                Box(Modifier.weight(1f)) {
-                    HudButton("CONFIRM DELETE") { vm.delete(row); onDismiss() }
-                }
-                Spacer(Modifier.width(8.dp))
-                Box(Modifier.weight(1f)) {
-                    HudButton("KEEP", onClick = { confirmDelete = false })
-                }
-            }
-        }
+        HudButton("DELETE THIS TRIP", style = HudButtonStyle.DANGER) { confirmDelete = true }
         Spacer(Modifier.height(8.dp))
-        HudButton("CLOSE", onClick = onDismiss)
+        HudButton("CLOSE", style = HudButtonStyle.SECONDARY, onClick = onDismiss)
         Spacer(Modifier.height(24.dp))
+      }
+
+      if (confirmDelete) {
+        HudConfirmDialog(
+            message = "Delete this recorded trip? The CSV file goes away, and with it " +
+                "the route, the charts and the summary. Shared copies are not touched.",
+            confirmLabel = "DELETE TRIP",
+            confirmStyle = HudButtonStyle.DANGER,
+            onConfirm = {
+                confirmDelete = false
+                vm.delete(row)
+                onDismiss()
+            },
+            onDismiss = { confirmDelete = false },
+        )
+      }
     }
 }
 
@@ -202,19 +221,27 @@ private const val CHART_POINTS = 600
 
 @Composable
 private fun ChartRow(title: String, unit: String, values: List<Double>, accent: Color) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    // Each chart sits on a `.perf-card` tile: rgba(18,25,38,.8), 8px radius, hairline.
+    Column(
+        Modifier.fillMaxWidth()
+            // `.perf-card`, the tile the page puts inside a card: rgba(18,25,38,.8),
+            // 8px corners, hairline, 12px padding, no shadow of its own.
+            .hudCard(fill = HudColors.CardInner)
+            .padding(12.dp),
+    ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, color = HudColors.TextDim, style = HudeSmall)
+            Text(title, color = HudColors.Cyan, style = HudeSectionTitle(0.2f / 13f))
             Spacer(Modifier.width(8.dp))
             Text(
                 "peak ${hudNum(values.maxOrNull(), if (unit == "m") 0 else 1)} $unit",
                 color = accent,
-                style = HudMonoText,
+                style = HudePerfValue(),
             )
         }
         Spacer(Modifier.height(4.dp))
         Sparkline(values, Modifier.fillMaxWidth().height(72.dp), line = accent, fill = accent)
     }
+    Spacer(Modifier.height(10.dp))
 }
 
 @Composable
@@ -229,7 +256,9 @@ private fun GridRow(first: @Composable () -> Unit, second: @Composable () -> Uni
 
 @Composable
 private fun SummaryGrid(s: TripSummary) {
-    Text("SUMMARY", color = HudColors.Cyan, style = HudeLabel)
+    // `.section-title`: cyan, 11px, 700, 0.8px tracking - the page's name for a
+    // group inside a card, which is exactly what this grid is.
+    Text("SUMMARY", color = HudColors.Cyan, style = HudeSectionCaps())
     Spacer(Modifier.height(8.dp))
     GridRow(
         { StatCell("DISTANCE", hudNum(s.distanceKm, 2), "km", modifier = Modifier.fillMaxWidth()) },
@@ -284,7 +313,7 @@ private fun SummaryGrid(s: TripSummary) {
                 "closed, the Wi-Fi dropped, or the Web UI was open on the phone " +
                 "and the logger stood down.",
             color = HudColors.TextDim,
-            style = HudeSmall,
+            style = HudeCfgNote(),
         )
         Spacer(Modifier.height(8.dp))
     }

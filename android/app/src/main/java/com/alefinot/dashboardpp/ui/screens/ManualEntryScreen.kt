@@ -1,7 +1,6 @@
 package com.alefinot.dashboardpp.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -9,9 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.Text
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,9 +19,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.alefinot.dashboardpp.ui.components.HudButton
+import com.alefinot.dashboardpp.ui.components.HudInput
+import com.alefinot.dashboardpp.ui.components.HudInputStyle
 import com.alefinot.dashboardpp.ui.theme.HudColors
-import com.alefinot.dashboardpp.ui.theme.HudeDisplaySmall
-import com.alefinot.dashboardpp.ui.theme.HudeSmall
+import com.alefinot.dashboardpp.ui.theme.HudeHeading
+import com.alefinot.dashboardpp.ui.theme.HudeCfgNote
+import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
 import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
 
 @Composable
@@ -35,8 +36,10 @@ fun ManualEntryScreen(vm: ConnectionViewModel) {
         ) {
             Text(
                 "ENTER DEVICE IP",
+                // the state color is the point here, so the h2 keeps its own
+                // weight and size and drops the heading's gradient fill.
                 color = HudColors.Cyan,
-                style = HudeDisplaySmall,
+                style = HudeHeading(),
             )
             Spacer(Modifier.height(16.dp))
             Text(
@@ -45,25 +48,28 @@ fun ManualEntryScreen(vm: ConnectionViewModel) {
                     + "Check the IP in your network's device list,\n"
                     + "or scan again when it's powered and awake.",
                 color = HudColors.TextDim,
-                style = HudeSmall,
+                style = HudeCfgNote(),
             )
             Spacer(Modifier.height(16.dp))
-            BasicTextField(
+            // `HudInput` is the page's field recipe: 6px corners, `--bg-input` fill,
+            // 6x10 padding, 12px text, `#182030` and a cyan edge once it has focus.
+            HudInput(
                 value = ip,
                 onValueChange = { ip = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, HudColors.CyanDim)
-                    .background(HudColors.Panel)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                textStyle = TextStyle(color = HudColors.Cyan),
+                modifier = Modifier.fillMaxWidth(),
+                style = HudInputStyle.FIELD,
+                placeholder = "192.168.1.10",
+                keyboardType = KeyboardType.Number,
+                onDone = { vm.submitManualIp(ip) },
             )
             if (vm.manualError.value != null) {
                 Spacer(Modifier.height(12.dp))
                 Text(
+                    // `.cfg-warn`: the page's "you must not miss this" line, in
+                    // `--accent-rose` at weight 700.
                     vm.manualError.value ?: "",
                     color = HudColors.Red,
-                    style = HudeSmall,
+                    style = HudeSectionTitle(0f),
                 )
             }
             Spacer(Modifier.height(24.dp))

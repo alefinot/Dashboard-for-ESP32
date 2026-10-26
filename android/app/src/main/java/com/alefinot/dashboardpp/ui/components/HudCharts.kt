@@ -1,7 +1,6 @@
 package com.alefinot.dashboardpp.ui.components
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,20 +18,26 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.alefinot.dashboardpp.ui.theme.HudColors
-import com.alefinot.dashboardpp.ui.theme.HudMonoText
-import com.alefinot.dashboardpp.ui.theme.HudeLabel
-import com.alefinot.dashboardpp.ui.theme.HudeSmall
+import com.alefinot.dashboardpp.ui.theme.HudNumericSmall
+import com.alefinot.dashboardpp.ui.theme.HudePerfValue
+import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
+import com.alefinot.dashboardpp.ui.theme.HudeFormLabel
+import com.alefinot.dashboardpp.ui.theme.hudCard
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * One labelled value in the Live card wall. Same visual language as the ESP's
- * own WebUI cells (label above, mono value), so the native screen reads as the
- * same product rather than a second app.
+ * One labelled value in the Live card wall, built from `.perf-card`: that tile's
+ * fill (`rgba(18,25,38,.8)`), hairline, 8px corners and 12px padding, with no
+ * shadow of its own - the page shadows overlays, not tiles. Inside it, the page's
+ * own pairing: a `h4` title in cyan Outfit at 13px/700/0.2px, and the figure in
+ * `.perf-value`'s monospace at weight 600.
+ *
+ * The page has no live-data tile at all (its LIVE numbers stay on the dashboard's
+ * own 3.2" screen), so this is the closest thing it does have: a small surface with
+ * a cyan title and a monospace figure. The unit takes `label`'s muted 12px.
  */
 @Composable
 fun StatCell(
@@ -43,26 +48,26 @@ fun StatCell(
     dim: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val fg = if (dim) HudColors.TextDim else HudColors.TextPrimary
     Box(
-        modifier
-            .border(1.dp, HudColors.CyanDim)
-            .background(HudColors.Panel)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+        modifier.hudCard(fill = HudColors.CardInner).padding(12.dp),
     ) {
         Column {
-            Text(label, color = HudColors.TextDim, style = HudeSmall)
+            // The accent drives state, not decoration: a faulted or stale reading
+            // tints the title, the way the page puts its status colours on a border
+            // and a label rather than on a fill.
+            Text(label, color = accent, style = HudeSectionTitle(0.2f / 13f))
             Text(
-                buildString {
-                    append(value)
-                    if (unit.isNotEmpty()) {
-                        append(' ')
-                        append(unit)
-                    }
-                },
-                color = fg,
-                style = HudMonoText,
+                value,
+                color = if (dim) HudColors.TextDim else HudColors.TextPrimary,
+                style = HudePerfValue(),
             )
+            if (unit.isNotEmpty()) {
+                Text(
+                    unit,
+                    color = HudColors.TextMuted,
+                    style = HudeFormLabel(),
+                )
+            }
         }
     }
 }
@@ -146,7 +151,7 @@ fun HudGauge(
             val start = 135f
             val sweep = 270f
             drawArc(
-                color = HudColors.CyanDim.copy(alpha = 0.45f),
+                color = Color(0x2600E5FF),        // rgba(0,229,255,.15) - the unfilled sweep
                 startAngle = start,
                 sweepAngle = sweep,
                 useCenter = false,
@@ -182,19 +187,15 @@ fun HudGauge(
         ) {
             Text(
                 label,
-                color = HudColors.TextDim,
-                style = HudeLabel,
+                color = HudColors.Cyan,
+                style = HudeSectionTitle(0.2f / 13f),
             )
             Text(
                 value.toInt().toString(),
                 color = accent,
-                style = androidx.compose.ui.text.TextStyle(
-                    fontFamily = com.alefinot.dashboardpp.ui.theme.HudeDisplayFamily,
-                    fontSize = 44.sp,
-                    fontWeight = FontWeight.W700,
-                ),
+                style = HudNumericSmall,
             )
-            Text(unit, color = HudColors.TextDim, style = HudeSmall)
+            Text(unit, color = HudColors.TextMuted, style = HudeFormLabel())
         }
     }
 }

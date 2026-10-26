@@ -1,12 +1,13 @@
 package com.alefinot.dashboardpp.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.unit.dp
@@ -30,7 +32,9 @@ import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
 import com.alefinot.dashboardpp.viewmodel.TripRow
 import com.alefinot.dashboardpp.viewmodel.TripsViewModel
 import com.alefinot.dashboardpp.ui.theme.HudColors
-import com.alefinot.dashboardpp.ui.theme.HudeLabel
+import com.alefinot.dashboardpp.ui.theme.HudRadius
+import com.alefinot.dashboardpp.ui.theme.hudGlass
+import com.alefinot.dashboardpp.ui.theme.HudeFormLabel
 
 /**
  * The four modes of a connected dashboard: native live view, the ESP's own
@@ -128,6 +132,10 @@ fun ConnectedTabs(
             TabButton("ESP SETTINGS", tab == AppTab.WEB) { tab = AppTab.WEB }
             TabButton("APP SETTINGS", tab == AppTab.SETTINGS) { tab = AppTab.SETTINGS }
         }
+        // One hairline under the strip, the way the page separates its header from
+        // the content (`header::after` is a 2px cyan fade; here a full hairline at
+        // the token alpha, which is the same job at this width).
+        Box(Modifier.fillMaxWidth().height(1.dp).background(HudColors.Hairline))
 
         Box(Modifier.fillMaxSize()) {
             // Composed once it has been opened, and kept that way: the native
@@ -158,7 +166,7 @@ fun ConnectedTabs(
     }
 
     openTrip?.let { row ->
-        Box(Modifier.fillMaxSize().background(HudColors.Bg)) {
+        Box(Modifier.fillMaxSize()) {
             TripDetailScreen(row = row, vm = trips, onDismiss = { openTrip = null })
         }
     }
@@ -174,16 +182,26 @@ private fun TabButton(
     val accent = when {
         !enabled -> HudColors.TextDim
         selected -> HudColors.Cyan
-        else -> HudColors.CyanDim
+        else -> HudColors.TextMuted
     }
     Box(
         Modifier
             .padding(end = 8.dp)
-            .border(1.dp, accent)
-            .background(if (selected) HudColors.Panel else HudColors.Bg)
+            // A tab is a control, so it takes the control radius (8dp). The current
+            // one is a glass sheet with a cyan hairline, the page's
+            // `.conn-pill.active`; the others are hairline-only outlines, its
+            // `.conn-pill` at rest. Disabled (no trip store on this firmware) keeps
+            // the outline and dims the label.
+            .hudGlass(
+                shape = HudRadius.CardShape,
+                fill = if (selected) HudColors.Panel else Color.Transparent,
+                borderColor = if (selected) HudColors.CyanDim else Color(0x1FFFFFFF),
+                elevation = if (selected) 8.dp else 0.dp,
+                highlight = if (selected) 0.05f else 0f,
+            )
             .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
-        Text(label, color = accent, style = HudeLabel)
+        Text(label, color = accent, style = HudeFormLabel())
     }
 }

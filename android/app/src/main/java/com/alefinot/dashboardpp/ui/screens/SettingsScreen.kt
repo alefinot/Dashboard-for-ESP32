@@ -1,7 +1,6 @@
 package com.alefinot.dashboardpp.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -31,13 +30,22 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import com.alefinot.dashboardpp.trips.TripRuntime
 import com.alefinot.dashboardpp.ui.components.HudButton
+import com.alefinot.dashboardpp.ui.components.HudButtonStyle
+import com.alefinot.dashboardpp.ui.components.HudConfirmDialog
 import com.alefinot.dashboardpp.ui.components.HudToggle
 import com.alefinot.dashboardpp.ui.components.hudBytes
 import com.alefinot.dashboardpp.ui.theme.HudColors
-import com.alefinot.dashboardpp.ui.theme.HudMonoText
-import com.alefinot.dashboardpp.ui.theme.HudeDisplaySmall
-import com.alefinot.dashboardpp.ui.theme.HudeLabel
-import com.alefinot.dashboardpp.ui.theme.HudeSmall
+import com.alefinot.dashboardpp.ui.theme.HudBrushes
+import com.alefinot.dashboardpp.ui.theme.HudRadius
+import com.alefinot.dashboardpp.ui.theme.HudeCfgHelp
+import com.alefinot.dashboardpp.ui.theme.HudeCfgLive
+import com.alefinot.dashboardpp.ui.theme.HudeCfgNote
+import com.alefinot.dashboardpp.ui.theme.HudeFormLabel
+import com.alefinot.dashboardpp.ui.theme.HudeHeading
+import com.alefinot.dashboardpp.ui.theme.HudePerfLabel
+import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
+import com.alefinot.dashboardpp.ui.theme.HudePerfValue
+import com.alefinot.dashboardpp.ui.theme.hudCard
 import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
 import com.alefinot.dashboardpp.viewmodel.TripsViewModel
 
@@ -62,6 +70,7 @@ fun SettingsScreen(
     val recording by TripRuntime.state.collectAsStateWithLifecycle()
     var storageLine by remember { mutableStateOf("") }
     var showConfirmClear by remember { mutableStateOf(false) }
+    var showConfirmForget by remember { mutableStateOf(false) }
     val settings = remember { RecorderSettings(context) }
     val scope = rememberCoroutineScope()
     val recordingEnabled by settings.recordingEnabled
@@ -74,57 +83,56 @@ fun SettingsScreen(
             "?"
         }
     }
-    Box(Modifier.fillMaxSize().background(HudColors.Bg)) {
+    Box(
+        Modifier.fillMaxSize()
+            .background(HudColors.Bg),
+    ) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         ) {
-            Text(
-                "APP SETTINGS",
-                color = HudColors.Cyan,
-                style = HudeDisplaySmall,
-            )
+            Text("APP SETTINGS", style = HudeHeading().copy(brush = HudBrushes.titleGradient()))
             Spacer(Modifier.height(24.dp))
             Box(
-                Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, HudColors.CyanDim)
-                    .background(HudColors.Panel)
-                    .padding(16.dp),
+                Modifier.fillMaxWidth().hudCard()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
             ) {
                 Column {
+                    // A label/value pair inside a card is the page's Performance
+                    // Monitor row: `.perf-label` on the left, `.perf-value` monospace
+                    // on the right. Here they stack, because the values are long.
                     Text(
                         "DEVICE IP",
-                        color = HudColors.TextDim,
-                        style = HudeSmall,
+                        color = HudColors.TextMuted,
+                        style = HudePerfLabel(),
                     )
-                    Text(ip, color = HudColors.TextPrimary, style = HudMonoText)
+                    Text(ip, color = HudColors.TextPrimary, style = HudePerfValue())
                     Spacer(Modifier.height(12.dp))
                     Text(
                         "FIRMWARE",
-                        color = HudColors.TextDim,
-                        style = HudeSmall,
+                        color = HudColors.TextMuted,
+                        style = HudePerfLabel(),
                     )
                     Text(
                         version ?: "UNKNOWN",
                         color = HudColors.TextPrimary,
-                        style = HudMonoText,
+                        style = HudePerfValue(),
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
                         "APP",
-                        color = HudColors.TextDim,
-                        style = HudeSmall,
+                        color = HudColors.TextMuted,
+                        style = HudePerfLabel(),
                     )
                     Text(
                         appVersion,
                         color = HudColors.TextPrimary,
-                        style = HudMonoText,
+                        style = HudePerfValue(),
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
                         "Dashboard++ by @ale.finot",
                         color = HudColors.Cyan,
-                        style = HudeSmall,
+                        style = HudeFormLabel(),
                     )
                 }
             }
@@ -138,8 +146,13 @@ fun SettingsScreen(
                 needsUpdate = recording.lastError == EspApi.FIRMWARE_UPDATE_REQUIRED,
             )
             Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("AUTO-START ON CONNECT", color = HudColors.TextDim, style = HudeSmall)
+            Row(
+                Modifier.fillMaxWidth().height(48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // `label` in the page's own colour: every form label in the settings
+                // form is cyan, not muted (`label { color: var(--accent-cyan) }`).
+                Text("AUTO-START ON CONNECT", color = HudColors.Cyan, style = HudeFormLabel())
                 Spacer(Modifier.width(12.dp))
                 HudToggle(on = recordingEnabled) { on ->
                     scope.launch { settings.setRecordingEnabled(on) }
@@ -147,31 +160,21 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            HudButton("STORAGE & FILES") {
+            HudButton("STORAGE & FILES", style = HudButtonStyle.SECONDARY) {
                 storageLine = hudBytes(trips.storageBytes()) + " recorded · " +
                     trips.rows.value.size + " trip files"
             }
             Spacer(Modifier.height(8.dp))
             if (storageLine.isNotEmpty()) {
-                Text(storageLine, color = HudColors.TextDim, style = HudeSmall)
+                Text(storageLine, color = HudColors.TextMuted, style = HudeCfgLive())
                 Spacer(Modifier.height(8.dp))
             }
-            if (!showConfirmClear) {
-                HudButton("DELETE ALL TRIPS") { showConfirmClear = true }
-            } else {
-                Row(Modifier.fillMaxWidth()) {
-                    Box(Modifier.weight(1f)) {
-                        HudButton("CONFIRM DELETE ALL") {
-                            trips.deleteAll()
-                            storageLine = "All recorded trips removed."
-                            showConfirmClear = false
-                        }
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Box(Modifier.weight(1f)) {
-                        HudButton("KEEP", onClick = { showConfirmClear = false })
-                    }
-                }
+            // The page never asks by turning one button into two: `confirmDialog()`
+            // puts a modal box over the screen, and the only ways out are its two
+            // buttons or Escape. Same here - and deleting every recorded drive is
+            // exactly the kind of action that should not be one careless tap deep.
+            HudButton("DELETE ALL TRIPS", style = HudButtonStyle.DANGER) {
+                showConfirmClear = true
             }
             Spacer(Modifier.height(4.dp))
             Text(
@@ -180,7 +183,7 @@ fun SettingsScreen(
                     "stands down while the Web UI is on screen. Open drives are never " +
                     "deleted. Share a trip as CSV or GPX from the Trips tab.",
                 color = HudColors.TextDim,
-                style = HudeSmall,
+                style = HudeCfgNote(),
             )
             Spacer(Modifier.height(24.dp))
 
@@ -188,9 +191,40 @@ fun SettingsScreen(
             // model: as soon as it stops reporting a connection the tab row is
             // gone and discovery takes over. Settings no longer has to close
             // itself, and the old CLOSE button has nothing left to close.
-            HudButton("RE-SCAN NETWORK") { vm.rescan() }
+            HudButton("RE-SCAN NETWORK", style = HudButtonStyle.SECONDARY) { vm.rescan() }
             Spacer(Modifier.height(8.dp))
-            HudButton("FORGET THIS DEVICE") { vm.forgetDevice(ip) }
+            HudButton("FORGET THIS DEVICE", style = HudButtonStyle.DANGER) {
+                showConfirmForget = true
+            }
+        }
+
+        if (showConfirmClear) {
+            HudConfirmDialog(
+                message = "Delete every recorded trip? All CSV files the app has " +
+                    "written go away. A drive that is still being recorded is kept.",
+                confirmLabel = "DELETE ALL",
+                confirmStyle = HudButtonStyle.DANGER,
+                onConfirm = {
+                    trips.deleteAll()
+                    storageLine = "All recorded trips removed."
+                    showConfirmClear = false
+                },
+                onDismiss = { showConfirmClear = false },
+            )
+        }
+        if (showConfirmForget) {
+            HudConfirmDialog(
+                message = "Forget this device? The app drops the saved address and " +
+                    "goes back to scanning the network. Nothing is deleted on the " +
+                    "dashboard itself, and recorded trips stay on the phone.",
+                confirmLabel = "FORGET",
+                confirmStyle = HudButtonStyle.DANGER,
+                onConfirm = {
+                    showConfirmForget = false
+                    vm.forgetDevice(ip)
+                },
+                onDismiss = { showConfirmForget = false },
+            )
         }
     }
 }
@@ -214,11 +248,20 @@ private fun RecordingCard(
         paused -> "PAUSED · WEB UI OPEN" to HudColors.Amber
         else -> "NOT RECORDING" to HudColors.TextDim
     }
+    // The page's status strip (`#msg` plus its `.msg-*` variants): 8px radius, a
+    // hairline in the status colour at 30%, that colour at 8% as the fill over the
+    // status strip's own `rgba(15,23,42,.6)`, and the status colour in the label.
     Box(
-        Modifier.fillMaxWidth().border(1.dp, color).background(HudColors.Panel).padding(12.dp),
+        Modifier.fillMaxWidth()
+            .hudCard(
+                fill = HudColors.Msg,
+                borderColor = color.copy(alpha = 0.3f),
+            )
+            .background(color.copy(alpha = 0.08f), HudRadius.CardShape)
+            .padding(12.dp),
     ) {
         Column {
-            Text(status, color = color, style = HudeLabel)
+            Text(status, color = color, style = HudeSectionTitle())
             Spacer(Modifier.height(6.dp))
             Text(
                 when {
@@ -240,8 +283,8 @@ private fun RecordingCard(
                         "Logging idle: connected, waiting for samples, or auto-start " +
                             "is off."
                 },
-                color = HudColors.TextDim,
-                style = HudeSmall,
+                color = HudColors.TextMuted,
+                style = HudeCfgHelp(),
             )
         }
     }

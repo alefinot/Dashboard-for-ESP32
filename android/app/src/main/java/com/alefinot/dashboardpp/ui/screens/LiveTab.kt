@@ -1,8 +1,6 @@
 package com.alefinot.dashboardpp.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,7 +21,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.alefinot.dashboardpp.api.EspApi
 import com.alefinot.dashboardpp.api.EspApiLane
@@ -33,8 +30,14 @@ import com.alefinot.dashboardpp.trips.TripRuntimeState
 import com.alefinot.dashboardpp.ui.components.HudGauge
 import com.alefinot.dashboardpp.ui.components.StatCell
 import com.alefinot.dashboardpp.ui.theme.HudColors
-import com.alefinot.dashboardpp.ui.theme.HudeDisplaySmall
-import com.alefinot.dashboardpp.ui.theme.HudeSmall
+import com.alefinot.dashboardpp.ui.theme.HudBrushes
+import com.alefinot.dashboardpp.ui.theme.HudRadius
+import com.alefinot.dashboardpp.ui.theme.HudeHeading
+import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
+import com.alefinot.dashboardpp.ui.theme.HudeBody
+import com.alefinot.dashboardpp.ui.theme.HudeCfgHelp
+import com.alefinot.dashboardpp.ui.theme.HudeCfgNote
+import com.alefinot.dashboardpp.ui.theme.hudCard
 import kotlinx.coroutines.delay
 
 /**
@@ -92,12 +95,17 @@ fun LiveTab(ip: String, active: Boolean) {
     }
 
     Column(
-        Modifier.fillMaxSize().background(HudColors.Bg)
+        Modifier.fillMaxSize()
+            // `html { background-color: #000000 }`, `body { background-color:
+            // --bg-base }`: the page's ground is flat black, with no gradient and
+            // no glow anywhere. Nothing is added here - the cards' translucent
+            // fills do the modelling, exactly as they do on the page.
+            .background(HudColors.Bg)
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("LIVE", color = HudColors.Cyan, style = HudeDisplaySmall)
+            Text("LIVE", style = HudeHeading().copy(brush = HudBrushes.titleGradient()))
             Spacer(Modifier.width(12.dp))
             StatusChip(state)
         }
@@ -105,14 +113,24 @@ fun LiveTab(ip: String, active: Boolean) {
 
         val snapshot = state.snapshot
         if (snapshot != null) {
-            HudGauge(
-                value = snapshot.spd,
-                fullScale = speedScale(snapshot),
-                label = "SPEED",
-                unit = "km/h · ${sourceLabel(snapshot.src)}",
-                modifier = Modifier.fillMaxWidth().height(190.dp),
-                accent = if (snapshot.spd > 0.0) HudColors.Cyan else HudColors.CyanDim,
-            )
+            // `.card`, unmodified: rgba(22,30,46,.6), a 5% hairline, 8px corners,
+            // no shadow. The page's cards carry no gradient wash of their own, so
+            // the cyan on this screen comes from the gauge itself.
+            Box(
+                Modifier.fillMaxWidth()
+                    .hudCard()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                HudGauge(
+                    value = snapshot.spd,
+                    fullScale = speedScale(snapshot),
+                    label = "SPEED",
+                    unit = "km/h · ${sourceLabel(snapshot.src)}",
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    accent = if (snapshot.spd > 0.0) HudColors.Cyan else HudColors.CyanDim,
+                )
+            }
             Spacer(Modifier.height(16.dp))
         }
 
@@ -131,8 +149,8 @@ fun LiveTab(ip: String, active: Boolean) {
                 } else {
                     "Waiting for the dashboard…"
                 },
-                color = HudColors.TextDim,
-                style = HudeSmall,
+                color = HudColors.TextMuted,
+                style = HudeCfgHelp(),
             )
         }
         Spacer(Modifier.height(24.dp))
@@ -165,6 +183,11 @@ private fun fuelStateLabel(st: Int): String = when (st) {
 private fun fmt(value: Double, places: Int = 1): String =
     String.format(java.util.Locale.US, "%.${places}f", value)
 
+/**
+ * The run state as one of the page's pills (`.ip-banner` radius) carrying a
+ * `.msg-success` / `.msg-error` tint: the accent at 8% behind the glass, a 30%
+ * accent hairline, accent text.
+ */
 @Composable
 private fun StatusChip(state: TripRuntimeState) {
     val (label, color) = when {
@@ -176,28 +199,47 @@ private fun StatusChip(state: TripRuntimeState) {
         else -> "NOT RECORDING" to HudColors.TextDim
     }
     Box(
-        Modifier.border(1.dp, color).background(HudColors.Panel)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+        Modifier
+            // `.ip-banner` for the shape (--bg-card pill, hairline, 4x12 padding),
+            // `.msg-success`/`.msg-error` for the state: that colour as a 30%
+            // hairline and an 8% wash, and in the label.
+            .hudCard(
+                shape = HudRadius.PillShape,
+                fill = HudColors.Panel,
+                borderColor = color.copy(alpha = 0.3f),
+            )
+            .background(color.copy(alpha = 0.08f), HudRadius.PillShape)
+            .padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
-        Text(label, color = color, style = HudeSmall)
+        // `#ip-banner` is 13px with no weight of its own, and `#msg`'s variants put
+        // the colour in the text: same here.
+        Text(label, color = color, style = HudeBody())
     }
 }
 
 @Composable
 private fun FallbackNotice() {
     Box(
-        Modifier.fillMaxWidth().border(1.dp, HudColors.Amber).background(HudColors.Panel)
-            .padding(10.dp),
+        Modifier.fillMaxWidth()
+            // `#msg` with `.msg-warning`: 8px corners, the status strip's own fill
+            // under an amber wash at 8%, amber hairline at 30%, 12x6 padding. No
+            // shadow - `#msg` declares none.
+            .hudCard(
+                fill = HudColors.Msg,
+                borderColor = HudColors.Amber.copy(alpha = 0.3f),
+            )
+            .background(HudColors.Amber.copy(alpha = 0.08f), HudRadius.CardShape)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         Column {
-            Text("LIMITED DATA", color = HudColors.Amber, style = HudeSmall)
+            Text("LIMITED DATA", color = HudColors.Amber, style = HudeSectionTitle())
             Spacer(Modifier.height(4.dp))
             Text(
                 "This device has no /api/snapshot endpoint, so speed, GNSS and trip " +
                     "figures are not published and this drive cannot be recorded. " +
                     "Update the firmware to V1.4.6 or newer.",
-                color = HudColors.TextDim,
-                style = HudeSmall,
+                color = HudColors.TextMuted,
+                style = HudeCfgNote(),
             )
         }
     }

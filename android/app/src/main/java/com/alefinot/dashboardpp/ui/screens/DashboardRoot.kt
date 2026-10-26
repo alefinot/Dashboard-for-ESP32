@@ -24,10 +24,11 @@ import androidx.compose.ui.unit.dp
 import com.alefinot.dashboardpp.R
 import com.alefinot.dashboardpp.ui.components.ScanProgressRing
 import com.alefinot.dashboardpp.ui.theme.HudColors
-import com.alefinot.dashboardpp.ui.theme.HudeDisplayLarge
-import com.alefinot.dashboardpp.ui.theme.HudeLabel
-import com.alefinot.dashboardpp.ui.theme.HudeSmall
-import com.alefinot.dashboardpp.ui.theme.HudeTitle
+import com.alefinot.dashboardpp.ui.theme.HudBrushes
+import com.alefinot.dashboardpp.ui.theme.HudeSplash
+import com.alefinot.dashboardpp.ui.theme.HudeTable
+import com.alefinot.dashboardpp.ui.theme.HudeCfgNote
+import com.alefinot.dashboardpp.ui.theme.HudeHeading
 import com.alefinot.dashboardpp.viewmodel.ConnectionUiState
 import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
 import com.alefinot.dashboardpp.viewmodel.TripsViewModel
@@ -81,16 +82,14 @@ fun SplashScreen() {
                 modifier = Modifier.size(96.dp),
             )
             Spacer(Modifier.height(20.dp))
-            Text(
-                "DASHBOARD++",
-                color = HudColors.Cyan,
-                style = HudeDisplayLarge,
-            )
+            // `h2` in the page: a white-to-cyan gradient painted into the text, at
+            // the splash keeps its own display size, filled the way the page fills its heading.
+            Text("DASHBOARD++", style = HudeSplash.copy(brush = HudBrushes.titleGradient()))
             Spacer(Modifier.height(16.dp))
             Text(
                 "ESP32 companion",
-                color = HudColors.TextDim,
-                style = HudeLabel,
+                color = HudColors.TextMuted,
+                style = HudeTable(),
             )
         }
     }
@@ -107,14 +106,13 @@ fun DiscoveryScreen(vm: ConnectionViewModel, title: String) {
             Spacer(Modifier.height(24.dp))
             Text(
                 title,
-                color = HudColors.TextPrimary,
-                style = HudeTitle,
+                style = HudeHeading().copy(brush = HudBrushes.titleGradient()),
             )
             Spacer(Modifier.height(8.dp))
             Text(
                 "Scanning local network…",
-                color = HudColors.TextDim,
-                style = HudeSmall,
+                color = HudColors.TextMuted,
+                style = HudeCfgNote(),
             )
         }
     }

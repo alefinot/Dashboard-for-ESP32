@@ -1,7 +1,9 @@
 package com.alefinot.dashboardpp.ui.screens
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,8 +15,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alefinot.dashboardpp.trips.TripRuntime
@@ -32,10 +37,18 @@ import com.alefinot.dashboardpp.ui.components.hudDuration
 import com.alefinot.dashboardpp.ui.components.hudNum
 import com.alefinot.dashboardpp.trips.TripRuntimeState
 import com.alefinot.dashboardpp.ui.theme.HudColors
-import com.alefinot.dashboardpp.ui.theme.HudeDisplaySmall
-import com.alefinot.dashboardpp.ui.theme.HudeLabel
-import com.alefinot.dashboardpp.ui.theme.HudeSmall
-import com.alefinot.dashboardpp.ui.theme.HudMonoText
+import com.alefinot.dashboardpp.ui.theme.HudBrushes
+import com.alefinot.dashboardpp.ui.theme.HudMotion
+import com.alefinot.dashboardpp.ui.theme.HudRadius
+import com.alefinot.dashboardpp.ui.theme.hudCard
+import com.alefinot.dashboardpp.ui.theme.HudeHeading
+import com.alefinot.dashboardpp.ui.theme.HudeBody
+import com.alefinot.dashboardpp.ui.theme.HudeCfgHelp
+import com.alefinot.dashboardpp.ui.theme.HudeCfgLive
+import com.alefinot.dashboardpp.ui.theme.HudeCfgNote
+import com.alefinot.dashboardpp.ui.theme.HudePerfValue
+import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
+import com.alefinot.dashboardpp.ui.theme.HudeTable
 import com.alefinot.dashboardpp.viewmodel.TripRow
 import com.alefinot.dashboardpp.viewmodel.TripsViewModel
 import java.text.SimpleDateFormat
@@ -63,26 +76,31 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(HudColors.Bg).padding(16.dp)) {
+    Column(
+        Modifier.fillMaxSize()
+            .background(HudColors.Bg)
+            .padding(16.dp),
+    ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("TRIPS", color = HudColors.Cyan, style = HudeDisplaySmall)
+            // The page's `h2`: 14px, 700, letter-spacing 2, and its gradient text.
+            Text("TRIPS", style = HudeHeading().copy(brush = HudBrushes.titleGradient()))
             Spacer(Modifier.width(12.dp))
             Text(
                 "${rows.size} · ${formatBytes(vm.storageBytes())}",
-                color = HudColors.TextDim,
-                style = HudeSmall,
+                color = HudColors.TextMuted,
+                style = HudeCfgLive(),
             )
         }
         Spacer(Modifier.height(4.dp))
         Text(
             "One file per ESP power session · CSV in app storage",
             color = HudColors.TextDim,
-            style = HudeSmall,
+            style = HudeCfgNote(),
         )
         Spacer(Modifier.height(12.dp))
 
         if (message != null) {
-            Text(message.orEmpty(), color = HudColors.Amber, style = HudeSmall)
+            Text(message.orEmpty(), color = HudColors.Amber, style = HudeCfgHelp())
             Spacer(Modifier.height(8.dp))
         }
 
@@ -93,19 +111,42 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
 
         if (rows.isEmpty() && !runtime.recording) {
             Spacer(Modifier.height(24.dp))
-            Text("No trips recorded yet.", color = HudColors.TextDim, style = HudeLabel)
+            Text("No trips recorded yet.", color = HudColors.TextPrimary, style = HudeBody())
             Spacer(Modifier.height(8.dp))
             Text(
                 "Drives are logged automatically while the app is open and the " +
                     "dashboard answers /api/snapshot.",
                 color = HudColors.TextDim,
-                style = HudeSmall,
+                style = HudeCfgNote(),
             )
         }
 
-        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(rows, key = { it.file.absolutePath }) { row ->
-                TripCard(row, onOpen)
+        // The page fades its body in as one block (`pageFadeIn` on the body), and
+        // that is what this list does too. It could not be done per row: a
+        // LazyColumn throws rows away and re-creates them as they scroll, so a
+        // row-local entrance would replay on every scroll back — the cost the
+        // design brief rules out. One ramp drives the whole list instead, each
+        // row taking its slice of it by position, so a row scrolling back into
+        // view finds the ramp already at 1 and costs nothing.
+        var revealed by remember { mutableStateOf(false) }
+        LaunchedEffect(rows.size) {
+            if (rows.isNotEmpty()) revealed = true
+        }
+        val staggered = minOf(rows.size, 8)
+        val rampMs = (HudMotion.ENTRANCE_MS + HudMotion.STAGGER_MS * maxOf(staggered - 1, 0)).toFloat()
+        val ramp by animateFloatAsState(
+            if (revealed) 1f else 0f,
+            tween(rampMs.toInt(), easing = LinearEasing),
+            label = "tripsReveal",
+        )
+        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            itemsIndexed(rows, key = { _, row -> row.file.absolutePath }) { i, row ->
+                val start = (minOf(i, staggered - 1) * HudMotion.STAGGER_MS)
+                TripCard(
+                    row,
+                    onOpen,
+                    reveal = ((ramp * rampMs - start) / HudMotion.ENTRANCE_MS).coerceIn(0f, 1f),
+                )
             }
         }
     }
@@ -116,18 +157,30 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
 private fun LiveTripRow(state: TripRuntimeState) {
     val snap = state.snapshot
     val summary = state.summary
+    // No page rule for a live recording row, so it borrows the page's status
+    // language: `#msg` plus `.msg-success` -- emerald hairline at 30%, emerald at
+    // 8% as the wash, 8px radius.
     Box(
-        Modifier.fillMaxWidth().border(1.dp, HudColors.Green).background(HudColors.Panel)
-            .padding(12.dp),
+        Modifier.fillMaxWidth()
+            // `#msg` + `.msg-success`: 8px corners, the status strip's own fill
+            // under an emerald wash at 8%, emerald hairline at 30%. No shadow.
+            .hudCard(
+                fill = HudColors.Msg,
+                borderColor = HudColors.Green.copy(alpha = 0.3f),
+            )
+            .background(HudColors.Green.copy(alpha = 0.08f), HudRadius.CardShape)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Column {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("RECORDING", color = HudColors.Green, style = HudeLabel)
+                // `#msg`'s own 13px, at the weight the page gives a line it wants
+                // read first (`.cfg-warn`, `.card h4`).
+                Text("RECORDING", color = HudColors.Green, style = HudeSectionTitle(0f))
                 Spacer(Modifier.width(10.dp))
                 Text(
                     summary?.let { formatDuration(it.durationMs) } ?: "0:00:00",
                     color = HudColors.TextPrimary,
-                    style = HudMonoText,
+                    style = HudePerfValue(),
                 )
             }
             Spacer(Modifier.height(6.dp))
@@ -140,34 +193,42 @@ private fun LiveTripRow(state: TripRuntimeState) {
                     append(fmtOrDash(summary?.fuelUsedL, 2))
                     append(" L")
                 },
-                color = HudColors.TextDim,
-                style = HudeSmall,
+                color = HudColors.TextMuted,
+                style = HudeCfgHelp(),
             )
         }
     }
 }
 
 @Composable
-private fun TripCard(row: TripRow, onOpen: (TripRow) -> Unit) {
+private fun TripCard(row: TripRow, onOpen: (TripRow) -> Unit, reveal: Float = 1f) {
     Box(
-        Modifier.fillMaxWidth().border(1.dp, HudColors.CyanDim).background(HudColors.Panel)
-            .clickable { onOpen(row) }.padding(12.dp),
+        Modifier.fillMaxWidth()
+            // The list's shared ramp, in alpha and in an 8px rise -- `pageFadeIn`
+            // lifts by exactly that much.
+            .alpha(reveal)
+            .offset { IntOffset(0, ((1f - reveal) * 8f).dp.roundToPx()) }
+            .hudCard()
+            .clickable { onOpen(row) }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Column {
             Text(
+                // A trip row is tabular data, so it takes the page's `table` rule:
+                // 12px monospace, 0.5px tracking.
                 SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(row.startMs)),
                 color = HudColors.TextPrimary,
-                style = HudeLabel,
+                style = HudeTable(),
             )
             Spacer(Modifier.height(6.dp))
             val s = row.summary
             if (s == null) {
-                Text("…", color = HudColors.TextDim, style = HudeSmall)
+                Text("…", color = HudColors.TextMuted, style = HudeCfgHelp())
             } else {
                 Text(
                     "${fmtOrDash(s.distanceKm, 2)} km · ${formatDuration(s.durationMs)}",
                     color = HudColors.Cyan,
-                    style = HudMonoText,
+                    style = HudeTable(),
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -179,8 +240,8 @@ private fun TripCard(row: TripRow, onOpen: (TripRow) -> Unit) {
                             append(" · ").append(s.gaps).append(" gaps")
                         }
                     },
-                    color = HudColors.TextDim,
-                    style = HudeSmall,
+                    color = HudColors.TextMuted,
+                    style = HudeCfgHelp(),
                 )
             }
         }
