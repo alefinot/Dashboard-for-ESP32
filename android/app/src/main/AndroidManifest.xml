@@ -6,6 +6,22 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+    <!-- Trip recording (see the trip recording plan). A foreground service with
+         a permanent notification is the only way Android lets a companion app
+         keep polling the car while the phone is doing its own thing; the wake
+         lock is what keeps that poll alive when the screen times out, and it is
+         held only while a trip is actually open. POST_NOTIFICATIONS is runtime on
+         Android 13+: without it the service still runs, the notification is just
+         not shown, and the recording switch explains that in the UI. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Optional: the Settings screen offers a battery-optimisation exemption so
+         the OEM doze killer does not end a drive mid-trip. Never requested at
+         install time, only offered once in the UI. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
         android:name=".DashboardApp"
         android:label="@string/app_name"
@@ -24,5 +40,25 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- stopWithTask=false: swiping the app away must not end a drive that is
+             being logged. The service seals the trip and stops on its own once
+             the device has been unreachable past the idle window. -->
+        <service
+            android:name=".service.TripLogService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            android:stopWithTask="false" />
+
+        <!-- Share-sheet access to exported CSV/GPX, read-only and per-URI. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/files_path" />
+        </provider>
     </application>
 </manifest>

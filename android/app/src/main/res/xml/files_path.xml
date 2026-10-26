@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files handed out by FileProvider when sharing a trip: the CSV copied out of
+     the trip folder, and the generated GPX. Both live in the app cache, which is
+     scratch space by definition — the trip log itself stays in
+     getExternalFilesDir()/trips, which no other app can be given access to. -->
+<paths>
+    <cache-path
+        name="exports"
+        path="exports/" />
+</paths>
