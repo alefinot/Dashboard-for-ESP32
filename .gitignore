@@ -80,3 +80,6 @@ hardware/check_*.png
 #   as the external yardstick in step 5 of the stackup plan, never in the
 #   generation pipeline.
 hardware/tools/
+
+# pi agent session state (local only)
+.unipi/

@@ -84,7 +84,7 @@ fun SplashScreen() {
             Spacer(Modifier.height(20.dp))
             // `h2` in the page: a white-to-cyan gradient painted into the text, at
             // the splash keeps its own display size, filled the way the page fills its heading.
-            Text("DASHBOARD++", style = HudeSplash.copy(brush = HudBrushes.titleGradient()))
+            Text("DASHBOARD++", style = HudeSplash.copy(brush = HudBrushes.title))
             Spacer(Modifier.height(16.dp))
             Text(
                 "ESP32 companion",
@@ -106,7 +106,7 @@ fun DiscoveryScreen(vm: ConnectionViewModel, title: String) {
             Spacer(Modifier.height(24.dp))
             Text(
                 title,
-                style = HudeHeading().copy(brush = HudBrushes.titleGradient()),
+                style = HudeHeading().copy(brush = HudBrushes.title),
             )
             Spacer(Modifier.height(8.dp))
             Text(

@@ -15,6 +15,16 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+/**
+ * Where the retained page is at. The tab uses it to cover the one thing it cannot
+ * show yet - a page that is still being fetched, or one that did not answer -
+ * instead of leaving a black rectangle with no explanation.
+ */
+enum class WebUiStage { LOADING, READY, FAILED }
 
 object FileChooser {
     const val REQUEST_CODE = 42
@@ -180,11 +190,33 @@ class WebUiHolder(
     private var loadedOk = false
     private var timersPaused = false
 
+    private val _stage = MutableStateFlow(WebUiStage.LOADING)
+
+    /**
+     * The page's fetch state. The View is kept alive between tabs, so only the very
+     * first fetch of a connection has nothing drawn behind the tab: that is the one
+     * the shell covers (see `WebUiCover`), and the RETRY it offers replaces the old
+     * "open the tab again and hope" path.
+     */
+    val stage: StateFlow<WebUiStage> = _stage.asStateFlow()
+
+    /** Fetch the page again - what the cover's RETRY button calls. */
+    fun retry() {
+        val v = view ?: return
+        loadedOk = false
+        _stage.value = WebUiStage.LOADING
+        v.loadUrl("http://$ip/")
+    }
+
     /** The page for this connection: created once, then handed out again. */
     fun obtain(context: Context): WebView {
-        val v = view ?: buildDashboardWebView(context, activity, ip, vm) { ok -> loadedOk = ok }
+        val v = view ?: buildDashboardWebView(context, activity, ip, vm) { ok ->
+            loadedOk = ok
+            _stage.value = if (ok) WebUiStage.READY else WebUiStage.FAILED
+        }
             .also {
                 view = it
+                _stage.value = WebUiStage.LOADING
                 it.loadUrl("http://$ip/")
             }
         // Compose threw the old slot away but the View is still attached to it,

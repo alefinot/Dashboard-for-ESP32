@@ -1,5 +1,9 @@
 package com.alefinot.dashboardpp.ui.screens
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,21 +20,29 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import com.alefinot.dashboardpp.api.EspApi
 import com.alefinot.dashboardpp.api.EspApiLane
 import com.alefinot.dashboardpp.api.Snapshot
 import com.alefinot.dashboardpp.trips.TripRuntime
 import com.alefinot.dashboardpp.trips.TripRuntimeState
+import com.alefinot.dashboardpp.ui.components.HudEnter
 import com.alefinot.dashboardpp.ui.components.HudGauge
 import com.alefinot.dashboardpp.ui.components.StatCell
 import com.alefinot.dashboardpp.ui.theme.HudColors
 import com.alefinot.dashboardpp.ui.theme.HudBrushes
+import com.alefinot.dashboardpp.ui.theme.HudMotion
 import com.alefinot.dashboardpp.ui.theme.HudRadius
 import com.alefinot.dashboardpp.ui.theme.HudeHeading
 import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
@@ -39,6 +51,29 @@ import com.alefinot.dashboardpp.ui.theme.HudeCfgHelp
 import com.alefinot.dashboardpp.ui.theme.HudeCfgNote
 import com.alefinot.dashboardpp.ui.theme.hudCard
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlin.math.PI
+import kotlin.math.cos
+
+/**
+ * The breathing half of a live recording state. The page defines `pulseGlow`
+ * (`src/webui.html:70` - `box-shadow: 0 0 12px rgba(0,229,255,.2)` at the ends of
+ * the keyframe, `0 0 24px rgba(0,229,255,.5)` in the middle) and, on this reading
+ * of the file, never attaches it to a selector: the WebUI has no recording
+ * indicator to animate. The app has that state, so the chip borrows the page's own
+ * keyframe instead of inventing a motion. The page sets no duration for it, because
+ * nothing uses it; 2 s is the app's number, chosen so one breath spans two 1 Hz
+ * samples - slow enough to read as a pulse and not as a blink.
+ */
+private const val CHIP_PULSE_MS = 2000L
+
+/**
+ * The breath is recomputed ~16 times a second instead of on every frame: a glow
+ * that takes a second to reach its bright stop has nothing to show between those
+ * steps, and a per-frame loop measured 48 repaints a second on the test tablet
+ * (SM-T590) for as long as the recorder ran.
+ */
+private const val CHIP_PULSE_STEP_MS = 60L
 
 /**
  * The native live view: the same data the WebUI renders, drawn natively so the
@@ -104,10 +139,12 @@ fun LiveTab(ip: String, active: Boolean) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("LIVE", style = HudeHeading().copy(brush = HudBrushes.titleGradient()))
-            Spacer(Modifier.width(12.dp))
-            StatusChip(state)
+        HudEnter(modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("LIVE", style = HudeHeading().copy(brush = HudBrushes.title))
+                Spacer(Modifier.width(12.dp))
+                StatusChip(state)
+            }
         }
         Spacer(Modifier.height(16.dp))
 
@@ -116,42 +153,54 @@ fun LiveTab(ip: String, active: Boolean) {
             // `.card`, unmodified: rgba(22,30,46,.6), a 5% hairline, 8px corners,
             // no shadow. The page's cards carry no gradient wash of their own, so
             // the cyan on this screen comes from the gauge itself.
-            Box(
-                Modifier.fillMaxWidth()
-                    .hudCard()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                contentAlignment = Alignment.Center,
+            // `pageFadeIn` per panel, offset by one stagger step: the readout
+            // arrives just after the heading, the figures just after that, and the
+            // whole screen has settled inside a single page entrance.
+            HudEnter(
+                modifier = Modifier.fillMaxWidth(),
+                delayMs = HudMotion.STAGGER_MS,
             ) {
-                HudGauge(
-                    value = snapshot.spd,
-                    fullScale = speedScale(snapshot),
-                    label = "SPEED",
-                    unit = "km/h · ${sourceLabel(snapshot.src)}",
-                    modifier = Modifier.fillMaxWidth().height(200.dp),
-                    accent = if (snapshot.spd > 0.0) HudColors.Cyan else HudColors.CyanDim,
-                )
+                Box(
+                    Modifier.fillMaxWidth()
+                        .hudCard()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    HudGauge(
+                        value = snapshot.spd,
+                        fullScale = speedScale(snapshot),
+                        label = "SPEED",
+                        unit = "km/h · ${sourceLabel(snapshot.src)}",
+                        modifier = Modifier.fillMaxWidth().height(200.dp),
+                        accent = if (snapshot.spd > 0.0) HudColors.Cyan else HudColors.CyanDim,
+                    )
+                }
             }
             Spacer(Modifier.height(16.dp))
         }
 
-        if (snapshot == null && state.live != null) {
-            // Firmware older than V1.4.6 answers /api/live but has no
-            // /api/snapshot: show what it does publish, and say what is missing.
-            FallbackNotice()
-            Spacer(Modifier.height(12.dp))
-            LiveReadingsCells(state)
-        } else if (snapshot != null) {
-            SnapshotCells(snapshot)
-        } else {
-            Text(
-                if (state.lastError == EspApi.FIRMWARE_UPDATE_REQUIRED) {
-                    "No snapshot endpoint on this device."
+        HudEnter(modifier = Modifier.fillMaxWidth(), delayMs = 2 * HudMotion.STAGGER_MS) {
+            Column(Modifier.fillMaxWidth()) {
+                if (snapshot == null && state.live != null) {
+                    // Firmware older than V1.4.6 answers /api/live but has no
+                    // /api/snapshot: show what it does publish, and say what is missing.
+                    FallbackNotice()
+                    Spacer(Modifier.height(12.dp))
+                    LiveReadingsCells(state)
+                } else if (snapshot != null) {
+                    SnapshotCells(snapshot)
                 } else {
-                    "Waiting for the dashboard…"
-                },
-                color = HudColors.TextMuted,
-                style = HudeCfgHelp(),
-            )
+                    Text(
+                        if (state.lastError == EspApi.FIRMWARE_UPDATE_REQUIRED) {
+                            "No snapshot endpoint on this device."
+                        } else {
+                            "Waiting for the dashboard…"
+                        },
+                        color = HudColors.TextMuted,
+                        style = HudeCfgHelp(),
+                    )
+                }
+            }
         }
         Spacer(Modifier.height(24.dp))
     }
@@ -190,30 +239,104 @@ private fun fmt(value: Double, places: Int = 1): String =
  */
 @Composable
 private fun StatusChip(state: TripRuntimeState) {
-    val (label, color) = when {
+    val (label, target) = when {
         state.recording -> "RECORDING" to HudColors.Green
         state.lastError == EspApi.FIRMWARE_UPDATE_REQUIRED -> "NEEDS UPDATE" to HudColors.Amber
         state.pausedForWebUi -> "PAUSED · WEB UI" to HudColors.Amber
+        // Nothing has come back yet on this connection - that is not the same
+        // claim as "the dashboard stopped answering", which is what NO DATA means.
+        state.lastOkMs == 0L -> "CONNECTING" to HudColors.TextDim
         state.polling && state.stale -> "NO DATA" to HudColors.Red
         state.polling -> "LOGGING IDLE" to HudColors.Cyan
         else -> "NOT RECORDING" to HudColors.TextDim
+    }
+    // The state changes without the user touching anything (the recorder starts,
+    // the page takes the connection, data goes stale), so both halves of the pill
+    // move: the colour over the page's 0.2s control easing, the word crossfading
+    // into its place.
+    val color by animateColorAsState(
+        target,
+        tween(HudMotion.SWITCH_MS, easing = HudMotion.Ease),
+        label = "chipColor",
+    )
+    // `pulseGlow`, held by the pill while RECORDING. The fraction is a state object
+    // read *inside* the draw lambda below: a step of the breath invalidates the
+    // chip's own layer, not the Live screen behind it. When the state stops
+    // recording the breath is left at its dim stop, and the pill settles back to the
+    // plain tint the CSS gives a `.msg-*` pill.
+    val glow = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(state.recording) {
+        if (!state.recording) {
+            glow.floatValue = 0f
+            return@LaunchedEffect
+        }
+        val start = android.os.SystemClock.elapsedRealtime()
+        while (isActive) {
+            val p = (android.os.SystemClock.elapsedRealtime() - start) % CHIP_PULSE_MS
+            // The keyframe sits at one stop for 0% and 100% and the other for 50%,
+            // which is a cosine and not a triangle: it eases at both ends, so there
+            // is no snap at the bottom of the breath.
+            glow.floatValue = 0.5f - 0.5f * cos(2f * PI.toFloat() * p / CHIP_PULSE_MS)
+            delay(CHIP_PULSE_STEP_MS)
+        }
     }
     Box(
         Modifier
             // `.ip-banner` for the shape (--bg-card pill, hairline, 4x12 padding),
             // `.msg-success`/`.msg-error` for the state: that colour as a 30%
-            // hairline and an 8% wash, and in the label.
+            // hairline and an 8% wash, and in the label. The padding sits on the
+            // label rather than the box, so the layer that draws the breath spans
+            // the whole pill and its ring lands on the hairline.
             .hudCard(
                 shape = HudRadius.PillShape,
                 fill = HudColors.Panel,
                 borderColor = color.copy(alpha = 0.3f),
             )
-            .background(color.copy(alpha = 0.08f), HudRadius.PillShape)
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .background(color.copy(alpha = 0.08f), HudRadius.PillShape),
     ) {
         // `#ip-banner` is 13px with no weight of its own, and `#msg`'s variants put
         // the colour in the text: same here.
-        Text(label, color = color, style = HudeBody())
+        Crossfade(label, animationSpec = tween(HudMotion.SWITCH_MS), label = "chipText") {
+            Text(
+                it,
+                color = color,
+                style = HudeBody(),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+        Canvas(Modifier.matchParentSize()) {
+            val g = glow.floatValue
+            if (g > 0.01f) {
+                val h = size.height
+                val path = Path()
+                path.addRoundRect(
+                    RoundRect(Rect(0f, 0f, size.width, h), CornerRadius(h / 2f, h / 2f)),
+                )
+                // The page's shadow is a blur outside the pill, and this layer has no
+                // blur to give it (blurring what is behind needs API 31, the app
+                // supports 26), so the halo is three strokes growing inward from the
+                // hairline - a stroke is centred on the path, so the outer half of
+                // each is cut off by the layer. Their alphas peak under the page's
+                // bright stop (.5) so the stack never reads heavier than the single
+                // shadow it stands in for, and all three ride the same cosine the
+                // keyframe does.
+                drawPath(
+                    path,
+                    color.copy(alpha = 0.05f + 0.07f * g),
+                    style = Stroke(width = 7.dp.toPx()),
+                )
+                drawPath(
+                    path,
+                    color.copy(alpha = 0.07f + 0.11f * g),
+                    style = Stroke(width = 3.5.dp.toPx()),
+                )
+                drawPath(
+                    path,
+                    color.copy(alpha = 0.18f + 0.30f * g),
+                    style = Stroke(width = 1.5.dp.toPx()),
+                )
+            }
+        }
     }
 }
 

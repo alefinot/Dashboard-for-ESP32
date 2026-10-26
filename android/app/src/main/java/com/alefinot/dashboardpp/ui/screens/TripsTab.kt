@@ -83,7 +83,7 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             // The page's `h2`: 14px, 700, letter-spacing 2, and its gradient text.
-            Text("TRIPS", style = HudeHeading().copy(brush = HudBrushes.titleGradient()))
+            Text("TRIPS", style = HudeHeading().copy(brush = HudBrushes.title))
             Spacer(Modifier.width(12.dp))
             Text(
                 "${rows.size} · ${formatBytes(vm.storageBytes())}",
@@ -128,7 +128,9 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
         // design brief rules out. One ramp drives the whole list instead, each
         // row taking its slice of it by position, so a row scrolling back into
         // view finds the ramp already at 1 and costs nothing.
-        var revealed by remember { mutableStateOf(false) }
+        // With motion off the list starts revealed: the ramp would otherwise animate
+        // from nothing, which is motion the user asked not to have.
+        var revealed by remember { mutableStateOf(!HudMotion.enabled) }
         LaunchedEffect(rows.size) {
             if (rows.isNotEmpty()) revealed = true
         }

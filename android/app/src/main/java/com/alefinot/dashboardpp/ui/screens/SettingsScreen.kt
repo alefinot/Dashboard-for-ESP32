@@ -75,6 +75,7 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val recordingEnabled by settings.recordingEnabled
         .collectAsStateWithLifecycle(initialValue = true)
+    val motionOn by settings.motionEnabled.collectAsStateWithLifecycle(initialValue = true)
     val appVersion = remember {
         try {
             val app = context.applicationContext
@@ -90,7 +91,7 @@ fun SettingsScreen(
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         ) {
-            Text("APP SETTINGS", style = HudeHeading().copy(brush = HudBrushes.titleGradient()))
+            Text("APP SETTINGS", style = HudeHeading().copy(brush = HudBrushes.title))
             Spacer(Modifier.height(24.dp))
             Box(
                 Modifier.fillMaxWidth().hudCard()
@@ -159,6 +160,26 @@ fun SettingsScreen(
                     if (on) TripLogService.start(context, ip) else TripLogService.stop(context)
                 }
             }
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier.fillMaxWidth().height(48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Same label treatment as every other form label on this screen:
+                // cyan, `label { color: var(--accent-cyan) }`.
+                Text("MOTION", color = HudColors.Cyan, style = HudeFormLabel())
+                Spacer(Modifier.width(12.dp))
+                HudToggle(on = motionOn) { on -> scope.launch { settings.setMotionEnabled(on) } }
+            }
+            Text(
+                "On, the app moves the way the dashboard does: panels arrive with the " +
+                    "page's own fade, the tab marker travels to the tab you tap, the " +
+                    "recorded trips come in one after another, and a live recording " +
+                    "breathes. Off, everything is simply in place. A device that turns " +
+                    "its own animation scale off stops the app too, without asking.",
+                color = HudColors.TextDim,
+                style = HudeCfgNote(),
+            )
             Spacer(Modifier.height(12.dp))
             HudButton("STORAGE & FILES", style = HudButtonStyle.SECONDARY) {
                 storageLine = hudBytes(trips.storageBytes()) + " recorded · " +

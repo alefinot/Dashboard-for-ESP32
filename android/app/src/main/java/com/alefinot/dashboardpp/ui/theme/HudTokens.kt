@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -71,6 +73,39 @@ object HudMotion {
     /** `.adv-switch` and `.reset-btn`: 0.2 s. */
     const val SWITCH_MS = 200
 
+    /**
+     * The app's own motion switch, mirrored here from the app's preferences (see
+     * ConnectedTabs, which collects `RecorderSettings.motionEnabled` into it) so the
+     * theme can read a flag without owning a store. It is a Compose state object on
+     * purpose: flipping it recomposes the callers that read `enabled`, so the switch
+     * takes effect on the next thing the user touches rather than on the next
+     * restart.
+     *
+     * The system's animator duration scale needs no code here: Compose multiplies
+     * every duration it runs by `MotionDurationScale`, which is that setting
+     * (androidx's changelog for compose-ui 1.2.0-alpha05 records the change), so a
+     * device with animation scale turned off already stops here.
+     */
+    private val _prefEnabled = mutableStateOf(true)
+
+    /** Motion the app may use: the user's switch. */
+    val enabled: Boolean get() = _prefEnabled.value
+
+    /** Written by the screen that collects the preference (see ConnectedTabs). */
+    fun setPrefEnabled(on: Boolean) {
+        if (_prefEnabled.value != on) _prefEnabled.value = on
+    }
+
+    /**
+     * The tab pill travelling between labels. The page has no tab bar to animate, so
+     * this is the page's own 0.25 s button curve (`button:hover`/`:active`) applied
+     * to the one control the app has and the page does not.
+     */
+    const val TAB_MS = 250
+
+    /** `pageFadeIn`: the 8px rise that comes with every entrance on the page. */
+    const val RISE_DP = 8
+
     /** `.perf-bar-fill`: `transition: width 0.8s ease`. */
     const val BAR_MS = 800
 
@@ -83,6 +118,15 @@ object HudMotion {
      * chosen small enough that a nine-row wall settles inside one page entrance.
      */
     const val STAGGER_MS = 30
+
+    /**
+     * How long a gauge figure takes to travel to a new value. The page has no
+     * gauge, so this number is ours; it sits between the page's two live-motion
+     * rules - 0.3 s for a control, 0.8 s for `.perf-bar-fill` changing width - so a
+     * value arriving once a second never snaps and is never still moving when the
+     * next sample lands. Nothing here loops: the arc is idle between samples.
+     */
+    const val GAUGE_MS = 400
 }
 
 /**
@@ -99,13 +143,6 @@ object HudBrushes {
     /** `button:hover` - the brightened state, and the one a touch press uses. */
     fun buttonActive(): Brush = Brush.linearGradient(
         listOf(Color(0x4D00E5FF), Color(0x732979FF)),
-    )
-
-    /** `h2` - the heading's clip: `linear-gradient(135deg, #ffffff 30%, #00e5ff)`. */
-    fun titleGradient(): Brush = Brush.linearGradient(
-        0f to Color(0xFFFFFFFF),
-        0.3f to Color(0xFFFFFFFF),
-        1f to HudColors.Cyan,
     )
 
     /** `.btn-secondary` - a flat fill, `rgba(30,41,59,.7)`, not a gradient. */

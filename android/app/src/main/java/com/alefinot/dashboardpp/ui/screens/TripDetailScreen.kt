@@ -100,7 +100,7 @@ fun TripDetailScreen(row: TripRow, vm: TripsViewModel, onDismiss: () -> Unit) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(s.startMs)),
-                style = HudeHeading().copy(brush = HudBrushes.titleGradient()),
+                style = HudeHeading().copy(brush = HudBrushes.title),
             )
         }
         Spacer(Modifier.height(4.dp))

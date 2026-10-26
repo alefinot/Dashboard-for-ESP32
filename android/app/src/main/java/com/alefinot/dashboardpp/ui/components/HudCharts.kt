@@ -1,5 +1,7 @@
 package com.alefinot.dashboardpp.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -20,7 +23,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import com.alefinot.dashboardpp.ui.theme.HudColors
-import com.alefinot.dashboardpp.ui.theme.HudNumericSmall
+import com.alefinot.dashboardpp.ui.theme.HudMotion
+import com.alefinot.dashboardpp.ui.theme.HudeMetric
+import com.alefinot.dashboardpp.ui.theme.HudeMetricUnit
 import com.alefinot.dashboardpp.ui.theme.HudePerfValue
 import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
 import com.alefinot.dashboardpp.ui.theme.HudeFormLabel
@@ -142,7 +147,21 @@ fun HudGauge(
     accent: Color = HudColors.Cyan,
 ) {
     val clamped = max(0.0, min(value, fullScale))
-    val fraction = (clamped / fullScale).toFloat().coerceIn(0f, 1f)
+    // A new figure arrives once a second. The arc and the number travel to it on
+    // the page's own strong ease-out instead of jumping (HudMotion.GAUGE_MS): the
+    // page has no gauge to copy, so the duration is ours, chosen so the movement
+    // settles before the next sample. Both animations are value-triggered - with no
+    // new sample the gauge holds still and costs no frames.
+    val fraction by animateFloatAsState(
+        (clamped / fullScale).toFloat().coerceIn(0f, 1f),
+        tween(HudMotion.GAUGE_MS, easing = HudMotion.Standard),
+        label = "gaugeSweep",
+    )
+    val shownValue by animateFloatAsState(
+        clamped.toFloat(),
+        tween(HudMotion.GAUGE_MS, easing = HudMotion.Standard),
+        label = "gaugeFigure",
+    )
     Box(modifier) {
         Canvas(Modifier.fillMaxSize()) {
             val stroke = size.minDimension * 0.09f
@@ -191,11 +210,13 @@ fun HudGauge(
                 style = HudeSectionTitle(0.2f / 13f),
             )
             Text(
-                value.toInt().toString(),
+                // `.speed-value` - the 44px monospace figure the dashboard itself
+                // puts in the middle of its gauge, in the accent colour.
+                shownValue.toInt().toString(),
                 color = accent,
-                style = HudNumericSmall,
+                style = HudeMetric(),
             )
-            Text(unit, color = HudColors.TextMuted, style = HudeFormLabel())
+            Text(unit, color = HudColors.TextMuted, style = HudeMetricUnit())
         }
     }
 }

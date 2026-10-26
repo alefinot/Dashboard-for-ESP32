@@ -4,7 +4,6 @@ import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
@@ -42,7 +41,7 @@ val HudeSplash = TextStyle(
  * The headings are the page's own: `HudeHeading` is `h2` (the only heading the
  * page writes), and `HudeSectionTitle` is `.card h4` — the page has no h1, h3 or
  * h5 rule, so a screen heading painted any other way is the app arguing with its
- * own WebUI. The h2 is filled by `HudBrushes.titleGradient()`.
+ * own WebUI. The h2 is filled by `HudBrushes.title`.
  */
 fun HudeSectionTitle(spacingEm: Float = 0.04f) = TextStyle(
     fontFamily = HudeDisplayFamily,
@@ -51,7 +50,7 @@ fun HudeSectionTitle(spacingEm: Float = 0.04f) = TextStyle(
     letterSpacing = spacingEm.em,
 )
 
-/** `h2`: 26px, 800, -0.5px — `LIVE`, `TRIPS`, filled by `HudBrushes.titleGradient()`. */
+/** `h2`: 26px, 800, -0.5px — `LIVE`, `TRIPS`, filled by `HudBrushes.title`. */
 fun HudeHeading(spacingEm: Float = -0.5f / 26f) = TextStyle(
     fontFamily = HudeDisplayFamily,
     fontSize = 26.sp,
@@ -200,49 +199,6 @@ fun HudePerfValue(spacingEm: Float = 0.5f / 13f) = TextStyle(
     lineHeight = 18.sp,
 )
 
-/**
- * The app's own monospace reading size — the size an app screen reaches for when
- * the page has no rule to copy, because a value line in a card is a table row
- * more than it is a paragraph. It is derived, not found in the CSS.
- */
-fun HudeMonoBody(spacingEm: Float = 0.5f / 13f) = TextStyle(
-    fontFamily = HudeMonoFamily,
-    fontSize = 13.sp,
-    fontWeight = FontWeight.W400,
-    letterSpacing = spacingEm.em,
-    lineHeight = 18.sp,
-)
-
-// Numeric HUD style — mono, big, slightly tracked
-val HudNumeric = TextStyle(
-    fontFamily = HudeMonoFamily,
-    fontSize = 28.sp,
-    fontWeight = FontWeight.W700,
-    letterSpacing = 1.5.sp,
-    textAlign = TextAlign.Center,
-    lineHeight = 30.sp,
-)
-
-// Large numeric (RPM, speed primary)
-val HudNumericLarge = TextStyle(
-    fontFamily = HudeMonoFamily,
-    fontSize = 44.sp,
-    fontWeight = FontWeight.W700,
-    letterSpacing = 2.sp,
-    textAlign = TextAlign.Center,
-    lineHeight = 46.sp,
-)
-
-// Small numeric / secondary readouts
-val HudNumericSmall = TextStyle(
-    fontFamily = HudeMonoFamily,
-    fontSize = 16.sp,
-    fontWeight = FontWeight.W600,
-    letterSpacing = 1.sp,
-    lineHeight = 20.sp,
-)
-
-// Label style (monospace, tracked, uppercase-ish feel)
 /** `button`: 13px, 600 — the words on an action, in the body family. */
 fun HudeButtonLabel(spacingEm: Float = 0f) = TextStyle(
     fontFamily = HudeBodyFamily,
@@ -250,16 +206,6 @@ fun HudeButtonLabel(spacingEm: Float = 0f) = TextStyle(
     fontWeight = FontWeight.W600,
     letterSpacing = spacingEm.em,
 )
-
-// Data text — primary mono for values
-val HudMonoText = TextStyle(
-    fontFamily = HudeMonoFamily,
-    fontSize = 15.sp,
-    fontWeight = FontWeight.W500,
-    letterSpacing = 1.sp,
-    lineHeight = 20.sp,
-)
-
 
 fun HudeTypography(): Typography = Typography(
     // The Material slots exist so Material3 components inside our own composables

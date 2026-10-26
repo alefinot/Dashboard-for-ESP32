@@ -11,11 +11,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.alefinot.dashboardpp.ui.theme.HudMotion
+import kotlinx.coroutines.delay
 
 /**
  * The page's entrance, `pageFadeIn`: opacity 0 → 1 with an 8px rise, on
@@ -30,12 +32,28 @@ import com.alefinot.dashboardpp.ui.theme.HudMotion
 fun HudEnter(
     modifier: Modifier = Modifier,
     durationMs: Int = HudMotion.ENTRANCE_MS,
+    delayMs: Int = 0,
     riseDp: Int = 8,
     scaleFrom: Float? = null,
     content: @Composable () -> Unit,
 ) {
+    // Motion off: the content is there, with no transition at all. Branching rather
+    // than passing a zero duration, because `AnimatedVisibility` given an `enter`
+    // and no matching `exit` still runs the framework's default fade when it hides -
+    // so a duration of 0 would leave a fade where the user asked for none.
+    if (!HudMotion.enabled) {
+        Box(modifier) { content() }
+        return
+    }
     var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { shown = true }
+    LaunchedEffect(Unit) {
+        // A wall of panels arriving one after another (the Live screen: heading,
+        // then the readout, then the figures) is one page entrance split into
+        // slices, not a queue the user waits through - hence a 30 ms offset per
+        // block, so nine panels settle inside one 0.5 s fade.
+        if (delayMs > 0) delay(delayMs.toLong())
+        shown = true
+    }
     val spec = tween<IntOffset>(durationMs, easing = HudMotion.Standard)
     val rise = with(LocalDensity.current) { riseDp.dp.roundToPx() }
     AnimatedVisibility(

@@ -84,6 +84,15 @@ class RecorderSettings(context: Context) {
         store.data.catch { emit(emptyPreferences()) }
             .map { it[KEY_RECORDING] ?: true }
 
+    /**
+     * The app's motion switch (`motion_enabled`, default on). It lives in this
+     * store because this DataStore is where the app keeps its preferences - the
+     * notification flag next to it is not a recording setting either.
+     */
+    val motionEnabled: Flow<Boolean> =
+        store.data.catch { emit(emptyPreferences()) }
+            .map { it[KEY_MOTION] ?: true }
+
     val notificationEnabled: Flow<Boolean> =
         store.data.catch { emit(emptyPreferences()) }
             .map { it[KEY_NOTIFICATION] ?: true }
@@ -111,6 +120,10 @@ class RecorderSettings(context: Context) {
         store.edit { it[KEY_RECORDING] = enabled }
     }
 
+    suspend fun setMotionEnabled(enabled: Boolean) {
+        store.edit { it[KEY_MOTION] = enabled }
+    }
+
     suspend fun setNotificationEnabled(enabled: Boolean) {
         store.edit { it[KEY_NOTIFICATION] = enabled }
     }
@@ -121,6 +134,7 @@ class RecorderSettings(context: Context) {
 
     companion object {
         private val KEY_RECORDING = booleanPreferencesKey("recording_enabled")
+        private val KEY_MOTION = booleanPreferencesKey("motion_enabled")
         private val KEY_NOTIFICATION = booleanPreferencesKey("notification_enabled")
         private val KEY_BATTERY_PROMPT = booleanPreferencesKey("battery_prompt_shown")
     }
