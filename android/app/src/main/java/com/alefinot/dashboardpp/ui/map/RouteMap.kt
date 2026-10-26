@@ -3,6 +3,7 @@ package com.alefinot.dashboardpp.ui.map
 import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.graphics.drawable.GradientDrawable
+import android.view.ViewTreeObserver
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
@@ -43,6 +44,11 @@ object OsmdroidSetup {
             val cache = File(base, "osmtiles")
             if (!cache.exists()) cache.mkdirs()
             Configuration.getInstance().apply {
+                // Base path first: its getter falls back to asking a Context
+                // that osmdroid only knows after Configuration.load(), which we
+                // never call — so leaving it unset logs a caught NPE on every
+                // MapView construction.
+                setOsmdroidBasePath(base)
                 // Explicit setters: the getter for the tile cache is overloaded
                 // (with and without a Context), so the synthetic property syntax
                 // would not resolve.
@@ -80,12 +86,17 @@ fun RouteMap(points: List<GeoPoint>, modifier: Modifier = Modifier) {
 
 private class MapHolder {
     private var map: MapView? = null
+    private var layoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
 
     /**
-     * Framing is applied once per point set. Re-fitting on every recomposition
-     * would yank the viewport back while the user is panning around the route.
+     * Framing is applied once per point set and viewport size. Re-fitting on
+     * every recomposition would yank the viewport back while the user is
+     * panning around the route.
      */
-    private var fitted: Int? = null
+    private var fitted: Long? = null
+
+    /** Filtered track, kept so framing can run after the first layout. */
+    private var track: List<GeoPoint> = emptyList()
 
     fun build(context: Context): MapView {
         val view = MapView(context)
@@ -102,37 +113,94 @@ private class MapHolder {
         return view
     }
 
+    /**
+     * The track is drawn as soon as the view exists; framing waits for a real
+     * size, because a `AndroidView` update block runs before layout and framing
+     * an unmeasured map is not merely wrong — see [MapFit].
+     */
     fun applyTrack(view: MapView, points: List<GeoPoint>) {
+        track = MapFit.usable(points)
+        drawTrack(view)
+        if (view.width > 0 && view.height > 0) fit(view) else awaitSize(view)
+    }
+
+    private fun awaitSize(view: MapView) {
+        if (layoutListener != null) return
+        val observer = view.viewTreeObserver
+        val listener = object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                if (view.width > 0 && view.height > 0) {
+                    detachListener(view)
+                    fit(view)
+                }
+            }
+        }
+        layoutListener = listener
+        if (observer.isAlive) observer.addOnGlobalLayoutListener(listener)
+    }
+
+    private fun detachListener(view: MapView) {
+        layoutListener?.let { l ->
+            val observer = view.viewTreeObserver
+            if (observer.isAlive) observer.removeOnGlobalLayoutListener(l)
+        }
+        layoutListener = null
+    }
+
+    private fun drawTrack(view: MapView) {
         val manager = view.getOverlayManager()
         manager.clear()
-        if (points.isEmpty()) return
+        if (track.isEmpty()) return
 
         val density = view.resources.displayMetrics.density
         val line = Polyline()
-        line.getPoints().addAll(points)
+        line.getPoints().addAll(track)
         line.setColor(HudColors.Cyan.toArgb())
         line.setWidth(5f * density)
         line.getPaint().setStrokeCap(android.graphics.Paint.Cap.ROUND)
         line.getPaint().setStrokeJoin(android.graphics.Paint.Join.ROUND)
         manager.add(line)
 
-        if (points.size >= 2) {
-            manager.add(endMarker(view, points.first(), HudColors.Green.toArgb(), "Trip start"))
-            manager.add(endMarker(view, points.last(), HudColors.Amber.toArgb(), "Trip end"))
+        if (track.size >= 2) {
+            manager.add(endMarker(view, track.first(), HudColors.Green.toArgb(), "Trip start"))
+            manager.add(endMarker(view, track.last(), HudColors.Amber.toArgb(), "Trip end"))
         } else {
-            manager.add(endMarker(view, points.first(), HudColors.Green.toArgb(), "Position"))
+            manager.add(endMarker(view, track.first(), HudColors.Green.toArgb(), "Position"))
         }
+    }
 
-        val fitKey = points.size * 31 + (points.first().latitude.toInt() * 7) +
-            (points.last().longitude.toInt() * 13)
-        if (fitKey != fitted) {
-            fitted = fitKey
-            val box = BoundingBox.fromGeoPoints(points)
+    private fun fit(view: MapView) {
+        val plan = MapFit.plan(track, view.width, view.height, view.maxZoomLevel) ?: return
+        val key = fitKey(view)
+        if (key == fitted) return
+        fitted = key
+        if (plan.useBoundingBox) {
+            val density = view.resources.displayMetrics.density
             // strokeSize is the pixel padding kept around the track so the start
             // and end markers are never flush with the map edge.
-            view.zoomToBoundingBox(box, true, (28 * density).toInt())
+            view.zoomToBoundingBox(
+                BoundingBox.fromGeoPoints(track),
+                true,
+                (28 * density).toInt(),
+            )
+        } else {
+            // A single position, or a map that has no size to fit into: point
+            // the camera at it and leave the zoom decision to us.
+            view.controller.setZoom(plan.zoom)
+            view.controller.setCenter(plan.center)
         }
         view.invalidate()
+    }
+
+    /** Identity of "this track in this viewport", used to fit exactly once. */
+    private fun fitKey(view: MapView): Long {
+        var h = (view.width.toLong() shl 20) xor view.height.toLong()
+        h = h * 31 + track.size
+        if (track.isNotEmpty()) {
+            h = h * 31 + track.first().latitude.hashCode()
+            h = h * 31 + track.last().longitude.hashCode()
+        }
+        return h
     }
 
     private fun endMarker(view: MapView, point: GeoPoint, color: Int, title: String): Marker {
@@ -161,10 +229,12 @@ private class MapHolder {
 
     fun release() {
         map?.run {
+            detachListener(this)
             onPause()
             onDetach()
         }
         map = null
+        track = emptyList()
         fitted = null
     }
 }
