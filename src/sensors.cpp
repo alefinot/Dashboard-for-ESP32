@@ -497,6 +497,10 @@ static constexpr unsigned long DEBOUNCE_US = 12000UL;
 // updateFilteredSpeed() in gpsTask (core 0) - atomic 32-bit read/write.
 volatile int heldSpeedSourceMode = 0;
 
+// The trip total is a 64-bit double written under tripDistMux by the sensor
+// task (issue #61). On ESP32 a bare read is two 32-bit bus cycles, so it can
+// mix the halves of two different values - the issue #14 hazard. Readers
+// outside this file go through tripDistanceSnapshot() below.
 double tripDistanceKm = 0.0;
 static portMUX_TYPE tripDistMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -519,6 +523,11 @@ static void tripDistanceReset() {
   tripDistanceKm = 0.0;
   portEXIT_CRITICAL(&tripDistMux);
 }
+
+// Thread-safe read for readers off the sensor task (/api/snapshot): the same
+// spinlock the writers use, so the web task never sees a half-written double
+// (the issue #14 hazard, applied to the trip total).
+double tripDistanceSnapshot() { return tripDistanceGet(); }
 
 float tripStartFuelLiters = -1.0f;
 float tripFuelConsumedLiters = 0.0f;

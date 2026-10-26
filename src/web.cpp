@@ -2119,12 +2119,113 @@ static void liveGetHandler() {
   server.send(200, "application/json", buf);
 }
 
+// The bounded appender used by the noise-bench handlers is defined further
+// down; /api/snapshot needs it before that point, so it is forward-declared
+// here. It is a general allocation-free JSON builder, not bench-only.
+static void nbCatf(char *buf, size_t cap, size_t *used, const char *fmt, ...);
+
+// ----------------------------------------------------------------------------
+// GET /api/snapshot - the whole vehicle + GNSS picture in one atomic snapshot,
+// for external consumers (today: the Android app's trip recorder). /api/live
+// answers the WebUI's five cells and carries no speed, trip, economy or GNSS
+// data at all, which is why a logger on the phone had nothing to log; the ESP
+// has always computed those numbers, it just never published them.
+//
+// Allocation discipline is the same as /api/live (rule 14): one static buffer
+// - the web task is the only caller - filled by the bounded nbCatf() appender,
+// no JsonDocument, no per-request heap. Read-only, so it changes nothing the
+// WebUI or the app already consume (rule 17).
+//
+// `fix` is 1 only while the GNSS location is valid; lat/lon then carry the
+// last published fix, otherwise 0/0. hdop and alt print -1 when the fix did
+// not carry them (no plausible GNSS reading reaches either). Every other field
+// is always present, so a consumer never has to guess about missing keys.
+// `odo` is the display's total (demo mode includes the simulated distance),
+// which is what the phone should log.
+// ----------------------------------------------------------------------------
+static void snapshotGetHandler() {
+  static char buf[512];  // worst-case render is ~360 B (web task: sole caller)
+  size_t used = 0;
+
+  // Fallback values first: all of these are single 32-bit atoms, so reading
+  // them unlocked is safe (no tearing, only a slightly older value). If the
+  // g_stateMutex take fails we answer from these and never block the web task.
+  float spd = currentCachedSpeed, avg = averageSpeed, peak = maxSpeed;
+  float ikml = instantKml, akml = averageKml, tripL = tripFuelConsumedLiters;
+  float tripKm = (float)tripDistanceSnapshot();
+  float fuelL = fuelLiters, volts = batteryVoltage, temp = engineTemperature;
+  float tmrS = accelResultTime;
+  int odoInt = 0, odoDec = 0;  // integer/done parts of km x100, from odoGet()
+  int fuelPct = fuelPercentage, src = heldSpeedSourceMode;
+  int tmrSt = (int)accelState;
+  double odo = odoGet();  // locked accessor: the double never tears
+  if (odo < 0.0) odo = 0.0;
+  if (odo > 16000000.0) odo = 16000000.0;
+  double odoR = odo * 100.0 + 0.5;
+  odoInt = (int)(odoR / 100.0);
+  odoDec = (int)(odoR - (double)odoInt * 100.0);
+
+  if (xSemaphoreTake(g_stateMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+    // The guarded group: one tick's worth of values, so no cell disagrees with
+    // its neighbour, and odo comes from the snapshot the display is drawing
+    // (it is the demo-mode-aware total).
+    spd = g_sensorData.currentSpeed;
+    avg = g_sensorData.averageSpeed;
+    peak = g_sensorData.maxSpeed;
+    ikml = g_sensorData.instantKml;
+    akml = g_sensorData.averageKml;
+    tripL = tripFuelConsumedLiters;
+    fuelL = g_sensorData.fuelLiters;
+    volts = g_sensorData.batteryVoltage;
+    temp = g_sensorData.engineTemperature;
+    tmrS = g_sensorData.accelResultTime;
+    fuelPct = g_sensorData.fuelPercentage;
+    src = g_sensorData.speedSourceMode;
+    tmrSt = (int)g_sensorData.accelState;
+    odo = g_sensorData.totalDistanceKm;
+    xSemaphoreGive(g_stateMutex);
+    if (odo < 0.0) odo = 0.0;
+    if (odo > 16000000.0) odo = 16000000.0;
+    odoR = odo * 100.0 + 0.5;
+    odoInt = (int)(odoR / 100.0);
+    odoDec = (int)(odoR - (double)odoInt * 100.0);
+  }
+
+  // GNSS state comes only from the published snapshot - gps.* belongs to gpsTask
+  // and its value()/kmph()/hdop() calls consume a one-shot update flag (issue #9).
+  GpsFixSnapshot fix;
+  bool haveFix = gpsSnapshotCopy(fix) && fix.valid;
+
+  nbCatf(buf, sizeof(buf), &used,
+         "{\"ver\":\"%s\",\"up\":%lu,\"spd\":%.1f,\"src\":%d,\"avg\":%.1f,"
+         "\"max\":%.1f,\"trp_km\":%.2f,\"trp_l\":%.2f,\"ikml\":%.1f,"
+         "\"akml\":%.1f,\"odo\":%d.%02d,\"fuel_l\":%.2f,\"fuel_pct\":%d,"
+         "\"fuel_st\":%d,\"volts\":%.2f,\"temp\":%.1f,\"amb\":%d,\"sats\":%d,\"hdop\":",
+         FW_VERSION, (unsigned long)(millis() / 1000UL), spd, src, avg, peak,
+         tripKm, tripL, ikml, akml, odoInt, odoDec, fuelL, fuelPct,
+         (int)fuelInputState, volts, temp, ambientLightValue, fix.satellites);
+  if (fix.hdopValid) nbCatf(buf, sizeof(buf), &used, "%.2f", fix.hdop);
+  else nbCatf(buf, sizeof(buf), &used, "-1");
+  nbCatf(buf, sizeof(buf), &used, ",\"alt\":");
+  if (fix.altValid) nbCatf(buf, sizeof(buf), &used, "%.0f", fix.altitudeM);
+  else nbCatf(buf, sizeof(buf), &used, "-1");
+  nbCatf(buf, sizeof(buf), &used, ",\"lat\":%.6f,\"lon\":%.6f,\"fix\":%d,"
+         "\"tmr_st\":%d,\"tmr_s\":%.2f,\"fps\":%.1f,\"heap\":%lu}",
+         haveFix ? fix.lat : 0.0, haveFix ? fix.lon : 0.0, haveFix ? 1 : 0,
+         tmrSt, tmrS, currentMeasuredFps, (unsigned long)ESP.getFreeHeap());
+
+  server.send(200, "application/json", buf);
+}
 // ----------------------------------------------------------------------------
 // Noise bench (master plan step 8): POST starts a four-run measurement job on
 // the four sensor ADC pins, GET reports progress and the finished matrix. The
 // job runs in its own core-0 task, so neither request blocks the web server.
 // Bench instrument only: no config, no NVS, no WebUI. See README "Noise bench".
 // ----------------------------------------------------------------------------
+// Allocation-free append with a running cursor: writes at most cap-1 bytes in
+// total, so a long list can never walk off the end of the caller's buffer.
+// Used by the noise-bench matrix and by /api/snapshot (rule 14: fixed buffers,
+// no String concatenation, no JsonDocument).
 static void nbCatf(char *buf, size_t cap, size_t *used, const char *fmt, ...) {
   if (*used >= cap - 1) return;
   va_list args;
@@ -2682,6 +2783,10 @@ void webServerTask(void *pvParameters) {
 
   // One combined snapshot for the WebUI's live readings - see liveGetHandler.
   server.on("/api/live", HTTP_GET, liveGetHandler);
+
+  // The full vehicle + GNSS snapshot for external consumers (Android trip
+  // recorder). Read-only and additive - see snapshotGetHandler.
+  server.on("/api/snapshot", HTTP_GET, snapshotGetHandler);
 
   // Noise bench (master plan step 8): POST starts a job on the four sensor ADC
   // pins, GET returns progress / the finished matrix. No config, no NVS.

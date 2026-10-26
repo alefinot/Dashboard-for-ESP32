@@ -672,6 +672,9 @@ extern volatile bool hallSpeedConfirmed;
 extern volatile int heldSpeedSourceMode;
 
 extern double tripDistanceKm;
+// Spinlocked read of the trip total for readers off the sensor task
+// (/api/snapshot). Never read the extern double from another task (issue #14).
+double tripDistanceSnapshot();
 extern float tripStartFuelLiters;
 extern float tripFuelConsumedLiters;
 extern unsigned long movingTimeMs;
