@@ -36,7 +36,7 @@ import com.alefinot.dashboardpp.ui.theme.HudeLabel
  * configuration (its Web UI, labelled for what it configures), recorded trips,
  * and this app's own settings.
  */
-enum class AppTab { LIVE, WEB, TRIPS, SETTINGS }
+enum class AppTab { LIVE, TRIPS, WEB, SETTINGS }
 
 /**
  * The connected shell. Live, Trips and Settings are native (chartable,
@@ -91,14 +91,14 @@ fun ConnectedTabs(
     Column(Modifier.fillMaxSize().background(HudColors.Bg)) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             TabButton("LIVE", tab == AppTab.LIVE) { tab = AppTab.LIVE }
-            // "ESP SETTINGS" says whose settings these are — the ESP's own Web
-            // UI — which is the distinction the app needs, not "Web UI".
-            TabButton("ESP SETTINGS", tab == AppTab.WEB) { tab = AppTab.WEB }
             TabButton(
                 label = if (tripsAvailable) "TRIPS" else "TRIPS ✕",
                 selected = tab == AppTab.TRIPS,
                 enabled = tripsAvailable,
             ) { tab = AppTab.TRIPS }
+            // "ESP SETTINGS" says whose settings these are — the ESP's own Web
+            // UI — which is the distinction the app needs, not "Web UI".
+            TabButton("ESP SETTINGS", tab == AppTab.WEB) { tab = AppTab.WEB }
             TabButton("APP SETTINGS", tab == AppTab.SETTINGS) { tab = AppTab.SETTINGS }
         }
 
