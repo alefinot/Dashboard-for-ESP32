@@ -1,6 +1,5 @@
 package com.alefinot.dashboardpp.ui.screens
 
-import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -10,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.activity.compose.BackHandler
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -44,19 +42,21 @@ import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
 import com.alefinot.dashboardpp.viewmodel.TripsViewModel
 
 /**
- * App settings — controls that apply to the Android app itself. The ESP's
- * own configuration (network, save / reboot / reset) lives in the Web UI's
- * bottom toolbar and is not duplicated here.
+ * The "APP SETTINGS" tab — controls that apply to the Android app itself. The
+ * ESP's own configuration (network, save / reboot / reset) stays in its Web UI
+ * on the "ESP SETTINGS" tab and is not duplicated here.
+ *
+ * This is a tab, not an overlay: nothing to dismiss and no back handler to
+ * install. The two connection actions at the bottom end the connection, and the
+ * shell reacts to that by leaving the tabs — which is how you get out.
  */
 @Composable
 fun SettingsScreen(
     vm: ConnectionViewModel,
-    activity: Activity,
     ip: String,
     version: String?,
     trips: TripsViewModel,
     tripsAvailable: Boolean,
-    onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
     val recording by TripRuntime.state.collectAsStateWithLifecycle()
@@ -68,17 +68,12 @@ fun SettingsScreen(
         .collectAsStateWithLifecycle(initialValue = true)
     val appVersion = remember {
         try {
-            activity.packageManager
-                .getPackageInfo(activity.packageName, 0).versionName ?: "?"
+            val app = context.applicationContext
+            app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "?"
         } catch (e: Exception) {
             "?"
         }
     }
-    // Close the settings overlay from the system back button and the
-    // predictive back edge-swipe gesture (Android 14+) — both are routed
-    // through OnBackPressedDispatcher, which BackHandler hooks. It's active
-    // only while this screen is composed (settings overlay is showing).
-    BackHandler { onDismiss() }
     Box(Modifier.fillMaxSize().background(HudColors.Bg)) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -189,11 +184,13 @@ fun SettingsScreen(
             )
             Spacer(Modifier.height(24.dp))
 
-            HudButton("RE-SCAN NETWORK") { onDismiss(); vm.rescan() }
+            // Both of these end the connection, and the shell follows the view
+            // model: as soon as it stops reporting a connection the tab row is
+            // gone and discovery takes over. Settings no longer has to close
+            // itself, and the old CLOSE button has nothing left to close.
+            HudButton("RE-SCAN NETWORK") { vm.rescan() }
             Spacer(Modifier.height(8.dp))
-            HudButton("FORGET THIS DEVICE") { vm.forgetDevice(ip); onDismiss() }
-            Spacer(Modifier.height(8.dp))
-            HudButton("CLOSE", onClick = onDismiss)
+            HudButton("FORGET THIS DEVICE") { vm.forgetDevice(ip) }
         }
     }
 }
