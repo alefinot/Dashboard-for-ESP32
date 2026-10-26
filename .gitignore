@@ -1,6 +1,8 @@
 .pio
 .vscode/
-test/
+# Only the local scratch folder at the repo root: android/app/src/test/
+# holds the app unit tests and must stay tracked.
+/test/
 nul
 scan_lan.ps1
 chips/
