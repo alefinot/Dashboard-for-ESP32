@@ -30,10 +30,13 @@ import com.alefinot.dashboardpp.ui.theme.HudeSmall
 import com.alefinot.dashboardpp.ui.theme.HudeTitle
 import com.alefinot.dashboardpp.viewmodel.ConnectionUiState
 import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
+import com.alefinot.dashboardpp.viewmodel.TripsViewModel
 
 @Composable
 fun DashboardRoot(activity: android.app.Activity, vm: ConnectionViewModel) {
-    val showSettings = remember { mutableStateOf(false) }
+    // One TripsViewModel for the whole session: it owns the file index and the
+    // summary cache, and outlives tab switches (trip recording plan §5).
+    val trips = remember { TripsViewModel(activity.application) }
     LaunchedEffect(Unit) { vm.boot() }
     val s = vm.uiState.value
     // Keep content inside the safe area: with targetSdk 35 edge-to-edge is
@@ -54,20 +57,10 @@ fun DashboardRoot(activity: android.app.Activity, vm: ConnectionViewModel) {
             is ConnectionUiState.ManualEntryNeeded -> ManualEntryScreen(vm)
             is ConnectionUiState.ConnectionLost -> ConnectionLostScreen(vm, s.reason)
             is ConnectionUiState.NoWifi -> NoWifiScreen(vm, s.detail)
-            is ConnectionUiState.Connected -> DashboardWebScreen(
-                activity,
-                vm,
-                s.ip,
-                onSettings = { showSettings.value = true },
-            )
-        }
-        if (showSettings.value && s is ConnectionUiState.Connected) {
-            SettingsScreen(
-                vm,
-                activity,
-                s.ip,
-                s.version,
-                onDismiss = { showSettings.value = false },
+            is ConnectionUiState.Connected -> ConnectedTabs(
+                conn = s,
+                connection = vm,
+                trips = trips,
             )
         }
     }

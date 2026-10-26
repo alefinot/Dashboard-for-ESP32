@@ -36,6 +36,21 @@ fun HudButton(label: String, modifier: Modifier = Modifier, onClick: () -> Unit)
 }
 
 @Composable
+fun HudToggle(on: Boolean, modifier: Modifier = Modifier, onToggle: (Boolean) -> Unit) {
+    val accent = if (on) HudColors.Cyan else HudColors.TextDim
+    Box(
+        modifier = modifier
+            .border(1.dp, accent)
+            .background(HudColors.Panel)
+            .clickable { onToggle(!on) }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(if (on) "ON" else "OFF", color = accent, style = HudeLabel)
+    }
+}
+
+@Composable
 fun HudPanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Box(
         modifier = modifier
