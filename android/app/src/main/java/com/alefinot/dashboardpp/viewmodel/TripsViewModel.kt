@@ -65,7 +65,10 @@ class TripsViewModel(app: Application) : AndroidViewModel(app) {
             val rows = files.map { f ->
                 val hit = cached[f.absolutePath]
                 val summary = if (hit != null && TripIndex.fresh(f, hit)) hit.summary else null
-                TripRow(f, f.lastModified(), f.length(), summary)
+                // The card is labelled with the drive's start from the file
+                // name, not the mtime: a live trip's mtime moves every second,
+                // and a sealed one marks the end of the drive, not its start.
+                TripRow(f, TripStore.startMsOf(f.name) ?: f.lastModified(), f.length(), summary)
             }
             _rows.value = rows
             index.retain(files.map { it.absolutePath }.toSet())

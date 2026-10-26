@@ -5,6 +5,7 @@ import java.io.BufferedWriter
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStreamWriter
+import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,7 +28,10 @@ class TripStore(context: Context) {
     /** Newest first, as the Trips list wants them. */
     fun trips(): List<File> =
         dir().listFiles { f -> f.isFile && f.name.startsWith("trip-") && f.name.endsWith(".csv") }
-            ?.sortedByDescending { it.lastModified() }
+            // Ordered by the drive's start (the name), not by mtime: a live trip
+            // is being appended to, so its mtime keeps moving to the top of the
+            // list on every refresh.
+            ?.sortedByDescending { startMsOf(it.name) ?: it.lastModified() }
             ?: emptyList()
 
     fun totalBytes(): Long = trips().sumOf { it.length() }
@@ -59,6 +63,27 @@ class TripStore(context: Context) {
                 val candidate = "trip-$stamp-" + String.format(Locale.US, "%03d.csv", seq)
                 if (!exists(candidate)) return candidate
                 seq++
+            }
+        }
+
+        /**
+         * The trip start encoded in a file name, or null when the name is not
+         * ours (a file copied in by hand, or the fixtures the tests use).
+         *
+         * This is what the Trips list labels a card with. The file's mtime is
+         * not a trip's start: while a trip is live its mtime is "the recorder
+         * last wrote", and once sealed it is "the session ended" — which is how
+         * a drive that began at 13:39 got labelled 13:57 on the device. The
+         * stamp in the name is the one label that never moves.
+         */
+        fun startMsOf(name: String): Long? {
+            val m = Regex("^trip-(\\d{8})-(\\d{6})-\\d{3}\\.csv$").find(name) ?: return null
+            val format = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+            format.isLenient = false
+            return try {
+                format.parse("${m.groupValues[1]}-${m.groupValues[2]}")?.time
+            } catch (e: ParseException) {
+                null // impossible dates (month 13, second 61) are not ours
             }
         }
     }

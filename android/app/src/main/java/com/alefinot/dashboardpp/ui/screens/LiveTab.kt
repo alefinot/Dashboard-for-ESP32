@@ -262,7 +262,9 @@ private fun SnapshotCells(s: Snapshot) {
                 modifier = Modifier.fillMaxWidth(),
             )
         },
-        { StatCell("AMBIENT", s.amb.toString(), "°C", modifier = Modifier.fillMaxWidth()) },
+        // "amb" is the ambient LIGHT sensor (raw value, no unit) — the Web UI
+        // shows it as a bare reading, so this does too. Not a temperature.
+        { StatCell("LIGHT", s.amb.toString(), modifier = Modifier.fillMaxWidth()) },
     )
     RowOf(
         {
@@ -333,7 +335,7 @@ private fun LiveReadingsCells(state: TripRuntimeState) {
         { StatCell("COOLANT", fmt(live.temp, 1), "°C", modifier = Modifier.fillMaxWidth()) },
     )
     RowOf(
-        { StatCell("AMBIENT", live.ambient.toString(), "°C", modifier = Modifier.fillMaxWidth()) },
+        { StatCell("LIGHT", live.ambient.toString(), modifier = Modifier.fillMaxWidth()) },
         { StatCell("SPEED", "—", modifier = Modifier.fillMaxWidth(), dim = true) },
     )
 }
