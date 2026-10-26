@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import com.alefinot.dashboardpp.ui.theme.HudColors
@@ -75,7 +76,14 @@ fun RouteMap(points: List<GeoPoint>, modifier: Modifier = Modifier) {
     OsmdroidSetup.ensure(context)
     val holder = remember { MapHolder() }
     AndroidView(
-        modifier = modifier,
+        // Clipped here, not in the host: osmdroid sizes its tile painting from
+        // the canvas it is handed (TilesOverlay keeps a mCanvasRect taken from
+        // Canvas.getClipBounds), and Compose draws an interop View into its own
+        // canvas without clipping it to the slot. Left alone, the basemap paints
+        // over the whole screen — status bar, cards, summary cells — while the
+        // track and markers stay inside the view's real bounds. On top of the
+        // visual mess it also fetches and decodes tiles nobody can see.
+        modifier = modifier.clipToBounds(),
         factory = { ctx -> holder.build(ctx) },
         update = { map -> holder.applyTrack(map, points) },
     )
