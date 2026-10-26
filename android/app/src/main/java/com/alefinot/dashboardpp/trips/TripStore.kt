@@ -1,0 +1,157 @@
+package com.alefinot.dashboardpp.trips
+
+import android.content.Context
+import java.io.BufferedWriter
+import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStreamWriter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/**
+ * Where trip files live (trip recording plan §4). App-private external storage:
+ * visible to the user through a file manager and via the share sheet, removed
+ * cleanly with the app, and needs no storage permission.
+ */
+class TripStore(context: Context) {
+    private val appContext = context.applicationContext
+
+    fun dir(): File {
+        val base = appContext.getExternalFilesDir(null) ?: appContext.filesDir
+        val d = File(base, "trips")
+        if (!d.exists()) d.mkdirs()
+        return d
+    }
+
+    /** Newest first, as the Trips list wants them. */
+    fun trips(): List<File> =
+        dir().listFiles { f -> f.isFile && f.name.startsWith("trip-") && f.name.endsWith(".csv") }
+            ?.sortedByDescending { it.lastModified() }
+            ?: emptyList()
+
+    fun totalBytes(): Long = trips().sumOf { it.length() }
+
+    fun deleteAll(): Int {
+        val files = trips()
+        files.forEach { it.delete() }
+        return files.size
+    }
+
+    /** `trip-YYYYMMDD-HHMMSS-<seq>.csv`, the seq breaking ties within a second. */
+    fun newName(startMs: Long): String {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(startMs))
+        val dir = dir()
+        return File(dir, uniqueName(stamp) { File(dir, it).exists() }).absolutePath
+    }
+
+    companion object {
+        /**
+         * Pure half of [newName]: the first `trip-<stamp>-NNN.csv` that does not
+         * collide. Two drives started in the same second (a seal and an immediate
+         * re-open, or a clock jump) must never overwrite each other's file.
+         */
+        fun uniqueName(stamp: String, exists: (String) -> Boolean): String {
+            var seq = 1
+            while (true) {
+                // Locale.US: a locale that renders digits differently must not
+                // change the file names we compare against.
+                val candidate = "trip-$stamp-" + String.format(Locale.US, "%03d.csv", seq)
+                if (!exists(candidate)) return candidate
+                seq++
+            }
+        }
+    }
+}
+
+/**
+ * File access for the recorder, behind an interface so the session state machine
+ * ([TripRecorder]) is a plain JVM class the unit tests can drive with a fake.
+ */
+interface TripWriter {
+    /** Create the file and write the header; returns the path. */
+    fun create(path: String)
+
+    /** Continue an existing file — no second header. */
+    fun reopen(path: String)
+
+    fun append(path: String, line: String)
+
+    /** Flush and close. The file stays valid; sealing is not a format event. */
+    fun seal(path: String)
+
+    /** Existing data lines, used to seed the running summary on a re-open. */
+    fun readDataLines(path: String): List<String>
+
+    fun exists(path: String): Boolean
+}
+
+/** The real implementation: one append-mode writer per open trip file. */
+class CsvTripWriter(private val store: TripStore) : TripWriter {
+    private val open = HashMap<String, BufferedWriter>()
+
+    override fun create(path: String) {
+        closeOf(path)
+        val f = File(path)
+        f.parentFile?.mkdirs()
+        val w = BufferedWriter(OutputStreamWriter(FileOutputStream(f), Charsets.UTF_8))
+        w.write(TripFormat.HEADER)
+        w.newLine()
+        w.flush()
+        open[path] = w
+    }
+
+    override fun reopen(path: String) {
+        if (open.containsKey(path)) return
+        val f = File(path)
+        if (!f.exists()) {
+            create(path)
+            return
+        }
+        val w = BufferedWriter(OutputStreamWriter(FileOutputStream(f, true), Charsets.UTF_8))
+        open[path] = w
+    }
+
+    override fun append(path: String, line: String) {
+        val w = open[path] ?: return
+        w.write(line)
+        w.newLine()
+        // Flushing every sample is what keeps the file honest after a kill: at
+        // one line per second the cost is irrelevant, the value is the trip.
+        w.flush()
+    }
+
+    override fun seal(path: String) = closeOf(path)
+
+    private fun closeOf(path: String) {
+        open.remove(path)?.run {
+            try {
+                flush()
+                close()
+            } catch (e: Exception) {
+                // A dead volume or a revoked storage permission must not take the
+                // service down; the samples already flushed are still on disk.
+            }
+        }
+    }
+
+    override fun readDataLines(path: String): List<String> {
+        val f = File(path)
+        if (!f.exists()) return emptyList()
+        return try {
+            val out = ArrayList<String>()
+            f.forEachLine { line ->
+                if (line.isNotBlank() && !TripFormat.isHeader(line)) out.add(line)
+            }
+            out
+        } catch (e: Exception) {
+            // A torn read (device storage revoked mid-trip) costs the seeding,
+            // never the append that follows.
+            emptyList()
+        }
+    }
+
+    override fun exists(path: String): Boolean = File(path).exists()
+
+    fun closeAll() = open.keys.toList().forEach { closeOf(it) }
+}

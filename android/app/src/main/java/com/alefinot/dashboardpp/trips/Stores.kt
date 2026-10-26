@@ -1,0 +1,127 @@
+package com.alefinot.dashboardpp.trips
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import java.io.File
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+
+// One DataStore instance per name, per process — that is what the delegate
+// guarantees, and both the UI and the service read these.
+private val Context.tripIndexStore: DataStore<Preferences> by preferencesDataStore("trip_index")
+private val Context.tripSettingsStore: DataStore<Preferences> by preferencesDataStore("trip_settings")
+
+/** A summary remembered next to the file it describes. */
+data class CachedSummary(val mtime: Long, val size: Long, val summary: TripSummary)
+
+/**
+ * Cache of per-trip summaries (trip recording plan §4): opening the Trips tab
+ * must not re-parse every CSV, so a sealed trip is summarised once and reused
+ * until its mtime or size changes. Trips still being written are never cached.
+ */
+class TripIndex(context: Context) {
+    private val store = context.applicationContext.tripIndexStore
+
+    private fun key(path: String) = "idx:$path"
+
+    suspend fun put(path: String, mtime: Long, size: Long, summary: TripSummary) {
+        store.edit { it[stringPreferencesKey(key(path))] = "$mtime;$size;${TripSummaryCodec.encode(summary)}" }
+    }
+
+    fun cached(): Flow<Map<String, CachedSummary>> =
+        store.data
+            .catch { emit(emptyPreferences()) }
+            .map { prefs ->
+                val out = HashMap<String, CachedSummary>()
+                for ((k, v) in prefs.asMap()) {
+                    if (k.name.startsWith("idx:") && v is String) {
+                        val parts = v.split(";", limit = 3)
+                        if (parts.size != 3) continue
+                        val summary = TripSummaryCodec.decode(parts[2]) ?: continue
+                        out[k.name.removePrefix("idx:")] = CachedSummary(
+                            mtime = parts[0].toLongOrNull() ?: continue,
+                            size = parts[1].toLongOrNull() ?: continue,
+                            summary = summary,
+                        )
+                    }
+                }
+                out
+            }
+
+    /** Drop cache rows for files that no longer exist. */
+    suspend fun retain(livePaths: Set<String>) {
+        store.edit { prefs ->
+            val stale = prefs.asMap().keys
+                .filter { it.name.startsWith("idx:") && it.name.removePrefix("idx:") !in livePaths }
+            stale.forEach { prefs.remove(it) }
+        }
+    }
+
+    companion object {
+        /** True when a cached row still matches the file on disk. */
+        fun fresh(file: File, cached: CachedSummary): Boolean =
+            file.length() == cached.size && file.lastModified() == cached.mtime
+    }
+}
+
+/**
+ * Recording settings (trip recording plan §5): an explicit user switch, kept in
+ * DataStore with the app's other preferences. Off is off — the service is not
+ * started, so no polling and no wake lock.
+ */
+class RecorderSettings(context: Context) {
+    private val store = context.applicationContext.tripSettingsStore
+
+    val recordingEnabled: Flow<Boolean> =
+        store.data.catch { emit(emptyPreferences()) }
+            .map { it[KEY_RECORDING] ?: true }
+
+    val notificationEnabled: Flow<Boolean> =
+        store.data.catch { emit(emptyPreferences()) }
+            .map { it[KEY_NOTIFICATION] ?: true }
+
+    /** One-time battery-optimisation hint, so it never nags twice. */
+    val batteryPromptShown: Flow<Boolean> =
+        store.data.catch { emit(emptyPreferences()) }
+            .map { it[KEY_BATTERY_PROMPT] ?: false }
+
+    /** The persisted session per device, so a trip survives an app restart. */
+    suspend fun sessionFor(ip: String): SessionRecord? {
+        val text = try {
+            store.data.first()[stringPreferencesKey("session:$ip")]
+        } catch (e: Exception) {
+            null
+        } ?: return null
+        return SessionCodec.decode(ip, text)
+    }
+
+    suspend fun saveSession(record: SessionRecord) {
+        store.edit { it[stringPreferencesKey("session:${record.ip}")] = SessionCodec.encode(record) }
+    }
+
+    suspend fun setRecordingEnabled(enabled: Boolean) {
+        store.edit { it[KEY_RECORDING] = enabled }
+    }
+
+    suspend fun setNotificationEnabled(enabled: Boolean) {
+        store.edit { it[KEY_NOTIFICATION] = enabled }
+    }
+
+    suspend fun setBatteryPromptShown() {
+        store.edit { it[KEY_BATTERY_PROMPT] = true }
+    }
+
+    companion object {
+        private val KEY_RECORDING = booleanPreferencesKey("recording_enabled")
+        private val KEY_NOTIFICATION = booleanPreferencesKey("notification_enabled")
+        private val KEY_BATTERY_PROMPT = booleanPreferencesKey("battery_prompt_shown")
+    }
+}
