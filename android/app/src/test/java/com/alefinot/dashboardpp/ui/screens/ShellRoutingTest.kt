@@ -134,6 +134,17 @@ class ShellRoutingTest {
     }
 
     @Test
+    fun `the ESP page is warmed only while it is still unopened`() {
+        // Warming is Chromium work spent on a page nobody is looking at, so it is
+        // allowed exactly once per connection, only with a device to fetch it from,
+        // and not at all if the user reached the slot on their own first.
+        assertTrue(ShellRules.shouldWarm(connected = true, seen = false, warmed = false))
+        assertFalse(ShellRules.shouldWarm(connected = false, seen = false, warmed = false))
+        assertFalse(ShellRules.shouldWarm(connected = true, seen = true, warmed = false))
+        assertFalse(ShellRules.shouldWarm(connected = true, seen = false, warmed = true))
+    }
+
+    @Test
     fun `local history does not need a device`() {
         // The fact the offline shell stands on: with nothing connected there is no
         // firmware version to check, and the trip files are the phone's own.

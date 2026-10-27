@@ -233,6 +233,31 @@ fun AppShell(
         EspApiLane.webUiVisible = visible
         if (visible) webUi?.onShow() else webUi?.onHide()
     }
+    // Warming the ESP slot. The View has been kept alive between visits since app 21, so
+    // the fetch of the page is the one thing that can still be running underneath the
+    // frame that carries the tab switch. It happens while the app is idle: one frame of
+    // quiet first so the shell paints before Chromium is spent on a page nobody is
+    // looking at, then one second without the pager moving. The keys are the cancelling:
+    // a swipe restarts the wait (and the shell re-keys the holder when a connection
+    // drops), and once the user has opened the slot there is nothing left to warm.
+    var warmed by remember(ip) { mutableStateOf(false) }
+    LaunchedEffect(ip, webSeen, page, pager.isScrollInProgress) {
+        val holder = webUi ?: return@LaunchedEffect
+        if (!ShellRules.shouldWarm(connected = ip != null, seen = webSeen, warmed = warmed)) {
+            return@LaunchedEffect
+        }
+        withFrameNanos { }
+        delay(1_000)
+        if (webSeen) return@LaunchedEffect   // the user reached the slot on their own
+        holder.warm(context)
+        warmed = true
+    }
+    // A warmed page is fetched but not seen, so its own 1 Hz tick has to be stopped once
+    // the fetch lands: parked on Live, the app must still hold exactly one HTTP client
+    // (plan §4.3), and pausing any earlier would pause the fetch itself.
+    LaunchedEffect(warmed, webSeen, ip) {
+        if (warmed && !webSeen) webUi?.quiesceWhenSettled()
+    }
     DisposableEffect(webUi) {
         onDispose {
             EspApiLane.webUiVisible = false

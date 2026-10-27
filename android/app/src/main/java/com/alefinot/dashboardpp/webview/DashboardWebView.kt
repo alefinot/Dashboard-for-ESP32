@@ -19,6 +19,8 @@ import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Where the retained page is at. The tab uses it to cover the one thing it cannot
@@ -26,6 +28,9 @@ import kotlinx.coroutines.flow.asStateFlow
  * instead of leaving a black rectangle with no explanation.
  */
 enum class WebUiStage { LOADING, READY, FAILED }
+
+/** How long a warmed page may take to answer before it is paused anyway. */
+private const val WEB_WARM_SETTLE_MS = 8_000L
 
 object FileChooser {
     const val REQUEST_CODE = 42
@@ -214,6 +219,40 @@ class WebUiHolder(
         loadedOk = false
         _stage.value = WebUiStage.LOADING
         v.loadUrl("http://$ip/")
+    }
+
+    /**
+     * Build the page and start its fetch before the tab is ever opened, so the first
+     * visit is a paint rather than a load. This fetch — 53 KB of gzipped HTML, 0.2-0.45 s
+     * on a healthy bench LAN, longer over a weak car link — is the only work left that
+     * can still be running underneath the frame that carries the tab switch: the View
+     * itself has been kept alive between visits since app 21.
+     *
+     * It goes through [obtain] rather than a second loading path, so there is one place
+     * that decides what a page is and when it may be asked for. Nothing paints: the draw
+     * gate is already off while the slot is out of the viewport, and a View with no
+     * parent has no surface to paint into in any case.
+     */
+    fun warm(context: Context) {
+        if (view != null) return
+        obtain(context)
+    }
+
+    /**
+     * Stop a warmed page working, once it has an answer worth stopping on.
+     *
+     * Pausing the timers the instant the fetch starts would pause the fetch with it:
+     * `pauseTimers` stops Chromium's layout and timer updates, not only the page's own
+     * scripts. So the page is left alone until its stage settles and paused right after.
+     * Without this the warmed page would run its `setInterval(liveTick, 1000)` behind the
+     * native tabs while the user is parked on Live, and the app deliberately keeps one
+     * HTTP lane to the ESP (plan §4.3). The `drawn` check is the race the user can cause:
+     * if they open the slot during the wait, the page is on screen and gets to keep its
+     * timers, because `onShow` is the tab's own business.
+     */
+    suspend fun quiesceWhenSettled() {
+        withTimeoutOrNull(WEB_WARM_SETTLE_MS) { stage.first { it != WebUiStage.LOADING } }
+        if (!drawn) onHide()
     }
 
     /** The page for this connection: created once, then handed out again. */

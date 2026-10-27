@@ -90,4 +90,14 @@ object ShellRules {
      */
     fun pageUnserved(tripsAvailable: Boolean, connected: Boolean): Boolean =
         connected && !tripsAvailable
+
+    /**
+     * Whether the ESP page may be warmed (built and fetched while the tab is shut).
+     * It is Chromium work spent on a page the user is not looking at, so it is allowed
+     * once per connection, only when there is a device to fetch from — offline there is
+     * nothing to fetch and the offline shell's whole point is that it holds no WebView
+     * process — and never once the user has opened the slot themselves.
+     */
+    fun shouldWarm(connected: Boolean, seen: Boolean, warmed: Boolean): Boolean =
+        connected && !seen && !warmed
 }
