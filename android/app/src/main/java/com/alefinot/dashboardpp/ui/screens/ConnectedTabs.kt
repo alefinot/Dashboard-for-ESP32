@@ -114,30 +114,54 @@ private const val LIVE_PAGE = 1
 private const val TRIPS_PAGE = 0
 
 /**
- * One page per connection, kept alive across tab switches, so re-entering
- * ESP SETTINGS is a paint rather than the 1.55 s reload measured before (see
- * [WebUiHolder]). The WebView itself is built lazily: someone who never opens the
- * tab never costs the ESP a page fetch.
+ * The app's only screen once it is up: the five-slot bar and the pages it swipes
+ * between. There is no other route to a settings screen, no overlay, no back handler,
+ * and no second version of the bar; the trip detail is a pushed route, the only one.
+ *
+ * It is the shell with a device *and* the shell without one. With no device, `conn` is
+ * null: the bar keeps all five slots, Trips and App Settings work in full, and Live
+ * and the ESP slot answer with a cover that quotes the reason the view model gave.
+ * A lost connection is not an exit from the app - it is a page with nothing to show
+ * right now. See [ShellRouting] for how a state becomes a mode and [ShellRules] for
+ * what the bar and the recorder do about it.
+ *
+ * The ESP page is kept per connection rather than per visit, so re-entering it is a
+ * paint rather than the 1.55 s reload measured before (see [WebUiHolder]). The WebView
+ * itself is built lazily: someone who never opens the slot never costs the ESP a page
+ * fetch, and with no device at all there is nothing to host.
  */
 @Composable
-fun ConnectedTabs(
-    conn: ConnectionUiState.Connected,
+fun AppShell(
+    conn: ConnectionUiState.Connected?,
+    reason: String?,
+    findIsRetryNetwork: Boolean,
     connection: ConnectionViewModel,
     trips: TripsViewModel,
 ) {
     val context = LocalContext.current
     val activity = context as? android.app.Activity
-    val webUi = remember(conn.ip) { activity?.let { WebUiHolder(it, conn.ip, connection) } }
+    val connected = conn != null
+    val ip = conn?.ip
+    val webUi = remember(ip) {
+        if (ip == null || activity == null) null else WebUiHolder(activity, ip, connection)
+    }
     // Has the page been opened at all this connection? After that it stays
     // composed behind the other pages instead of being torn down, which is what
     // makes coming back to it instant.
-    var webSeen by remember(conn.ip) { mutableStateOf(false) }
+    var webSeen by remember(ip) { mutableStateOf(false) }
     var openTrip by remember { mutableStateOf<TripRow?>(null) }
     // The Coming Soon slot is not a destination: tapping it leaves the page alone
     // and answers in place, so the bar needs somewhere to say so without a dialog.
     var soonNote by remember { mutableStateOf(false) }
+    // Typing an address by hand is a panel over the shell, raised from the covers and
+    // from App Settings, and it closes by itself the moment a device turns up.
+    var manualOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(connected) { if (connected) manualOpen = false }
 
-    val tripsAvailable = TripsEnabled.forFirmware(conn.version)
+    // Firmware with no snapshot endpoint has no trip store; with no device there is no
+    // version to check, and the trip files are the phone's own, so the trips pages
+    // stay pages (`forFirmware(null)` is true).
+    val tripsAvailable = TripsEnabled.forFirmware(conn?.version)
 
     // The user's recording switch, collected here so starting and stopping the
     // service follows it immediately (the service checks it again on its side).
@@ -157,15 +181,22 @@ fun ConnectedTabs(
     // the Web UI may poll all follow this one value.
     val page = BarPages.getOrElse(pager.currentPage) { AppTab.LIVE }
 
-    LaunchedEffect(conn.ip, tripsAvailable, recordingEnabled) {
-        if (tripsAvailable && recordingEnabled) {
-            TripLogService.start(context, conn.ip)
+    // Recording needs a device to sample, firmware with the snapshot endpoint, and the
+    // user's switch - all three, and the first of them is why the service never runs
+    // in the offline shell (see ShellRules.recorderWants).
+    LaunchedEffect(ip, tripsAvailable, recordingEnabled) {
+        val target = ip?.takeIf { ShellRules.recorderWants(ip, tripsAvailable, recordingEnabled) }
+        if (target != null) {
+            TripLogService.start(context, target)
         } else {
             TripLogService.stop(context)
-            // A page the firmware cannot serve is snapped out of, not animated to:
-            // the user did not ask to go anywhere.
-            val now = BarPages.getOrElse(pager.currentPage) { AppTab.LIVE }
-            if (now == AppTab.TRIPS) pager.scrollToPage(LIVE_PAGE)
+            // A page the firmware cannot serve is snapped out of, not animated to: the
+            // user did not ask to go anywhere. With no device the trips page is the
+            // phone's own, so the offline shell leaves the user on it.
+            if (ShellRules.pageUnserved(tripsAvailable, connected = ip != null)) {
+                val now = BarPages.getOrElse(pager.currentPage) { AppTab.LIVE }
+                if (now == AppTab.TRIPS) pager.scrollToPage(LIVE_PAGE)
+            }
         }
     }
 
@@ -291,9 +322,30 @@ fun ConnectedTabs(
                     when (BarPages.getOrElse(p) { AppTab.LIVE }) {
                         AppTab.TRIPS -> NativePage(inView) { TripsTab(trips) { row -> openTrip = row } }
                         AppTab.LIVE -> NativePage(inView) {
-                            // Off-screen pages are not the live view: their polling has
-                            // to stay down or two clients would hit /api/snapshot at once.
-                            LiveTab(ip = conn.ip, active = page == AppTab.LIVE)
+                            if (conn == null) {
+                                // The page stays, the live view does not: this is what
+                                // "limited features, not a limited app" looks like on the
+                                // page that needs a device most.
+                                OfflineCover(
+                                    title = "NO DASHBOARD ON THE NETWORK",
+                                    reason = reason,
+                                    note = "Trips and App Settings work without a device. " +
+                                        "Speed, GNSS and the dashboard's own configuration " +
+                                        "need one - connect, and this page is the live view " +
+                                        "again.",
+                                    rememberedIp = connection.lastKnownIp.value,
+                                    findLabel = if (findIsRetryNetwork) "RETRY NETWORK" else "FIND DEVICE",
+                                    onFind = {
+                                        if (findIsRetryNetwork) connection.retryNoWifi() else connection.rescan()
+                                    },
+                                    onEnterIp = { manualOpen = true },
+                                    onWifi = { openWifiSettings(context) },
+                                )
+                            } else {
+                                // Off-screen pages are not the live view: their polling has
+                                // to stay down or two clients would hit /api/snapshot at once.
+                                LiveTab(ip = conn.ip, active = page == AppTab.LIVE)
+                            }
                         }
                         AppTab.WEB -> Box(
                             Modifier
@@ -314,8 +366,26 @@ fun ConnectedTabs(
                                         // behind the page: the first one. It gets the page's
                                         // overlay treatment instead of a black rectangle, and
                                         // a RETRY that re-issues the fetch.
-                                        WebUiCover(stage, conn.ip) { webUi.retry() }
+                                        WebUiCover(stage, conn?.ip ?: "") { webUi.retry() }
                                     }
+                                } else {
+                                    // No holder, because no device: the slot has no view to
+                                    // show, so it paints its own page and says what it is
+                                    // waiting for. Opaque, for the reason in [OfflineCover].
+                                    OfflineCover(
+                                        title = "NO DEVICE CONNECTED",
+                                        reason = reason,
+                                        note = "The dashboard's own configuration lives on the " +
+                                            "device. This slot becomes its Web UI as soon as a " +
+                                            "device is connected.",
+                                        rememberedIp = connection.lastKnownIp.value,
+                                        findLabel = if (findIsRetryNetwork) "RETRY NETWORK" else "FIND DEVICE",
+                                        onFind = {
+                                            if (findIsRetryNetwork) connection.retryNoWifi() else connection.rescan()
+                                        },
+                                        onEnterIp = { manualOpen = true },
+                                        onWifi = { openWifiSettings(context) },
+                                    )
                                 }
                             }
                         }
@@ -326,10 +396,11 @@ fun ConnectedTabs(
                             PageFade(Modifier.fillMaxSize()) {
                                 SettingsScreen(
                                     vm = connection,
-                                    ip = conn.ip,
-                                    version = conn.version,
+                                    ip = conn?.ip,
+                                    version = conn?.version,
                                     trips = trips,
                                     tripsAvailable = tripsAvailable,
+                                    onEnterIp = { manualOpen = true },
                                 )
                             }
                         }
@@ -345,6 +416,7 @@ fun ConnectedTabs(
                 pager = pager,
                 bounds = bounds,
                 tripsAvailable = tripsAvailable,
+                connected = connected,
                 onBounds = { slot, r -> bounds[slot] = r },
                 onSoon = { soonNote = true },
                 onSelect = { slot ->
@@ -387,12 +459,35 @@ fun ConnectedTabs(
                 }
             }
         }
+
+        if (manualOpen) {
+            // Over the shell, not instead of it: cancelling returns the user to the page
+            // they were on, and a successful entry recomposes the same shell with a
+            // device in it.
+            ManualEntryPanel(vm = connection) { manualOpen = false }
+        }
     }
 
     openTrip?.let { row ->
         Box(Modifier.fillMaxSize()) {
             TripDetailScreen(row = row, vm = trips, onDismiss = { openTrip = null })
         }
+    }
+}
+
+/**
+ * The system's Wi-Fi panel, for the one case the app cannot fix itself: there is no
+ * network to scan. A device with no such panel simply does not open anything - the
+ * cover's RETRY NETWORK still does the useful half.
+ */
+private fun openWifiSettings(context: android.content.Context) {
+    try {
+        context.startActivity(
+            android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    } catch (e: android.content.ActivityNotFoundException) {
+        // Nothing to open here; the cover's other two buttons still work.
     }
 }
 
@@ -429,7 +524,7 @@ private fun NativePage(active: Boolean, content: @Composable () -> Unit) {
  *
  * Its own composable on purpose. How far a pager has travelled changes every frame of
  * a swipe and every frame of a tap's animation; read out in the body of
- * [ConnectedTabs], that one value recomposes the whole screen - both native pages, the
+ * [AppShell], that one value recomposes the whole screen - both native pages, the
  * gauges, the lists, the bar - sixty times a second, and on this tablet that was
  * enough to drop most of the frames it was drawing. Read here, it recomposes a Box.
  */
@@ -489,6 +584,7 @@ private fun BottomBar(
     pager: PagerState,
     bounds: Map<AppTab, Rect>,
     tripsAvailable: Boolean,
+    connected: Boolean,
     onBounds: (AppTab, Rect) -> Unit,
     onSoon: () -> Unit,
     onSelect: (AppTab) -> Unit,
@@ -530,7 +626,7 @@ private fun BottomBar(
                             selected = selected == AppTab.TRIPS,
                             // A firmware without a trip store keeps the pin and dims it
                             // (the strip used to write "TRIPS x" for the same fact).
-                            dim = !tripsAvailable,
+                            dim = ShellRules.glyphDimmed(AppTab.TRIPS, connected, tripsAvailable),
                             size = 22.dp,
                             box = 48.dp,
                             onBounds = { onBounds(AppTab.TRIPS, it) },
@@ -557,6 +653,9 @@ private fun BottomBar(
                             icon = HudIcons.Chip,
                             desc = "ESP settings",
                             selected = selected == AppTab.WEB,
+                            // Dimmed rather than gone: the slot is a page even when there
+                            // is no device to put in it (ShellRules.glyphDimmed).
+                            dim = ShellRules.glyphDimmed(AppTab.WEB, connected, tripsAvailable),
                             size = 22.dp,
                             box = 48.dp,
                             onBounds = { onBounds(AppTab.WEB, it) },

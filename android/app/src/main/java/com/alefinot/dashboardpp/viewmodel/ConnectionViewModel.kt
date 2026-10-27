@@ -168,6 +168,20 @@ class ConnectionViewModel(context: Context) {
         discoveryJob?.cancel()
         discoveryJob = scope.launch {
             cleanupScan()
+            // No network means there is nothing to scan, and spending 15 s trying
+            // ends in a message that blames the device ("no Dashboard++ found on this
+            // network") when the truth is that there is no network. The offline shell
+            // reads the difference: NoWifi is the state whose cover offers RETRY
+            // NETWORK and the system Wi-Fi panel.
+            if (!Net.hasLocalLan(appContext)) {
+                discoveryActive.set(false)
+                uiState.value = ConnectionUiState.NoWifi(
+                    "No local network detected. Connect to Wi-Fi, or start " +
+                        "the phone's hotspot / USB tethering (the ESP32 joins " +
+                        "it as a client)."
+                )
+                return@launch
+            }
             discoveryActive.set(true)
             uiState.value = ConnectionUiState.Discovering
             scanProgress.value = 0f

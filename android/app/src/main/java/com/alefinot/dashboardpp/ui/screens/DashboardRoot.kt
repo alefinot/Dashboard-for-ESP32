@@ -50,16 +50,17 @@ fun DashboardRoot(activity: android.app.Activity, vm: ConnectionViewModel) {
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        when (s) {
-            is ConnectionUiState.Booting -> SplashScreen()
-            is ConnectionUiState.CheckingCache -> DiscoveryScreen(vm, "Checking saved device…")
-            is ConnectionUiState.CheckingSoftAp -> DiscoveryScreen(vm, "Checking SoftAP…")
-            is ConnectionUiState.Discovering -> DiscoveryScreen(vm, "Locating Dashboard++…")
-            is ConnectionUiState.ManualEntryNeeded -> ManualEntryScreen(vm)
-            is ConnectionUiState.ConnectionLost -> ConnectionLostScreen(vm, s.reason)
-            is ConnectionUiState.NoWifi -> NoWifiScreen(vm, s.detail)
-            is ConnectionUiState.Connected -> ConnectedTabs(
-                conn = s,
+        // One decision, in one place: what to put up for the state the view model
+        // reports. Everything after "found a device or not" is the same shell - see
+        // ShellRouting, which is where the offline behaviour is actually decided.
+        val mode = ShellRouting.mode(s)
+        when (mode) {
+            ShellMode.Splash -> SplashScreen()
+            is ShellMode.Scanning -> DiscoveryScreen(vm, mode.title)
+            is ShellMode.Shell -> AppShell(
+                conn = mode.conn,
+                reason = mode.reason,
+                findIsRetryNetwork = mode.findIsRetryNetwork,
                 connection = vm,
                 trips = trips,
             )

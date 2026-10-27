@@ -1,0 +1,142 @@
+package com.alefinot.dashboardpp.ui.screens
+
+import com.alefinot.dashboardpp.trips.TripsEnabled
+import com.alefinot.dashboardpp.viewmodel.ConnectionUiState
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * The whole "no ESP connected" design turns on one decision that used to be drawn
+ * in `DashboardRoot`'s `when`: which of the three things the root puts up for a
+ * given connection state, and with what.
+ *
+ * It is a pure function now, so the interesting cases are testable without a
+ * device: that the three states which used to be dead-end screens are the *same
+ * shell* the connected app shows (with `conn = null`), that the transient states
+ * are still the scan ring, and that the recorder and the bar follow the same rule
+ * the screens do.
+ */
+class ShellRoutingTest {
+
+    @Test
+    fun `booting is the splash`() {
+        assertEquals(ShellMode.Splash, ShellRouting.mode(ConnectionUiState.Booting))
+    }
+
+    @Test
+    fun `the transient hunting states are the scan ring, with their own line`() {
+        // Transient means the app is working: it must not look broken, and it has a
+        // page to show when the ring finishes.
+        val cache = ShellRouting.mode(ConnectionUiState.CheckingCache) as ShellMode.Scanning
+        assertTrue(cache.title.isNotEmpty())
+        val softAp = ShellRouting.mode(ConnectionUiState.CheckingSoftAp) as ShellMode.Scanning
+        assertTrue(softAp.title.contains("SoftAP"))
+        // Each stage says which door the app is knocking on, and none of them says
+        // "broken": these are states with a page at the end of them.
+        assertTrue(cache.title != softAp.title)
+        assertTrue(ShellRouting.mode(ConnectionUiState.Discovering) is ShellMode.Scanning)
+    }
+
+    @Test
+    fun `a connected device is the shell, with a connection and no reason`() {
+        val state = ConnectionUiState.Connected("192.168.1.116", "1.4.6")
+        val mode = ShellRouting.mode(state)
+        assertTrue(mode is ShellMode.Shell)
+        assertEquals(state, (mode as ShellMode.Shell).conn)
+        assertNull(mode.reason)
+        assertFalse(mode.findIsRetryNetwork)
+    }
+
+    @Test
+    fun `no device found is the shell, without a connection`() {
+        // This is the state that used to be a dead-end screen: the user could only
+        // re-scan or type an address, and the trips they had already recorded were
+        // unreachable. Now it is the shell with nothing to show for Live and ESP.
+        val mode = ShellRouting.mode(ConnectionUiState.ManualEntryNeeded)
+        assertTrue(mode is ShellMode.Shell)
+        assertNull((mode as ShellMode.Shell).conn)
+        assertTrue(mode.reason.orEmpty().isNotBlank())
+        assertFalse(mode.findIsRetryNetwork)
+    }
+
+    @Test
+    fun `a connection that drops mid-session keeps the shell and hands over the reason`() {
+        // The reason line is what the Live cover says; it comes from the view model
+        // and must not be rewritten on the way to the screen.
+        val reason = "Lost connection to 192.168.1.116."
+        val shell = ShellRouting.mode(ConnectionUiState.ConnectionLost(reason)) as ShellMode.Shell
+        assertNull(shell.conn)
+        assertEquals(reason, shell.reason)
+    }
+
+    @Test
+    fun `no local network is the shell too, and its FIND DEVICE retries the network`() {
+        val detail = "No local network detected."
+        val mode = ShellRouting.mode(ConnectionUiState.NoWifi(detail))
+        assertTrue(mode is ShellMode.Shell)
+        assertEquals(detail, (mode as ShellMode.Shell).reason)
+        // With no network at all, re-scanning the subnet is pointless: what has to be
+        // retried is whether a network exists now.
+        assertTrue(mode.findIsRetryNetwork)
+    }
+
+    @Test
+    fun `the recorder only runs with a device to record from`() {
+        assertTrue(ShellRules.recorderWants("192.168.1.116", tripsAvailable = true, recordingEnabled = true))
+        // The offline shell must never start the service, whatever the switches say.
+        assertFalse(ShellRules.recorderWants(null, tripsAvailable = true, recordingEnabled = true))
+        assertFalse(ShellRules.recorderWants(null, tripsAvailable = false, recordingEnabled = false))
+        // And the two switches still mean what they meant.
+        assertFalse(ShellRules.recorderWants("192.168.1.116", tripsAvailable = false, recordingEnabled = true))
+        assertFalse(ShellRules.recorderWants("192.168.1.116", tripsAvailable = true, recordingEnabled = false))
+    }
+
+    @Test
+    fun `the ESP slot dims when there is no device, and nothing else does`() {
+        // Dimmed, not gone: the bar keeps five slots in the same order whatever
+        // happens, so the swipe never passes through a hole and the cover inside the
+        // page is reachable.
+        assertTrue(ShellRules.glyphDimmed(AppTab.WEB, connected = false, tripsAvailable = true))
+        assertFalse(ShellRules.glyphDimmed(AppTab.WEB, connected = true, tripsAvailable = true))
+        // The trips pin already dims for firmware with no trip store - unchanged.
+        assertTrue(ShellRules.glyphDimmed(AppTab.TRIPS, connected = true, tripsAvailable = false))
+        assertFalse(ShellRules.glyphDimmed(AppTab.TRIPS, connected = false, tripsAvailable = true))
+        assertFalse(ShellRules.glyphDimmed(AppTab.LIVE, connected = false, tripsAvailable = true))
+        assertFalse(ShellRules.glyphDimmed(AppTab.SETTINGS, connected = false, tripsAvailable = true))
+    }
+
+    @Test
+    fun `every page is reachable offline`() {
+        // Trips and App Settings work in full; Live and ESP answer with a cover. None
+        // of them leaves the swipe order, and none of them is switched off.
+        for (tab in listOf(AppTab.TRIPS, AppTab.LIVE, AppTab.WEB, AppTab.SETTINGS)) {
+            assertTrue(ShellRules.pageReachable(tab, connected = false, tripsAvailable = true))
+            assertTrue(ShellRules.pageReachable(tab, connected = true, tripsAvailable = true))
+        }
+        // Firmware with no trip store still blocks the trips page, connected or not -
+        // that rule predates the offline shell and does not change.
+        assertFalse(ShellRules.pageReachable(AppTab.TRIPS, connected = true, tripsAvailable = false))
+    }
+
+    @Test
+    fun `the shell only moves someone off a page the firmware cannot serve`() {
+        // The trips page is the only one the shell ever leaves by itself, and it does
+        // that for one reason: the firmware has no trip store. Without a device the
+        // trip files belong to the phone, so a connection dropping while the user is
+        // reading a trip must leave them on the page, not throw them at a cover.
+        assertFalse(ShellRules.pageUnserved(tripsAvailable = true, connected = true))
+        assertFalse(ShellRules.pageUnserved(tripsAvailable = true, connected = false))
+        assertFalse(ShellRules.pageUnserved(tripsAvailable = false, connected = false))
+        assertTrue(ShellRules.pageUnserved(tripsAvailable = false, connected = true))
+    }
+
+    @Test
+    fun `local history does not need a device`() {
+        // The fact the offline shell stands on: with nothing connected there is no
+        // firmware version to check, and the trip files are the phone's own.
+        assertTrue(TripsEnabled.forFirmware(null))
+    }
+}
