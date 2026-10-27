@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alefinot.dashboardpp.trips.TripRuntime
 import com.alefinot.dashboardpp.ui.components.hudBytes
+import com.alefinot.dashboardpp.ui.components.LocalEnterActive
 import com.alefinot.dashboardpp.ui.components.hudDuration
 import com.alefinot.dashboardpp.ui.components.hudNum
 import com.alefinot.dashboardpp.trips.TripRuntimeState
@@ -121,35 +123,56 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
             )
         }
 
-        // The page fades its body in as one block (`pageFadeIn` on the body), and
-        // that is what this list does too. It could not be done per row: a
-        // LazyColumn throws rows away and re-creates them as they scroll, so a
-        // row-local entrance would replay on every scroll back — the cost the
-        // design brief rules out. One ramp drives the whole list instead, each
-        // row taking its slice of it by position, so a row scrolling back into
-        // view finds the ramp already at 1 and costs nothing.
-        // With motion off the list starts revealed: the ramp would otherwise animate
-        // from nothing, which is motion the user asked not to have.
-        var revealed by remember { mutableStateOf(!HudMotion.enabled) }
-        LaunchedEffect(rows.size) {
-            if (rows.isNotEmpty()) revealed = true
-        }
-        val staggered = minOf(rows.size, 8)
-        val rampMs = (HudMotion.ENTRANCE_MS + HudMotion.STAGGER_MS * maxOf(staggered - 1, 0)).toFloat()
-        val ramp by animateFloatAsState(
-            if (revealed) 1f else 0f,
-            tween(rampMs.toInt(), easing = LinearEasing),
-            label = "tripsReveal",
-        )
-        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            itemsIndexed(rows, key = { _, row -> row.file.absolutePath }) { i, row ->
-                val start = (minOf(i, staggered - 1) * HudMotion.STAGGER_MS)
-                TripCard(
-                    row,
-                    onOpen,
-                    reveal = ((ramp * rampMs - start) / HudMotion.ENTRANCE_MS).coerceIn(0f, 1f),
-                )
-            }
+        // The list of drives, with the page's own staggered reveal.
+        TripList(rows, onOpen)
+    }
+}
+
+/**
+ * The list of drives, revealed the way the page fades its body in (`pageFadeIn` on
+ * the body) rather than row by row: a LazyColumn throws rows away and re-creates them
+ * as they scroll, so a row-local entrance would replay on every scroll back - the
+ * cost the design brief rules out. One ramp drives the whole list instead, each row
+ * taking its slice of it by position, so a row scrolling back into view finds the ramp
+ * already at 1 and costs nothing.
+ *
+ * The ramp belongs to a visit, not to composition. The page is kept composed between
+ * visits so that arriving is a paint rather than a rebuild, so the ramp is re-armed
+ * when the page comes into view ([LocalEnterActive]) - and a scroll never re-arms it,
+ * because it never leaves the view.
+ *
+ * With motion off the list starts revealed: the ramp would otherwise animate from
+ * nothing, which is motion the user asked not to have.
+ */
+@Composable
+private fun TripList(rows: List<TripRow>, onOpen: (TripRow) -> Unit) {
+    val inView = LocalEnterActive.current
+    var visits by remember { mutableIntStateOf(0) }
+    LaunchedEffect(inView) {
+        if (inView) visits++
+    }
+    // The visit counter keys the ramp: a new visit starts it back at nothing, which is
+    // what a freshly composed page used to do by itself. Starting at zero visits, an
+    // off-screen page sits unrevealed and animates nothing until the user gets here.
+    var revealed by remember(visits) { mutableStateOf(visits > 0 && !HudMotion.enabled) }
+    LaunchedEffect(visits) {
+        if (visits > 0 && rows.isNotEmpty()) revealed = true
+    }
+    val staggered = minOf(rows.size, 8)
+    val rampMs = (HudMotion.ENTRANCE_MS + HudMotion.STAGGER_MS * maxOf(staggered - 1, 0)).toFloat()
+    val ramp by animateFloatAsState(
+        if (revealed) 1f else 0f,
+        tween(rampMs.toInt(), easing = LinearEasing),
+        label = "tripsReveal",
+    )
+    LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        itemsIndexed(rows, key = { _, row -> row.file.absolutePath }) { i, row ->
+            val start = (minOf(i, staggered - 1) * HudMotion.STAGGER_MS)
+            TripCard(
+                row,
+                onOpen,
+                reveal = ((ramp * rampMs - start) / HudMotion.ENTRANCE_MS).coerceIn(0f, 1f),
+            )
         }
     }
 }

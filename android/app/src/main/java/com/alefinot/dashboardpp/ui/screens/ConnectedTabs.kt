@@ -24,6 +24,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -57,6 +58,8 @@ import com.alefinot.dashboardpp.trips.RecorderSettings
 import com.alefinot.dashboardpp.trips.TripsEnabled
 import com.alefinot.dashboardpp.ui.components.HudEnter
 import com.alefinot.dashboardpp.ui.components.HudIcons
+import com.alefinot.dashboardpp.ui.components.LocalEnterActive
+import com.alefinot.dashboardpp.ui.components.PageFade
 import com.alefinot.dashboardpp.webview.WebUiHolder
 import com.alefinot.dashboardpp.webview.WebUiStage
 import com.alefinot.dashboardpp.viewmodel.ConnectionUiState
@@ -181,9 +184,11 @@ fun ConnectedTabs(
     // changes the moment it flips, so a swipe does not recompose this screen.
     val webInView by remember(webUi) {
         derivedStateOf {
-            kotlin.math.abs(
-                (pager.currentPage + pager.currentPageOffsetFraction) - BarPages.indexOf(AppTab.WEB),
-            ) < 0.999f
+            PagerFocus.inViewport(
+                pager.currentPage,
+                pager.currentPageOffsetFraction,
+                BarPages.indexOf(AppTab.WEB),
+            )
         }
     }
     LaunchedEffect(webInView) {
@@ -239,9 +244,24 @@ fun ConnectedTabs(
                     state = pager,
                     modifier = Modifier.fillMaxSize(),
                 ) { p ->
+                    // Is this page on screen right now? Its own derived flag, read
+                    // rather than computed in the body: the pager hands over a new
+                    // offset every frame of a drag, and only the flip is worth
+                    // reacting to. This is the same rule that says whether the web
+                    // view may paint, so a page paints, is mirrored and animates in on
+                    // one and the same event (see PagerFocus).
+                    val inView by remember(pager, p) {
+                        derivedStateOf {
+                            PagerFocus.inViewport(
+                                pager.currentPage,
+                                pager.currentPageOffsetFraction,
+                                p,
+                            )
+                        }
+                    }
                     when (BarPages.getOrElse(p) { AppTab.LIVE }) {
-                        AppTab.TRIPS -> NativePage { TripsTab(trips) { row -> openTrip = row } }
-                        AppTab.LIVE -> NativePage {
+                        AppTab.TRIPS -> NativePage(inView) { TripsTab(trips) { row -> openTrip = row } }
+                        AppTab.LIVE -> NativePage(inView) {
                             // Off-screen pages are not the live view: their polling has
                             // to stay down or two clients would hit /api/snapshot at once.
                             LiveTab(ip = conn.ip, active = page == AppTab.LIVE)
@@ -257,25 +277,32 @@ fun ConnectedTabs(
                                         webUi?.stage?.value == WebUiStage.READY
                                 },
                         ) {
-                            if (webUi != null) {
-                                val stage by webUi.stage.collectAsStateWithLifecycle()
-                                if (stage != WebUiStage.READY) {
-                                    // Exactly one fetch per connection has nothing drawn
-                                    // behind the page: the first one. It gets the page's
-                                    // overlay treatment instead of a black rectangle, and
-                                    // a RETRY that re-issues the fetch.
-                                    WebUiCover(stage, conn.ip) { webUi.retry() }
+                            CompositionLocalProvider(LocalEnterActive provides inView) {
+                                if (webUi != null) {
+                                    val stage by webUi.stage.collectAsStateWithLifecycle()
+                                    if (stage != WebUiStage.READY) {
+                                        // Exactly one fetch per connection has nothing drawn
+                                        // behind the page: the first one. It gets the page's
+                                        // overlay treatment instead of a black rectangle, and
+                                        // a RETRY that re-issues the fetch.
+                                        WebUiCover(stage, conn.ip) { webUi.retry() }
+                                    }
                                 }
                             }
                         }
-                        AppTab.SETTINGS -> NativePage {
-                            SettingsScreen(
-                                vm = connection,
-                                ip = conn.ip,
-                                version = conn.version,
-                                trips = trips,
-                                tripsAvailable = tripsAvailable,
-                            )
+                        AppTab.SETTINGS -> NativePage(inView) {
+                            // A block fade rather than per-card stagger: this page is a
+                            // stack of settings cards, and the page it mirrors fades its
+                            // body in as one block too.
+                            PageFade(Modifier.fillMaxSize()) {
+                                SettingsScreen(
+                                    vm = connection,
+                                    ip = conn.ip,
+                                    version = conn.version,
+                                    trips = trips,
+                                    tripsAvailable = tripsAvailable,
+                                )
+                            }
                         }
                     }
                 }
@@ -343,10 +370,15 @@ fun ConnectedTabs(
 /**
  * A native page, opaque on purpose: it slides over the retained Web view, and a
  * transparent page would let that view show through mid-swipe.
+ *
+ * It also hands its panels the pager's answer about visibility, so their entrance
+ * [HudEnter] runs when the page comes in rather than when it happens to be composed.
  */
 @Composable
-private fun NativePage(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().background(HudColors.Bg)) { content() }
+private fun NativePage(active: Boolean, content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxSize().background(HudColors.Bg)) {
+        CompositionLocalProvider(LocalEnterActive provides active) { content() }
+    }
 }
 
 /**
