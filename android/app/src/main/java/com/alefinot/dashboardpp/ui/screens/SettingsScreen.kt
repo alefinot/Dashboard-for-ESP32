@@ -182,7 +182,7 @@ fun SettingsScreen(
             )
             Spacer(Modifier.height(12.dp))
             HudButton("STORAGE & FILES", style = HudButtonStyle.SECONDARY) {
-                storageLine = hudBytes(trips.storageBytes()) + " recorded · " +
+                storageLine = hudBytes(trips.storageBytes.value) + " recorded · " +
                     trips.rows.value.size + " trip files"
             }
             Spacer(Modifier.height(8.dp))

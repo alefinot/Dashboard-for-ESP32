@@ -68,14 +68,24 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
     val rows by vm.rows.collectAsStateWithLifecycle()
     val runtime by TripRuntime.state.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
+    val storage by vm.storageBytes.collectAsStateWithLifecycle()
     var refreshKey by remember { mutableStateOf(0) }
 
-    LaunchedEffect(refreshKey, runtime.recording) {
-        if (!runtime.recording) vm.refresh() else {
-            // While recording, the sealed trips still need their summaries; the
-            // open file is shown from RAM instead.
-            vm.refresh()
-        }
+    // The pager keeps this page composed from the first frame on (see ConnectedTabs),
+    // so composition is no longer the same event as arrival. The index pass runs once
+    // as soon as the shell exists - that is the warm-up that makes the first swipe in
+    // a paint rather than a folder walk under the finger - and again every time the
+    // user actually gets here, which is what a fresh composition used to buy. The
+    // counter goes down to the list with it: the reveal is keyed to a visit too.
+    val inView = LocalEnterActive.current
+    var visits by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { vm.refresh() }
+    LaunchedEffect(inView, refreshKey, runtime.recording) {
+        if (!inView) return@LaunchedEffect
+        visits++
+        // While recording, the sealed trips still need their summaries; the open file
+        // is shown from the recorder's RAM instead.
+        vm.refresh()
     }
 
     Column(
@@ -88,7 +98,7 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
             Text("TRIPS", style = HudeHeading().copy(brush = HudBrushes.title))
             Spacer(Modifier.width(12.dp))
             Text(
-                "${rows.size} · ${formatBytes(vm.storageBytes())}",
+                "${rows.size} · ${formatBytes(storage)}",
                 color = HudColors.TextMuted,
                 style = HudeCfgLive(),
             )
@@ -124,7 +134,7 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
         }
 
         // The list of drives, with the page's own staggered reveal.
-        TripList(rows, onOpen)
+        TripList(rows, visits, onOpen)
     }
 }
 
@@ -137,23 +147,20 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
  * already at 1 and costs nothing.
  *
  * The ramp belongs to a visit, not to composition. The page is kept composed between
- * visits so that arriving is a paint rather than a rebuild, so the ramp is re-armed
- * when the page comes into view ([LocalEnterActive]) - and a scroll never re-arms it,
- * because it never leaves the view.
+ * visits so that arriving is a paint rather than a rebuild, so the counter that
+ * re-arms it is counted by [TripsTab] off the pager's viewport flag
+ * ([LocalEnterActive]) - and a scroll never re-arms it, because it never leaves the
+ * view.
  *
  * With motion off the list starts revealed: the ramp would otherwise animate from
  * nothing, which is motion the user asked not to have.
  */
 @Composable
-private fun TripList(rows: List<TripRow>, onOpen: (TripRow) -> Unit) {
-    val inView = LocalEnterActive.current
-    var visits by remember { mutableIntStateOf(0) }
-    LaunchedEffect(inView) {
-        if (inView) visits++
-    }
+private fun TripList(rows: List<TripRow>, visits: Int, onOpen: (TripRow) -> Unit) {
     // The visit counter keys the ramp: a new visit starts it back at nothing, which is
-    // what a freshly composed page used to do by itself. Starting at zero visits, an
-    // off-screen page sits unrevealed and animates nothing until the user gets here.
+    // what a freshly composed page used to do by itself. At zero visits - the page
+    // composed at boot, the user somewhere else - the list sits unrevealed and
+    // animates nothing until the user gets here.
     var revealed by remember(visits) { mutableStateOf(visits > 0 && !HudMotion.enabled) }
     LaunchedEffect(visits) {
         if (visits > 0 && rows.isNotEmpty()) revealed = true

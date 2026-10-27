@@ -34,8 +34,6 @@ class TripStore(context: Context) {
             ?.sortedByDescending { startMsOf(it.name) ?: it.lastModified() }
             ?: emptyList()
 
-    fun totalBytes(): Long = trips().sumOf { it.length() }
-
     fun deleteAll(): Int {
         val files = trips()
         files.forEach { it.delete() }

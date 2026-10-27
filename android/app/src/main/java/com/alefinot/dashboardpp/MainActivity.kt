@@ -12,10 +12,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.lifecycle.lifecycleScope
+import com.alefinot.dashboardpp.trips.RecorderSettings
 import com.alefinot.dashboardpp.ui.screens.DashboardRoot
+import com.alefinot.dashboardpp.ui.theme.HudMotion
 import com.alefinot.dashboardpp.ui.theme.HudTheme
 import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
 import com.alefinot.dashboardpp.webview.FileChooser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -34,6 +41,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
+        warmPreferences()
         setContent {
             val vm = remember { ConnectionViewModel(application) }
             DisposableEffect(vm) {
@@ -42,6 +50,23 @@ class MainActivity : ComponentActivity() {
             HudTheme {
                 DashboardRoot(this, vm)
             }
+        }
+    }
+
+    /**
+     * The app's switches live in DataStore, which never answers synchronously, and
+     * the splash window is the only stretch of idle the app gets before its first
+     * frame is on screen. Reading them there - off the main thread, mirrored onto
+     * the theme on it - is what lets the first page entrance know the motion switch
+     * as it composes, rather than starting to animate and stopping mid-fade. The
+     * recording switch matters the same way to the service start in [ConnectedTabs],
+     * whose cold path is a DataStore read on the boot critical path otherwise.
+     */
+    private fun warmPreferences() {
+        lifecycleScope.launch(Dispatchers.Main) {
+            val settings = RecorderSettings(application)
+            withContext(Dispatchers.IO) { settings.warm() }
+            HudMotion.setPrefEnabled(settings.motionEnabled.first())
         }
     }
 

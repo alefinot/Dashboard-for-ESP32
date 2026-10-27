@@ -53,6 +53,17 @@ class TripsViewModel(app: Application) : AndroidViewModel(app) {
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message
 
+    private val _storageBytes = MutableStateFlow(0L)
+
+    /**
+     * Bytes of recorded CSV, as counted by the last index pass. Deliberately a flow
+     * rather than a function that walks the folder: the Trips header shows it, and a
+     * directory walk in a composition runs on the UI thread on every recomposition of
+     * that header - which, now that the page stays composed, would include every
+     * second the recorder reports while the user is looking at another page.
+     */
+    val storageBytes: StateFlow<Long> = _storageBytes
+
     fun refresh() {
         scope.launch(Dispatchers.IO) {
             _busy.value = true
@@ -71,6 +82,7 @@ class TripsViewModel(app: Application) : AndroidViewModel(app) {
                 TripRow(f, TripStore.startMsOf(f.name) ?: f.lastModified(), f.length(), summary)
             }
             _rows.value = rows
+            _storageBytes.value = files.sumOf { it.length() }
             index.retain(files.map { it.absolutePath }.toSet())
             _busy.value = false
             // Any file whose summary is missing gets summarised in the
@@ -153,7 +165,6 @@ class TripsViewModel(app: Application) : AndroidViewModel(app) {
         _message.value = null
     }
 
-    fun storageBytes(): Long = store.totalBytes()
 
     companion object {
         /** Exposed for the settings screen's "open the folder" affordance. */

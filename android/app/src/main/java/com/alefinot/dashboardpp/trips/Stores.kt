@@ -102,6 +102,19 @@ class RecorderSettings(context: Context) {
         store.data.catch { emit(emptyPreferences()) }
             .map { it[KEY_BATTERY_PROMPT] ?: false }
 
+    /**
+     * Read the three switches once, so the store is in RAM before anything needs
+     * an answer. DataStore never answers synchronously, and the boot window (the
+     * splash) is the only idle stretch the app gets before its first frame: warmed
+     * there, the shell's first entrance already knows the motion switch instead of
+     * animating and then stopping mid-fade.
+     */
+    suspend fun warm() {
+        recordingEnabled.first()
+        motionEnabled.first()
+        notificationEnabled.first()
+    }
+
     /** The persisted session per device, so a trip survives an app restart. */
     suspend fun sessionFor(ip: String): SessionRecord? {
         val text = try {

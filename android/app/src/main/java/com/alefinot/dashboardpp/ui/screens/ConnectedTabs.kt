@@ -34,10 +34,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -240,9 +242,36 @@ fun ConnectedTabs(
                 // underneath would never be touched - the ESP slot mirrors its gesture
                 // stream onto that View (see [GestureMirror]), which gives the web page
                 // its taps and scrolls back without giving up the swipe.
+                // Pages beyond the visible one are composed as well, so arriving is a
+                // paint and not a build: a cold page used to be composed while the
+                // pager was already moving, and the Trips page costs ~650 ms of UI
+                // thread on this tablet (measured - see the plan's baseline). That is
+                // the one long frame in a swipe.
+                //
+                // It is only affordable because everything a page *does* is keyed to
+                // the viewport flag computed below rather than to its composition: the
+                // HTTP lane, the web view's paint, the record chip's breath, the trips
+                // list's reveal and the page's own drawing all wait for the page to be
+                // on screen, and the trip list re-reads itself on arrival instead of on
+                // composition.
+                //
+                // And the building is timed so it does not land on the user: the pages
+                // are composed a beat after the shell has drawn and animated in, one
+                // page per frame. Pre-composing them all in the shell's first
+                // composition measured 4.4 s to the bar against 3.1 s without it, and
+                // that is the first thing the driver ever sees.
+                var extraPages by remember { mutableStateOf(0) }
+                LaunchedEffect(Unit) {
+                    delay(600)
+                    while (extraPages < BarPages.size - 2) {
+                        withFrameNanos { }
+                        extraPages++
+                    }
+                }
                 HorizontalPager(
                     state = pager,
                     modifier = Modifier.fillMaxSize(),
+                    beyondViewportPageCount = extraPages,
                 ) { p ->
                     // Is this page on screen right now? Its own derived flag, read
                     // rather than computed in the body: the pager hands over a new
@@ -376,7 +405,20 @@ fun ConnectedTabs(
  */
 @Composable
 private fun NativePage(active: Boolean, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().background(HudColors.Bg)) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(HudColors.Bg)
+            // A page that is not on screen does not paint. With every page kept
+            // composed, the frame pass would otherwise replay four pages of draw
+            // commands for every frame the shell draws: the RECORDING breath on the
+            // Live page measured 13 ms a frame with nothing kept composed and 17-26 ms
+            // with the pages composed and still painting. The gate rides the same
+            // viewport flag as everything else, and that flag flips at the first pixel
+            // of movement (see PagerFocus), so a page never misses a frame it could be
+            // seen in.
+            .drawWithContent { if (active) drawContent() },
+    ) {
         CompositionLocalProvider(LocalEnterActive provides active) { content() }
     }
 }

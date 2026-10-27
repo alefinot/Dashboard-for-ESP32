@@ -143,7 +143,7 @@ fun LiveTab(ip: String, active: Boolean) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("LIVE", style = HudeHeading().copy(brush = HudBrushes.title))
                 Spacer(Modifier.width(12.dp))
-                StatusChip(state)
+                StatusChip(state, active)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -238,7 +238,7 @@ private fun fmt(value: Double, places: Int = 1): String =
  * accent hairline, accent text.
  */
 @Composable
-private fun StatusChip(state: TripRuntimeState) {
+private fun StatusChip(state: TripRuntimeState, active: Boolean) {
     val (label, target) = when {
         state.recording -> "RECORDING" to HudColors.Green
         state.lastError == EspApi.FIRMWARE_UPDATE_REQUIRED -> "NEEDS UPDATE" to HudColors.Amber
@@ -265,8 +265,13 @@ private fun StatusChip(state: TripRuntimeState) {
     // recording the breath is left at its dim stop, and the pill settles back to the
     // plain tint the CSS gives a `.msg-*` pill.
     val glow = remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(state.recording) {
-        if (!state.recording) {
+    LaunchedEffect(state.recording, active) {
+        // `active` is not decoration: the page is now composed whether or not the
+        // user is looking at it, and a breath that runs off-screen invalidates that
+        // chip's layer ~30 times a second for nobody. It restarts from the dim stop
+        // when the page comes back, which is where a breath starting from rest
+        // belongs anyway.
+        if (!state.recording || !active) {
             glow.floatValue = 0f
             return@LaunchedEffect
         }
