@@ -2527,6 +2527,18 @@ static void perfGetHandler() {
   doc["cpu_dynamic"] = ENABLE_DYNAMIC_CPU;
   doc["cpu_usage"] = cpuUsagePct;
   doc["uptime_s"] = millis() / 1000;
+  // mac: the base eFuse MAC - the stable identity the companion app keys its
+  // vehicle records on. It is burnt in at the factory, so it is valid with Wi-Fi
+  // off and is untouched by STA/SoftAP offsets or DHCP (WiFi.macAddress() is not
+  // usable here for that reason). getEfuseMac() writes octet 0 into the LOW byte
+  // of the returned uint64 (little-endian), so the shifts run 0..40 to print the
+  // conventional A4:CF:12:3B:9E:07 order. Stack buffer, no heap.
+  uint64_t efuseMac = ESP.getEfuseMac();
+  char macStr[18];
+  snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+           (uint8_t) efuseMac, (uint8_t)(efuseMac >> 8), (uint8_t)(efuseMac >> 16),
+           (uint8_t)(efuseMac >> 24), (uint8_t)(efuseMac >> 32), (uint8_t)(efuseMac >> 40));
+  doc["mac"] = macStr;
   doc["free_heap"] = ESP.getFreeHeap();
   doc["min_free_heap"] = ESP.getMinFreeHeap();
 
