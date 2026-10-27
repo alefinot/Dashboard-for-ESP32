@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -189,6 +190,10 @@ class WebUiHolder(
     private var view: WebView? = null
     private var loadedOk = false
     private var timersPaused = false
+    // Should the page be painting right now? Kept as a field because the View can be
+    // created at any moment (the first time the tab is within reach of the pager), and
+    // a newly built View defaults to VISIBLE and running.
+    private var drawn = true
 
     private val _stage = MutableStateFlow(WebUiStage.LOADING)
 
@@ -199,6 +204,9 @@ class WebUiHolder(
      * "open the tab again and hope" path.
      */
     val stage: StateFlow<WebUiStage> = _stage.asStateFlow()
+
+    /** The live View, or null until the tab has been opened for this connection. */
+    fun peek(): WebView? = view
 
     /** Fetch the page again - what the cover's RETRY button calls. */
     fun retry() {
@@ -226,7 +234,41 @@ class WebUiHolder(
         // was first opened) gets another chance: keeping the view must not mean
         // keeping the error page.
         if (!loadedOk) v.loadUrl("http://$ip/")
+        // A View built while the tab is out of the viewport has to start out hidden:
+        // its default is VISIBLE, and one painting page under the native tabs is
+        // enough to cost every animation above it.
+        applyDrawn(v)
         return v
+    }
+
+    /**
+     * Paint gate: the page is either inside the pager's viewport or it is not, and
+     * either way it stays attached, loaded and holding its surface (that is what
+     * makes coming back a repaint). What stops when it is out of the viewport is the
+     * drawing - INVISIBLE so the View keeps its size and layout, plus onPause so
+     * Chromium stops producing frames rather than only hiding them.
+     *
+     * Without this the retained page costs the whole app its frame budget: filmed on
+     * a SM-T590, an idle screen with the page retained behind the tabs rendered 18
+     * frames a second at 73 ms each, the same screen with the page never opened 29
+     * at 17 ms. Every animation - the sheet between the tabs, the gauges, the lists -
+     * was paying for a page nobody was looking at.
+     *
+     * The input gate that used to sit next to this one (a touch listener that ate
+     * every event) is gone with the design it served: an invisible View takes no
+     * touches on Android, and the gestures that do belong to this page are handed to
+     * it by the pager's ESP slot, which only feeds a View that is the settled page,
+     * loaded, and under the finger - see GestureMirror.
+     */
+    fun setDrawn(on: Boolean) {
+        if (drawn == on) return
+        drawn = on
+        view?.let { applyDrawn(it) }
+    }
+
+    private fun applyDrawn(v: WebView) {
+        v.visibility = if (drawn) View.VISIBLE else View.INVISIBLE
+        if (drawn) v.onResume() else v.onPause()
     }
 
     /** Tab left the screen: stop the page working behind the native tabs. */
@@ -243,20 +285,6 @@ class WebUiHolder(
         if (!timersPaused) return
         timersPaused = false
         v.resumeTimers()
-    }
-
-    /**
-     * Input gate. While the page sits behind another tab, its view is still in
-     * the hierarchy at full size, so a tap in the gaps of the tab above could
-     * reach a page the user cannot see, and a stray drag would scroll it out
-     * from under them. Consuming touches at the view level stops both: the
-     * WebView never sees them.
-     */
-    fun setInteractive(on: Boolean) {
-        val v = view ?: return
-        v.isClickable = on
-        v.isLongClickable = on
-        v.setOnTouchListener(if (on) null else { _, _ -> true })
     }
 
     /** Connection over (or the shell disposed): let Chromium and the page go. */

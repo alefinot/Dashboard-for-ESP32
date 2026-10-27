@@ -19,12 +19,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +47,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -168,17 +171,29 @@ fun ConnectedTabs(
     // layer with `ss`: with the page hidden the app opens no connection to the ESP at
     // all, while the page on screen opens about two per second (it fetches more than
     // one endpoint per tick).
+    // Two different questions, and collapsing them is what made the app sluggish.
+    // "Is the page inside the pager's viewport" decides whether it may paint and take
+    // touches; a swipe uncovers it long before the pager commits, so waiting for the
+    // settled page shows a half-drawn page sliding in. "Is it the settled page"
+    // decides who owns the HTTP lane and whether the page's own 1 s tick runs - that
+    // one has to wait for the settle, or two clients would poll the dashboard at once.
+    // The viewport answer is derived: recomputed as the pager moves, but it only
+    // changes the moment it flips, so a swipe does not recompose this screen.
+    val webInView by remember(webUi) {
+        derivedStateOf {
+            kotlin.math.abs(
+                (pager.currentPage + pager.currentPageOffsetFraction) - BarPages.indexOf(AppTab.WEB),
+            ) < 0.999f
+        }
+    }
+    LaunchedEffect(webInView) {
+        if (webInView) webSeen = true
+        webUi?.setDrawn(webInView)
+    }
     LaunchedEffect(page) {
         val visible = page == AppTab.WEB
-        if (visible) webSeen = true
         EspApiLane.webUiVisible = visible
-        if (visible) {
-            webUi?.setInteractive(true)
-            webUi?.onShow()
-        } else {
-            webUi?.setInteractive(false)
-            webUi?.onHide()
-        }
+        if (visible) webUi?.onShow() else webUi?.onHide()
     }
     DisposableEffect(webUi) {
         onDispose {
@@ -190,31 +205,13 @@ fun ConnectedTabs(
     // The bar: the selected slot's glass sheet is measured from the icons, and it
     // follows the pager rather than a separate selection - which is what makes it
     // slide during a swipe instead of only after one.
+    // The sheet's composable reads this map and the pager; the screen body does not,
+    // so a swipe recomposes the sheet and nothing else.
     val bounds = remember { mutableStateMapOf<AppTab, Rect>() }
-    val density = LocalDensity.current
-    val settled = pager.currentPage.coerceIn(0, BarPages.size - 1)
-    val rest = bounds[BarPages[settled]]
-    // A fraction of the way between two pages: integer at rest, and sweeping from
-    // one integer to the next while the user drags or the bar animates a tap.
-    val frac = (pager.currentPage + pager.currentPageOffsetFraction)
-        .coerceIn(0f, (BarPages.size - 1).toFloat())
-    val from = BarPages[frac.toInt()]
-    val to = BarPages[(frac.toInt() + 1).coerceAtMost(BarPages.size - 1)]
-    val f = frac - frac.toInt()
-    val a = bounds[from]
-    val b = bounds[to]
-    // Motion on, the sheet is interpolated where the swipe actually is, so it travels
-    // with the pages and stops where they stop. Motion off, it is simply under the
-    // settled slot - and the page change itself is a snap, not a scroll.
-    val pill = when {
-        HudMotion.enabled && a != null && b != null && f > 0.001f -> Rect(
-            a.left + (b.left - a.left) * f,
-            a.top + (b.top - a.top) * f,
-            a.right + (b.right - a.right) * f,
-            a.bottom + (b.bottom - a.bottom) * f,
-        )
-        else -> rest ?: a
-    }
+    // One mirror for the screen: a gesture's state has to survive between the events
+    // that make it up.
+    val touchSlop = LocalViewConfiguration.current.touchSlop
+    val mirror = remember(webUi) { GestureMirror({ webUi?.peek() }, touchSlop) }
 
     Box(Modifier.fillMaxSize().background(HudColors.Bg)) {
         Column(Modifier.fillMaxSize()) {
@@ -234,7 +231,14 @@ fun ConnectedTabs(
                 // The pages slide over that retained view. The ESP page is a hole in
                 // them on purpose: once the page is up, the view underneath is the
                 // content, and the swipe is what uncovers it.
-                HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { p ->
+                // A pager claims every gesture that starts inside it, so a page kept
+                // underneath would never be touched - the ESP slot mirrors its gesture
+                // stream onto that View (see [GestureMirror]), which gives the web page
+                // its taps and scrolls back without giving up the swipe.
+                HorizontalPager(
+                    state = pager,
+                    modifier = Modifier.fillMaxSize(),
+                ) { p ->
                     when (BarPages.getOrElse(p) { AppTab.LIVE }) {
                         AppTab.TRIPS -> NativePage { TripsTab(trips) { row -> openTrip = row } }
                         AppTab.LIVE -> NativePage {
@@ -242,7 +246,17 @@ fun ConnectedTabs(
                             // to stay down or two clients would hit /api/snapshot at once.
                             LiveTab(ip = conn.ip, active = page == AppTab.LIVE)
                         }
-                        AppTab.WEB -> Box(Modifier.fillMaxSize()) {
+                        AppTab.WEB -> Box(
+                            Modifier
+                                .fillMaxSize()
+                                .webUiGestureMirror(mirror) {
+                                    // Only the settled ESP page mirrors, and only when
+                                    // there is a page to touch: while the cover is up it
+                                    // is the cover that takes the taps.
+                                    page == AppTab.WEB &&
+                                        webUi?.stage?.value == WebUiStage.READY
+                                },
+                        ) {
                             if (webUi != null) {
                                 val stage by webUi.stage.collectAsStateWithLifecycle()
                                 if (stage != WebUiStage.READY) {
@@ -272,7 +286,8 @@ fun ConnectedTabs(
             Box(Modifier.fillMaxWidth().height(1.dp).background(HudColors.Hairline))
             BottomBar(
                 selected = page,
-                pill = pill,
+                pager = pager,
+                bounds = bounds,
                 tripsAvailable = tripsAvailable,
                 onBounds = { slot, r -> bounds[slot] = r },
                 onSoon = { soonNote = true },
@@ -335,6 +350,60 @@ private fun NativePage(content: @Composable () -> Unit) {
 }
 
 /**
+ * The glass sheet under the selected slot, and the only thing that reads the pager
+ * while it moves.
+ *
+ * Its own composable on purpose. How far a pager has travelled changes every frame of
+ * a swipe and every frame of a tap's animation; read out in the body of
+ * [ConnectedTabs], that one value recomposes the whole screen - both native pages, the
+ * gauges, the lists, the bar - sixty times a second, and on this tablet that was
+ * enough to drop most of the frames it was drawing. Read here, it recomposes a Box.
+ */
+@Composable
+private fun PillSheet(pager: PagerState, bounds: Map<AppTab, Rect>, barOrigin: Offset) {
+    val density = LocalDensity.current
+    val settled = pager.currentPage.coerceIn(0, BarPages.size - 1)
+    val rest = bounds[BarPages[settled]]
+    // A fraction of the way between two pages: integer at rest, and sweeping from
+    // one integer to the next while the user drags or the bar animates a tap.
+    val frac = (pager.currentPage + pager.currentPageOffsetFraction)
+        .coerceIn(0f, (BarPages.size - 1).toFloat())
+    val from = BarPages[frac.toInt()]
+    val to = BarPages[(frac.toInt() + 1).coerceAtMost(BarPages.size - 1)]
+    val f = frac - frac.toInt()
+    val a = bounds[from]
+    val b = bounds[to]
+    // Motion on, the sheet is interpolated where the swipe actually is, so it travels
+    // with the pages and stops where they stop. Motion off, it is simply under the
+    // settled slot - and the page change itself is a snap, not a scroll.
+    val pill = if (HudMotion.enabled && a != null && b != null && f > 0.001f) {
+        Rect(
+            a.left + (b.left - a.left) * f,
+            a.top + (b.top - a.top) * f,
+            a.right + (b.right - a.right) * f,
+            a.bottom + (b.bottom - a.bottom) * f,
+        )
+    } else {
+        rest ?: a
+    } ?: return
+    if (pill.width <= 0f) return
+    with(density) {
+        Box(
+            Modifier
+                .offset((pill.left - barOrigin.x).toDp(), (pill.top - barOrigin.y).toDp())
+                .size(pill.width.toDp(), pill.height.toDp())
+                // `.conn-pill.active`: the glass sheet with the cyan hairline.
+                .hudGlass(
+                    shape = HudRadius.CardShape,
+                    borderColor = HudColors.CyanDim,
+                    elevation = 8.dp,
+                    highlight = 0.05f,
+                ),
+        )
+    }
+}
+
+/**
  * The bottom bar: five slots, Live in the middle and larger, the current one under
  * a glass sheet that slides between them (`.conn-pill.active`). The sheet is not
  * five fills that swap in place - it is one sheet, because every state change on the
@@ -343,13 +412,13 @@ private fun NativePage(content: @Composable () -> Unit) {
 @Composable
 private fun BottomBar(
     selected: AppTab,
-    pill: Rect?,
+    pager: PagerState,
+    bounds: Map<AppTab, Rect>,
     tripsAvailable: Boolean,
     onBounds: (AppTab, Rect) -> Unit,
     onSoon: () -> Unit,
     onSelect: (AppTab) -> Unit,
 ) {
-    val density = LocalDensity.current
     // Where the bar itself starts on screen. The slot bounds are measured in root
     // coordinates (that is what onGloballyPositioned reports), and Modifier.offset is
     // relative to this Box, so the two have to be reconciled - without that, the sheet
@@ -364,22 +433,7 @@ private fun BottomBar(
             // the system bars these insets read as zero.
             .windowInsetsPadding(WindowInsets.navigationBars),
     ) {
-        if (pill != null && pill.width > 0f) {
-            with(density) {
-                Box(
-                    Modifier
-                        .offset((pill.left - barOrigin.x).toDp(), (pill.top - barOrigin.y).toDp())
-                        .size(pill.width.toDp(), pill.height.toDp())
-                        // `.conn-pill.active`: the glass sheet with the cyan hairline.
-                        .hudGlass(
-                            shape = HudRadius.CardShape,
-                            borderColor = HudColors.CyanDim,
-                            elevation = 8.dp,
-                            highlight = 0.05f,
-                        ),
-                )
-            }
-        }
+        PillSheet(pager, bounds, barOrigin)
         Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp)) {
             for (slot in BarSlots) {
                 val weight = if (slot == BarSlot.LIVE) 1.4f else 1f
