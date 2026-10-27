@@ -1,6 +1,8 @@
 package com.alefinot.dashboardpp.viewmodel
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import androidx.compose.runtime.mutableStateOf
 import com.alefinot.dashboardpp.discovery.ConnectionCache
 import com.alefinot.dashboardpp.discovery.DeviceVerifier
@@ -28,6 +30,9 @@ class ConnectionViewModel(context: Context) {
     private var scanner: SubnetScanner? = null
     private var discoveryJob: Job? = null
     private val discoveryActive = AtomicBoolean(false)
+    private val cm: ConnectivityManager? =
+        appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    private var networkWatcher: ConnectivityManager.NetworkCallback? = null
 
     val uiState = mutableStateOf<ConnectionUiState>(ConnectionUiState.Booting)
     val scanProgress = mutableStateOf(0f)
@@ -35,6 +40,7 @@ class ConnectionViewModel(context: Context) {
     val manualError = mutableStateOf<String?>(null)
 
     fun boot() {
+        watchNetwork()
         scope.launch {
             delay(1200) // splash
             val cached = cache.lastIp()
@@ -137,7 +143,82 @@ class ConnectionViewModel(context: Context) {
         }
     }
 
+    /**
+     * Follow the default network so the app stops needing a finger for what the tablet
+     * already knows. An SM-T590 that joins the house Wi-Fi, or starts the car's hotspot
+     * after the fact, used to sit on RETRY NETWORK until it was tapped - and with the
+     * shell in place that idle state is now a whole interface the user browses while
+     * the ESP half of it waits.
+     *
+     * `registerDefaultNetworkCallback` (rather than `registerNetworkCallback` with no
+     * NetworkRequest, which throws) follows the network the system would actually use,
+     * so a VPN interface or a transient hotspot does not become a separate hunt, and
+     * [ReconnectPolicy] decides what an event is worth. The two delays are the debounce:
+     * a freshly joined network still needs DHCP and the ESP's own mDNS advertisement,
+     * and an interface flapping behind a dock handover would otherwise start a 15 s
+     * scan every time it settles.
+     *
+     * If registration itself fails there is nothing to show: the covers' RETRY NETWORK
+     * button still runs the same ladder by hand.
+     */
+    private fun watchNetwork() {
+        val sys = cm ?: return
+        if (networkWatcher != null) return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                scope.launch {
+                    delay(NETWORK_RETRY_DELAY_MS)
+                    if (discoveryActive.get()) return@launch
+                    if (!ReconnectPolicy.shouldHunt(
+                            uiState.value, Net.hasLocalLan(appContext),
+                        )
+                    ) {
+                        return@launch
+                    }
+                    // The same ladder the covers' button runs: cached IP, the SoftAP
+                    // guess, then mDNS and the subnet sweep.
+                    retryNoWifi()
+                }
+            }
+
+            override fun onLost(network: Network) {
+                scope.launch {
+                    delay(NETWORK_LOST_DELAY_MS)
+                    if (discoveryActive.get()) return@launch
+                    val state = uiState.value
+                    if (!ReconnectPolicy.shouldRecheck(state)) return@launch
+                    val ip = (state as ConnectionUiState.Connected).ip
+                    // One real request, so a two-second Wi-Fi blip does not throw the
+                    // user out of a session that is still alive.
+                    if (verifier.verify(ip) is VerifyResult.Failed) {
+                        uiState.value = ConnectionUiState.ConnectionLost(
+                            "The network carrying $ip went away. If the ESP is still " +
+                                "reachable, tap RETRY NETWORK.",
+                        )
+                    }
+                }
+            }
+        }
+        networkWatcher = cb
+        try {
+            sys.registerDefaultNetworkCallback(cb)
+        } catch (e: Exception) {
+            networkWatcher = null
+        }
+    }
+
+    private fun stopNetworkWatch() {
+        val w = networkWatcher ?: return
+        networkWatcher = null
+        try {
+            cm?.unregisterNetworkCallback(w)
+        } catch (e: Exception) {
+            // Already gone: the system drops callbacks with the process anyway.
+        }
+    }
+
     fun dispose() {
+        stopNetworkWatch()
         cleanupScan()
         job.cancel()
     }
@@ -226,5 +307,13 @@ class ConnectionViewModel(context: Context) {
         scanner?.cancel()
         nsd = null
         scanner = null
+    }
+
+    private companion object {
+        /** A joined network needs DHCP and the ESP's mDNS advertisement to settle. */
+        const val NETWORK_RETRY_DELAY_MS = 1_500L
+
+        /** Short enough to notice a real walk-away, long enough to survive a blip. */
+        const val NETWORK_LOST_DELAY_MS = 800L
     }
 }
