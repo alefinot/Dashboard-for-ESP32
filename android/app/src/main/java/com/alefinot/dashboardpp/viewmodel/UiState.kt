@@ -5,7 +5,13 @@ sealed interface ConnectionUiState {
     object CheckingCache : ConnectionUiState
     object CheckingSoftAp : ConnectionUiState
     object Discovering : ConnectionUiState
-    data class Connected(val ip: String, val version: String?) : ConnectionUiState
+    /**
+     * [mac] is the answering unit's eFuse identity, taken from the verify step and
+     * carried so the vehicle rules can say which card this physical unit is. It
+     * defaults to null: firmware predating the `mac` field never reports one, and
+     * that is still a connection - the rules fall back to the address.
+     */
+    data class Connected(val ip: String, val version: String?, val mac: String? = null) : ConnectionUiState
     object ManualEntryNeeded : ConnectionUiState
     data class ConnectionLost(val reason: String) : ConnectionUiState
     data class NoWifi(val detail: String) : ConnectionUiState

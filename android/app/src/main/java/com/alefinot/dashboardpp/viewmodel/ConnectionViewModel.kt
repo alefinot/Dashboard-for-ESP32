@@ -235,7 +235,7 @@ class ConnectionViewModel(context: Context) {
     private fun connect(r: VerifyResult.Verified) {
         cache.setIp(r.ip)
         lastKnownIp.value = r.ip
-        uiState.value = ConnectionUiState.Connected(r.ip, r.version)
+        uiState.value = ConnectionUiState.Connected(r.ip, r.version, r.mac)
     }
 
     /**
