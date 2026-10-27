@@ -279,6 +279,51 @@ class VehicleCodecTest {
     }
 
     @Test
+    fun `a number followed by whitespace still decodes`() {
+        // A hand-edited row, or any writer that pretty-prints, puts a space between a
+        // number and the ',' or '}' that ends it. Losing the whole record over that
+        // spacing is the expensive failure - it deletes a card the user named - and the
+        // parser already tolerates newlines and tabs in the same position, so a space
+        // has to work too.
+        val spaced = """{"v":"v1","id":"v13","createdAtMs":1690000000000 ,"notes":"y", "lastConnectedAtMs":1700000000000 }"""
+
+        val back = VehicleCodec.decode(spaced)
+
+        assertEquals("v13", back?.id)
+        assertEquals(1_690_000_000_000L, back?.createdAtMs)
+        assertEquals(1_700_000_000_000L, back?.lastConnectedAtMs)
+        assertEquals("y", back?.notes) // the space after a ',' has to work as well
+    }
+
+    @Test
+    fun `two numbers with a space between them are still refused`() {
+        // Widening the number scan set must not make "12 34" readable as something:
+        // the value ends at the space, and the object parser is what rejects the rest.
+        // Pinning both halves is the point - without this, the fix above would look
+        // like it had thrown away the guard.
+        assertNull(VehicleCodec.decode("""{"v":"v1","id":"v14","createdAtMs":12 34}"""))
+    }
+
+    @Test
+    fun `a foreign ips order is truncated, and the next connect puts it right`() {
+        // Rule 5 says a card's ips list is newest-first and at most three long. Our own
+        // writer always satisfies that; a foreign or torn row might not. Decode keeps
+        // the first three as stored (it cannot tell the order from the list alone), and
+        // VehicleMatch.bindConnect re-derives the order on the next connect - so the
+        // worst case from a foreign row is probing a staler address first, once.
+        val foreign = """{"v":"v1","id":"v15","ips":["10.0.0.9","10.0.0.8","10.0.0.7","10.0.0.6"]}"""
+        val row = VehicleCodec.decode(foreign) ?: error("the foreign row must decode")
+        assertEquals(listOf("10.0.0.9", "10.0.0.8", "10.0.0.7"), row.ips)
+
+        val healed = VehicleMatch.bindConnect(row, "192.168.1.50", null, 1_700_000_000_000L)
+
+        assertEquals(
+            listOf("192.168.1.50", "10.0.0.9", "10.0.0.8"),
+            VehicleCodec.decode(VehicleCodec.encode(healed))?.ips,
+        )
+    }
+
+    @Test
     fun `a null string field is written as null and read back as null`() {
         // Not a test of a value so much as of the writer: "mac":"" and "mac":null
         // mean different things (see the sparse test), so both forms have to be

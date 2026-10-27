@@ -316,13 +316,13 @@ object VehicleCodec {
 
         private fun numberValue(): Num {
             val start = i
-            while (i < s.length && (s[i].isDigit() || "eE+-. ".contains(s[i]))) {
-                // A space may only appear inside a malformed value ("12 34"): reject
-                // it rather than reading half of it, because a truncated number
-                // silently rewrites an odometer-sized field.
-                if (s[i] == ' ') throw Malformed("space inside a number")
-                i++
-            }
+            // No whitespace in the scan set: a number ends at the first character that
+            // cannot be part of one, and the caller's own separator check is what
+            // rejects nonsense. "12 34" therefore ends at the space and is refused a
+            // step later as `expected ',' or '}'`, while `12 }` and `12,` are ordinary
+            // JSON and must read - the writer emits its own fields that way, and a
+            // hand-edited row often does too.
+            while (i < s.length && (s[i].isDigit() || "eE+-.".contains(s[i]))) i++
             val text = s.substring(start, i)
             if (text.isEmpty() || text.toDoubleOrNull() == null) throw Malformed("not a number: '$text'")
             return Num(text)
