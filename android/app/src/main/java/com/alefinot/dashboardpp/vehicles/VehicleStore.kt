@@ -32,9 +32,22 @@ private val Context.vehicleStore: DataStore<Preferences> by preferencesDataStore
  * Nothing here decides identity: the record's `mac` is stored and returned
  * verbatim, and [VehicleMatch] is the only place that text is interpreted. Nor does
  * anything here sort except through [sorted].
+ *
+ * Nothing here interprets a photo either: the JPEG belongs to [VehiclePhotoStore],
+ * which this store owns as [photos] so that deleting a card cannot leave its
+ * picture behind, and so the whole app has one photo cache instead of several
+ * (task 4 and task 5 read through this instance).
  */
 class VehicleStore(context: Context) {
     private val store = context.applicationContext.vehicleStore
+
+    /**
+     * The store that owns this garage's JPEGs, exposed so callers use *this* one:
+     * [VehiclePhotoStore]'s decoded-photo cache is bounded in bytes per instance, so
+     * a second instance would double the RAM budget and, worse, would not see the
+     * evictions the other one makes when [delete] removes a picture.
+     */
+    val photos: VehiclePhotoStore = VehiclePhotoStore(context)
 
     /**
      * The garage in display order, live: one row per card, corrupt rows skipped.
@@ -75,15 +88,20 @@ class VehicleStore(context: Context) {
      * exists ([sorted] tolerates a stale pointer, but the UI would have nothing to
      * highlight).
      *
-     * The card's JPEG is not touched here. It is `vehicles/<id>.jpg` and belongs to
-     * `VehiclePhotoStore.delete(id)` (task 3b), which will be called from this
-     * method; until that lands, deleting a card leaves its photo file on disk.
+     * The card's JPEG goes with it: [VehiclePhotoStore.delete] removes
+     * `vehicles/<id>.jpg` and every cached decode of it, so a later card that is
+     * handed a fresh id cannot inherit the deleted vehicle's picture. That part is
+     * blocking file I/O, like the rest of [VehiclePhotoStore], and runs after the
+     * row is gone: a photo removal the user did not ask for is the worse failure, so
+     * the DataStore write comes first and a card whose file could not be deleted
+     * costs disk space, not a card the user still wanted.
      */
     suspend fun delete(id: String) {
         store.edit { prefs ->
             prefs.remove(stringPreferencesKey(rowKey(id)))
             if (prefs[KEY_LAST] == id) prefs.remove(KEY_LAST)
         }
+        photos.delete(id)
     }
 
     /** Which card the garage opens on, or null if none was ever picked. */

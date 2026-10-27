@@ -29,6 +29,16 @@ enum class VehicleType { CAR, MOTORCYCLE, OTHER }
  * store round-trips it verbatim because remembering is not the store's judgement.
  * The shape check belongs in front of a typed value: `normalizeMac(typed) != null`.
  *
+ * `photoFile` is a bare file name (`v1.jpg`) inside the store's vehicles dir, never
+ * an absolute path: the external files directory can move (adopted storage, a
+ * backup restore), and a persisted path would then be a dead link. It is a pointer,
+ * not a claim that the bytes exist - if the file is gone (a photo deleted from the
+ * file manager, a restore that carried records but not pictures),
+ * [VehiclePhotoStore.read] answers `null` and the card draws its placeholder; the
+ * record itself stays valid. An action that removes a photo and keeps the card
+ * (task 5) also clears this field, so the editor does not offer a picture that is
+ * already gone.
+ *
  * `year` is a `String`, not an `Int`: the user types it, and "c. 1998", "1998/99"
  * and "" are all answers a number field would throw away.
  *
