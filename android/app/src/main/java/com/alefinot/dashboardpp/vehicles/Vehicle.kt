@@ -21,6 +21,14 @@ enum class VehicleType { CAR, MOTORCYCLE, OTHER }
  * unbound card is a normal state, not a broken one - it is matched by address
  * instead, under the narrower rule [VehicleMatch.resolve] describes.
  *
+ * The contract a codec or editor author has to hold to: `mac` is `null`, or a
+ * canonical `XX:XX:XX:XX:XX:XX` - uppercase, colon-separated, six pairs, as
+ * [VehicleMatch.normalizeMac] writes it. Anything else (an empty string, half a
+ * value, `"garage door"`) counts as *unbound*: VehicleMatch's private `claimedMac`
+ * rejects it, [VehicleMatch.bindConnect] clears it on the next connect, and the
+ * store round-trips it verbatim because remembering is not the store's judgement.
+ * The shape check belongs in front of a typed value: `normalizeMac(typed) != null`.
+ *
  * `year` is a `String`, not an `Int`: the user types it, and "c. 1998", "1998/99"
  * and "" are all answers a number field would throw away.
  *

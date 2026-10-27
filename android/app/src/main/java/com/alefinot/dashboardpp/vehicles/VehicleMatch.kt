@@ -8,7 +8,12 @@ sealed interface MatchDecision {
     /** A card was probed by address and answered with a MAC nobody claims: adopt it. */
     data class BindMac(val vehicle: Vehicle, val mac: String) : MatchDecision
 
-    /** Nobody claims it (or nothing answers a claim): the page offers adoption. */
+    /**
+     * Nothing claims this unit. Task 4's page offers adoption **only when a MAC was
+     * reported** (`mac != null`): with no MAC there is no identity to adopt, only an
+     * address that answered, and the card for an address alone is made by the
+     * address rule, not by this branch.
+     */
     data class Unknown(val ip: String, val mac: String?) : MatchDecision
 }
 
@@ -32,8 +37,13 @@ sealed interface MatchDecision {
  */
 object VehicleMatch {
 
-    /** How many addresses a card remembers - see [bindConnect]. */
-    private const val MAX_IPS = 3
+    /**
+     * How many addresses a card remembers - see [bindConnect].
+     *
+     * `internal`, not private, so the codec truncates through the same cap: a
+     * second literal 3 in [VehicleCodec] is how the two halves drift apart.
+     */
+    internal const val MAX_IPS = 3
 
     /** Six hex pairs, colon-separated: exactly what `perfGetHandler` prints. */
     private val MAC_SHAPE = Regex("^([0-9A-F]{2}:){5}[0-9A-F]{2}$")
@@ -85,6 +95,13 @@ object VehicleMatch {
      *
      * Ties are resolved by list order, first claimant wins; [MatchDecision.Unknown]
      * is preferred over guessing when the evidence contradicts itself.
+     *
+     * One consequence to carry into the UI (task 4 owns it): rule 2 matches only
+     * *unbound* cards, so a card that already holds a MAC can never be matched by
+     * address. A bound card whose unit is still running pre-`mac` firmware, or was
+     * rolled back, therefore answers at its own remembered address and still
+     * resolves to [MatchDecision.Unknown] - only the caller knows which card it
+     * probed, so only the caller can decide what to show.
      */
     fun resolve(vehicles: List<Vehicle>, ip: String, mac: String?): MatchDecision {
         val reported = normalizeMac(mac)
@@ -121,6 +138,11 @@ object VehicleMatch {
      * it. [exceptId] is the card being saved, which is allowed to keep its own
      * identity - without that, editing an existing vehicle would fail its own
      * uniqueness check.
+     *
+     * A `null` answer means two different things, and a save path must not read the
+     * second as permission: "nobody holds this MAC" and "that string is not a MAC at
+     * all". Check the shape first - `normalizeMac(typed) != null` - before accepting
+     * a typed value, or a card can be saved with `mac = "garage door"`.
      *
      * This is the only thing standing between a garage and two cards bound to the
      * same unit (or to the same bogus all-zero MAC a CRC-corrupt eFuse reports), so

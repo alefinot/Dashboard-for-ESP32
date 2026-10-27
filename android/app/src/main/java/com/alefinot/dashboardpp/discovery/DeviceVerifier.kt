@@ -3,8 +3,8 @@ package com.alefinot.dashboardpp.discovery
 import org.json.JSONObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
 import com.alefinot.dashboardpp.vehicles.VehicleMatch
+import java.util.concurrent.TimeUnit
 
 sealed interface VerifyResult {
     /**

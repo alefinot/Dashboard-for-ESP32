@@ -36,6 +36,13 @@ class VehicleMatchTest {
         assertEquals("A4:CF:12:3B:9E:07", VehicleMatch.normalizeMac("a4:cf:12:3b:9e:07"))
         // Padded by a JSON field or a paste buffer.
         assertEquals("A4:CF:12:3B:9E:07", VehicleMatch.normalizeMac("  A4:CF:12:3B:9E:07  "))
+        // An *internal* space is repaired too, and that is a decision rather than
+        // an accident: normalizeMac strips every whitespace character, so a value
+        // mangled by a line-wrapped backup file or a hand-edited record still
+        // resolves. Nothing else here pins that half of the leniency, and without
+        // this line a later task could tighten it to trim() and silently un-bind
+        // every card that happened to store such a value.
+        assertEquals("A4:CF:12:3B:9E:07", VehicleMatch.normalizeMac("A4:CF:12:3B: 9E:07"))
 
         // Everything else means "no identity", not "an odd-looking one": an old
         // firmware that has no `mac` field at all (null / ""), a value the ESP
@@ -66,6 +73,29 @@ class VehicleMatchTest {
         val decision = VehicleMatch.resolve(listOf(pressed, owner), "192.168.1.42", macA)
 
         assertEquals(MatchDecision.Bound(owner), decision)
+    }
+
+    @Test
+    fun `a card that stored its identity in lower case still owns that unit`() {
+        // Rule 1 again, from the other direction: the codec round-trips the
+        // record's `mac` text verbatim (it is not the store's job to sanitize),
+        // so a value written by hand, by an older build, or typed by the user in
+        // the editor reaches `claimedMac` in whatever case it was stored in. The
+        // ESP always prints upper case, so if the comparison were case-sensitive
+        // the card would look unbound, a second card would be offered the same
+        // unit, and rule 4 would never see the collision.
+        val stored = card("hatch", mac = "a4:cf:12:3b:9e:07", ips = listOf("10.0.0.9"))
+
+        assertEquals(
+            MatchDecision.Bound(stored),
+            VehicleMatch.resolve(listOf(stored), "192.168.1.42", macA),
+        )
+
+        // The same card is the one rule 4 reports, for the same reason.
+        assertEquals(
+            stored,
+            VehicleMatch.macTakenBy(listOf(stored, card("bike", mac = macB)), macA, null),
+        )
     }
 
     @Test
