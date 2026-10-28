@@ -98,7 +98,6 @@ import kotlinx.coroutines.launch
 fun AppShell(
     conn: ConnectionUiState.Connected?,
     reason: String?,
-    findIsRetryNetwork: Boolean,
     connection: ConnectionViewModel,
     trips: TripsViewModel,
 ) {
@@ -114,8 +113,8 @@ fun AppShell(
     // makes coming back to it instant.
     var webSeen by remember(ip) { mutableStateOf(false) }
     var openTrip by remember { mutableStateOf<TripRow?>(null) }
-    // Typing an address by hand is a panel over the shell, raised from the covers and
-    // from App Settings, and it closes by itself the moment a device turns up.
+    // Typing an address by hand is a panel over the shell. It is raised from the vehicle
+    // page and nowhere else, and it closes by itself the moment a device turns up.
     var manualOpen by remember { mutableStateOf(false) }
     LaunchedEffect(connected) { if (connected) manualOpen = false }
 
@@ -150,6 +149,28 @@ fun AppShell(
     // The settled page. The bar's selection, which screen is `active`, and whether
     // the Web UI may poll all follow this one value.
     val page = BarLayout.pages.getOrElse(pager.currentPage) { BarLayout.home }
+
+    // A cover's one action: go to the page that can do something about it. It moves the
+    // pager exactly the way a bar tap does - animated while motion is on, a snap when it
+    // is off - because the cover is not a screen to leave, it is this screen with a
+    // different page in front of you.
+    val openGarage: () -> Unit = {
+        val index = BarLayout.pageOf(AppTab.VEHICLES)
+        if (index >= 0) {
+            scope.launch {
+                if (HudMotion.enabled) pager.animateScrollToPage(index) else pager.scrollToPage(index)
+            }
+        }
+    }
+    // Which vehicle a cover is waiting for. The garage's list is collected here too, not
+    // only on the vehicle page, because a cover has to name the vehicle it cannot reach -
+    // and the store is DataStore-backed, so there is no synchronous read to borrow. The
+    // collection is keyed to the view model and the shell only recomposes when a card is
+    // added or edited, which is rare, cheap (the retained Web view and the pager keep their
+    // state), and always something the user did on the vehicle page a moment earlier.
+    val garageCards = remember(connection) { connection.vehicleCards() }
+    val garageList by garageCards.collectAsStateWithLifecycle(initialValue = emptyList())
+    val coverVehicleName = garageList.firstOrNull { it.id == connection.selectedVehicleId.value }?.name
 
     // Recording needs a device to sample, firmware with the snapshot endpoint, and the
     // user's switch - all three, and the first of them is why the service never runs
@@ -315,10 +336,10 @@ fun AppShell(
                         }
                     }
                     when (BarLayout.pages.getOrElse(p) { BarLayout.home }) {
-                        // The app's home, and the only page whose job is to make the
-                        // other pages possible. It raises the same manual-entry panel the
-                        // covers raise, so there is one behaviour for typing an address
-                        // rather than one per screen that offers it.
+                        // The app's home, and the only page whose job is to make the other
+                        // pages possible. It holds every connect action the app has - the
+                        // cards' CONNECT/DISCONNECT, the search, and the address box this
+                        // shell raises over it - and the covers below have none of their own.
                         AppTab.VEHICLES -> NativePage(inView) {
                             VehicleScreen(
                                 connection,
@@ -346,15 +367,10 @@ fun AppShell(
                                     reason = reason,
                                     note = "Trips and App Settings work without a device. " +
                                         "Speed, GNSS and the dashboard's own configuration " +
-                                        "need one - connect, and this page is the live view " +
-                                        "again.",
-                                    rememberedIp = connection.lastKnownIp.value,
-                                    findLabel = if (findIsRetryNetwork) "RETRY NETWORK" else "FIND DEVICE",
-                                    onFind = {
-                                        if (findIsRetryNetwork) connection.retryNoWifi() else connection.rescan()
-                                    },
-                                    onEnterIp = { manualOpen = true },
-                                    onWifi = { openWifiSettings(context) },
+                                        "need one - the vehicle page is where a dashboard is " +
+                                        "found and connected.",
+                                    vehicleName = coverVehicleName,
+                                    onOpenVehicles = openGarage,
                                 )
                             } else {
                                 // Off-screen pages are not the live view: their polling has
@@ -391,15 +407,10 @@ fun AppShell(
                                         title = "NO DEVICE CONNECTED",
                                         reason = reason,
                                         note = "The dashboard's own configuration lives on the " +
-                                            "device. This slot becomes its Web UI as soon as a " +
-                                            "device is connected.",
-                                        rememberedIp = connection.lastKnownIp.value,
-                                        findLabel = if (findIsRetryNetwork) "RETRY NETWORK" else "FIND DEVICE",
-                                        onFind = {
-                                            if (findIsRetryNetwork) connection.retryNoWifi() else connection.rescan()
-                                        },
-                                        onEnterIp = { manualOpen = true },
-                                        onWifi = { openWifiSettings(context) },
+                                            "device. This slot becomes its Web UI once the " +
+                                            "vehicle page has connected one.",
+                                        vehicleName = coverVehicleName,
+                                        onOpenVehicles = openGarage,
                                     )
                                 }
                             }
@@ -415,7 +426,6 @@ fun AppShell(
                                     version = conn?.version,
                                     trips = trips,
                                     tripsAvailable = tripsAvailable,
-                                    onEnterIp = { manualOpen = true },
                                 )
                             }
                         }
@@ -489,22 +499,6 @@ fun AppShell(
         Box(Modifier.fillMaxSize()) {
             TripDetailScreen(row = row, vm = trips, onDismiss = { openTrip = null })
         }
-    }
-}
-
-/**
- * The system's Wi-Fi panel, for the one case the app cannot fix itself: there is no
- * network to scan. A device with no such panel simply does not open anything - the
- * cover's RETRY NETWORK still does the useful half.
- */
-private fun openWifiSettings(context: android.content.Context) {
-    try {
-        context.startActivity(
-            android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    } catch (e: android.content.ActivityNotFoundException) {
-        // Nothing to open here; the cover's other two buttons still work.
     }
 }
 

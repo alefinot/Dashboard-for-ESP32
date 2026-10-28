@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -82,8 +83,15 @@ import kotlinx.coroutines.delay
  * gives the covers, because a paraphrased failure is how an app ends up saying
  * "searching" about a network that already answered.
  *
- * Forgetting a vehicle is not on this page yet; it needs the name on the card to confirm
- * it, which is the next thing the page grows.
+ * Forgetting a vehicle lives in the editor it opens from, not on the card: DELETE asks for
+ * the name that is written on the card before it goes, photo, record and saved sessions
+ * with it. Recorded trips stay, badged with the name they were driven under.
+ *
+ * This page is also the app's **only** place for connect actions - CONNECT, DISCONNECT,
+ * SEARCH and ENTER IP MANUALLY. The Live and ESP covers deliberately carry none of them:
+ * a device belongs to a vehicle, so reaching for one starts by choosing a card, and a
+ * second copy of the same control somewhere else is what makes a connection impossible to
+ * explain.
  */
 @Composable
 fun VehicleScreen(
@@ -92,6 +100,7 @@ fun VehicleScreen(
     onEdit: (String) -> Unit,
     onNameUnclaimed: () -> Unit,
 ) {
+    val context = LocalContext.current
     // Collected once per view model: `vehicleCards()` hands back a cold flow, and calling
     // it in place would rebuild and restart the collection on every recomposition.
     val cards = remember(connection) { connection.vehicleCards() }
@@ -100,6 +109,12 @@ fun VehicleScreen(
     val state = connection.uiState.value
     val notice by connection.notice
     val unclaimed by connection.unclaimed
+    // Whether the search button has to read RETRY NETWORK instead of SEARCH FOR DASHBOARD++. It
+    // is decided here, from the same tested mapping the covers use ([ShellRouting]), rather than
+    // handed down by the shell: the rule and the sentence it changes belong on the same page,
+    // and a pass-through parameter is one more thing that can drift out of agreement with the
+    // state it was computed from.
+    val findIsRetryNetwork = ShellRouting.view(state).findIsRetryNetwork
 
     // The clock the derived status lines ("LAST SEEN YESTERDAY") are measured against.
     // Read once per composition and refreshed once a minute while this page is on screen:
@@ -195,6 +210,9 @@ fun VehicleScreen(
             AddVehicleCard(
                 onSearch = { connection.rescan() },
                 onEnterIp = onEnterIp,
+                findIsRetryNetwork = findIsRetryNetwork,
+                onRetryNetwork = { connection.retryNoWifi() },
+                onWifi = { openWifiSettings(context) },
             )
         }
     }
@@ -439,14 +457,26 @@ private fun NoticeCard(
 }
 
 /**
- * The last thing in the garage, and the only way a new vehicle gets in: [plan §5] puts both
- * entry points on this page because it is the page a user is already standing on. SEARCH
- * runs the whole ladder (walk, mDNS, probe, and adopting a unit no card claims); ENTER IP
- * MANUALLY raises the same panel the covers raise, the one path for a device no discovery
- * can see.
+ * The last thing in the garage, and the only way a new vehicle gets in: [plan §5] puts every
+ * entry point on this page because it is the page a user is already standing on. SEARCH runs
+ * the whole ladder (walk, mDNS, probe, and adopting a unit no card claims); ENTER IP MANUALLY
+ * raises the app's only address box, the one path for a device no discovery can see.
+ *
+ * When there is no local network to search, the same button checks for one before it hunts
+ * (`retryNoWifi`, which is the only path that can say "there is no network here" instead of
+ * "I found nothing"), and the system's Wi-Fi panel is offered next to it: the app cannot join a
+ * network for the user, and the place that used to offer this - the Live cover - no longer has
+ * any connect furniture at all. The label stays the same either way: it is one button with one
+ * meaning, and the sentence under it says what is different right now.
  */
 @Composable
-private fun AddVehicleCard(onSearch: () -> Unit, onEnterIp: () -> Unit) {
+private fun AddVehicleCard(
+    onSearch: () -> Unit,
+    onEnterIp: () -> Unit,
+    findIsRetryNetwork: Boolean,
+    onRetryNetwork: () -> Unit,
+    onWifi: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -460,20 +490,45 @@ private fun AddVehicleCard(onSearch: () -> Unit, onEnterIp: () -> Unit) {
                 "SEARCH FOR DASHBOARD++",
                 modifier = Modifier.weight(1f),
                 style = HudButtonStyle.PRIMARY,
-            ) { onSearch() }
+            ) { if (findIsRetryNetwork) onRetryNetwork() else onSearch() }
             HudButton(
                 "ENTER IP MANUALLY",
                 modifier = Modifier.weight(1f),
                 style = HudButtonStyle.SECONDARY,
             ) { onEnterIp() }
         }
+        if (findIsRetryNetwork) {
+            Spacer(Modifier.height(8.dp))
+            HudButton("WI-FI SETTINGS", style = HudButtonStyle.SECONDARY) { onWifi() }
+        }
         Spacer(Modifier.height(10.dp))
         Text(
-            "A dashboard that answers becomes a card. Name it, and the app remembers the " +
-                "vehicle rather than the address - which is why coming back to a car you " +
-                "drive every day takes a couple of seconds and a first hunt does not.",
+            if (findIsRetryNetwork) {
+                "Searching needs a local network: join the Wi-Fi the dashboard is on (or " +
+                    "share one over USB tethering), then try again - or type its address."
+            } else {
+                "A dashboard that answers becomes a card. Name it, and the app remembers the " +
+                    "vehicle rather than the address - which is why coming back to a car you " +
+                    "drive every day takes a couple of seconds and a first hunt does not."
+            },
             color = HudColors.TextDim,
             style = HudeCfgNote(),
         )
+    }
+}
+
+/**
+ * The system's Wi-Fi panel, for the one case the app cannot fix itself: there is no network
+ * to scan. A device with no such screen simply opens nothing - RETRY NETWORK still does the
+ * useful half as soon as a network exists.
+ */
+private fun openWifiSettings(context: android.content.Context) {
+    try {
+        context.startActivity(
+            android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    } catch (e: android.content.ActivityNotFoundException) {
+        // No such panel on this device; the retry button still works.
     }
 }

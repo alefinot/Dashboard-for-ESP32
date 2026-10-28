@@ -24,9 +24,10 @@ data class ShellView(
     val conn: ConnectionUiState.Connected?,
     val reason: String?,
     /**
-     * What the covers' FIND DEVICE has to do: when the app has given up without a
-     * network, or has nothing to reach for, re-scanning the subnet is pointless and what
-     * has to be retried is whether a network exists now.
+     * Whether the garage's search button has to check for a network before it hunts: when the
+     * app has given up without a network, or has nothing to reach for, re-scanning the subnet is
+     * pointless and what has to be retried is whether a network exists now. The label does not
+     * change with it - one button, one meaning - but the offer of the system's Wi-Fi panel does.
      */
     val findIsRetryNetwork: Boolean,
 )

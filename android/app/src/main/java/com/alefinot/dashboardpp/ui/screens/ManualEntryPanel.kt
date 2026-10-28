@@ -40,7 +40,8 @@ import androidx.compose.ui.text.input.ImeAction
 
 /**
  * Typing an address by hand — the form the old `ManualEntryScreen` had, moved from a
- * screen into a panel over the shell.
+ * screen into a panel over the shell. The vehicle page's ADD VEHICLE card is the only thing
+ * that raises it: one address box in the app, raised where the vehicles are.
  *
  * It is a panel for the same reason the page's confirm box is a `<div>` rather than
  * a window: the app behind it is the point. The user came from a page they were
@@ -77,8 +78,10 @@ fun ManualEntryPanel(vm: ConnectionViewModel, onDismiss: () -> Unit) {
                 Text("ENTER IP MANUALLY", color = HudColors.Cyan, style = HudeSectionTitle())
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    "The app could not find the dashboard. If you know its address, " +
-                        "type it in — it remembers it for next time.",
+                    "Type the address of the dashboard to reach - handy when discovery cannot " +
+                        "see it, on another subnet or behind the dashboard's own SoftAP. A " +
+                        "dashboard that answers becomes a saved address of the selected " +
+                        "vehicle, or a new card if the app has never seen it before.",
                     color = HudColors.TextMuted,
                     style = HudeCfgHelp(),
                 )

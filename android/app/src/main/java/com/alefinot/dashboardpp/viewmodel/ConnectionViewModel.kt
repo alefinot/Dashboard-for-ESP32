@@ -79,7 +79,11 @@ class ConnectionViewModel(
     val uiState = mutableStateOf<ConnectionUiState>(ConnectionUiState.Idle(null))
     val scanProgress = mutableStateOf(0f)
 
-    /** The address of the last successful connect — the vehicle page's status line. */
+    /**
+     * The address of the most recent successful connect. The manual-address panel offers it
+     * as a starting point; the garage quotes its cards instead, because a card keeps every
+     * address this vehicle has ever answered on, not just the last one the app saw.
+     */
     val lastKnownIp = mutableStateOf<String?>(null)
 
     /** Error line for the manual-address panel. */
@@ -122,12 +126,12 @@ class ConnectionViewModel(
         }
     }
 
-    /** RE-SCAN NETWORK, from App Settings: the full ladder for the selected card. */
+    /** SEARCH FOR DASHBOARD++ on the garage's ADD VEHICLE card: the full ladder. */
     fun rescan() {
         startAttempt(ConnectMode.SEARCH)
     }
 
-    /** The covers' RETRY NETWORK: check that a network exists, then reach again. */
+    /** The same card when there is no network to search: check for one, then reach again. */
     fun retryNoWifi() {
         scope.launch {
             if (!Net.hasLocalLan(appContext)) {

@@ -34,6 +34,14 @@ import com.alefinot.dashboardpp.ui.theme.hudGlass
  * width cap, the same scrim-free centred column) because that is the one panel in
  * this app that already knows how to sit over a page and be read.
  *
+ * It carries **no connect furniture**. Search, address entry, connect and disconnect
+ * live on the vehicle page and nowhere else, because a device belongs to a vehicle and
+ * choosing one is the vehicle page's job: a FIND DEVICE button here would be a second
+ * way to do the same thing, and the second way is what makes a connection impossible to
+ * explain. What the cover does instead is say which vehicle it is waiting for, quote the
+ * reason the view model gave, and offer one action, [onOpenVehicles], which takes the
+ * user to the page that can act.
+ *
  * It is deliberately not a screen: no route, no back handler, no state of its own.
  * It is drawn by the page, from the reason the view model supplied, and it goes away
  * by itself the moment a connection comes back.
@@ -43,12 +51,9 @@ fun OfflineCover(
     title: String,
     reason: String?,
     note: String,
-    rememberedIp: String?,
+    vehicleName: String?,
+    onOpenVehicles: () -> Unit,
     modifier: Modifier = Modifier,
-    findLabel: String = "FIND DEVICE",
-    onFind: () -> Unit,
-    onEnterIp: () -> Unit,
-    onWifi: (() -> Unit)? = null,
 ) {
     // Opaque on purpose. The ESP slot is a hole in the app rather than a page, so on
     // that tab the cover has to carry the background the WebView would have painted;
@@ -74,23 +79,19 @@ fun OfflineCover(
                     Text(reason, color = HudColors.TextMuted, style = HudeBody())
                     Spacer(Modifier.height(10.dp))
                 }
-                if (!rememberedIp.isNullOrBlank()) {
-                    Text(
-                        "Last device: $rememberedIp",
-                        color = HudColors.Cyan,
-                        style = HudeCfgLive(),
-                    )
-                    Spacer(Modifier.height(10.dp))
-                }
+                // Which vehicle this page is waiting for. With a card selected the page
+                // can name it, and that turns "no device" into "my car is not here" - a
+                // sentence the driver already understands. With no card at all the app has
+                // never met a dashboard, and the honest line is that nothing is chosen yet.
+                Text(
+                    if (vehicleName.isNullOrBlank()) "NO VEHICLE SELECTED" else "WAITING FOR: $vehicleName",
+                    color = HudColors.Cyan,
+                    style = HudeCfgLive(),
+                )
+                Spacer(Modifier.height(10.dp))
                 Text(note, color = HudColors.TextDim, style = HudeCfgNote())
                 Spacer(Modifier.height(18.dp))
-                HudButton(findLabel, style = HudButtonStyle.PRIMARY, onClick = onFind)
-                Spacer(Modifier.height(8.dp))
-                HudButton("ENTER IP", style = HudButtonStyle.SECONDARY, onClick = onEnterIp)
-                if (onWifi != null) {
-                    Spacer(Modifier.height(8.dp))
-                    HudButton("WI-FI SETTINGS", style = HudButtonStyle.SECONDARY, onClick = onWifi)
-                }
+                HudButton("OPEN VEHICLE PAGE", style = HudButtonStyle.PRIMARY, onClick = onOpenVehicles)
             }
         }
     }

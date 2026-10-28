@@ -47,7 +47,6 @@ fun DashboardRoot(activity: android.app.Activity, vm: ConnectionViewModel) {
         AppShell(
             conn = view.conn,
             reason = view.reason,
-            findIsRetryNetwork = view.findIsRetryNetwork,
             connection = vm,
             trips = trips,
         )

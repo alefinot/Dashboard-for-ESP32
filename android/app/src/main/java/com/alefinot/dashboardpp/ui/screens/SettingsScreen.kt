@@ -69,7 +69,6 @@ fun SettingsScreen(
     version: String?,
     trips: TripsViewModel,
     tripsAvailable: Boolean,
-    onEnterIp: () -> Unit,
 ) {
     val context = LocalContext.current
     val recording by TripRuntime.state.collectAsStateWithLifecycle()
@@ -214,18 +213,10 @@ fun SettingsScreen(
                 style = HudeCfgNote(),
             )
             Spacer(Modifier.height(24.dp))
-
-            // Both of these end the connection, and the shell follows the view
-            // model: as soon as it stops reporting a connection the tab row is
-            // gone and discovery takes over. Settings no longer has to close
-            // itself, and the old CLOSE button has nothing left to close.
-            // Offline the way back in is here too - the same form the covers
-            // raise, so there is one behaviour for it.
-            if (ip == null) {
-                HudButton("ENTER IP MANUALLY", style = HudButtonStyle.SECONDARY) { onEnterIp() }
-                Spacer(Modifier.height(8.dp))
-            }
-            HudButton("RE-SCAN NETWORK", style = HudButtonStyle.SECONDARY) { vm.rescan() }
+            // No connect, no search, no address box, no forget: a device belongs to a
+            // vehicle, so every one of those actions sits on the vehicle page's card and
+            // nowhere else. What is left here are the app's own switches, which work
+            // whether or not a dashboard is on the network.
         }
 
         if (showConfirmClear) {
