@@ -92,8 +92,12 @@ class TripStore(context: Context) {
  * ([TripRecorder]) is a plain JVM class the unit tests can drive with a fake.
  */
 interface TripWriter {
-    /** Create the file and write the header; returns the path. */
-    fun create(path: String)
+    /**
+     * Create the file, writing [tag] (a `#vehicle=` line, or "" for none) above the
+     * header. The tag goes first because a reader that only wants to know who the
+     * drive belongs to should not have to read past line 1.
+     */
+    fun create(path: String, tag: String)
 
     /** Continue an existing file — no second header. */
     fun reopen(path: String)
@@ -113,13 +117,15 @@ interface TripWriter {
 class CsvTripWriter(private val store: TripStore) : TripWriter {
     private val open = HashMap<String, BufferedWriter>()
 
-    override fun create(path: String) {
+    override fun create(path: String, tag: String) {
         closeOf(path)
         val f = File(path)
         f.parentFile?.mkdirs()
         val w = BufferedWriter(OutputStreamWriter(FileOutputStream(f), Charsets.UTF_8))
-        w.write(TripFormat.HEADER)
-        w.newLine()
+        TripFormat.fileHead(tag).forEach { line ->
+            w.write(line)
+            w.newLine()
+        }
         w.flush()
         open[path] = w
     }
@@ -128,7 +134,11 @@ class CsvTripWriter(private val store: TripStore) : TripWriter {
         if (open.containsKey(path)) return
         val f = File(path)
         if (!f.exists()) {
-            create(path)
+            // A file that vanished mid-drive is recreated without a tag: the trip
+            // already had an owner written once, and inventing one here from the
+            // recorder's current binding would be a guess about a file that may
+            // hold samples from before that vehicle existed.
+            create(path, "")
             return
         }
         val w = BufferedWriter(OutputStreamWriter(FileOutputStream(f, true), Charsets.UTF_8))
@@ -164,7 +174,7 @@ class CsvTripWriter(private val store: TripStore) : TripWriter {
         return try {
             val out = ArrayList<String>()
             f.forEachLine { line ->
-                if (line.isNotBlank() && !TripFormat.isHeader(line)) out.add(line)
+                if (!TripFormat.skippable(line)) out.add(line)
             }
             out
         } catch (e: Exception) {
@@ -177,4 +187,24 @@ class CsvTripWriter(private val store: TripStore) : TripWriter {
     override fun exists(path: String): Boolean = File(path).exists()
 
     fun closeAll() = open.keys.toList().forEach { closeOf(it) }
+}
+
+/**
+ * The owner of a trip file, read from line 1 without parsing the file.
+ *
+ * The Trips list wants a name badge on every card; the summary cache carries the
+ * tag whenever it has a row for the file, and this is the fallback for files the
+ * cache does not know yet. It reads one line, which is what makes the badge cost
+ * no second walk over the samples.
+ */
+object TripTagReader {
+    /** Line 1 of a trip file: its tag, or null when it has none (or cannot be read). */
+    fun read(file: File): TripTag? {
+        if (!file.exists()) return null
+        return try {
+            file.bufferedReader(Charsets.UTF_8).use { r -> TripFormat.parseTag(r.readLine() ?: "") }
+        } catch (e: Exception) {
+            null
+        }
+    }
 }

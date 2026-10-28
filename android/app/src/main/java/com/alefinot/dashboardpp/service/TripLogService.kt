@@ -59,6 +59,20 @@ class TripLogService : Service() {
     private var settings: RecorderSettings? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var ip: String = ""
+
+    /**
+     * Whose drives the files are: the card selected when this service was pointed at
+     * [ip], and the MAC that dashboard reported when the app verified it. The
+     * snapshot endpoint carries no identity of its own, so the recorder can only be
+     * told [plan §6]; the values arrive as extras on the start command.
+     *
+     * They are a point-in-time copy on purpose: "the name at record time" is what a
+     * trip's tag should hold, and renaming a vehicle later must not relabel drives
+     * that already happened.
+     */
+    private var vehicleId: String = ""
+    private var vehicleName: String = ""
+    private var eff: String = ""
     private var telemetryInNotification = true
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -81,6 +95,12 @@ class TripLogService : Service() {
             return START_NOT_STICKY
         }
         ip = target
+        vehicleId = intent.getStringExtra(EXTRA_VEHICLE_ID).orEmpty()
+        vehicleName = intent.getStringExtra(EXTRA_VEHICLE_NAME).orEmpty()
+        eff = intent.getStringExtra(EXTRA_EFF).orEmpty()
+        // A recorder already running from an earlier command keeps the file it is
+        // inside - re-pointing only changes the tag of the next file it creates.
+        recorder?.bindVehicle(vehicleId, eff, vehicleName)
         // A foreground service must announce itself immediately after
         // startForegroundService(); without this the process is ANR'd in ~5 s.
         ServiceCompat.startForeground(
@@ -248,6 +268,9 @@ class TripLogService : Service() {
         recorder = TripRecorder(csvWriter, { startMs -> tripStore.newName(startMs) }, {
             System.currentTimeMillis()
         }, prior)
+        // The identity arrives on the intent, the recorder is built later (this is
+        // the first place it can be built): hand it over before the first sample.
+        recorder?.bindVehicle(vehicleId, eff, vehicleName)
         return true
     }
 
@@ -382,6 +405,11 @@ class TripLogService : Service() {
         const val EXTRA_OPEN_TAB = "open_tab"
         const val TAB_LIVE = "live"
 
+        /** The card whose drives these are, and the MAC the dashboard reported. */
+        const val EXTRA_VEHICLE_ID = "vehicle_id"
+        const val EXTRA_VEHICLE_NAME = "vehicle_name"
+        const val EXTRA_EFF = "eff"
+
         private const val CHANNEL = "trip_recording"
         private const val NOTIF_ID = 4201
         private const val WAKE_TAG = "dashboardpp:trip"
@@ -389,9 +417,12 @@ class TripLogService : Service() {
         private const val SLOW_POLL_MS = 5_000L
         private const val BACKOFF_POLL_MS = 15_000L
 
-        fun start(context: Context, ip: String) {
+        fun start(context: Context, ip: String, vehicleId: String, vehicleName: String, eff: String) {
             val intent = Intent(context, TripLogService::class.java).apply {
                 putExtra(EXTRA_IP, ip)
+                putExtra(EXTRA_VEHICLE_ID, vehicleId)
+                putExtra(EXTRA_VEHICLE_NAME, vehicleName)
+                putExtra(EXTRA_EFF, eff)
             }
             ContextCompat.startForegroundService(context, intent)
         }

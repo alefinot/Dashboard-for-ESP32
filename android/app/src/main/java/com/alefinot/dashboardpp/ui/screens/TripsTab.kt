@@ -5,6 +5,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,8 +52,10 @@ import com.alefinot.dashboardpp.ui.theme.HudeCfgHelp
 import com.alefinot.dashboardpp.ui.theme.HudeCfgLive
 import com.alefinot.dashboardpp.ui.theme.HudeCfgNote
 import com.alefinot.dashboardpp.ui.theme.HudePerfValue
+import com.alefinot.dashboardpp.ui.theme.HudeSectionCaps
 import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
 import com.alefinot.dashboardpp.ui.theme.HudeTable
+import com.alefinot.dashboardpp.viewmodel.TripFilterOption
 import com.alefinot.dashboardpp.viewmodel.TripRow
 import com.alefinot.dashboardpp.viewmodel.TripsViewModel
 import java.text.SimpleDateFormat
@@ -66,6 +71,9 @@ import java.util.Locale
 @Composable
 fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
     val rows by vm.rows.collectAsStateWithLifecycle()
+    val visible by vm.visibleRows.collectAsStateWithLifecycle()
+    val filter by vm.filter.collectAsStateWithLifecycle()
+    val options by vm.filterOptions.collectAsStateWithLifecycle()
     val runtime by TripRuntime.state.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val storage by vm.storageBytes.collectAsStateWithLifecycle()
@@ -98,7 +106,13 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
             Text("TRIPS", style = HudeHeading().copy(brush = HudBrushes.title))
             Spacer(Modifier.width(12.dp))
             Text(
-                "${rows.size} · ${formatBytes(storage)}",
+                // What the cards underneath actually are: when a filter is on, the
+                // count says so instead of quietly shrinking.
+                if (visible.size == rows.size) {
+                    "${rows.size} · ${formatBytes(storage)}"
+                } else {
+                    "${visible.size} of ${rows.size} · ${formatBytes(storage)}"
+                },
                 color = HudColors.TextMuted,
                 style = HudeCfgLive(),
             )
@@ -109,6 +123,14 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
             color = HudColors.TextDim,
             style = HudeCfgNote(),
         )
+
+        // Narrow the list to one vehicle. The model decides when the row exists at
+        // all: with a single vehicle and nothing untagged there is nothing to narrow,
+        // and a control with one choice is decoration [plan §6].
+        if (options.size > 1) {
+            Spacer(Modifier.height(10.dp))
+            TripFilterChips(options, filter) { vm.setFilter(it) }
+        }
         Spacer(Modifier.height(12.dp))
 
         if (message != null) {
@@ -121,20 +143,71 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
             Spacer(Modifier.height(10.dp))
         }
 
-        if (rows.isEmpty() && !runtime.recording) {
+        if (visible.isEmpty() && !runtime.recording) {
             Spacer(Modifier.height(24.dp))
-            Text("No trips recorded yet.", color = HudColors.TextPrimary, style = HudeBody())
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Drives are logged automatically while the app is open and the " +
-                    "dashboard answers /api/snapshot.",
-                color = HudColors.TextDim,
-                style = HudeCfgNote(),
-            )
+            if (rows.isEmpty()) {
+                Text("No trips recorded yet.", color = HudColors.TextPrimary, style = HudeBody())
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Drives are logged automatically while the app is open and the " +
+                        "dashboard answers /api/snapshot.",
+                    color = HudColors.TextDim,
+                    style = HudeCfgNote(),
+                )
+            } else {
+                // Files exist; the filter is what hides them. Say which chip is on,
+                // and say where the rest went, rather than presenting an empty page.
+                val wanted = options.firstOrNull { it.value == filter }?.label ?: filter
+                Text(
+                    "No drives filed under $wanted.",
+                    color = HudColors.TextPrimary,
+                    style = HudeBody(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "${rows.size} drive${if (rows.size == 1) "" else "s"} recorded in total - " +
+                        "pick ALL to see them.",
+                    color = HudColors.TextDim,
+                    style = HudeCfgNote(),
+                )
+            }
         }
 
         // The list of drives, with the page's own staggered reveal.
-        TripList(rows, visits, onOpen)
+        TripList(visible, visits, onOpen)
+    }
+}
+
+/**
+ * The filter chips. A chip takes the page's own card treatment at its smallest -
+ * hairline box, `HudeSectionCaps` type - rather than a Material chip, which would be
+ * the one element on this page that does not look like the rest of the app.
+ */
+@Composable
+private fun TripFilterChips(options: List<TripFilterOption>, current: String, onSelect: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { opt ->
+            val on = opt.value == current
+            Box(
+                Modifier
+                    .hudCard(
+                        shape = HudRadius.FieldShape,
+                        fill = if (on) HudColors.Cyan.copy(alpha = 0.12f) else HudColors.CardFill,
+                        borderColor = if (on) HudColors.CyanDim else HudColors.CardHairline,
+                    )
+                    .clickable { onSelect(opt.value) }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    opt.label,
+                    color = if (on) HudColors.Cyan else HudColors.TextMuted,
+                    style = HudeSectionCaps(),
+                )
+            }
+        }
     }
 }
 
@@ -245,13 +318,17 @@ private fun TripCard(row: TripRow, onOpen: (TripRow) -> Unit, reveal: Float = 1f
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Column {
-            Text(
-                // A trip row is tabular data, so it takes the page's `table` rule:
-                // 12px monospace, 0.5px tracking.
-                SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(row.startMs)),
-                color = HudColors.TextPrimary,
-                style = HudeTable(),
-            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    // A trip row is tabular data, so it takes the page's `table` rule:
+                    // 12px monospace, 0.5px tracking.
+                    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(row.startMs)),
+                    color = HudColors.TextPrimary,
+                    style = HudeTable(),
+                )
+                Spacer(Modifier.weight(1f))
+                VehicleBadge(row)
+            }
             Spacer(Modifier.height(6.dp))
             val s = row.summary
             if (s == null) {
@@ -277,6 +354,37 @@ private fun TripCard(row: TripRow, onOpen: (TripRow) -> Unit, reveal: Float = 1f
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun VehicleBadge(row: TripRow) {
+    // The name is looked up live from the id in the file, so renaming a vehicle
+    // relabels every one of its old drives at once, and a deleted card keeps showing
+    // the name its own file recorded.
+    //
+    // The amber state is keyed on the *id*, not the label: a file can have an id and
+    // still have no readable name (tagged while the card's name was blank, card since
+    // deleted), and calling that "NO VEHICLE" would say the file knows nothing when it
+    // knows the one thing that matters [plan §6].
+    val unknown = row.vehicleId == null
+    val label = if (unknown) "NO VEHICLE" else row.vehicleName ?: "UNNAMED"
+    Box(
+        Modifier
+            .hudCard(
+                shape = HudRadius.FieldShape,
+                fill = if (unknown) HudColors.Msg else HudColors.Cyan.copy(alpha = 0.08f),
+                borderColor = if (unknown) HudColors.Amber.copy(alpha = 0.3f) else HudColors.CyanDim,
+            )
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    ) {
+        Text(
+            label,
+            color = if (unknown) HudColors.Amber else HudColors.Cyan,
+            style = HudeSectionCaps(),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

@@ -60,6 +60,28 @@ class TripRecorder(
     private var session: SessionRecord? = initialSession
 
     /**
+     * The `#vehicle=` line for the next file this recorder creates ("" = no tag).
+     *
+     * The app - not the recorder - decides who a trip belongs to: the recorder is
+     * handed samples, and a sample carries no identity. What it is handed instead
+     * is this line, rendered by the service from the vehicle card that was selected
+     * when the drive started. It is deliberately a snapshot rather than a live
+     * lookup: renaming a vehicle later must not rewrite a drive that already
+     * happened, and [bindVehicle] during an open trip changes the next file, never
+     * the one being written.
+     */
+    private var tag: String = ""
+
+    /**
+     * Say whose drive this is. Empty [vehicleId] (no card selected) means no tag:
+     * an untagged file is honest, while a tag with a half-known id would be a guess.
+     */
+    fun bindVehicle(vehicleId: String, eff: String, name: String) {
+        val next = TripFormat.tagLine(vehicleId, eff, name)
+        if (next != tag) tag = next
+    }
+
+    /**
      * A trip sealed by the 12 h cap must not be re-opened by the next sample of
      * the same ESP session — otherwise the cap would never actually split the
      * the file. Remembered here rather than in [SessionRecord] so the persisted
@@ -124,7 +146,7 @@ class TripRecorder(
                 opened = true
             } else {
                 val path = pathFor(now)
-                writer.create(path)
+                writer.create(path, tag)
                 accumulator = TripAccumulator()
                 openTrip = TripRef(path, now)
                 opened = true
@@ -279,7 +301,7 @@ object TripReader {
     fun samples(path: String): List<TripSample> {
         val out = ArrayList<TripSample>()
         forEachLine(path) { line ->
-            if (line.isNotBlank() && !TripFormat.isHeader(line)) {
+            if (!TripFormat.skippable(line)) {
                 TripFormat.parseLine(line)?.let { out.add(it) }
             }
         }
@@ -294,7 +316,7 @@ object TripReader {
         val acc = TripAccumulator()
         var any = false
         forEachLine(path) { line ->
-            if (line.isNotBlank() && !TripFormat.isHeader(line)) {
+            if (!TripFormat.skippable(line)) {
                 TripFormat.parseLine(line)?.let {
                     acc.add(it)
                     any = true

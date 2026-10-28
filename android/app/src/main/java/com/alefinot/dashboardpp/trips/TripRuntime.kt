@@ -34,6 +34,15 @@ data class TripRuntimeState(
         get() = polling && (System.currentTimeMillis() - lastOkMs) > 5_000L
 }
 
+/**
+ * The owner the app hands the recorder when it starts it: which address is being
+ * sampled, which card that address belongs to, that card's name at this moment,
+ * and what the dashboard reported as its eFuse identity. `/api/snapshot` carries
+ * none of it, and a trip file outlives the connection that created it, so the app
+ * says this once, at the only moment it knows it [plan §6].
+ */
+data class RecorderTarget(val ip: String, val vehicleId: String, val vehicleName: String, val eff: String)
+
 object TripRuntime {
     private val _state = MutableStateFlow(TripRuntimeState())
     val state: StateFlow<TripRuntimeState> = _state

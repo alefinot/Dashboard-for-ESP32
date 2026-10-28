@@ -13,6 +13,29 @@ import java.util.Locale
 data class TripSample(val tsMs: Long, val snapshot: Snapshot)
 
 /**
+ * Who a trip file belongs to, as written in its first line. The id is the app's
+ * own stable key (a rename does not move it), the MAC is what the dashboard
+ * reported when the drive started, and the name is a copy of what the card said
+ * at that moment - kept so a deleted vehicle still has a readable history, while
+ * the current name is always looked up live from the id.
+ *
+ * A tag with no id does not exist: a file either says who it belongs to or it is
+ * an untagged trip, which the Trips list reports as unknown rather than guessing.
+ */
+data class TripTag(val vehicleId: String, val eff: String, val name: String) {
+    /** The part after `#vehicle=` - what the summary cache stores alongside the file. */
+    fun raw(): String = "$vehicleId|$eff|$name"
+
+    companion object {
+        fun fromRaw(raw: String): TripTag? {
+            val p = raw.split("|", limit = 3)
+            if (p.size != 3 || p[0].isBlank()) return null
+            return TripTag(p[0], p[1], p[2])
+        }
+    }
+}
+
+/**
  * CSV shape of a trip log (trip recording plan §4). Header first, then one line
  * per sample in a fixed 25-column order, oldest first. The file is append-only
  * and always valid on disk: a process kill costs only the samples that were
@@ -27,6 +50,50 @@ object TripFormat {
 
     const val HEADER = "ts_ms,up_s,spd,src,avg,max,trp_km,trp_l,ikml,akml,odo," +
         "fuel_l,fuel_pct,fuel_st,volts,temp,amb,sats,hdop,alt,lat,lon,fix,tmr_st,tmr_s"
+
+    /**
+     * The vehicle tag line, written above the header. A `#` line is a comment: the
+     * 25-column data rows are a fixed-format table that `parseLine` demands at its
+     * exact width, so the only way to add anything without breaking every file
+     * already on disk is a line that is not a data line [plan §6].
+     *
+     * The three fields never contain `|`, `;`, CR or LF: `sanitizeField` replaces
+     * them. That is not paranoia about the vehicle name - the name is bounded where
+     * it is typed - it is what lets the same raw string sit inside the summary
+     * cache's `;`-separated row without a second escaping rule.
+     */
+    fun tagLine(vehicleId: String, eff: String, name: String): String {
+        val id = sanitizeField(vehicleId)
+        if (id.isEmpty()) return ""
+        return TAG_PREFIX + id + "|" + sanitizeField(eff.ifBlank { UNKNOWN_EFF }) +
+            "|" + sanitizeField(name)
+    }
+
+    /** The tag of a file, or null when the line is not one (or is malformed). */
+    fun parseTag(line: String): TripTag? {
+        if (!line.startsWith(TAG_PREFIX)) return null
+        return TripTag.fromRaw(line.removePrefix(TAG_PREFIX))
+    }
+
+    /** Any line the CSV reader must skip rather than try to parse. */
+    fun isComment(line: String): Boolean = line.startsWith("#")
+
+    const val TAG_PREFIX = "#vehicle="
+
+    /** What a tag writes for a dashboard that never reported its MAC. */
+    const val UNKNOWN_EFF = "unknown"
+
+    /** Field-safe form of a tag value. Never returns an empty string for non-blank input. */
+    private fun sanitizeField(value: String): String = buildString(value.length) {
+        for (c in value) {
+            append(
+                when (c) {
+                    '|', ';', '\r', '\n', '\t' -> ' '
+                    else -> c
+                },
+            )
+        }
+    }.trim()
 
     fun line(sample: TripSample): String {
         val s = sample.snapshot
@@ -104,6 +171,25 @@ object TripFormat {
     }
 
     fun isHeader(line: String): Boolean = line.startsWith("ts_ms,up_s")
+
+    /**
+     * True for anything a trip file reader should not hand to `parseLine`: blank,
+     * the header, and the tag line (and any comment a user might add by hand).
+     * One place, because the same three skips appear in every reader loop, and a
+     * loop that forgets one does not crash - it counts a comment as a sample.
+     */
+    fun skippable(line: String): Boolean =
+        line.isBlank() || isHeader(line) || isComment(line)
+
+    /**
+     * The lines a new trip file starts with: the vehicle's tag when there is one,
+     * then the header. Kept as a pure list so the shape of a file's head - which
+     * every reader of a trip file depends on, and which the Trips page and the
+     * export both lean on - can be stated in a test without an Android [Context]
+     * to open a file.
+     */
+    fun fileHead(tag: String): List<String> =
+        if (tag.isBlank()) listOf(HEADER) else listOf(tag, HEADER)
 }
 
 /**

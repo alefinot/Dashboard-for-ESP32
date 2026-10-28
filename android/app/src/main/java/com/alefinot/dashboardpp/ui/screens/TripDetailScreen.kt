@@ -104,6 +104,10 @@ fun TripDetailScreen(row: TripRow, vm: TripsViewModel, onDismiss: () -> Unit) {
             )
         }
         Spacer(Modifier.height(4.dp))
+        // Whose drive this was. The answer comes from the file's own first line, not
+        // from the app: it was written when the drive started, and the garage may
+        // have been renamed or emptied since then [plan §6].
+        Text(vehicleLine(row), color = HudColors.TextMuted, style = HudeCfgNote())
         Text(
             buildString {
                 append(hudDuration(s.durationMs))
@@ -242,6 +246,22 @@ private fun ChartRow(title: String, unit: String, values: List<Double>, accent: 
         Sparkline(values, Modifier.fillMaxWidth().height(72.dp), line = accent, fill = accent)
     }
     Spacer(Modifier.height(10.dp))
+}
+
+/**
+ * The one line naming whose drive this is. A file with no tag says so in words
+ * rather than showing a blank: a blank reads like a bug, and the honest answer is
+ * that the file does not know. The MAC is shown when the file has it - it is the
+ * only identity left when the card it was filed under has since been deleted.
+ */
+private fun vehicleLine(row: TripRow): String = when {
+    row.vehicleId == null ->
+        "No vehicle recorded on this file - it predates per-vehicle tagging."
+    else -> buildString {
+        append("Vehicle: ").append(row.vehicleName ?: row.vehicleId)
+        if (!row.inGarage) append(" (that card is no longer in the garage)")
+        row.eff?.let { append(" - dashboard ").append(it) }
+    }
 }
 
 @Composable

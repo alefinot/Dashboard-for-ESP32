@@ -57,9 +57,15 @@ class FakeWriter : TripWriter {
     val events = mutableListOf<String>()
     var sealedPaths: MutableSet<String> = mutableSetOf()
 
-    override fun create(path: String) {
+    /** The `#vehicle=` line each file was created with ("" = untagged). */
+    val tags = LinkedHashMap<String, String>()
+
+    override fun create(path: String, tag: String) {
         events.add("create:$path")
-        files.getOrPut(path) { StringBuilder() }
+        tags[path] = tag
+        val buf = files.getOrPut(path) { StringBuilder() }
+        if (tag.isNotBlank()) buf.append(tag).append('\n')
+        buf.append(TripFormat.HEADER).append('\n')
     }
 
     override fun reopen(path: String) {
@@ -79,7 +85,8 @@ class FakeWriter : TripWriter {
     }
 
     override fun readDataLines(path: String): List<String> =
-        files[path]?.toString()?.lineSequence()?.filter { it.isNotBlank() }?.toList() ?: emptyList()
+        files[path]?.toString()?.lineSequence()?.filter { !TripFormat.skippable(it) }?.toList()
+            ?: emptyList()
 
     override fun exists(path: String): Boolean = files.containsKey(path)
 

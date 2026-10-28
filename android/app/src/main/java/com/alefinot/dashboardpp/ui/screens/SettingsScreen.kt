@@ -159,11 +159,24 @@ fun SettingsScreen(
                 Text("AUTO-START ON CONNECT", color = HudColors.Cyan, style = HudeFormLabel())
                 Spacer(Modifier.width(12.dp))
                 HudToggle(on = recordingEnabled) { on ->
-                    scope.launch { settings.setRecordingEnabled(on) }
-                    // The switch is a preference first and a service second: offline there
-                    // is nothing to sample, so turning it on saves the intent for the next
-                    // connection instead of starting a recorder with no device behind it.
-                    if (on && ip != null) TripLogService.start(context, ip) else TripLogService.stop(context)
+                    scope.launch {
+                        settings.setRecordingEnabled(on)
+                        // The switch is a preference first and a service second: offline
+                        // there is nothing to sample, so turning it on saves the intent for
+                        // the next connection instead of starting a recorder with no device
+                        // behind it. Whose drives they are travels with the start command,
+                        // because the recorder cannot ask the dashboard that.
+                        if (on) {
+                            val owner = vm.recorderTarget()
+                            if (owner != null) {
+                                TripLogService.start(
+                                    context, owner.ip, owner.vehicleId, owner.vehicleName, owner.eff,
+                                )
+                            }
+                        } else {
+                            TripLogService.stop(context)
+                        }
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))

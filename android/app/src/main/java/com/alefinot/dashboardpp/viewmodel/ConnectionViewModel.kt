@@ -13,6 +13,7 @@ import com.alefinot.dashboardpp.discovery.NsdDiscoverer
 import com.alefinot.dashboardpp.discovery.SubnetScanner
 import com.alefinot.dashboardpp.discovery.VerifyResult
 import com.alefinot.dashboardpp.trips.RecorderSettings
+import com.alefinot.dashboardpp.trips.RecorderTarget
 import com.alefinot.dashboardpp.vehicles.Vehicle
 import com.alefinot.dashboardpp.vehicles.CropRect
 import com.alefinot.dashboardpp.vehicles.VehiclePhotoStore
@@ -117,6 +118,27 @@ class ConnectionViewModel(
 
     /** The garage, for the vehicle page. */
     fun vehicleCards() = vehicles.all()
+
+    /**
+     * What the trip recorder has to write as the owner of the files it creates: the
+     * address it is pointed at, the card that owns it, that card's name right now,
+     * and the MAC the dashboard reported when it was verified.
+     *
+     * The recorder cannot work this out by itself - `/api/snapshot` carries no
+     * identity of the unit that answered, and a trip file outlives the connection -
+     * so the app hands it these values when it starts the service [plan §6]. Null
+     * when nothing is connected: a file with a half-known owner would be a guess,
+     * and an untagged file is the honest version of the same thing.
+     */
+    suspend fun recorderTarget(): RecorderTarget? {
+        val c = uiState.value as? ConnectionUiState.Connected ?: return null
+        val name = try {
+            vehicles.all().first().firstOrNull { it.id == c.vehicleId }?.name
+        } catch (e: Exception) {
+            null
+        }
+        return RecorderTarget(c.ip, c.vehicleId, name.orEmpty(), c.mac.orEmpty())
+    }
 
     fun boot() {
         watchNetwork()

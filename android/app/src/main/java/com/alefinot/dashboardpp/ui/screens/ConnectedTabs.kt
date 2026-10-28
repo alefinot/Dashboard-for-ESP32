@@ -174,11 +174,17 @@ fun AppShell(
 
     // Recording needs a device to sample, firmware with the snapshot endpoint, and the
     // user's switch - all three, and the first of them is why the service never runs
-    // in the offline shell (see ShellRules.recorderWants).
-    LaunchedEffect(ip, tripsAvailable, recordingEnabled) {
+    // in the offline shell (see ShellRules.recorderWants). It also needs to know whose
+    // drive this is, which is what the recorder writes as the file's `#vehicle=` line:
+    // the snapshot endpoint says nothing about who answered, so the app has to say it.
+    LaunchedEffect(ip, conn?.vehicleId, tripsAvailable, recordingEnabled) {
         val target = ip?.takeIf { ShellRules.recorderWants(ip, tripsAvailable, recordingEnabled) }
         if (target != null) {
-            TripLogService.start(context, target)
+            val owner = connection.recorderTarget()
+            TripLogService.start(
+                context, target,
+                owner?.vehicleId.orEmpty(), owner?.vehicleName.orEmpty(), owner?.eff.orEmpty(),
+            )
         } else {
             TripLogService.stop(context)
             // A page the firmware cannot serve is snapped out of, not animated to: the
