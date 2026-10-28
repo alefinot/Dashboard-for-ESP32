@@ -9,7 +9,13 @@ import com.alefinot.dashboardpp.discovery.Net
 import com.alefinot.dashboardpp.discovery.NsdDiscoverer
 import com.alefinot.dashboardpp.discovery.SubnetScanner
 import com.alefinot.dashboardpp.discovery.VerifyResult
+import com.alefinot.dashboardpp.trips.RecorderSettings
+import com.alefinot.dashboardpp.vehicles.Vehicle
 import com.alefinot.dashboardpp.vehicles.VehicleStore
+import com.alefinot.dashboardpp.vehicles.displayName
+import com.alefinot.dashboardpp.vehicles.macConflict
+import com.alefinot.dashboardpp.vehicles.mergeTypedFields
+import com.alefinot.dashboardpp.vehicles.refusalMessage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +55,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class ConnectionViewModel(
     context: Context,
     private val vehicles: VehicleStore = VehicleStore(context),
+    private val tripSettings: RecorderSettings = RecorderSettings(context),
 ) {
     private val appContext = context.applicationContext
     private val job = SupervisorJob()
@@ -158,6 +165,122 @@ class ConnectionViewModel(
             unclaimed.value = null
             if (uiState.value is ConnectionUiState.Connected) {
                 uiState.value = ConnectionUiState.Idle(null)
+            }
+        }
+    }
+
+    /**
+     * The editor's starting point for a card that already exists: the stored record, so the
+     * form opens prefilled with what the app already knows instead of with blanks.
+     *
+     * [onDraft] runs on [scope], off the main thread; it only assigns Compose state, which
+     * is safe from any thread. A card that vanished while the form was being opened answers
+     * null, and the screen closes itself rather than editing a ghost.
+     */
+    fun editDraft(vehicleId: String, onDraft: (Vehicle?) -> Unit) {
+        scope.launch { onDraft(vehicles.get(vehicleId)) }
+    }
+
+    /**
+     * The editor's starting point for a dashboard that answered and belongs to no card.
+     *
+     * The id is taken from the store here, not when the form is saved, because [VehicleStore.nextId]
+     * reserves it in the transaction that reads it - a second adoption started while this form
+     * is open cannot then be handed the same id. A cancelled form costs a skipped number, and
+     * that is the cheaper mistake: card ids double as trip tags, so an id is never handed out
+     * twice.
+     *
+     * `lastConnectedAtMs` is set because the unit did just answer - the card is born with a
+     * real "last seen", not an empty one.
+     */
+    fun adoptDraft(onDraft: (Vehicle?) -> Unit) {
+        val unit = unclaimed.value ?: return
+        scope.launch {
+            val seen = now()
+            onDraft(
+                Vehicle(
+                    id = vehicles.nextId(),
+                    mac = unit.mac,
+                    ips = listOf(unit.ip),
+                    firmwareVersion = unit.version,
+                    lastConnectedAtMs = seen,
+                    createdAtMs = seen,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Write the user's half of a card, or refuse the write. [onDone] gets null when the
+     * card is stored and the refusal's wording when it is not, so the form can stay open
+     * with the reason in it instead of closing on a write that never happened.
+     *
+     * Two rules are applied here rather than in the form, so they cannot be skipped by a
+     * second caller (task 8's adoption, a future import): a blank name is filled with the
+     * unit's identity tail, and a card carrying another card's MAC is refused outright -
+     * that is the exact state this refactor exists to make impossible, and a warning the
+     * user can press through would leave two cards describing one dashboard.
+     *
+     * Everything the app measured (`mac`, `ips`, `lastConnectedAtMs`, `firmwareVersion`,
+     * `createdAtMs`, the photo) is kept by [mergeTypedFields]; a save that rebuilt the
+     * record from the form would drop the evidence that binds the card to the unit.
+     */
+    fun saveVehicle(typed: Vehicle, onDone: (refusal: String?) -> Unit = {}) {
+        scope.launch {
+            val all = vehicles.all().first()
+            val stored = all.firstOrNull { it.id == typed.id }
+            val merged = stored?.let { mergeTypedFields(it, typed) } ?: typed
+            val taken = all.filter { it.id != merged.id }.map { it.name }.toSet()
+            val finished = merged.copy(name = displayName(merged.name, merged, taken))
+            macConflict(finished, all)?.let { clash ->
+                onDone(refusalMessage(clash))
+                return@launch
+            }
+            vehicles.put(finished)
+            // A card that did not exist before becomes the selected one: the user made it
+            // from a unit that is in front of them, and the next thing they do is connect.
+            if (stored == null) {
+                vehicles.select(finished.id)
+                selectedVehicleId.value = finished.id
+                unclaimed.value = null
+            }
+            onDone(null)
+        }
+    }
+
+    /**
+     * Forget a vehicle: its card, its JPEG, and the recorder's rows for the addresses it
+     * remembered. The drives it took stay exactly where they are - a trip's file name
+     * carries this card's id, and the log outlives the card on purpose.
+     *
+     * The session rows go *before* the card is removed, because a row is a claim about an
+     * address; if the card disappears first, a crash in between leaves the claim pointing at
+     * nothing. Removing the rows first leaves the worst case as a card that still exists
+     * with a clean address book, which the next connect refills.
+     */
+    fun deleteVehicle(vehicleId: String) {
+        scope.launch {
+            val v = vehicles.get(vehicleId) ?: return@launch
+            val ownsSession = (uiState.value as? ConnectionUiState.Connected)?.vehicleId == vehicleId
+            if (ownsSession) ladder?.cancel()
+            tripSettings.clearSessions(v.ips)
+            vehicles.delete(vehicleId)
+            if (selectedVehicleId.value == vehicleId) {
+                // The store clears its own pointer; the VM's copy has to follow, and the
+                // garage needs *some* card selected afterwards or the ladder has nothing to
+                // reach for on the next network change. The neighbour takes the slot.
+                val next = vehicles.all().first().firstOrNull()
+                if (next != null) {
+                    vehicles.select(next.id)
+                    selectedVehicleId.value = next.id
+                } else {
+                    selectedVehicleId.value = null
+                }
+            }
+            if (ownsSession) {
+                uiState.value = ConnectionUiState.Idle(null)
+                notice.value = null
+                unclaimed.value = null
             }
         }
     }

@@ -118,7 +118,7 @@ class RecorderSettings(context: Context) {
     /** The persisted session per device, so a trip survives an app restart. */
     suspend fun sessionFor(ip: String): SessionRecord? {
         val text = try {
-            store.data.first()[stringPreferencesKey("session:$ip")]
+            store.data.first()[stringPreferencesKey(sessionKey(ip))]
         } catch (e: Exception) {
             null
         } ?: return null
@@ -126,7 +126,34 @@ class RecorderSettings(context: Context) {
     }
 
     suspend fun saveSession(record: SessionRecord) {
-        store.edit { it[stringPreferencesKey("session:${record.ip}")] = SessionCodec.encode(record) }
+        store.edit { it[stringPreferencesKey(sessionKey(record.ip))] = SessionCodec.encode(record) }
+    }
+
+    /**
+     * Drop the recorder's rows for a vehicle that is being forgotten.
+     *
+     * These rows are per *address*, and they hold an open trip's continuity - last accepted
+     * uptime, last sample, which file the drive is in. They are not trips and are never
+     * listed as ones, so deleting them loses no drive: the sealed file stays on disk and the
+     * trips list reads the file names. What is being cleaned is the claim that this address
+     * belongs to a vehicle that no longer has a card - leaving it would hand the next card
+     * that dials that address a stranger's half-finished trip.
+     *
+     * Returns the number of rows actually removed, which is what lets the caller skip the
+     * write when there is nothing to do.
+     */
+    suspend fun clearSessions(ips: List<String>): Int {
+        if (ips.isEmpty()) return 0
+        var removed = 0
+        store.edit { tx ->
+            // Keys in this store are typed objects; the pure rule works on their names, so
+            // the names are read out here and turned back into keys of the right type (each
+            // session row holds a String) for the removal.
+            val names = sessionKeysToRemove(tx.asMap().keys.map { it.name }.toSet(), ips)
+            removed = names.size
+            for (n in names) tx.remove(stringPreferencesKey(n))
+        }
+        return removed
     }
 
     suspend fun setRecordingEnabled(enabled: Boolean) {
@@ -150,5 +177,21 @@ class RecorderSettings(context: Context) {
         private val KEY_MOTION = booleanPreferencesKey("motion_enabled")
         private val KEY_NOTIFICATION = booleanPreferencesKey("notification_enabled")
         private val KEY_BATTERY_PROMPT = booleanPreferencesKey("battery_prompt_shown")
+
+        /** The key holding the recorder's row for one address. */
+        fun sessionKey(ip: String) = "session:$ip"
+
+        /**
+         * Of [existing], the session rows that belong to [ips].
+         *
+         * Whole-key equality on purpose: "192.168.1.9" is a text prefix of "192.168.1.99",
+         * and a prefix match here would delete another vehicle's open trip. Kept as a pure
+         * function (and tested in `SessionKeysTest`) because the store itself cannot be.
+         */
+        fun sessionKeysToRemove(existing: Set<String>, ips: List<String>): List<String> {
+            if (ips.isEmpty()) return emptyList()
+            val wanted = ips.map { sessionKey(it) }.toSet()
+            return existing.filter { it in wanted }
+        }
     }
 }

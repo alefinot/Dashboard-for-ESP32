@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -81,6 +82,8 @@ import kotlinx.coroutines.delay
 fun VehicleScreen(
     connection: ConnectionViewModel,
     onEnterIp: () -> Unit,
+    onEdit: (String) -> Unit,
+    onNameUnclaimed: () -> Unit,
 ) {
     // Collected once per view model: `vehicleCards()` hands back a cold flow, and calling
     // it in place would rebuild and restart the collection on every recomposition.
@@ -154,6 +157,7 @@ fun VehicleScreen(
                         onConnect = { connection.connectVehicle(v.id, ConnectMode.SEARCH) },
                         onRetrySaved = { connection.connectVehicle(v.id, ConnectMode.PROBE) },
                         onDisconnect = { connection.disconnect() },
+                        onEdit = { onEdit(v.id) },
                     )
                     Spacer(Modifier.height(10.dp))
                 }
@@ -174,6 +178,8 @@ fun VehicleScreen(
                     "${it.ip} (firmware ${it.version ?: "unknown"}) is not on this list yet. " +
                         "Name it and it becomes a card of its own.",
                     HudColors.Cyan,
+                    actionLabel = "NAME IT",
+                    onAction = onNameUnclaimed,
                 )
                 Spacer(Modifier.height(10.dp))
             }
@@ -205,9 +211,10 @@ fun VehicleScreen(
  * connected card always offers DISCONNECT (even if the selection has moved on, because
  * that is the card with a session to end), and any other selected card offers CONNECT —
  * the whole ladder — plus, when it has an address on file, the short two-address try.
- * Cards that are neither selected nor connected offer nothing, because the first thing
- * anyone does with an unselected card is touch it, and a wall of buttons for cars nobody
- * is looking at is not a garage.
+ * Every card offers EDIT, including a card nobody is standing on: a card is a record about
+ * a vehicle, and records are edited whether or not they are the one being reached for. A
+ * card that is neither selected nor connected offers *only* that, because a wall of
+ * connection buttons for cars nobody is looking at is not a garage.
  */
 @Composable
 private fun VehicleCard(
@@ -221,6 +228,7 @@ private fun VehicleCard(
     onConnect: () -> Unit,
     onRetrySaved: () -> Unit,
     onDisconnect: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     val status = cardStatusLine(vehicle, state, nowMs)
     Column(
@@ -291,30 +299,33 @@ private fun VehicleCard(
             }
         }
 
-        if (selected || connected) {
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (connected) {
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (connected) {
+                HudButton(
+                    "DISCONNECT",
+                    modifier = Modifier.widthIn(min = 120.dp),
+                    style = HudButtonStyle.SECONDARY,
+                ) { onDisconnect() }
+            } else if (selected) {
+                HudButton(
+                    "CONNECT",
+                    modifier = Modifier.widthIn(min = 108.dp),
+                    style = HudButtonStyle.PRIMARY,
+                ) { onConnect() }
+                if (vehicle.ips.isNotEmpty()) {
                     HudButton(
-                        "DISCONNECT",
-                        modifier = Modifier.widthIn(min = 120.dp),
+                        "RETRY AT ${vehicle.ips.first()}",
+                        modifier = Modifier.weight(1f),
                         style = HudButtonStyle.SECONDARY,
-                    ) { onDisconnect() }
-                } else {
-                    HudButton(
-                        "CONNECT",
-                        modifier = Modifier.widthIn(min = 108.dp),
-                        style = HudButtonStyle.PRIMARY,
-                    ) { onConnect() }
-                    if (vehicle.ips.isNotEmpty()) {
-                        HudButton(
-                            "RETRY AT ${vehicle.ips.first()}",
-                            modifier = Modifier.weight(1f),
-                            style = HudButtonStyle.SECONDARY,
-                        ) { onRetrySaved() }
-                    }
+                    ) { onRetrySaved() }
                 }
             }
+            HudButton(
+                "EDIT",
+                modifier = Modifier.widthIn(min = 72.dp),
+                style = HudButtonStyle.SECONDARY,
+            ) { onEdit() }
         }
     }
 }
@@ -325,7 +336,13 @@ private fun VehicleCard(
  * to contradict its own cards out loud rather than let a wrong card stand.
  */
 @Composable
-private fun NoticeCard(title: String, text: String, accent: Color) {
+private fun NoticeCard(
+    title: String,
+    text: String,
+    accent: Color,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -335,6 +352,17 @@ private fun NoticeCard(title: String, text: String, accent: Color) {
         Text(title, color = accent, style = HudeSectionTitle())
         Spacer(Modifier.height(8.dp))
         Text(text, color = HudColors.TextMuted, style = HudeCfgNote())
+        if (actionLabel != null && onAction != null) {
+            // The offer is only worth making if it can be accepted where it is made: a
+            // notice the user has to go hunting for a control on to act on is a notice they
+            // will dismiss instead.
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.heightIn(min = 44.dp)) {
+                    HudButton(actionLabel, style = HudButtonStyle.PRIMARY) { onAction() }
+                }
+            }
+        }
     }
 }
 

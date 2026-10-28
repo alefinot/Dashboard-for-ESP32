@@ -58,6 +58,7 @@ import com.alefinot.dashboardpp.api.EspApiLane
 import com.alefinot.dashboardpp.service.TripLogService
 import com.alefinot.dashboardpp.trips.RecorderSettings
 import com.alefinot.dashboardpp.trips.TripsEnabled
+import com.alefinot.dashboardpp.vehicles.Vehicle
 import com.alefinot.dashboardpp.ui.components.HudEnter
 import com.alefinot.dashboardpp.ui.components.LocalEnterActive
 import com.alefinot.dashboardpp.ui.components.PageFade
@@ -117,6 +118,15 @@ fun AppShell(
     // from App Settings, and it closes by itself the moment a device turns up.
     var manualOpen by remember { mutableStateOf(false) }
     LaunchedEffect(connected) { if (connected) manualOpen = false }
+
+    // The editor is state in the shell, not a route, for the same reason the manual-address
+    // panel is: closing it returns the user to the garage exactly where they were. The draft
+    // is the record being edited, `editorIsNew` says whether it has a row yet (a card adopted
+    // from an unclaimed unit has none, and its form has no DELETE), and `editorRefusal` holds
+    // the reason a SAVE was turned down so the form can show it instead of vanishing.
+    var editing by remember { mutableStateOf<Vehicle?>(null) }
+    var editorIsNew by remember { mutableStateOf(false) }
+    var editorRefusal by remember { mutableStateOf<String?>(null) }
 
     // Firmware with no snapshot endpoint has no trip store; with no device there is no
     // version to check, and the trip files are the phone's own, so the trips pages
@@ -310,7 +320,20 @@ fun AppShell(
                         // covers raise, so there is one behaviour for typing an address
                         // rather than one per screen that offers it.
                         AppTab.VEHICLES -> NativePage(inView) {
-                            VehicleScreen(connection, onEnterIp = { manualOpen = true })
+                            VehicleScreen(
+                                connection,
+                                onEnterIp = { manualOpen = true },
+                                onEdit = { id ->
+                                    editorRefusal = null
+                                    editorIsNew = false
+                                    connection.editDraft(id) { v -> editing = v }
+                                },
+                                onNameUnclaimed = {
+                                    editorRefusal = null
+                                    editorIsNew = true
+                                    connection.adoptDraft { v -> editing = v }
+                                },
+                            )
                         }
                         AppTab.TRIPS -> NativePage(inView) { TripsTab(trips) { row -> openTrip = row } }
                         AppTab.LIVE -> NativePage(inView) {
@@ -429,6 +452,35 @@ fun AppShell(
             // they were on, and a successful entry recomposes the same shell with a
             // device in it.
             ManualEntryPanel(vm = connection) { manualOpen = false }
+        }
+
+        editing?.let { draft ->
+            VehicleEditorScreen(
+                draft = draft,
+                isNew = editorIsNew,
+                refusal = editorRefusal,
+                onSave = { typed ->
+                    connection.saveVehicle(typed) { refusal ->
+                        editorRefusal = refusal
+                        // A refused write leaves the form open with the reason in it; the
+                        // user's edits are still on screen, because the card they were
+                        // trying to fix is the one thing they must not lose.
+                        if (refusal == null) {
+                            editing = null
+                            editorRefusal = null
+                        }
+                    }
+                },
+                onDismiss = {
+                    editing = null
+                    editorRefusal = null
+                },
+                onDelete = {
+                    connection.deleteVehicle(draft.id)
+                    editing = null
+                    editorRefusal = null
+                },
+            )
         }
     }
 
