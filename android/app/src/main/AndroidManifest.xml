@@ -22,6 +22,19 @@
          install time, only offered once in the UI. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Package visibility, Android 11+. The editor's TAKE PHOTO button hands an
+         IMAGE_CAPTURE intent to whatever camera the device has, and from API 30 an app that
+         does not declare the action here cannot see - so cannot resolve, so cannot launch -
+         the camera activity at all. The symptom of forgetting this block is a sentence that
+         is not true: "no camera is available here" on a phone with two of them. The gallery
+         route needs no entry, because the photo picker is chosen by the system rather than
+         resolved by us. AppXmlWiringTest asserts this block stays. -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".DashboardApp"
         android:label="@string/app_name"

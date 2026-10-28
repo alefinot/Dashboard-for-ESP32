@@ -1,5 +1,7 @@
 package com.alefinot.dashboardpp.ui.screens
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,11 +26,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -153,6 +160,7 @@ fun VehicleScreen(
                         connected = connectedCard(v, state),
                         nowMs = nowMs,
                         ringProgress = connection.scanProgress.value,
+                        photo = cardPhoto(connection, v.id),
                         onClick = { connection.selectVehicle(v.id) },
                         onConnect = { connection.connectVehicle(v.id, ConnectMode.SEARCH) },
                         onRetrySaved = { connection.connectVehicle(v.id, ConnectMode.PROBE) },
@@ -193,16 +201,96 @@ fun VehicleScreen(
 }
 
 /**
+ * A card's photo, decoded at the size the cover is drawn and no larger, and recomposed when
+ * [ConnectionViewModel.photoVersion] says the picture on disk changed under us.
+ *
+ * Twice the cover's long edge rather than once: the cover is 76 dp, which is 113 px on this
+ * tablet's density but 228 px on a modern phone, and a bitmap decoded at the smaller number
+ * goes soft the moment the app runs on hardware denser than the one the layout was sketched
+ * on. [VehiclePhotoStore.read] takes the request as a ceiling, not a promise - it never
+ * decodes larger than the JPEG it kept (1280 px at most, usually much less), so asking for
+ * twice the box costs nothing on the cards that have no photo to speak of.
+ *
+ * The one sharp edge is a slow read answering late: the request runs on the VM's scope, so a
+ * stale answer can land after a fresh one and paint the previous picture for a moment. It is
+ * self-correcting (the next recomposition keyed on [ConnectionViewModel.photoVersion] asks
+ * again) and it is a card cover, not a diagnosis, so the race is left as it is rather than
+ * bought with a request serial number on every card on the page.
+ */
+@Composable
+private fun cardPhoto(connection: ConnectionViewModel, vehicleId: String): Bitmap? {
+    val edgePx = with(LocalDensity.current) { 76.dp.toPx().toInt() * 2 }
+    val version = connection.photoVersion.intValue
+    val photo by produceState<Bitmap?>(initialValue = null, vehicleId, version) {
+        connection.photo(vehicleId, edgePx) { value = it }
+    }
+    return photo
+}
+
+/**
+ * The cover panel: photo, scan ring, or car glyph - one of the three, in that order.
+ *
+ * [ContentScale.Crop] on a landscape cover is the deliberate half-truth: a stored photo is a
+ * square (the editor frames it that way), and filling the panel means showing its middle
+ * band. That is the band the user framed with their fingers, and the alternative -
+ * letterboxing a square into 76x54 - would make the garage look like a wall of stamps.
+ *
+ * The photo wins over the scan ring, which is a change from the placeholder-only cover: a
+ * card being hunted for still says so in its status line and in the footer's phase line, and
+ * the ring in the cover was never the only notice. Repeating it over a user's own photograph
+ * would be the app asking to be looked at instead of looking at the car.
+ */
+@Composable
+private fun CardCover(
+    photo: Bitmap?,
+    selected: Boolean,
+    scanning: Boolean,
+    ringProgress: Float,
+) {
+    Box(
+        Modifier
+            .size(width = 76.dp, height = 54.dp)
+            .clip(HudRadius.CardShape)
+            .background(HudColors.Panel)
+            .border(1.dp, HudColors.Hairline, HudRadius.CardShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        photo?.let {
+            Image(
+                bitmap = it.asImageBitmap(),
+                contentDescription = "photo of this vehicle",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(width = 76.dp, height = 54.dp),
+            )
+        }
+        if (photo == null) {
+            if (scanning) {
+                ScanRing(ringProgress, Modifier.size(28.dp))
+            } else {
+                Icon(
+                    HudIcons.Car,
+                    contentDescription = null,
+                    tint = if (selected) HudColors.CyanDim else HudColors.TextDim,
+                    modifier = Modifier.size(30.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
  * One vehicle card, drawn with the page's `.card` skin like the trip rows: same fill,
  * same hairline, same corners, so a list of vehicles and a list of drives read as the
  * same kind of thing on the same page.
  *
  * The selection is an edge, not a badge: the selected card takes the page's accent
  * hairline and a faint top highlight, because it is a standing fact about the app rather
- * than a status that comes and goes. The cover is a placeholder panel until a photo of
- * the vehicle exists, drawn with the bar's own car glyph so the shape means "vehicle" in
- * both places — and it is drawn dim on purpose. An empty frame that shows the glyph is
- * honest about being empty; one that shows a stock car is not. While the app is hunting
+ * than a status that comes and goes. The cover shows the vehicle's photo when the card has
+ * one, and until then it is a placeholder panel drawn with the bar's own car glyph so the
+ * shape means "vehicle" in both places — and it is drawn dim on purpose. An empty frame
+ * that shows the glyph is honest about being empty; one that shows a stock car is not.
+ * A square photo is cropped to this landscape cover rather than letterboxed, which puts the
+ * middle of the picture where the vehicle is (see [CardCover]). While the app is hunting
  * for **this** card's unit the cover becomes the sweep's ring instead: that is where a
  * user is looking when they press SEARCH, and the full-screen ring that used to answer the
  * question is gone.
@@ -224,6 +312,7 @@ private fun VehicleCard(
     connected: Boolean,
     nowMs: Long,
     ringProgress: Float,
+    photo: Bitmap?,
     onClick: () -> Unit,
     onConnect: () -> Unit,
     onRetrySaved: () -> Unit,
@@ -242,24 +331,7 @@ private fun VehicleCard(
             .padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(width = 76.dp, height = 54.dp)
-                    .background(HudColors.Panel, HudRadius.CardShape)
-                    .border(1.dp, HudColors.Hairline, HudRadius.CardShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (showScanRing(state)) {
-                    ScanRing(ringProgress, Modifier.size(28.dp))
-                } else {
-                    Icon(
-                        HudIcons.Car,
-                        contentDescription = null,
-                        tint = if (selected) HudColors.CyanDim else HudColors.TextDim,
-                        modifier = Modifier.size(30.dp),
-                    )
-                }
-            }
+            CardCover(photo, selected, showScanRing(state), ringProgress)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.fillMaxWidth()) {
                 Text(

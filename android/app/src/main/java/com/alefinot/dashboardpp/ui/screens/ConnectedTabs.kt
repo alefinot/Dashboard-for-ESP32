@@ -456,6 +456,7 @@ fun AppShell(
 
         editing?.let { draft ->
             VehicleEditorScreen(
+                vm = connection,
                 draft = draft,
                 isNew = editorIsNew,
                 refusal = editorRefusal,

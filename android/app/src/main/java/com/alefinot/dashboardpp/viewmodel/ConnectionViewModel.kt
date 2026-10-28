@@ -1,8 +1,11 @@
 package com.alefinot.dashboardpp.viewmodel
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.Uri
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import com.alefinot.dashboardpp.discovery.DeviceVerifier
 import com.alefinot.dashboardpp.discovery.Net
@@ -11,6 +14,8 @@ import com.alefinot.dashboardpp.discovery.SubnetScanner
 import com.alefinot.dashboardpp.discovery.VerifyResult
 import com.alefinot.dashboardpp.trips.RecorderSettings
 import com.alefinot.dashboardpp.vehicles.Vehicle
+import com.alefinot.dashboardpp.vehicles.CropRect
+import com.alefinot.dashboardpp.vehicles.VehiclePhotoStore
 import com.alefinot.dashboardpp.vehicles.VehicleStore
 import com.alefinot.dashboardpp.vehicles.displayName
 import com.alefinot.dashboardpp.vehicles.macConflict
@@ -26,7 +31,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -95,6 +102,14 @@ class ConnectionViewModel(
 
     /** The card the app is currently reaching for. */
     val selectedVehicleId = mutableStateOf<String?>(null)
+
+    /**
+     * Bumped every time a card's photo changes on disk. A cover that recomposes on it
+     * follows a crop that landed while the editor was open; without it the composable keeps
+     * the bitmap it decoded when the screen opened and the card shows a picture the user has
+     * already replaced.
+     */
+    val photoVersion = mutableIntStateOf(0)
 
     /** The garage, for the vehicle page. */
     fun vehicleCards() = vehicles.all()
@@ -282,6 +297,120 @@ class ConnectionViewModel(
                 notice.value = null
                 unclaimed.value = null
             }
+        }
+    }
+
+    /**
+     * A card's photo, decoded no larger than the [maxEdgePx] box it is going to be drawn
+     * in, answered on [scope] because decoding is file I/O. Page and editor ask for a box
+     * rather than for "the photo" - that is what keeps a garage of six cars from holding six
+     * full-size bitmaps (rule 14, and the head of [VehiclePhotoStore]).
+     *
+     * Read it together with [photoVersion]: the version is what tells the screen that the
+     * answer it cached is no longer the one on disk.
+     */
+    fun photo(vehicleId: String, maxEdgePx: Int, onReady: (Bitmap?) -> Unit) {
+        scope.launch { onReady(vehicles.photos.read(vehicleId, maxEdgePx)) }
+    }
+
+    /**
+     * The gallery route: copy what the picker chose into this card's scratch capture, and
+     * answer the file the crop screen will show, or `null` when the copy could not be made.
+     *
+     * The copy is not a formality. A picker hands over a `content://` URI owned by another
+     * app, whose stream may not be seekable and whose grant can lapse while the crop screen
+     * is open - so everything after this point works on a file this app owns, which is also
+     * what makes a retry after a screen rotation possible (see
+     * [VehiclePhotoStore.stageFrom]).
+     *
+     * [onStaged] runs on the **main** thread, unlike most callbacks here. The copy is file
+     * I/O and happens on [scope], but what the caller does with the answer is open a panel,
+     * and a screen opened from a background thread is a crash rather than a slow frame.
+     */
+    fun stagePickedPhoto(uri: Uri, vehicleId: String, onStaged: (File?) -> Unit) {
+        scope.launch {
+            val staged = vehicles.photos.stageFrom(uri, vehicleId)
+            withContext(Dispatchers.Main) { onStaged(staged) }
+        }
+    }
+
+    /**
+     * Offer the system camera a scratch capture: the file it writes into and the
+     * `content://` URI the intent is launched with, or `null` when there is nothing to
+     * offer - which the editor reports as the camera not being available instead of taking
+     * a photograph that has nowhere to land and then claiming it worked.
+     *
+     * Answered on the **main** thread for the same reason as [stagePickedPhoto]: the caller
+     * turns this straight into `launch(uri)`, and an intent may only be launched from the
+     * main thread. The FileProvider call behind it is not I/O, so there is nothing to move
+     * off the UI here; a device with no writable cache dir is the only way it answers null.
+     */
+    fun cameraCapture(vehicleId: String, onCapture: (VehiclePhotoStore.Capture?) -> Unit) {
+        scope.launch {
+            val capture = vehicles.photos.captureFor(vehicleId)
+            withContext(Dispatchers.Main) { onCapture(capture) }
+        }
+    }
+
+    /**
+     * Cut the square the user framed into the card's photo, then point the record at it.
+     *
+     * Two writes, and the order carries the reasoning. The JPEG has to exist before a record
+     * claims it, otherwise a saved card can name a file that never arrived - the card would
+     * draw a placeholder and the editor would offer to open nothing. So the store lands the
+     * picture first, and only then does [VehicleStore.put] store the name. A crash between
+     * the two costs a JPEG on disk that no record names yet: invisible, and the next crop
+     * overwrites it.
+     *
+     * The record is read *before* the crop is attempted, which also closes a window: a card
+     * deleted while the crop screen was open has no photo to receive, and writing one would
+     * leave a picture named after a card that no longer exists.
+     *
+     * [onDone] runs on [scope] with the file the photo landed at, or `null` when the crop
+     * failed - in which case the card keeps the photo it had and the editor says so rather
+     * than closing. A user who cancels the crop screen never reaches this method:
+     * [cancelPhoto] removes the scratch capture and the previous photo stays, which is the
+     * plan's "CANCEL keeps the previous photo".
+     */
+    fun applyPhotoCrop(source: File, vehicleId: String, rect: CropRect, onDone: (File?) -> Unit) {
+        scope.launch {
+            val card = vehicles.get(vehicleId) ?: run {
+                vehicles.photos.clearCapture(vehicleId)
+                onDone(null)
+                return@launch
+            }
+            val landed = vehicles.photos.cropFrom(source, vehicleId, rect)
+            if (landed == null) {
+                onDone(null)
+                return@launch
+            }
+            vehicles.put(card.copy(photoFile = landed.name))
+            photoVersion.intValue++
+            onDone(landed)
+        }
+    }
+
+    /** The user decided against the picture they framed: the scratch capture goes. */
+    fun cancelPhoto(vehicleId: String) {
+        scope.launch { vehicles.photos.clearCapture(vehicleId) }
+    }
+
+    /**
+     * Take a card's photo off: the JPEG first, then the record's pointer.
+     *
+     * That order is the one a crash can survive. A record whose `photoFile` names a file that
+     * is gone reads back as "no photo" ([VehiclePhotoStore.read] answers null and the card
+     * draws its glyph), which is a cosmetic lie for one boot. The reverse - a file deleted
+     * after the record still names it, or a record pointing at a file that was never written
+     * - is the case where the editor offers a photo the app cannot show.
+     */
+    fun removePhoto(vehicleId: String) {
+        scope.launch {
+            vehicles.photos.delete(vehicleId)
+            vehicles.get(vehicleId)?.let { card ->
+                if (card.photoFile != null) vehicles.put(card.copy(photoFile = null))
+            }
+            photoVersion.intValue++
         }
     }
 

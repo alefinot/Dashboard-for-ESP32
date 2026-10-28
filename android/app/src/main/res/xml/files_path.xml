@@ -1,10 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Files handed out by FileProvider when sharing a trip: the CSV copied out of
-     the trip folder, and the generated GPX. Both live in the app cache, which is
-     scratch space by definition — the trip log itself stays in
-     getExternalFilesDir()/trips, which no other app can be given access to. -->
+<!-- Files handed out by FileProvider: the trip files being shared (CSV copied out of the
+     trip folder, and the generated GPX), and the scratch JPEG a camera capture is written
+     into before it is cropped. All of it lives in the app cache, which is scratch space by
+     definition — the trip log itself and the vehicle photos live in
+     getExternalFilesDir()/trips and /vehicles, which no other app is ever given access to.
+
+     `captures/` is the directory VehiclePhotoStore.captureFile writes, and the two names have
+     to agree: getUriForFile throws IllegalArgumentException for a file under no declared root,
+     which the store reports as "no camera" rather than launching an intent for a picture
+     nobody could read back. FileProviderPathsTest fails if either side drifts. -->
 <paths>
     <cache-path
         name="exports"
         path="exports/" />
+
+    <cache-path
+        name="captures"
+        path="captures/" />
 </paths>
