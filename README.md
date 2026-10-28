@@ -26,10 +26,18 @@ Featuring a 4.0-inch ILI9488 TFT display (480×320 resolution) driven over a 60 
    - [Power Management & Dynamic CPU Scaling](#6-power-management--dynamic-cpu-scaling)
 6. [Embedded Web UI & REST API Reference](#embedded-web-ui--rest-api-reference)
 7. [NVS Configuration Parameter Reference](#nvs-configuration-parameter-reference)
-8. [Codebase Architecture & File Map](#codebase-architecture--file-map)
-9. [Build, Installation & Flashing Guide](#build-installation--flashing-guide)
-10. [Simulation & Demo Mode](#simulation--demo-mode)
-11. [License & Credits](#license--credits)
+8. [Android Companion App](#android-companion-app)
+   - [The shell: one bar, one pager, one list](#the-shell-one-bar-one-pager-one-list)
+   - [The garage: a card is a vehicle and the unit that belongs to it](#the-garage-a-card-is-a-vehicle-and-the-unit-that-belongs-to-it)
+   - [Identity: which dashboard belongs to which card](#identity-which-dashboard-belongs-to-which-card)
+   - [Connection: where connecting happens, and where it does not](#connection-where-connecting-happens-and-where-it-does-not)
+   - [Trip log: one file per power session, tagged with the card](#trip-log-one-file-per-power-session-tagged-with-the-card)
+   - [Photos: pick, crop, one JPEG per vehicle](#photos-pick-crop-one-jpeg-per-vehicle)
+   - [Building and testing the app](#building-and-testing-the-app)
+9. [Codebase Architecture & File Map](#codebase-architecture--file-map)
+10. [Build, Installation & Flashing Guide](#build-installation--flashing-guide)
+11. [Simulation & Demo Mode](#simulation--demo-mode)
+12. [License & Credits](#license--credits)
 
 ---
 
@@ -628,6 +636,93 @@ ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely �
 #### UI Layout Offset Coordinates
 - `BIG_CENTER_X`, `BIG_CENTER_Y`: Screen anchor origin point.
 - `OFFSET_BIG_TIME_X/Y`, `OFFSET_BIG_DATE_X/Y`, `OFFSET_BIG_SPEED_NUM_X/Y`, `OFFSET_BIG_SPEED_UNIT_X/Y`, `OFFSET_BIG_ODO_X/Y`, `OFFSET_BIG_SAT_X/Y`, `OFFSET_BIG_TMR_X/Y`, `OFFSET_BIG_BAT_X/Y`, `OFFSET_INST_KML_X/Y`, `OFFSET_AVG_KML_X/Y`, `OFFSET_AVG_SPEED_X/Y`, `OFFSET_MAX_SPEED_X/Y`, `OFFSET_FUEL_LTRS_X/Y`, `SIDEBAR_LEFT_X/Y`, `SIDEBAR_RIGHT_X/Y`: Fine-grained pixel coordinate offsets for every UI component.
+
+---
+
+## Android Companion App
+
+The companion app lives in `android/`: Kotlin + Jetpack Compose, Gradle (`gradlew.bat`), package `com.alefinot.dashboardpp`, `minSdk 26` (Android 8.0), compile/target SDK 35, JVM 17. It is a second product on the same ESP: it does not drive the display, it discovers the dashboard, holds a garage of vehicles, samples `/api/snapshot` once a second into a CSV trip log, and shows what those drives did. Current build: `versionName 1.1.0`, `versionCode 28` (rule 24: every shared APK bumps `versionCode`).
+
+### The shell: one bar, one pager, one list
+
+`BarLayout` (`ui/screens/BarLayout.kt`) is the shell as data: one list, `pages`, used by both the icon row and the swipe pager, so a slot can never point at a page that does not exist and a page can never be unreachable from the bar. Left to right:
+
+| Slot | `AppTab` | Screen | |
+|---|---|---|---|
+| 0 | `LIVE` | `LiveTab` | The app's own live gauges (drawn from the polled snapshot, not the Web UI) |
+| 1 | `TRIPS` | `TripsTab` | Recorded drives, badges, filter, detail |
+| 2 | `VEHICLES` | `VehicleScreen` | **The garage and every way of connecting to a vehicle. `centre` and `home`: the app opens here.** |
+| 3 | `WEB` | ESP configuration | The dashboard's own Web UI in a WebView, labelled for what it configures |
+| 4 | `SETTINGS` | `SettingsScreen` | This app's settings: recording, storage, trips folder |
+
+Index 2 is the middle of five and the app opens there (`BarLayout.home`, which is the pager's `initialPage`). The garage became the home screen because it is where a connection is made: before it, every page assumed a dashboard was already there and an unreachable one left the whole app with one sentence and an address box. The bar carries one glyph size (`BarLayout.glyph`) - the centre larger - and a dimmed slot means "nothing behind this right now", not "quieter".
+
+### The garage: a card is a vehicle and the unit that belongs to it
+
+`vehicles/Vehicle.kt` is one record with two halves on purpose. The user's words - `name`, `type` (`CAR` / `MOTORCYCLE` / `OTHER`), `plate`, `maker`, `model`, `year` (a `String`: "c. 1998" and "1998/99" are answers a number field would throw away), `notes`, `photoFile` - are never written by a connect. The app's evidence about a physical unit - `mac`, `ips`, `lastConnectedAtMs`, `firmwareVersion` - is never typed. Keeping them in one record is what lets a card mean *this dashboard* instead of *whatever answered at this address*.
+
+- `id` is app-generated and stable across renames (`v1`, `v2`, ...: the next free name, `VehicleStore.nextIdName`). Trip files tag themselves with it, so renaming a vehicle does not rewrite recorded history.
+- `photoFile` is a bare file name (`v1.jpg`) inside the store's vehicles directory, never an absolute path: the external files directory can move (adopted storage, a restore), and a persisted path would become a dead link. A missing JPEG reads as "no photo", and the record stays valid.
+- `ips` is most-recent-first, capped at three entries.
+- Storage is DataStore (`vehicle_store`): one JSON record per `vehicle:<id>` row plus the selected card and the card order. Sorting and the next-name rule are pure functions in `VehicleStore`'s companion so they can be argued about in tests (`VehicleCodecTest`, `VehicleOrderTest`).
+
+### Identity: which dashboard belongs to which card
+
+The ESP reports its **base eFuse MAC** as `mac` on `/api/perf` (uppercase, colon-separated, six pairs) - an identity that survives Wi-Fi mode changes and DHCP, unlike the address the dashboard happens to hold. The app reads it during the verify step, and `vehicles/VehicleMatch` is the only place that text is ever interpreted:
+
+- A unit whose reported MAC equals a card's `mac` is that card, whatever address it answers at.
+- A card with no `mac` is matched by remembered address instead - the narrower rule that keeps old firmware (which never reports a MAC) usable.
+- A card made by address is **upgraded** to the MAC on the next connect: the first half of the record is untouched, only the evidence gets stronger.
+- `mac` is `null` or a canonical `XX:XX:XX:XX:XX:XX`. Anything else (an empty string, half a value, `"garbage"`) counts as unbound: `VehicleMatch` rejects it, the next connect clears it, and the store round-trips it verbatim, because remembering is not the store's judgement. The shape check lives in front of the typed value: `VehicleMatch.normalizeMac(typed) != null`.
+
+### Connection: where connecting happens, and where it does not
+
+`ConnectionUiState` (`viewmodel/UiState.kt`) has four states: `Idle(reason?)` (nothing reached for; the reason is what the garage shows, `null` on a cold start, so the garage draws before any network request), `Connecting(mode)`, `Connected(ip, mac?, vehicleId)`, `Failed(reason)`.
+
+`ConnectMode` says how far an attempt goes, which is what tells a page whether it may put anything in front of the garage:
+
+| Mode | When | What it tries |
+|---|---|---|
+| `SILENT` | At launch, unattended | The selected card's remembered addresses (up to three), nothing else, no screen over the garage |
+| `SEARCH` | `CONNECT` / `SEARCH FOR DASHBOARD++` pressed | Everything: the ladder, the subnet sweep, NSD discovery |
+
+A silent reconnect that succeeds *does* start the trip recorder when the recording switch is on: that is what a connected dashboard has always meant. A successful silent reconnect also never raises a scan ring.
+
+Every connect action (`connectVehicle`, `disconnect`, `selectVehicle`, `rescan`, `retryNoWifi`, `submitManualIp`) lives on the vehicle page, including `ENTER IP MANUALLY` and `WI-FI SETTINGS`. The covers on other pages offer exactly one button - `OPEN VEHICLE PAGE` - and contain no connect vocabulary; App Settings cannot raise the address panel. That is enforced by the guard test `ConnectActionsOnOnePageTest`, which strips comments first because half of that redesign is written down in doc comments naming the controls it removed.
+
+### Trip log: one file per power session, tagged with the card
+
+Files land in `Android/data/com.alefinot.dashboardpp/files/trips/` named `trip-YYYYMMDD-HHMMSS-NNN.csv`, one per ESP power session: `up_s` going backwards, or a different IP answering, seals the drive and opens the next file. Format is a header line and one fixed 25-column line per sample (`trips/TripFormat.kt`), append-only, oldest first.
+
+Above the header, a file may carry one comment line naming whose drive it is:
+
+```
+#vehicle=v1|94:B5:55:F8:B8:58|Motosbu
+ts_ms,up_s,spd,src,avg,max,trp_km,...
+```
+
+- The id is the card's key, the MAC is what the dashboard reported when the drive started, the name is a copy of what the card said at that moment - so a deleted vehicle still has a readable history while the current name is always looked up live from the id.
+- It is a `#` comment because the data rows are a fixed-width table that `parseLine` demands at their exact width: the only way to add anything without breaking every file already on disk is a line that is not a data line. Readers skip `#` lines and the header (`TripFormat.skippable`).
+- It is written **once, when the file is created**, and never rewritten. Renaming or re-pointing mid-drive changes the tag of the *next* file, not the one being written, and a file that vanishes mid-drive is recreated without a tag rather than with a guessed one.
+- A card with no MAC on record (firmware predating `mac`) writes the word `unknown`; a drive taken with no card selected writes no line at all. An untagged file is honest: the Trips list files it under `UNKNOWN` rather than guessing.
+- Identity reaches the recorder as extras on the start command (`vehicle_id`, `vehicle_name`, `eff`, built by `ConnectionViewModel.recorderTarget()`), because `/api/snapshot` says nothing about which unit answered and a trip file outlives the connection that created it.
+- The summary cache (`trip_index`) keeps the tag in its own row (`mtime;size;<tag or ->;<summary>`); rows written before tagging existed decode with `tagKnown = false`, get their tag read from line 1 once, and are re-seated so the next pass reads nothing.
+
+On the Trips page each card carries a badge - the vehicle name in cyan, or `NO VEHICLE` in amber keyed on the *id*, not on the label, because a file can have an id and still have no readable name. A chip row (`ALL`, one per vehicle that actually has drives, `UNKNOWN` when something is untagged) appears only when there is something to narrow: with one vehicle and nothing untagged, the list is already filtered and a control with one choice is decoration. When a filter is on the header count says `N of M` instead of quietly shrinking, the empty state names the chip that is on and says how many drives exist in total, and a remembered filter pointing at a card that no longer has drives falls back to `ALL` rather than showing an empty page labelled with an id the user has never seen. The detail page states it in one line: `Vehicle: Motosbu · dashboard 94:B5:55:F8:B8:58`, with `(that card is no longer in the garage)` when the id has no card. Deleting a card never deletes its drives.
+
+### Photos: pick, crop, one JPEG per vehicle
+
+The editor hands a picked image to `vehicles/PhotoCrop.kt`, which writes one JPEG per vehicle into `getExternalFilesDir()/vehicles` (`v1.jpg`); there is no separate thumbnail file. A camera capture is staged in the app's **cache** under `captures/` and handed to the camera app through `FileProvider` (authority `${applicationId}.fileprovider`), whose roots are declared in `res/xml/files_path.xml` (`exports/` for shared CSV/GPX, `captures/` for the scratch JPEG). The two names have to agree: `getUriForFile` throws for a file under no declared root, which the store reports as "no camera" rather than launching an intent for a picture nobody could read back - `AppXmlWiringTest` fails if either side drifts, and it also reads the manifest and the XML directly, in plain JVM, because there is no Robolectric in this project.
+
+### Building and testing the app
+
+```
+cd android
+./gradlew.bat testDebugUnitTest          # unit tests (plain JVM; no Robolectric anywhere)
+./gradlew.bat assembleDebug              # rule 8: the work is not done until an APK exists
+```
+
+The testable APK is the debug build at `android/app/build/outputs/apk/debug/app-debug.apk` (rule 27 attaches it to every release). `versionCode` bumps on every shared APK (rule 24). The launcher icon layers are generated and geometry-checked by `python scripts/preview_icon.py` - never hand-edited, the same rule as the firmware's generated headers. Installing over USB on a development tablet is `adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk`; UI behaviour is then read back from the running app (`uiautomator dump`), not only from the build.
 
 ---
 

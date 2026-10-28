@@ -8,7 +8,7 @@
      `captures/` is the directory VehiclePhotoStore.captureFile writes, and the two names have
      to agree: getUriForFile throws IllegalArgumentException for a file under no declared root,
      which the store reports as "no camera" rather than launching an intent for a picture
-     nobody could read back. FileProviderPathsTest fails if either side drifts. -->
+     nobody could read back. AppXmlWiringTest fails if either side drifts. -->
 <paths>
     <cache-path
         name="exports"
