@@ -1,5 +1,6 @@
 package com.alefinot.dashboardpp.ui.screens
 
+import com.alefinot.dashboardpp.viewmodel.ConnectMode
 import com.alefinot.dashboardpp.viewmodel.ConnectionUiState
 
 /**
@@ -7,17 +8,19 @@ import com.alefinot.dashboardpp.viewmodel.ConnectionUiState
  * `DashboardRoot`'s `when`, drawn there as six branches and three separate screens.
  *
  * It is a pure function now because the interesting part of it is not the drawing:
- * it is that four of the states below are *the same shell*. The three that used to
- * be dead ends ("no device found", "connection lost", "no Wi-Fi") each had one job
- * — get you back to a connection — and in doing so they hid the trips and the
- * settings that have nothing to do with the ESP. `Shell(conn = null)` is that same
- * page with those parts still standing.
+ * it is that *every* state below is the same shell. The three that used to be dead
+ * ends ("no device found", "connection lost", "no Wi-Fi") each had one job — get you
+ * back to a connection — and in doing so they hid the trips and the settings that have
+ * nothing to do with the ESP. `Shell(conn = null)` is that same page with those parts
+ * still standing, and the vehicle page is the page it opens on: which is why there is
+ * no splash and no scan screen in this list any more.
  */
 sealed interface ShellMode {
-    /** The splash, for as long as the view model is booting. */
-    object Splash : ShellMode
-
-    /** Hunting for a device: the scan ring, with the line for the stage. */
+    /**
+     * Hunting the *user* asked for: the scan ring, with the line for the stage. The
+     * silent reconnect at launch is deliberately not here — it changes nothing on
+     * screen, and the card being reached for says SEARCHING in its own status line.
+     */
     data class Scanning(val title: String) : ShellMode
 
     /**
@@ -26,9 +29,9 @@ sealed interface ShellMode {
      * recorder stays down. [reason] is the line the covers quote — it comes from the
      * view model, which is the only thing that knows what it tried.
      *
-     * [findIsRetryNetwork] says what FIND DEVICE has to do: with a network but no
-     * device, re-scan the subnet; with no network at all, re-scanning is pointless
-     * and what has to be retried is whether a network exists now.
+     * [findIsRetryNetwork] says what FIND DEVICE has to do: when the app gave up
+     * without a network, or has nothing to reach for, re-scanning the subnet is
+     * pointless and what has to be retried is whether a network exists now.
      */
     data class Shell(
         val conn: ConnectionUiState.Connected?,
@@ -39,15 +42,17 @@ sealed interface ShellMode {
 
 object ShellRouting {
     fun mode(state: ConnectionUiState): ShellMode = when (state) {
-        is ConnectionUiState.Booting -> ShellMode.Splash
-        is ConnectionUiState.CheckingCache -> ShellMode.Scanning("Checking saved device…")
-        is ConnectionUiState.CheckingSoftAp -> ShellMode.Scanning("Checking SoftAP…")
-        is ConnectionUiState.Discovering -> ShellMode.Scanning("Locating Dashboard++…")
+        // The garage is the first frame, so the state a cold start draws is a shell
+        // with nothing connected yet — no splash to sit through, and no scan ring while
+        // a handful of remembered addresses are dialed in the background.
+        is ConnectionUiState.Idle -> ShellMode.Shell(null, state.reason, true)
+        is ConnectionUiState.Connecting -> when (state.mode) {
+            ConnectMode.SILENT -> ShellMode.Shell(null, null, false)
+            ConnectMode.SEARCH -> ShellMode.Scanning("Locating Dashboard++…")
+            ConnectMode.PROBE -> ShellMode.Scanning("Reaching the selected vehicle…")
+        }
         is ConnectionUiState.Connected -> ShellMode.Shell(state, null, false)
-        is ConnectionUiState.ManualEntryNeeded ->
-            ShellMode.Shell(null, "No Dashboard++ found on this network.", false)
-        is ConnectionUiState.ConnectionLost -> ShellMode.Shell(null, state.reason, false)
-        is ConnectionUiState.NoWifi -> ShellMode.Shell(null, state.detail, true)
+        is ConnectionUiState.Failed -> ShellMode.Shell(null, state.reason, false)
     }
 }
 

@@ -5,69 +5,94 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * When a network event is worth reacting to.
+ * When a network event entitles the app to reach for the selected vehicle.
  *
- * Until now the app needed a finger for every one of them: a tablet that joins the
- * house Wi-Fi, or walks out of the car's hotspot, sat on RETRY NETWORK until it was
- * tapped. A `ConnectivityManager` callback makes that automatic, and a callback is not
- * a request - it arrives when the network says so, including for interfaces the user
- * never asked about (a VPN registering, Wi-Fi flapping). Each event acted on is a
- * 15 s discovery run, so the decision is the whole design, and it lives here where it
- * can be argued about instead of on a tablet.
+ * `ConnectivityManager` calls back when the network says so, not when the user does: a
+ * VPN interface registering, a hotspot starting, Wi-Fi flapping behind a dock Ethernet
+ * handover. Every event acted on is a connect attempt, so these two answers are the
+ * whole design of the watcher, and they are kept here as a pure rule because the
+ * interesting part is the argument, not the callback.
+ *
+ * The scoping is what the garage changes: since a card is bound to a physical unit, an
+ * unattended hunt can only ever mean "reach the unit on the selected card again". There
+ * is no such thing as an unattended search for *some* dashboard — that is what the
+ * sweep on the vehicle page is for, and it is something the user asks for.
  */
 class ReconnectPolicyTest {
 
     @Test
-    fun `a new network only restarts the hunt from a state the app gave up on`() {
-        // Still booting, or already looking, or already found: a hunt is running or
-        // there is nothing to look for.
-        assertFalse(ReconnectPolicy.shouldHunt(ConnectionUiState.Booting, hasLocalLan = true))
-        assertFalse(ReconnectPolicy.shouldHunt(ConnectionUiState.CheckingCache, hasLocalLan = true))
-        assertFalse(ReconnectPolicy.shouldHunt(ConnectionUiState.CheckingSoftAp, hasLocalLan = true))
-        assertFalse(ReconnectPolicy.shouldHunt(ConnectionUiState.Discovering, hasLocalLan = true))
+    fun `a new network only reaches again from a state the app gave up on`() {
+        // Connecting, or already connected: there is an attempt running or nothing to
+        // reach for.
         assertFalse(
             ReconnectPolicy.shouldHunt(
-                ConnectionUiState.Connected("192.168.1.116", "1.3.3"), hasLocalLan = true,
+                ConnectionUiState.Connecting(ConnectMode.SILENT),
+                hasLocalLan = true, hasSelection = true,
+            )
+        )
+        assertFalse(
+            ReconnectPolicy.shouldHunt(
+                ConnectionUiState.Connected("192.168.1.116", "1.4.6", "A4:CF:12:3B:9E:07", "v1"),
+                hasLocalLan = true, hasSelection = true,
             )
         )
 
-        // The three states that end a hunt: yes, and this is the case that matters on
-        // a tablet - Wi-Fi back on, hotspot started, dock Ethernet plugged in.
-        assertTrue(ReconnectPolicy.shouldHunt(ConnectionUiState.NoWifi("none"), hasLocalLan = true))
-        assertTrue(ReconnectPolicy.shouldHunt(ConnectionUiState.ManualEntryNeeded, hasLocalLan = true))
+        // Given up on — yes, and this is the case that matters on a tablet: Wi-Fi back
+        // on, hotspot started, dock Ethernet plugged in.
         assertTrue(
             ReconnectPolicy.shouldHunt(
-                ConnectionUiState.ConnectionLost("lost"), hasLocalLan = true,
+                ConnectionUiState.Failed("No answer"), hasLocalLan = true, hasSelection = true,
+            )
+        )
+        assertTrue(
+            ReconnectPolicy.shouldHunt(
+                ConnectionUiState.Idle("Nothing remembered"),
+                hasLocalLan = true, hasSelection = true,
             )
         )
 
-        // ...but only when the new network is a real local LAN. Tailscale registers an
-        // interface on this tablet every few minutes; that is a network event with no
-        // subnet to scan, and acting on it would replace the cover's message with one
-        // about a network that cannot hold a Dashboard++.
-        assertFalse(ReconnectPolicy.shouldHunt(ConnectionUiState.NoWifi("none"), hasLocalLan = false))
-        assertFalse(ReconnectPolicy.shouldHunt(ConnectionUiState.ManualEntryNeeded, hasLocalLan = false))
+        // …but only with a real local LAN. Tailscale registers an interface on this
+        // tablet every few minutes; that is a network event with no subnet that could
+        // hold the dashboard, and acting on it burns two connect timeouts each time.
         assertFalse(
             ReconnectPolicy.shouldHunt(
-                ConnectionUiState.ConnectionLost("lost"), hasLocalLan = false,
+                ConnectionUiState.Failed("No answer"), hasLocalLan = false, hasSelection = true,
+            )
+        )
+
+        // …and only with a vehicle selected. That is the difference from the old boot
+        // ladder, which hunted for any device on the theory that one might be wanted.
+        // With the garage empty, or with the selection cleared, a network event must
+        // stay quiet.
+        assertFalse(
+            ReconnectPolicy.shouldHunt(
+                ConnectionUiState.Failed("No answer"), hasLocalLan = true, hasSelection = false,
+            )
+        )
+        assertFalse(
+            ReconnectPolicy.shouldHunt(
+                ConnectionUiState.Idle(null), hasLocalLan = true, hasSelection = false,
             )
         )
     }
 
     @Test
-    fun `only a connected session re-checks its device when the network goes away`() {
-        // A dropped default network under a connected session is worth one verify: it
-        // answers "is the device still reachable, or did we walk out of its range"
-        // without waiting for a Web UI load to fail.
+    fun `only a connected session re-checks its unit when the network goes away`() {
+        // A dropped default network under a connected session is worth one real
+        // request: otherwise the app sits on a dead address until a Web UI load fails,
+        // which on the shell means until the user opens the ESP slot.
         assertTrue(
-            ReconnectPolicy.shouldRecheck(ConnectionUiState.Connected("192.168.1.116", "1.3.3"))
+            ReconnectPolicy.shouldRecheck(
+                ConnectionUiState.Connected("192.168.1.116", "1.4.6", "A4:CF:12:3B:9E:07", "v1"),
+            )
         )
-        // Everything else is already asking the user for something, or is on its way to
-        // a device: re-verifying would either be pointless or fight the running hunt.
-        assertFalse(ReconnectPolicy.shouldRecheck(ConnectionUiState.NoWifi("none")))
-        assertFalse(ReconnectPolicy.shouldRecheck(ConnectionUiState.ManualEntryNeeded))
-        assertFalse(ReconnectPolicy.shouldRecheck(ConnectionUiState.ConnectionLost("lost")))
-        assertFalse(ReconnectPolicy.shouldRecheck(ConnectionUiState.Discovering))
-        assertFalse(ReconnectPolicy.shouldRecheck(ConnectionUiState.Booting))
+        // Everything else is either already asking the user for something or is on its
+        // way to the unit: re-verifying would be pointless or would fight the attempt
+        // that is already running.
+        assertFalse(ReconnectPolicy.shouldRecheck(ConnectionUiState.Failed("No answer")))
+        assertFalse(ReconnectPolicy.shouldRecheck(ConnectionUiState.Idle(null)))
+        assertFalse(
+            ReconnectPolicy.shouldRecheck(ConnectionUiState.Connecting(ConnectMode.SEARCH))
+        )
     }
 }

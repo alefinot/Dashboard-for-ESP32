@@ -1,6 +1,5 @@
 package com.alefinot.dashboardpp.ui.screens
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,14 +18,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import com.alefinot.dashboardpp.R
 import com.alefinot.dashboardpp.ui.components.ScanProgressRing
 import com.alefinot.dashboardpp.ui.theme.HudColors
 import com.alefinot.dashboardpp.ui.theme.HudBrushes
-import com.alefinot.dashboardpp.ui.theme.HudeSplash
-import com.alefinot.dashboardpp.ui.theme.HudeTable
 import com.alefinot.dashboardpp.ui.theme.HudeCfgNote
 import com.alefinot.dashboardpp.ui.theme.HudeHeading
 import com.alefinot.dashboardpp.viewmodel.ConnectionUiState
@@ -55,7 +50,6 @@ fun DashboardRoot(activity: android.app.Activity, vm: ConnectionViewModel) {
         // ShellRouting, which is where the offline behaviour is actually decided.
         val mode = ShellRouting.mode(s)
         when (mode) {
-            ShellMode.Splash -> SplashScreen()
             is ShellMode.Scanning -> DiscoveryScreen(vm, mode.title)
             is ShellMode.Shell -> AppShell(
                 conn = mode.conn,
@@ -63,34 +57,6 @@ fun DashboardRoot(activity: android.app.Activity, vm: ConnectionViewModel) {
                 findIsRetryNetwork = mode.findIsRetryNetwork,
                 connection = vm,
                 trips = trips,
-            )
-        }
-    }
-}
-
-@Composable
-fun SplashScreen() {
-    Box(Modifier.fillMaxSize().background(HudColors.Bg)) {
-        Column(
-            Modifier.align(Alignment.Center).padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            // Same gauge as the launcher icon (issue #51) - the splash and the
-            // icon are one design language, not two unrelated marks.
-            Image(
-                painter = painterResource(R.drawable.ic_splash),
-                contentDescription = null,
-                modifier = Modifier.size(96.dp),
-            )
-            Spacer(Modifier.height(20.dp))
-            // `h2` in the page: a white-to-cyan gradient painted into the text, at
-            // the splash keeps its own display size, filled the way the page fills its heading.
-            Text("DASHBOARD++", style = HudeSplash.copy(brush = HudBrushes.title))
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "ESP32 companion",
-                color = HudColors.TextMuted,
-                style = HudeTable(),
             )
         }
     }

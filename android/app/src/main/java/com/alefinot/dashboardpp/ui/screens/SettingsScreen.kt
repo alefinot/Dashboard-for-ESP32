@@ -58,8 +58,9 @@ import com.alefinot.dashboardpp.viewmodel.TripsViewModel
  * install. It is also the settings page when there is no device, which is the point
  * of the nullable [ip]: the trip files, the motion switch and the storage figures
  * belong to the phone, so they stay readable and editable offline. Only the lines
- * that describe a device go quiet - the address, the firmware, and FORGET, which has
- * nothing to forget until a device is remembered.
+ * that describe a device go quiet - the address and the firmware. The vehicle page is
+ * where a device is forgotten now: a card is a vehicle, not an address, and deleting
+ * one needs the name on the screen to confirm it.
  */
 @Composable
 fun SettingsScreen(
@@ -74,10 +75,6 @@ fun SettingsScreen(
     val recording by TripRuntime.state.collectAsStateWithLifecycle()
     var storageLine by remember { mutableStateOf("") }
     var showConfirmClear by remember { mutableStateOf(false) }
-    var showConfirmForget by remember { mutableStateOf(false) }
-    // A remembered address is worth a FORGET even when no device is answering: that
-    // is exactly when the user may want the app to stop looking for it.
-    val remembered = vm.lastKnownIp.value
     val settings = remember { RecorderSettings(context) }
     val scope = rememberCoroutineScope()
     val recordingEnabled by settings.recordingEnabled
@@ -222,20 +219,13 @@ fun SettingsScreen(
             // model: as soon as it stops reporting a connection the tab row is
             // gone and discovery takes over. Settings no longer has to close
             // itself, and the old CLOSE button has nothing left to close.
-            // Offline the way back in is here too - the same panel the covers
-            // raise, so there is one form and one behaviour for it. FORGET only
-            // appears when there is a remembered device to forget.
+            // Offline the way back in is here too - the same form the covers
+            // raise, so there is one behaviour for it.
             if (ip == null) {
                 HudButton("ENTER IP MANUALLY", style = HudButtonStyle.SECONDARY) { onEnterIp() }
                 Spacer(Modifier.height(8.dp))
             }
             HudButton("RE-SCAN NETWORK", style = HudButtonStyle.SECONDARY) { vm.rescan() }
-            if (remembered != null) {
-                Spacer(Modifier.height(8.dp))
-                HudButton("FORGET THIS DEVICE", style = HudButtonStyle.DANGER) {
-                    showConfirmForget = true
-                }
-            }
         }
 
         if (showConfirmClear) {
@@ -250,20 +240,6 @@ fun SettingsScreen(
                     showConfirmClear = false
                 },
                 onDismiss = { showConfirmClear = false },
-            )
-        }
-        if (showConfirmForget) {
-            HudConfirmDialog(
-                message = "Forget this device? The app drops the saved address and " +
-                    "goes back to scanning the network. Nothing is deleted on the " +
-                    "dashboard itself, and recorded trips stay on the phone.",
-                confirmLabel = "FORGET",
-                confirmStyle = HudButtonStyle.DANGER,
-                onConfirm = {
-                    showConfirmForget = false
-                    vm.forgetDevice(ip ?: remembered ?: "")
-                },
-                onDismiss = { showConfirmForget = false },
             )
         }
     }
