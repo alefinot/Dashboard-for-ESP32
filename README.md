@@ -913,6 +913,27 @@ In Demo Mode:
 
 ## Changelog
 
+### V1.4.6 — The dashboard says who it is, and the app grew a garage (firmware + Android app)
+
+One compiled change on the ESP; the rest is the companion app, which is the biggest app change set since the app exists. The two ends are now talking about the same thing: a *vehicle*, not an address.
+
+**Firmware (`src/web.cpp`)**
+- `/api/perf` reports `mac`: the **base eFuse MAC**, uppercase and colon-separated (`A4:CF:12:3B:9E:07`). It is burnt in at the factory, so it is valid with Wi-Fi off and is untouched by the STA/SoftAP MAC offsets or by DHCP - which is exactly why `WiFi.macAddress()` could not be used for this. `ESP.getEfuseMac()` returns the value with octet 0 in the low byte, so the print shifts run 0..40 to get the conventional order. Stack buffer, no heap (rule 14); one JSON field on a handler that was already running.
+- The companion app keys its vehicle records on that value; the README endpoint row documents it (rule 17).
+
+**Android app (`android/`, `versionName 1.1.0`, `versionCode 28`)**
+- **The garage is the app's home.** The bar and the pager are now driven by one list (`BarLayout.pages`: LIVE, TRIPS, VEHICLES, WEB, SETTINGS), the vehicle page sits in the centre slot and opens at launch. There are no dead slots and no "coming soon" hole.
+- **A card is a vehicle plus the unit that belongs to it.** `Vehicle` holds the user's words (name, type, plate, maker, model, year, notes, photo) and the app's evidence (`mac`, up to three remembered addresses, last connect, firmware) in one record. A card whose unit reported a MAC is matched by MAC wherever it answers; a card made from an address is matched by address and upgraded to the MAC at the next connect. Renaming a card never moves its id (`v1`, `v2`, ...), which is what the trip files are filed under.
+- **Every way of connecting lives on the vehicle page**: `CONNECT`, `SEARCH FOR DASHBOARD++`, `ENTER IP MANUALLY`, `WI-FI SETTINGS`, `DISCONNECT`. The offline and "no device" covers elsewhere offer one button, `OPEN VEHICLE PAGE`, and hold no connect vocabulary at all (guarded by a test that reads the source of every other page).
+- **At launch the app reconnects quietly** to the selected card's remembered addresses and nothing else; the full ladder, including the subnet sweep and NSD discovery, is one press away. A successful silent reconnect still starts the trip recorder when the recording switch is on.
+- **Trip files now name their vehicle.** Line 1 of a new file can be `#vehicle=v1|94:B5:55:F8:B8:58|Motosbu` - card id, the MAC the dashboard reported at that moment, the name the card had then. It is written once, when the file is created, and never rewritten: renaming a card cannot relabel drives that already happened. It is a `#` comment because the 25 data columns are a fixed-width table every reader demands at that width, so the only way to add anything without breaking the files already on phones is a line that is not a data line. Files with no tag (older, or recorded with no card selected) are kept and shown as `UNKNOWN` rather than guessed at. The Trips page gained per-card badges and an `ALL` / per-vehicle / `UNKNOWN` chip row that appears only when there is something to narrow; deleting a card never deletes its drives.
+- **Photos: pick, crop, one JPEG per vehicle**, with the camera capture staged in the app's cache and handed over through `FileProvider` on declared roots that a test keeps in step with the directory the code actually writes.
+- **Documentation**: the README gained a full `Android Companion App` reference section (shell, garage record, identity rules, connection states, trip format and filter, photos, build commands).
+
+**Verified** - 235 Android unit tests, plain JVM, 0 failures. Read back on an SM-T590 (Android 9): the file written by the new build starts `#vehicle=v1|94:B5:55:F8:B8:58|Motosbu`, the 130 files before it are untouched and badge as `NO VEHICLE`, `grep -l '#vehicle='` returns exactly one file, and the filter path was exercised end to end (`131 · 6.7 MB` -> `1 of 131` under the card's chip -> detail line `Vehicle: Motosbu · dashboard 94:B5:55:F8:B8:58` -> back to `ALL`). Cold start, both covers, and the vehicle-page-only rule were checked on the same tablet at the previous step.
+
+**Size and tooling** - `RAM 25.9 %` (84,732 B of 327,680 B), `Flash 90.0 %` (1,711,251 B of the 1,900,544 B OTA slot, ~189 KB headroom). Firmware `1.4.6` signed for the cloud pull (`firmware.bin.sig`); the release carries `firmware.bin`, `firmware.bin.sig` and the debug `app-debug.apk` (rule 27).
+
 ### V1.4.5 — Cloud pull survives a mid-download stall (firmware)
 
 A unit on a weak link hit `error: update.begin failed` after the download stalled and the pull tried to restart. The restart's `Update.begin()` could not allocate its 4 KB flash buffer, even though the log reported ~43 KB free.
