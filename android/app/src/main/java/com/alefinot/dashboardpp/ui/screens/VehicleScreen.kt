@@ -127,29 +127,16 @@ fun VehicleScreen(
             Spacer(Modifier.height(18.dp))
 
             if (vehicles.isEmpty()) {
-                // Nothing paired. The page still has to say what the button below does,
-                // and where to go for a device the user already has the address of — the
-                // two questions a first run asks, answered before being asked.
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .hudCard(borderColor = HudColors.Amber.copy(alpha = 0.3f))
-                        .padding(14.dp),
-                ) {
-                    Column {
-                        Text("NOTHING PAIRED YET", color = HudColors.Amber, style = HudeSectionTitle())
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "FIND DASHBOARD++ looks for a Dashboard++ on this network and " +
-                                "pairs with the one it finds. If you know the address " +
-                                "already, connect by hand instead — the app still keeps a " +
-                                "card for it, because the card is what a trip belongs to.",
-                            color = HudColors.TextMuted,
-                            style = HudeCfgNote(),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(18.dp))
+                // One line. The card below already explains what its two buttons do, so an
+                // empty garage only has to say that nothing has been met yet - a second
+                // paragraph about what a search is would be the page talking to itself.
+                Text(
+                    "Nothing has been met yet: this app has not reached a dashboard on any " +
+                        "network it knows.",
+                    color = HudColors.TextMuted,
+                    style = HudeCfgNote(),
+                )
+                Spacer(Modifier.height(14.dp))
             } else {
                 for (v in vehicles) {
                     VehicleCard(
@@ -194,15 +181,6 @@ fun VehicleScreen(
             AddVehicleCard(
                 onSearch = { connection.rescan() },
                 onEnterIp = onEnterIp,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "FIND DASHBOARD++ looks on this network only. A vehicle the app has " +
-                    "paired before is tried at its own remembered addresses first, which " +
-                    "is why coming back to a car you drive every day takes a couple of " +
-                    "seconds and a first hunt does not.",
-                color = HudColors.TextDim,
-                style = HudeCfgNote(),
             )
         }
     }
