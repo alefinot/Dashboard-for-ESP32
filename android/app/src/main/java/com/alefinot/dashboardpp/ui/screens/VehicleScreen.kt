@@ -3,6 +3,7 @@ package com.alefinot.dashboardpp.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,16 +14,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -30,6 +36,7 @@ import com.alefinot.dashboardpp.vehicles.Vehicle
 import com.alefinot.dashboardpp.ui.components.HudButton
 import com.alefinot.dashboardpp.ui.components.HudButtonStyle
 import com.alefinot.dashboardpp.ui.components.HudIcons
+import com.alefinot.dashboardpp.ui.components.ScanRing
 import com.alefinot.dashboardpp.ui.theme.HudBrushes
 import com.alefinot.dashboardpp.ui.theme.HudColors
 import com.alefinot.dashboardpp.ui.theme.HudRadius
@@ -39,8 +46,10 @@ import com.alefinot.dashboardpp.ui.theme.HudePerfLabel
 import com.alefinot.dashboardpp.ui.theme.HudePerfValue
 import com.alefinot.dashboardpp.ui.theme.HudeSectionTitle
 import com.alefinot.dashboardpp.ui.theme.hudCard
+import com.alefinot.dashboardpp.viewmodel.ConnectMode
 import com.alefinot.dashboardpp.viewmodel.ConnectionUiState
 import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
+import kotlinx.coroutines.delay
 
 /**
  * The vehicle page — the garage, and the app's home.
@@ -79,6 +88,21 @@ fun VehicleScreen(
     val vehicles by cards.collectAsStateWithLifecycle(initialValue = emptyList())
     val selectedId = connection.selectedVehicleId.value
     val state = connection.uiState.value
+    val notice by connection.notice
+    val unclaimed by connection.unclaimed
+
+    // The clock the derived status lines ("LAST SEEN YESTERDAY") are measured against.
+    // Read once per composition and refreshed once a minute while this page is on screen:
+    // a card should not have to be revisited to stop saying "today" after midnight, and a
+    // per-frame clock would rebuild every card sixty times a second for a sentence that
+    // changes once a day.
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            nowMs = System.currentTimeMillis()
+        }
+    }
 
     Box(
         Modifier
@@ -133,21 +157,44 @@ fun VehicleScreen(
                         selected = v.id == selectedId,
                         // Only the selected card can be mid-attempt: the others are
                         // records, not candidates, and saying "connecting" about a card
-                        // the app is not reaching for would be a lie.
+                        // the app is not reaching for would be a lie. The connected card
+                        // is matched separately so it can always offer its own way out.
                         state = if (v.id == selectedId) state else null,
+                        connected = connectedCard(v, state),
+                        nowMs = nowMs,
+                        ringProgress = connection.scanProgress.value,
                         onClick = { connection.selectVehicle(v.id) },
+                        onConnect = { connection.connectVehicle(v.id, ConnectMode.SEARCH) },
+                        onRetrySaved = { connection.connectVehicle(v.id, ConnectMode.PROBE) },
+                        onDisconnect = { connection.disconnect() },
                     )
                     Spacer(Modifier.height(10.dp))
                 }
             }
 
-            Row(Modifier.fillMaxWidth()) {
-                HudButton("FIND DASHBOARD++", style = HudButtonStyle.PRIMARY) { connection.rescan() }
-                Spacer(Modifier.width(12.dp))
-                HudButton("CONNECT BY HAND (IP / HOSTNAME)", style = HudButtonStyle.SECONDARY) {
-                    onEnterIp()
-                }
+            // Two sentences that are not this page's to write, and that no card can
+            // represent: a unit answered that no card claims, or the unit that answered
+            // belongs to a different card than the one selected. Both are published by the
+            // view model and would otherwise be lost, and either one means a card on this
+            // list is about to be described wrongly.
+            notice?.let {
+                NoticeCard("THE APP AND THE CARD DISAGREE", it, HudColors.Amber)
+                Spacer(Modifier.height(10.dp))
             }
+            unclaimed?.let {
+                NoticeCard(
+                    "A DASHBOARD ANSWERED THAT NO CARD CLAIMS",
+                    "${it.ip} (firmware ${it.version ?: "unknown"}) is not on this list yet. " +
+                        "Name it and it becomes a card of its own.",
+                    HudColors.Cyan,
+                )
+                Spacer(Modifier.height(10.dp))
+            }
+
+            AddVehicleCard(
+                onSearch = { connection.rescan() },
+                onEnterIp = onEnterIp,
+            )
             Spacer(Modifier.height(10.dp))
             Text(
                 "FIND DASHBOARD++ looks on this network only. A vehicle the app has " +
@@ -171,17 +218,34 @@ fun VehicleScreen(
  * than a status that comes and goes. The cover is a placeholder panel until a photo of
  * the vehicle exists, drawn with the bar's own car glyph so the shape means "vehicle" in
  * both places — and it is drawn dim on purpose. An empty frame that shows the glyph is
- * honest about being empty; one that shows a stock car is not.
+ * honest about being empty; one that shows a stock car is not. While the app is hunting
+ * for **this** card's unit the cover becomes the sweep's ring instead: that is where a
+ * user is looking when they press SEARCH, and the full-screen ring that used to answer the
+ * question is gone.
+ *
+ * What a card offers depends on what the card *is*, not on what the page is doing: the
+ * connected card always offers DISCONNECT (even if the selection has moved on, because
+ * that is the card with a session to end), and any other selected card offers CONNECT —
+ * the whole ladder — plus, when it has an address on file, the short two-address try.
+ * Cards that are neither selected nor connected offer nothing, because the first thing
+ * anyone does with an unselected card is touch it, and a wall of buttons for cars nobody
+ * is looking at is not a garage.
  */
 @Composable
 private fun VehicleCard(
     vehicle: Vehicle,
     selected: Boolean,
     state: ConnectionUiState?,
+    connected: Boolean,
+    nowMs: Long,
+    ringProgress: Float,
     onClick: () -> Unit,
+    onConnect: () -> Unit,
+    onRetrySaved: () -> Unit,
+    onDisconnect: () -> Unit,
 ) {
-    val (status, statusColor) = cardStatus(vehicle, state)
-    Row(
+    val status = cardStatusLine(vehicle, state, nowMs)
+    Column(
         Modifier
             .fillMaxWidth()
             .hudCard(
@@ -190,68 +254,148 @@ private fun VehicleCard(
             )
             .clickable(onClickLabel = "Select ${vehicle.name}") { onClick() }
             .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .size(width = 76.dp, height = 54.dp)
-                .background(HudColors.Panel, HudRadius.CardShape)
-                .border(1.dp, HudColors.Hairline, HudRadius.CardShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                HudIcons.Car,
-                contentDescription = null,
-                tint = if (selected) HudColors.CyanDim else HudColors.TextDim,
-                modifier = Modifier.size(30.dp),
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.fillMaxWidth()) {
-            Text(
-                vehicle.name.ifBlank { "UNNAMED VEHICLE" },
-                color = if (selected) HudColors.Cyan else HudColors.TextPrimary,
-                style = HudeHeading().copy(fontSize = 17.sp),
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(status, color = statusColor, style = HudePerfLabel())
-            // The address is reference, not headline: it is what the app dialed last, and
-            // it changes when the car moves. A card that leads with an address is a card
-            // that is still thinking of itself as a bookmark.
-            vehicle.ips.firstOrNull()?.let {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(width = 76.dp, height = 54.dp)
+                    .background(HudColors.Panel, HudRadius.CardShape)
+                    .border(1.dp, HudColors.Hairline, HudRadius.CardShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (showScanRing(state)) {
+                    ScanRing(ringProgress, Modifier.size(28.dp))
+                } else {
+                    Icon(
+                        HudIcons.Car,
+                        contentDescription = null,
+                        tint = if (selected) HudColors.CyanDim else HudColors.TextDim,
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.fillMaxWidth()) {
+                Text(
+                    vehicle.name.ifBlank { "UNNAMED VEHICLE" },
+                    color = if (selected) HudColors.Cyan else HudColors.TextPrimary,
+                    style = HudeHeading().copy(fontSize = 17.sp),
+                )
+                // What the user called this vehicle, in their own words: the plate is the
+                // thing they look for in a car park, and the spec line is the difference
+                // between two cards with similar names. A blank field draws no line at all
+                // (see [plateLine]) - a card with empty gaps reads like a form.
+                plateLine(vehicle)?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(it, color = HudColors.TextDim, style = HudePerfLabel())
+                }
+                specLine(vehicle).takeIf { it.isNotEmpty() }?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(it, color = HudColors.TextMuted, style = HudeCfgNote())
+                }
                 Spacer(Modifier.height(4.dp))
-                Text(it, color = HudColors.TextDim, style = HudePerfValue())
+                Text(
+                    status.text,
+                    color = statusColor(status.tone),
+                    style = HudePerfLabel(),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // The address is reference, not headline: it is what the app dialed last,
+                // and it changes when the car moves. A card that leads with an address is a
+                // card that is still thinking of itself as a bookmark.
+                if (!connected) {
+                    vehicle.ips.firstOrNull()?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(it, color = HudColors.TextDim, style = HudePerfValue())
+                    }
+                }
+            }
+        }
+
+        if (selected || connected) {
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (connected) {
+                    HudButton(
+                        "DISCONNECT",
+                        modifier = Modifier.widthIn(min = 120.dp),
+                        style = HudButtonStyle.SECONDARY,
+                    ) { onDisconnect() }
+                } else {
+                    HudButton(
+                        "CONNECT",
+                        modifier = Modifier.widthIn(min = 108.dp),
+                        style = HudButtonStyle.PRIMARY,
+                    ) { onConnect() }
+                    if (vehicle.ips.isNotEmpty()) {
+                        HudButton(
+                            "RETRY AT ${vehicle.ips.first()}",
+                            modifier = Modifier.weight(1f),
+                            style = HudButtonStyle.SECONDARY,
+                        ) { onRetrySaved() }
+                    }
+                }
             }
         }
     }
 }
 
 /**
- * What a card says about itself. The caller passes a [ConnectionUiState] only for the
- * card the app is actually reaching for, so everything here is about one vehicle.
- *
- * The words a hunting or failing state gives are passed through **verbatim**. A card that
- * rewrites "ESP32 at 192.168.1.50 answered /api/perf, but that unit is not the vehicle
- * you selected" as "CONNECTION LOST" has stopped reporting and started reassuring, which
- * is the exact failure the whole refactor exists to remove.
+ * A fact the connection published that no card can carry: either the unit that answered
+ * belongs to another card, or it belongs to none. Both are drawn here because the page has
+ * to contradict its own cards out loud rather than let a wrong card stand.
  */
-private fun cardStatus(
-    vehicle: Vehicle,
-    state: ConnectionUiState?,
-): Pair<String, Color> = when {
-    state is ConnectionUiState.Connected ->
-        "CONNECTED · ${state.ip}" to HudColors.Green
+@Composable
+private fun NoticeCard(title: String, text: String, accent: Color) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .hudCard(borderColor = accent.copy(alpha = 0.35f))
+            .padding(14.dp),
+    ) {
+        Text(title, color = accent, style = HudeSectionTitle())
+        Spacer(Modifier.height(8.dp))
+        Text(text, color = HudColors.TextMuted, style = HudeCfgNote())
+    }
+}
 
-    state is ConnectionUiState.Connecting ->
-        state.mode.stageLine().uppercase() to HudColors.Amber
-
-    state is ConnectionUiState.Failed -> state.reason to HudColors.Red
-
-    // Idle with a reason is the case where the page has something specific to say and
-    // nothing running — the selection was cleared, or a session just ended.
-    state is ConnectionUiState.Idle && state.reason != null -> state.reason to HudColors.Amber
-
-    vehicle.ips.isNotEmpty() -> "SAVED · NOT HERE RIGHT NOW" to HudColors.TextMuted
-
-    else -> "NEVER SEEN ON A NETWORK YET" to HudColors.TextDim
+/**
+ * The last thing in the garage, and the only way a new vehicle gets in: [plan §5] puts both
+ * entry points on this page because it is the page a user is already standing on. SEARCH
+ * runs the whole ladder (walk, mDNS, probe, and adopting a unit no card claims); ENTER IP
+ * MANUALLY raises the same panel the covers raise, the one path for a device no discovery
+ * can see.
+ */
+@Composable
+private fun AddVehicleCard(onSearch: () -> Unit, onEnterIp: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .hudCard()
+            .padding(14.dp),
+    ) {
+        Text("ADD VEHICLE", color = HudColors.TextDim, style = HudeSectionTitle())
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            HudButton(
+                "SEARCH FOR DASHBOARD++",
+                modifier = Modifier.weight(1f),
+                style = HudButtonStyle.PRIMARY,
+            ) { onSearch() }
+            HudButton(
+                "ENTER IP MANUALLY",
+                modifier = Modifier.weight(1f),
+                style = HudButtonStyle.SECONDARY,
+            ) { onEnterIp() }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "A dashboard that answers becomes a card. Name it, and the app remembers the " +
+                "vehicle rather than the address - which is why coming back to a car you " +
+                "drive every day takes a couple of seconds and a first hunt does not.",
+            color = HudColors.TextDim,
+            style = HudeCfgNote(),
+        )
+    }
 }

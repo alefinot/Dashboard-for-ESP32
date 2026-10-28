@@ -270,3 +270,32 @@ fun ScanProgressRing(progress: Float, modifier: Modifier = Modifier) {
         strokeWidth = 3.dp,
     )
 }
+
+/**
+ * The ring a sweep shows while it is looking for a dashboard (`.scan-ring`).
+ *
+ * The sweep has two halves with different information: the subnet walk reports how far it
+ * has got, and mDNS plus the 50 ms probes answer with no count at all. So the ring has two
+ * forms — an arc that fills while there is a fraction to show, and a turning ring while
+ * there is nothing to count. With animation switched off it holds still at a partial arc:
+ * the state is "a search is running", and that does not need motion to be understood.
+ */
+@Composable
+fun ScanRing(progress: Float, modifier: Modifier = Modifier) {
+    when {
+        progress > 0f -> ScanProgressRing(progress, modifier)
+        !HudMotion.enabled -> CircularProgressIndicator(
+            progress = { 0.35f },
+            modifier = modifier,
+            color = HudColors.Cyan,
+            trackColor = HudColors.Hairline,
+            strokeWidth = 3.dp,
+        )
+        else -> CircularProgressIndicator(
+            modifier = modifier,
+            color = HudColors.Cyan,
+            trackColor = HudColors.Hairline,
+            strokeWidth = 3.dp,
+        )
+    }
+}
