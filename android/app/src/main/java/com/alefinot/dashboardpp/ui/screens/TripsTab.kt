@@ -157,9 +157,13 @@ fun TripsTab(vm: TripsViewModel, onOpen: (TripRow) -> Unit) {
             } else {
                 // Files exist; the filter is what hides them. Say which chip is on,
                 // and say where the rest went, rather than presenting an empty page.
-                val wanted = options.firstOrNull { it.value == filter }?.label ?: filter
+                // The chip is always offered while it hides rows (see filterOptionsFor),
+                // so the name is always resolvable; the fallback is words rather than the
+                // filter's code, because a `?` on screen is a bug the user has to read.
+                val chip = options.firstOrNull { it.value == filter }
                 Text(
-                    "No drives filed under $wanted.",
+                    if (chip == null) "No drives match the current filter."
+                    else "No drives filed under ${chip.label}.",
                     color = HudColors.TextPrimary,
                     style = HudeBody(),
                 )
@@ -234,8 +238,16 @@ private fun TripList(rows: List<TripRow>, visits: Int, onOpen: (TripRow) -> Unit
     // what a freshly composed page used to do by itself. At zero visits - the page
     // composed at boot, the user somewhere else - the list sits unrevealed and
     // animates nothing until the user gets here.
+    //
+    // `rows.size` is part of the key because the alternative is a page that counts four
+    // files and shows none. The visit and the index pass are separate events: arriving on
+    // the tab increments the visit while the folder walk is still running, and a latch
+    // armed only at the moment of the visit reads `rows` empty, never re-arms, and leaves
+    // every card at alpha 0 forever. Observed on a real tablet - header `4 · 262 kB`,
+    // filter ALL, an empty black list. An entrance animation may delay content; it may
+    // not decide whether content exists.
     var revealed by remember(visits) { mutableStateOf(visits > 0 && !HudMotion.enabled) }
-    LaunchedEffect(visits) {
+    LaunchedEffect(visits, rows.size) {
         if (visits > 0 && rows.isNotEmpty()) revealed = true
     }
     val staggered = minOf(rows.size, 8)

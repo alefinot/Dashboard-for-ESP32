@@ -169,7 +169,7 @@ class TripsViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             _rows.value = rows
-            _options.value = filterOptionsFor(rows, names)
+            _options.value = filterOptionsFor(rows, names, _filter.value)
             if (_filter.value != RecorderSettings.FILTER_ALL &&
                 _filter.value != RecorderSettings.FILTER_UNKNOWN &&
                 rows.none { it.vehicleId == _filter.value }
@@ -215,13 +215,32 @@ class TripsViewModel(app: Application) : AndroidViewModel(app) {
          * untagged files is already a filtered list, and a control with one choice is
          * decoration.
          *
+         * The one exception is the filter that is **on**. A filter hides rows, so the
+         * chip carrying it has to stay on screen while it does - otherwise the Trips page
+         * can sit at `0 of 3` with no control anywhere to turn it off. That state was
+         * reached on a real tablet: `UNKNOWN` remembered from an earlier session, every
+         * remaining file recorded under a card since, and the chip row judged itself
+         * decoration and vanished. `activeFilter` is only consulted when it actually
+         * hides something, which is what keeps the decoration rule standing for a filter
+         * that matches the whole list.
+         *
          * Reached through the class rather than an instance because the rule worth
          * pinning down is "when does this control exist at all", and building a
          * ViewModel needs an Android context that has nothing to do with that rule.
          */
-        internal fun filterOptionsFor(rows: List<TripRow>, names: Map<String, String>): List<TripFilterOption> {
-            val ids = rows.mapNotNull { it.vehicleId }.distinct()
-            val unknown = rows.any { it.vehicleId == null }
+        internal fun filterOptionsFor(
+            rows: List<TripRow>,
+            names: Map<String, String>,
+            activeFilter: String = RecorderSettings.FILTER_ALL,
+        ): List<TripFilterOption> {
+            val ids = rows.mapNotNull { it.vehicleId }.distinct().toMutableList()
+            var unknown = rows.any { it.vehicleId == null }
+            if (activeFilter != RecorderSettings.FILTER_ALL &&
+                applyFilter(rows, activeFilter).size < rows.size
+            ) {
+                if (activeFilter == RecorderSettings.FILTER_UNKNOWN) unknown = true
+                else if (!ids.contains(activeFilter)) ids.add(activeFilter)
+            }
             if (ids.size + (if (unknown) 1 else 0) < 2) return emptyList()
             val out = ArrayList<TripFilterOption>()
             out.add(TripFilterOption(RecorderSettings.FILTER_ALL, "ALL"))

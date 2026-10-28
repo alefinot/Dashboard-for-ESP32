@@ -130,4 +130,26 @@ class TripsFilterTest {
         )
         assertTrue(options.none { it.value == "veh-deleted" })
     }
+
+    @Test
+    fun aFilterThatHidesRowsStaysOfferedEvenWhenThereIsNothingElseToNarrow() {
+        // The state reached on a real tablet, where this rule came from: `UNKNOWN` was
+        // remembered from an earlier session, every file had since been recorded under a
+        // card, and the page showed `0 of 3` with no chip row at all - no way back to ALL
+        // anywhere on the screen. The rule that a control with one choice is decoration
+        // must not outrank the rule that a filter which hides rows has to be escapable.
+        val oneCar = listOf(row("/x/a.csv", "veh-1", "Caminone"), row("/x/b.csv", "veh-1", "Caminone"))
+        val options = TripsViewModel.filterOptionsFor(oneCar, mapOf("veh-1" to "Caminone"), RecorderSettings.FILTER_UNKNOWN)
+        assertEquals(listOf("ALL", "Caminone", "UNKNOWN"), options.map { it.label })
+        // …and the empty state can name the chip that is on, instead of printing its code.
+        assertEquals("UNKNOWN", options.first { it.value == RecorderSettings.FILTER_UNKNOWN }.label)
+    }
+
+    @Test
+    fun aFilterThatHidesNothingStillLeavesTheRowOut() {
+        // The boundary of that rule: a filter matching every row hides nothing, so the
+        // list is not trapped and the decoration rule stands.
+        val oneCar = listOf(row("/x/a.csv", "veh-1", "Caminone"))
+        assertTrue(TripsViewModel.filterOptionsFor(oneCar, mapOf("veh-1" to "Caminone"), "veh-1").isEmpty())
+    }
 }
