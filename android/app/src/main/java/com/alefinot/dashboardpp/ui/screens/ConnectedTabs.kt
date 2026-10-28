@@ -59,7 +59,6 @@ import com.alefinot.dashboardpp.service.TripLogService
 import com.alefinot.dashboardpp.trips.RecorderSettings
 import com.alefinot.dashboardpp.trips.TripsEnabled
 import com.alefinot.dashboardpp.ui.components.HudEnter
-import com.alefinot.dashboardpp.ui.components.HudIcons
 import com.alefinot.dashboardpp.ui.components.LocalEnterActive
 import com.alefinot.dashboardpp.ui.components.PageFade
 import com.alefinot.dashboardpp.webview.WebUiHolder
@@ -77,53 +76,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * The four modes of a connected dashboard: native live view, the ESP's own
- * configuration (its Web UI, labelled for what it configures), recorded trips,
- * and this app's own settings.
- *
- * They live in a bottom bar now, not in a strip under the title, and each one is
- * an icon rather than a word: Live carries the app's own mark, Trips a map pin,
- * ESP settings the chip, App settings the cog. Live sits in the middle of the bar
- * because it is the mode the app is mostly in; on its left are Trips and a Coming
- * Soon placeholder, on its right the two settings. The names are not lost - each
- * icon keeps its name as the accessibility description, so TalkBack still reads a
- * label and the touch target is a labelled control.
- *
- * The recording service is started here for the lifetime of the connection -
- * not the lifetime of a screen - so moving between tabs, or turning the screen
- * off in the car, keeps the log running.
- */
-enum class AppTab { LIVE, TRIPS, WEB, SETTINGS }
-
-/** The five slots of the bottom bar, left to right, with Live in the middle. */
-private enum class BarSlot { SOON, TRIPS, LIVE, WEB, SETTINGS }
-
-private val BarSlots = listOf(BarSlot.SOON, BarSlot.TRIPS, BarSlot.LIVE, BarSlot.WEB, BarSlot.SETTINGS)
-
-/**
- * The swipe order. Left to right, so dragging a finger left walks right along the
- * bar and the two agree about what is next to what.
- *
- * SOON is not in it. The bar advertises a screen that does not exist; putting it
- * in the pager would make the swipe pass through a hole.
- */
-private val BarPages = listOf(AppTab.TRIPS, AppTab.LIVE, AppTab.WEB, AppTab.SETTINGS)
-
-/** Live's index in [BarPages] and in the bar, which are the same order. */
-private const val LIVE_PAGE = 1
-private const val TRIPS_PAGE = 0
-
-/**
  * The app's only screen once it is up: the five-slot bar and the pages it swipes
  * between. There is no other route to a settings screen, no overlay, no back handler,
  * and no second version of the bar; the trip detail is a pushed route, the only one.
  *
- * It is the shell with a device *and* the shell without one. With no device, `conn` is
- * null: the bar keeps all five slots, Trips and App Settings work in full, and Live
- * and the ESP slot answer with a cover that quotes the reason the view model gave.
- * A lost connection is not an exit from the app - it is a page with nothing to show
- * right now. See [ShellRouting] for how a state becomes a mode and [ShellRules] for
- * what the bar and the recorder do about it.
+ * It opens on the vehicle page, and it is the same screen whether or not a dashboard is
+ * connected. With no device, `conn` is null: the bar keeps all five slots, Trips and App
+ * Settings work in full, Live and the ESP slot answer with a cover that quotes the reason
+ * the view model gave, and the vehicle page is where a connection is actually made. A
+ * lost connection is not an exit from the app - it is a page with nothing to show right
+ * now. See [ShellRouting] for how a state becomes a line on that page and [ShellRules]
+ * for what the bar and the recorder do about it.
  *
  * The ESP page is kept per connection rather than per visit, so re-entering it is a
  * paint rather than the 1.55 s reload measured before (see [WebUiHolder]). The WebView
@@ -150,9 +113,6 @@ fun AppShell(
     // makes coming back to it instant.
     var webSeen by remember(ip) { mutableStateOf(false) }
     var openTrip by remember { mutableStateOf<TripRow?>(null) }
-    // The Coming Soon slot is not a destination: tapping it leaves the page alone
-    // and answers in place, so the bar needs somewhere to say so without a dialog.
-    var soonNote by remember { mutableStateOf(false) }
     // Typing an address by hand is a panel over the shell, raised from the covers and
     // from App Settings, and it closes by itself the moment a device turns up.
     var manualOpen by remember { mutableStateOf(false) }
@@ -175,11 +135,11 @@ fun AppShell(
         .collectAsStateWithLifecycle(initialValue = true)
     LaunchedEffect(motionEnabled) { HudMotion.setPrefEnabled(motionEnabled) }
 
-    val pager = rememberPagerState(initialPage = LIVE_PAGE, pageCount = { BarPages.size })
+    val pager = rememberPagerState(initialPage = BarLayout.homePage, pageCount = { BarLayout.pages.size })
     val scope = rememberCoroutineScope()
     // The settled page. The bar's selection, which screen is `active`, and whether
     // the Web UI may poll all follow this one value.
-    val page = BarPages.getOrElse(pager.currentPage) { AppTab.LIVE }
+    val page = BarLayout.pages.getOrElse(pager.currentPage) { BarLayout.home }
 
     // Recording needs a device to sample, firmware with the snapshot endpoint, and the
     // user's switch - all three, and the first of them is why the service never runs
@@ -194,8 +154,8 @@ fun AppShell(
             // user did not ask to go anywhere. With no device the trips page is the
             // phone's own, so the offline shell leaves the user on it.
             if (ShellRules.pageUnserved(tripsAvailable, connected = ip != null)) {
-                val now = BarPages.getOrElse(pager.currentPage) { AppTab.LIVE }
-                if (now == AppTab.TRIPS) pager.scrollToPage(LIVE_PAGE)
+                val now = BarLayout.pages.getOrElse(pager.currentPage) { BarLayout.home }
+                if (now == AppTab.TRIPS) pager.scrollToPage(BarLayout.pageOf(AppTab.LIVE))
             }
         }
     }
@@ -220,7 +180,7 @@ fun AppShell(
             PagerFocus.inViewport(
                 pager.currentPage,
                 pager.currentPageOffsetFraction,
-                BarPages.indexOf(AppTab.WEB),
+                BarLayout.pageOf(AppTab.WEB),
             )
         }
     }
@@ -319,7 +279,7 @@ fun AppShell(
                 var extraPages by remember { mutableStateOf(0) }
                 LaunchedEffect(Unit) {
                     delay(600)
-                    while (extraPages < BarPages.size - 2) {
+                    while (extraPages < BarLayout.pages.size - 2) {
                         withFrameNanos { }
                         extraPages++
                     }
@@ -344,7 +304,14 @@ fun AppShell(
                             )
                         }
                     }
-                    when (BarPages.getOrElse(p) { AppTab.LIVE }) {
+                    when (BarLayout.pages.getOrElse(p) { BarLayout.home }) {
+                        // The app's home, and the only page whose job is to make the
+                        // other pages possible. It raises the same manual-entry panel the
+                        // covers raise, so there is one behaviour for typing an address
+                        // rather than one per screen that offers it.
+                        AppTab.VEHICLES -> NativePage(inView) {
+                            VehicleScreen(connection, onEnterIp = { manualOpen = true })
+                        }
                         AppTab.TRIPS -> NativePage(inView) { TripsTab(trips) { row -> openTrip = row } }
                         AppTab.LIVE -> NativePage(inView) {
                             if (conn == null) {
@@ -443,9 +410,8 @@ fun AppShell(
                 tripsAvailable = tripsAvailable,
                 connected = connected,
                 onBounds = { slot, r -> bounds[slot] = r },
-                onSoon = { soonNote = true },
                 onSelect = { slot ->
-                    val index = BarPages.indexOf(slot)
+                    val index = BarLayout.pageOf(slot)
                     if (index >= 0) {
                         scope.launch {
                             // The bar animates the same move a swipe would make, so a
@@ -456,33 +422,6 @@ fun AppShell(
                     }
                 },
             )
-        }
-
-        if (soonNote) {
-            // Answered in place, over the content, so the bar does not have to grow
-            // to say it. Disappears on its own.
-            LaunchedEffect(soonNote) {
-                delay(2600)
-                soonNote = false
-            }
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                HudEnter(delayMs = 0) {
-                    Box(
-                        Modifier
-                            .padding(bottom = 84.dp)
-                            .hudGlass(
-                                shape = HudRadius.CardShape,
-                                fill = HudColors.Msg,
-                                borderColor = HudColors.CyanDim,
-                                elevation = 6.dp,
-                                highlight = 0.04f,
-                            )
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
-                    ) {
-                        Text("COMING SOON - not built yet", color = HudColors.Cyan, style = HudeFormLabel())
-                    }
-                }
-            }
         }
 
         if (manualOpen) {
@@ -556,14 +495,14 @@ private fun NativePage(active: Boolean, content: @Composable () -> Unit) {
 @Composable
 private fun PillSheet(pager: PagerState, bounds: Map<AppTab, Rect>, barOrigin: Offset) {
     val density = LocalDensity.current
-    val settled = pager.currentPage.coerceIn(0, BarPages.size - 1)
-    val rest = bounds[BarPages[settled]]
+    val settled = pager.currentPage.coerceIn(0, BarLayout.pages.size - 1)
+    val rest = bounds[BarLayout.pages[settled]]
     // A fraction of the way between two pages: integer at rest, and sweeping from
     // one integer to the next while the user drags or the bar animates a tap.
     val frac = (pager.currentPage + pager.currentPageOffsetFraction)
-        .coerceIn(0f, (BarPages.size - 1).toFloat())
-    val from = BarPages[frac.toInt()]
-    val to = BarPages[(frac.toInt() + 1).coerceAtMost(BarPages.size - 1)]
+        .coerceIn(0f, (BarLayout.pages.size - 1).toFloat())
+    val from = BarLayout.pages[frac.toInt()]
+    val to = BarLayout.pages[(frac.toInt() + 1).coerceAtMost(BarLayout.pages.size - 1)]
     val f = frac - frac.toInt()
     val a = bounds[from]
     val b = bounds[to]
@@ -598,10 +537,15 @@ private fun PillSheet(pager: PagerState, bounds: Map<AppTab, Rect>, barOrigin: O
 }
 
 /**
- * The bottom bar: five slots, Live in the middle and larger, the current one under
- * a glass sheet that slides between them (`.conn-pill.active`). The sheet is not
- * five fills that swap in place - it is one sheet, because every state change on the
- * page is transitioned (0.2-0.3 s) and a tab that changes is a state change.
+ * The bottom bar: five slots, the vehicle page in the middle and larger, the current
+ * one under a glass sheet that slides between them (`.conn-pill.active`). The sheet is
+ * not five fills that swap in place - it is one sheet, because every state change on
+ * the page is transitioned (0.2-0.3 s) and a tab that changes is a state change.
+ *
+ * Which glyph goes in which slot, how big it is and whether it keeps its own colours is
+ * [BarLayout]'s decision, not this loop's - so the centre treatment is one line in a
+ * test instead of five branches here, and a slot cannot be drawn as one thing and paged
+ * as another.
  */
 @Composable
 private fun BottomBar(
@@ -611,7 +555,6 @@ private fun BottomBar(
     tripsAvailable: Boolean,
     connected: Boolean,
     onBounds: (AppTab, Rect) -> Unit,
-    onSoon: () -> Unit,
     onSelect: (AppTab) -> Unit,
 ) {
     // Where the bar itself starts on screen. The slot bounds are measured in root
@@ -630,74 +573,26 @@ private fun BottomBar(
     ) {
         PillSheet(pager, bounds, barOrigin)
         Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp)) {
-            for (slot in BarSlots) {
-                val weight = if (slot == BarSlot.LIVE) 1.4f else 1f
-                when (slot) {
-                    BarSlot.SOON -> Box(Modifier.weight(weight), contentAlignment = Alignment.Center) {
-                        BarGlyph(
-                            icon = HudIcons.Clock,
-                            desc = "Coming soon",
-                            selected = false,
-                            dim = true,
-                            size = 22.dp,
-                            box = 48.dp,
-                            onClick = onSoon,
-                        )
-                    }
-                    BarSlot.TRIPS -> Box(Modifier.weight(weight), contentAlignment = Alignment.Center) {
-                        BarGlyph(
-                            icon = HudIcons.Pin,
-                            desc = "Trips",
-                            selected = selected == AppTab.TRIPS,
-                            // A firmware without a trip store keeps the pin and dims it
-                            // (the strip used to write "TRIPS x" for the same fact).
-                            dim = ShellRules.glyphDimmed(AppTab.TRIPS, connected, tripsAvailable),
-                            size = 22.dp,
-                            box = 48.dp,
-                            onBounds = { onBounds(AppTab.TRIPS, it) },
-                            enabled = tripsAvailable,
-                            onClick = { onSelect(AppTab.TRIPS) },
-                        )
-                    }
-                    BarSlot.LIVE -> Box(Modifier.weight(weight), contentAlignment = Alignment.Center) {
-                        BarGlyph(
-                            // The app's own mark, colours and all: this is the mode the
-                            // app is mostly in, and the mark is how it is known.
-                            icon = HudIcons.Gauge,
-                            desc = "Live",
-                            selected = selected == AppTab.LIVE,
-                            colored = true,
-                            size = 30.dp,
-                            box = 52.dp,
-                            onBounds = { onBounds(AppTab.LIVE, it) },
-                            onClick = { onSelect(AppTab.LIVE) },
-                        )
-                    }
-                    BarSlot.WEB -> Box(Modifier.weight(weight), contentAlignment = Alignment.Center) {
-                        BarGlyph(
-                            icon = HudIcons.Chip,
-                            desc = "ESP settings",
-                            selected = selected == AppTab.WEB,
-                            // Dimmed rather than gone: the slot is a page even when there
-                            // is no device to put in it (ShellRules.glyphDimmed).
-                            dim = ShellRules.glyphDimmed(AppTab.WEB, connected, tripsAvailable),
-                            size = 22.dp,
-                            box = 48.dp,
-                            onBounds = { onBounds(AppTab.WEB, it) },
-                            onClick = { onSelect(AppTab.WEB) },
-                        )
-                    }
-                    BarSlot.SETTINGS -> Box(Modifier.weight(weight), contentAlignment = Alignment.Center) {
-                        BarGlyph(
-                            icon = HudIcons.Cog,
-                            desc = "App settings",
-                            selected = selected == AppTab.SETTINGS,
-                            size = 22.dp,
-                            box = 48.dp,
-                            onBounds = { onBounds(AppTab.SETTINGS, it) },
-                            onClick = { onSelect(AppTab.SETTINGS) },
-                        )
-                    }
+            for (tab in BarLayout.pages) {
+                val spec = BarLayout.glyph(tab)
+                Box(Modifier.weight(spec.weight), contentAlignment = Alignment.Center) {
+                    BarGlyph(
+                        icon = BarLayout.icon(tab),
+                        desc = spec.desc,
+                        selected = selected == tab,
+                        // Dimmed rather than gone: the slot is a page even when there is
+                        // nothing to put in it (ShellRules.glyphDimmed). A firmware with
+                        // no trip store keeps the pin and dims it - the strip used to
+                        // write "TRIPS x" for the same fact. The vehicle slot is never
+                        // dimmed: it is the page that works with nothing connected.
+                        dim = ShellRules.glyphDimmed(tab, connected, tripsAvailable),
+                        colored = spec.colored,
+                        size = spec.size,
+                        box = spec.box,
+                        onBounds = { onBounds(tab, it) },
+                        enabled = tab != AppTab.TRIPS || tripsAvailable,
+                        onClick = { onSelect(tab) },
+                    )
                 }
             }
         }
@@ -708,8 +603,11 @@ private fun BottomBar(
  * One icon in the bar. Selected ones take the page's accent cyan and sit under the
  * travelling sheet; the rest are `--text-muted`, and dimmed ones `--text-dim`.
  *
- * The gauge is the exception: it is the launcher mark, so it is never re-tinted. It
- * loses alpha instead, which keeps the mark recognisable while it recedes.
+ * `colored` is the exception path: paint the artwork as the theme drew it and let it
+ * recede by alpha instead. Only the vehicle glyph takes it now. The gauge on the LIVE
+ * slot is still the launcher's own geometry, but it is tinted like its neighbours - a
+ * full-colour mark in a row of tinted ones reads as a different kind of control, and an
+ * alpha-only dim is indistinguishable next to a selected cyan one.
  */
 @Composable
 private fun BarGlyph(

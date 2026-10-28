@@ -18,9 +18,10 @@ import com.alefinot.dashboardpp.ui.theme.HudColors
  * accent colour - no third-party icon set, because nothing else in the app carries
  * one and a borrowed shape would be a new visual language on top of an existing one.
  *
- * One icon is not drawn here at all: the live view's icon is the launcher mark
- * itself (see [Gauge]), so the app's own face is the thing the user taps to get back
- * to the driving screen.
+ * One icon is not *drawn* here from scratch: the live view's mark is the launcher's
+ * own gauge (see [Gauge]), so the app's face is the thing the user taps to get back to
+ * the driving screen. In the bar it is tinted like its neighbours, which is what keeps
+ * a dimmed slot reading as unusable next to it.
  *
  * All of them are plain path data, not bitmaps, so the accent follows the theme and
  * the edge stays clean when the bar is scaled up on a 2560x1600 screen - and none of
@@ -46,8 +47,13 @@ object HudIcons {
      * + translation`, so scale 0.32 about pivot (0, 0) plus the translation below
      * centres the mark and makes it roughly 19 x 17 units. The launcher's 8.5-unit
      * stroke scales with it and lands at 2.72, so the mark stays heavier than the
-     * other four glyphs - which is the point: it is the app's own icon, not a sibling
-     * of them.
+     * other glyphs drawn here - which is the point: it is the app's own icon.
+     *
+     * It sits on the LIVE slot, and since the vehicle page took the centre it is drawn
+     * like the others: the launcher's *geometry*, tinted by the bar (muted, cyan when
+     * selected, dim when the slot has nothing in it) rather than kept full-colour at
+     * reduced alpha. A full-colour mark in a row of tinted ones reads as a different
+     * kind of control, and dimming it by alpha alone was invisible next to a cyan one.
      *
      * If the launcher mark changes, change it here too (the two files reference each
      * other for that reason).
@@ -190,20 +196,38 @@ object HudIcons {
     }
 
     /**
-     * Coming Soon: a clock with the hour hand pointing at twelve - "not open yet".
+     * Vehicles: a car seen from the side - sill line with its shoulders, a roofline,
+     * two wheels drawn as arcs under the sill.
      *
-     * Kept quiet (dim, not accented) because it is an advertisement for a screen that
-     * does not exist, not a destination: tapping it never changes the page.
+     * This is the bar's mark for the app's home, and the same shape is the placeholder
+     * on a vehicle card that has no photo, so the glyph means "a vehicle" in two places
+     * and means it the same way. Drawn on the same 24-unit grid with the same 1.9-unit
+     * round stroke as the pin and the chip; the wheels are arcs rather than closed
+     * circles because a closed wheel at 22 dp turns into two dots and loses the body
+     * line it is supposed to sit under.
      */
-    val Clock: ImageVector by lazy {
+    val Car: ImageVector by lazy {
         ImageVector.Builder(
-            name = "HudClock", defaultWidth = VB.dp, defaultHeight = VB.dp,
+            name = "HudCar", defaultWidth = VB.dp, defaultHeight = VB.dp,
             viewportWidth = VB, viewportHeight = VB,
         ).addPath(
-            PathParser().parsePathString("M12,12 A9.1,9.1 0 1 1 12,11.99 Z").toNodes(),
+            // Sill, and the two shoulders that rise from it to the roofline's feet.
+            PathParser().parsePathString(
+                "M2.6,14.8 H21.4 M3.4,14.8 V12.6 A1.6,1.6 0 0 1 5.0,11.0 " +
+                    "H19.0 A1.6,1.6 0 0 1 20.6,12.6 V14.8",
+            ).toNodes(),
             stroke = SolidColor(HudColors.Cyan), strokeLineWidth = W,
+            strokeLineCap = StrokeCap.Round,
         ).addPath(
-            PathParser().parsePathString("M12,12.9 L12,6.6 M12,12.9 L16.4,14.6").toNodes(),
+            // Roofline: a cabin with raked ends, sitting on the body's top edge.
+            PathParser().parsePathString("M7.0,11.0 L9.2,7.2 H14.8 L17.0,11.0").toNodes(),
+            stroke = SolidColor(HudColors.Cyan), strokeLineWidth = W,
+            strokeLineCap = StrokeCap.Round,
+        ).addPath(
+            // Wheels, drawn under the sill so the body line stays the car's baseline.
+            PathParser().parsePathString(
+                "M5.6,14.8 A2.2,2.2 0 0 0 10.0,14.8 M14.0,14.8 A2.2,2.2 0 0 0 18.4,14.8",
+            ).toNodes(),
             stroke = SolidColor(HudColors.Cyan), strokeLineWidth = W,
             strokeLineCap = StrokeCap.Round,
         ).build()

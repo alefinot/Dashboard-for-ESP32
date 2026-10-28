@@ -15,47 +15,50 @@ import org.junit.Test
  * in `DashboardRoot`'s `when`: which of the three things the root puts up for a
  * given connection state, and with what.
  *
- * It is a pure function now, so the interesting cases are testable without a
- * device: that the three states which used to be dead-end screens are the *same
- * shell* the connected app shows (with `conn = null`), that the transient states
- * are still the scan ring, and that the recorder and the bar follow the same rule
- * the screens do.
+ * It is a pure function now, and after the vehicle page became the home there is only
+ * one thing it can put up: the shell. So what is left to test is what the shell says —
+ * that the states which used to be dead-end screens hand over their reason as a line
+ * instead of a screen, that a running ladder names itself in that line, and that the
+ * recorder and the bar follow the same rule the screens do.
  */
 class ShellRoutingTest {
 
     @Test
-    fun `cold start is the shell, not a splash or a scan`() {
-        // The vehicle page has to be the first frame the app draws. There is no
-        // Booting state any more, and the silent reconnect that runs underneath it is
-        // not allowed to put a screen in front of the garage.
-        val mode = ShellRouting.mode(ConnectionUiState.Idle(null))
-        assertTrue(mode is ShellMode.Shell)
-        assertNull((mode as ShellMode.Shell).conn)
-        assertNull(mode.reason)
+    fun `cold start is the vehicle page with nothing connected`() {
+        // The garage has to be the first frame the app draws: no splash, no scan ring,
+        // and no reason line yet, because nothing has been tried.
+        val view = ShellRouting.view(ConnectionUiState.Idle(null))
+        assertNull(view.conn)
+        assertNull(view.reason)
+        assertTrue(view.findIsRetryNetwork)
     }
 
     @Test
-    fun `a silent reconnect shows no scan screen at all`() {
-        // Reaching for the selected vehicle's remembered addresses at launch is a
-        // handful of requests; the page the user is looking at does not change while it
-        // runs, and the card answers with SEARCHING in its own status line (task 6).
-        val mode = ShellRouting.mode(ConnectionUiState.Connecting(ConnectMode.SILENT))
-        assertTrue(mode is ShellMode.Shell)
-        assertNull((mode as ShellMode.Shell).conn)
-    }
-
-    @Test
-    fun `a search the user asked for is the scan ring, with the stage line`() {
-        for (mode in listOf(ConnectMode.SEARCH, ConnectMode.PROBE)) {
-            val shown = ShellRouting.mode(ConnectionUiState.Connecting(mode))
-            assertTrue("$mode", shown is ShellMode.Scanning)
-            assertTrue((shown as ShellMode.Scanning).title.isNotBlank())
+    fun `every state renders the same shell, and none of them gets a screen of its own`() {
+        // There used to be a screen per state: a splash, a full-page scan ring, and
+        // three dead ends. Each one took the trips and the settings away in order to
+        // say one sentence. Now a state is a line on the page that was already there.
+        for (state in listOf(
+            ConnectionUiState.Idle(null),
+            ConnectionUiState.Connecting(ConnectMode.SILENT),
+            ConnectionUiState.Connecting(ConnectMode.SEARCH),
+            ConnectionUiState.Connecting(ConnectMode.PROBE),
+            ConnectionUiState.Failed("No Dashboard++ answered."),
+        )) {
+            assertNull("$state", ShellRouting.view(state).conn)
         }
-        val search = ShellRouting.mode(ConnectionUiState.Connecting(ConnectMode.SEARCH)) as ShellMode.Scanning
-        val probe = ShellRouting.mode(ConnectionUiState.Connecting(ConnectMode.PROBE)) as ShellMode.Scanning
-        // A sweep of the whole network and a retry of two remembered addresses are not
-        // the same wait, and the line the user watches has to say which one is running.
-        assertTrue(search.title != probe.title)
+    }
+
+    @Test
+    fun `a ladder that is running says which ladder is running`() {
+        // With the scan ring gone, the line under the cover is the only place a wait can
+        // be explained. A sweep of the whole network and a retry of two remembered
+        // addresses are not the same wait, and the app must not say "searching" for both.
+        val lines = ConnectMode.values().map {
+            ShellRouting.view(ConnectionUiState.Connecting(it)).reason
+        }
+        for (line in lines) assertTrue(line.orEmpty().isNotBlank())
+        assertEquals(lines.size, lines.distinct().size)
     }
 
     @Test
@@ -63,11 +66,10 @@ class ShellRoutingTest {
         val state = ConnectionUiState.Connected(
             "192.168.1.116", "1.4.6", "A4:CF:12:3B:9E:07", "v1",
         )
-        val mode = ShellRouting.mode(state)
-        assertTrue(mode is ShellMode.Shell)
-        assertEquals(state, (mode as ShellMode.Shell).conn)
-        assertNull(mode.reason)
-        assertFalse(mode.findIsRetryNetwork)
+        val view = ShellRouting.view(state)
+        assertEquals(state, view.conn)
+        assertNull(view.reason)
+        assertFalse(view.findIsRetryNetwork)
     }
 
     @Test
@@ -75,13 +77,12 @@ class ShellRoutingTest {
         // This is the state that used to be a dead-end screen: the user could only
         // re-scan or type an address, and the trips they had already recorded were
         // unreachable. Now it is the shell with nothing to show for Live and ESP.
-        val mode = ShellRouting.mode(ConnectionUiState.Failed("No Dashboard++ answered."))
-        assertTrue(mode is ShellMode.Shell)
-        assertNull((mode as ShellMode.Shell).conn)
-        assertTrue(mode.reason.orEmpty().isNotBlank())
+        val view = ShellRouting.view(ConnectionUiState.Failed("No Dashboard++ answered."))
+        assertNull(view.conn)
+        assertTrue(view.reason.orEmpty().isNotBlank())
         // The ladder just ran on a network that exists, so FIND DEVICE re-runs it
         // rather than asking whether there is a network at all.
-        assertFalse(mode.findIsRetryNetwork)
+        assertFalse(view.findIsRetryNetwork)
     }
 
     @Test
@@ -89,20 +90,19 @@ class ShellRoutingTest {
         // The reason line is what the Live cover says; it comes from the view model
         // and must not be rewritten on the way to the screen.
         val reason = "Lost connection to 192.168.1.116."
-        val shell = ShellRouting.mode(ConnectionUiState.Failed(reason)) as ShellMode.Shell
-        assertNull(shell.conn)
-        assertEquals(reason, shell.reason)
+        val view = ShellRouting.view(ConnectionUiState.Failed(reason))
+        assertNull(view.conn)
+        assertEquals(reason, view.reason)
     }
 
     @Test
     fun `nothing being reached for is the shell too, and its FIND DEVICE retries the network`() {
         val detail = ConnectionCore.NO_VEHICLE_SELECTED
-        val mode = ShellRouting.mode(ConnectionUiState.Idle(detail))
-        assertTrue(mode is ShellMode.Shell)
-        assertEquals(detail, (mode as ShellMode.Shell).reason)
+        val view = ShellRouting.view(ConnectionUiState.Idle(detail))
+        assertEquals(detail, view.reason)
         // With no vehicle to reach, the only thing worth retrying is whether there is a
         // network and a card to reach at all.
-        assertTrue(mode.findIsRetryNetwork)
+        assertTrue(view.findIsRetryNetwork)
     }
 
     @Test

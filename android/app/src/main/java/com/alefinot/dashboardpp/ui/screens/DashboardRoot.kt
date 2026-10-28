@@ -2,32 +2,30 @@ package com.alefinot.dashboardpp.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import com.alefinot.dashboardpp.ui.components.ScanProgressRing
 import com.alefinot.dashboardpp.ui.theme.HudColors
-import com.alefinot.dashboardpp.ui.theme.HudBrushes
-import com.alefinot.dashboardpp.ui.theme.HudeCfgNote
-import com.alefinot.dashboardpp.ui.theme.HudeHeading
-import com.alefinot.dashboardpp.viewmodel.ConnectionUiState
 import com.alefinot.dashboardpp.viewmodel.ConnectionViewModel
 import com.alefinot.dashboardpp.viewmodel.TripsViewModel
 
+/**
+ * The app's one screen, in every state.
+ *
+ * This used to be a `when` over the connection state, with six branches and three
+ * screens of its own: a splash, a full-page scan ring, and the dead ends. Each of them
+ * covered the whole window to say one sentence, and what they hid was the part of the app
+ * that never needed a dashboard — the trips that are already recorded, and the settings
+ * that belong to the phone.
+ *
+ * There is one screen now, and it opens on the vehicle page: the place where a
+ * connection is made, unmade and named. [ShellRouting] decides what the shell *says* for
+ * a state; this file only decides that it is always the same shell.
+ */
 @Composable
 fun DashboardRoot(activity: android.app.Activity, vm: ConnectionViewModel) {
     // One TripsViewModel for the whole session: it owns the file index and the
@@ -37,50 +35,21 @@ fun DashboardRoot(activity: android.app.Activity, vm: ConnectionViewModel) {
     val s = vm.uiState.value
     // Keep content inside the safe area: with targetSdk 35 edge-to-edge is
     // enforced, so without these insets the HUD chrome draws behind the
-    // system bars and overlaps the status bar / nav bar.
+    // status bar / nav bar.
     Box(
         Modifier
             .fillMaxSize()
             .background(HudColors.Bg)
             .statusBarsPadding()
-            .navigationBarsPadding()
+            .navigationBarsPadding(),
     ) {
-        // One decision, in one place: what to put up for the state the view model
-        // reports. Everything after "found a device or not" is the same shell - see
-        // ShellRouting, which is where the offline behaviour is actually decided.
-        val mode = ShellRouting.mode(s)
-        when (mode) {
-            is ShellMode.Scanning -> DiscoveryScreen(vm, mode.title)
-            is ShellMode.Shell -> AppShell(
-                conn = mode.conn,
-                reason = mode.reason,
-                findIsRetryNetwork = mode.findIsRetryNetwork,
-                connection = vm,
-                trips = trips,
-            )
-        }
-    }
-}
-
-@Composable
-fun DiscoveryScreen(vm: ConnectionViewModel, title: String) {
-    Box(Modifier.fillMaxSize().background(HudColors.Bg)) {
-        Column(
-            Modifier.align(Alignment.Center).padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            ScanProgressRing(vm.scanProgress.value, Modifier.size(56.dp))
-            Spacer(Modifier.height(24.dp))
-            Text(
-                title,
-                style = HudeHeading().copy(brush = HudBrushes.title),
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Scanning local network…",
-                color = HudColors.TextMuted,
-                style = HudeCfgNote(),
-            )
-        }
+        val view = ShellRouting.view(s)
+        AppShell(
+            conn = view.conn,
+            reason = view.reason,
+            findIsRetryNetwork = view.findIsRetryNetwork,
+            connection = vm,
+            trips = trips,
+        )
     }
 }
