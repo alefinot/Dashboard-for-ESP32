@@ -38,6 +38,8 @@ bool otaImageHashUpdate(const uint8_t *data, size_t len) {
   return mbedtls_sha256_update(&g_sha, data, len) == 0;
 }
 
+bool otaImageHashOpen() { return g_shaOpen; }
+
 bool otaImageHashFinish(uint8_t digest[32]) {
   if (!g_shaOpen || !digest) return false;
   int rc = mbedtls_sha256_finish(&g_sha, digest);

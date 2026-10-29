@@ -43,6 +43,11 @@ void otaImageHashBegin();
 bool otaImageHashUpdate(const uint8_t *data, size_t len);
 bool otaImageHashFinish(uint8_t digest[32]);
 
+// True when otaImageHashBegin() actually opened the context. Begin() returns
+// void because its only caller used to be the pull task; a caller that has to
+// decide "is this image hashed?" must be able to ask instead of assuming.
+bool otaImageHashOpen();
+
 // Verifies sigDer against digest + version. Returns true only on a valid
 // signature; mbedtlsErr (when given) receives the mbedTLS return code so the
 // caller can log why it failed.

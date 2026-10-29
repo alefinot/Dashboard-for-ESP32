@@ -2328,6 +2328,115 @@ static void ambientCalBrightPostHandler() {
   server.send(200, "application/json", buf);
 }
 
+// --- Signed LAN install (POST /api/ota) -------------------------------------
+// The image arrives over the same unauthenticated LAN HTTP server this unit
+// serves, and until now the upload path flashed anything that merely looked
+// like an ESP image (magic byte + plausible segment count). Only the pull path
+// ever called otaVerifyImage(), so the signature the maintainer publishes next
+// to firmware.bin proved nothing on the path most people use. With the phone
+// now downloading from GitHub and pushing over the LAN, this path is the
+// security boundary, so it verifies that same signature before the slot is
+// made bootable.
+//
+// Protocol: multipart POST with
+//   target_version  text field, required - the version string the .sig was made
+//                   over (it is inside the signed payload); one leading v/V is
+//                   dropped first, the way the pull path drops it
+//   signature       file part, required  - the DER signature (firmware.bin.sig)
+//   firmware        file part, required  - the image
+//   total_bytes     text field, optional - image size, for a real percentage
+//   force=1         text field, optional - reflash the identical version
+// The first two must precede the firmware part: the core parses a multipart
+// body strictly in order and hands each part to this handler as it arrives, so
+// a field placed after the image does not exist yet while the image is being
+// flashed. Binary data has to travel as a file part for the same reason - a
+// text part is read line by line, which would mangle DER.
+// OTA_ALLOW_UNSIGNED (bench builds only, the commented line in platformio.ini)
+// relaxes the LAN install exactly as it relaxes the pull path, so a contributor
+// without the maintainer's signing key can still flash a locally built image.
+// A release build compiles the requirement in, and nothing that arrives over
+// the network can ask for this.
+#ifdef OTA_ALLOW_UNSIGNED
+static const bool otaUploadSigRequired = false;
+#else
+static const bool otaUploadSigRequired = true;
+#endif
+
+static uint8_t g_otaUpSig[OTA_SIG_MAX_LEN];
+static size_t g_otaUpSigLen = 0;
+static bool g_otaUpSigStaged = false;  // a complete signature waits for its image
+static char g_otaUpVer[24] = "";       // target_version, verbatim (signed payload)
+static const char *g_otaUpReason = "";  // machine-readable refusal code
+static char g_otaUpDetail[96] = "";    // human-readable detail, also the client's msg
+static bool g_otaUploadActive = false;  // a part of this request reached the handler
+static bool g_otaUpClaimedScreen = false;  // this request took over the panel
+static volatile long otaUpBytes = 0;     // image bytes accepted into the slot
+static volatile long otaUpBytesTotal = 0;  // declared size, 0 = unknown
+
+// Update lifecycle. Read by GET /api/ota/check so a client can mirror whatever
+// the dashboard is showing instead of guessing from the HTTP reply. It tracks the
+// LAN install; cloud-pull outcomes keep reporting through the `status` string, so
+// a client that only needs "did the push work" should read `state`.
+enum class OtaPhase : uint8_t {
+  Idle, Staging, Receiving, Verifying, Writing, Done, Failed
+};
+static volatile OtaPhase otaPhase = OtaPhase::Idle;
+
+static const char *otaPhaseName(OtaPhase p) {
+  switch (p) {
+    case OtaPhase::Staging:   return "staging";
+    case OtaPhase::Receiving: return "receiving";
+    case OtaPhase::Verifying: return "verifying";
+    case OtaPhase::Writing:   return "writing";
+    case OtaPhase::Done:      return "done";
+    case OtaPhase::Failed:    return "error";
+    default:                  return "idle";
+  }
+}
+
+// 0..100 when the client declared total_bytes, -1 when it did not: reporting a
+// made-up percentage is worse than reporting none.
+static int otaUploadPercent() {
+  long total = otaUpBytesTotal;
+  if (total <= 0) return -1;
+  long pct = (otaUpBytes * 100L) / total;
+  return pct > 100 ? 100 : (int)pct;
+}
+
+// target_version is echoed back inside a JSON reply, so keep it to characters a
+// version can legitimately be built from and refuse everything else - no
+// quotes, spaces or control bytes can reach the client that way.
+static bool versionFieldOk(const char *s) {
+  if (!s || !*s) return false;
+  for (const char *p = s; *p; p++) {
+    if (*p >= '0' && *p <= '9') continue;
+    if (*p >= 'a' && *p <= 'z') continue;
+    if (*p >= 'A' && *p <= 'Z') continue;
+    if (*p == '.' || *p == '-' || *p == '_' || *p == '+') continue;
+    return false;
+  }
+  return true;
+}
+
+// One place records why an install was refused: the log, the status string the
+// dashboard and pollers read, and the code the POST reply carries as "reason".
+// It also drops any staged signature, because a refused attempt must not leave
+// one behind for a later request to pick up.
+static void otaUploadRefuse(const char *code, const char *fmt, ...) {
+  char detail[sizeof(g_otaUpDetail)];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(detail, sizeof(detail), fmt, ap);
+  va_end(ap);
+  g_otaUpReason = code;
+  snprintf(g_otaUpDetail, sizeof(g_otaUpDetail), "%s", detail);
+  g_otaUpSigStaged = false;
+  g_otaUpSigLen = 0;
+  otaPhase = OtaPhase::Failed;
+  logPrintf("OTA web: refused (%s) %s\n", code, detail);
+  setOtaPullStatus(detail);
+}
+
 static void otaPostHandler() {
   if (otaUpdateSuccess) {
     server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Update OK\"}");
@@ -2335,10 +2444,38 @@ static void otaPostHandler() {
     bootinfo_tag_reboot("ota");
     ESP.restart();
   } else {
-    server.send(500, "application/json", "{\"status\":\"error\",\"msg\":\"Update failed\"}");
+    // Keep status/msg for existing consumers and add a reason code: "signature
+    // invalid", "too big" and "no signature" are different problems and the app
+    // and WebUI can only say so if the firmware tells them which one it was.
+    if (!g_otaUploadActive) {
+      g_otaUpReason = "no_upload";
+      snprintf(g_otaUpDetail, sizeof(g_otaUpDetail),
+               "no firmware part in the request (send a multipart form with 'firmware')");
+    }
+    char body[208];
+    snprintf(body, sizeof(body),
+             "{\"status\":\"error\",\"msg\":\"%s\",\"reason\":\"%s\",\"state\":\"%s\"}",
+             g_otaUpDetail[0] ? g_otaUpDetail : "update failed",
+             g_otaUpReason[0] ? g_otaUpReason : "failed", otaPhaseName(otaPhase));
+    server.send(500, "application/json", body);
     otaUpdateInProgress = false;
     forceFullRedraw = true;
   }
+  // A staged signature belongs to the request that carried it. Clearing it here
+  // means a signature can never be picked up by a later POST: the only thing it
+  // can ever authorise is the image uploaded alongside it.
+  g_otaUpSigStaged = false;
+  g_otaUpSigLen = 0;
+  g_otaUploadActive = false;
+  // Same convention as every pull failure path: an install that is not going to
+  // happen must not leave the dashboard parked on the update screen. Only this
+  // request's own claim is released, so an upload that refused itself because a
+  // pull holds the slot cannot steal that pull's screen.
+  if (g_otaUpClaimedScreen && !otaUpdateSuccess) {
+    pendingOtaScreen = false;
+    forceFullRedraw = true;
+  }
+  g_otaUpClaimedScreen = false;
 }
 
 static void otaUploadHandler() {
@@ -2350,29 +2487,161 @@ static void otaUploadHandler() {
   static size_t uploadSeen = 0;      // bytes the client has handed us
   static bool uploadFailed = false;  // set once, ignores the rest of the body
   static uint8_t uploadMagic[2] = {0, 0};  // first bytes: image header check
+  // Signature part bookkeeping: the .sig arrives as its own file part, ordered
+  // before the image part (see the protocol note above).
+  static size_t sigSeen = 0;
+  static bool sigOverflow = false;  // client sent more than a signature can be
+
+  const bool isSigPart = (upload.name == "signature");
+  const bool isImagePart = (upload.name == "firmware");
 
   if (upload.status == UPLOAD_FILE_START) {
+    if (!isSigPart && !isImagePart) {
+      // A file part this protocol does not describe. Refuse rather than decide
+      // one of the client's extra files is the firmware.
+      logPrintf("OTA web: unexpected upload field '%s' - request refused\n",
+                upload.name.c_str());
+      g_otaUpReason = "bad_field";
+      snprintf(g_otaUpDetail, sizeof(g_otaUpDetail),
+               "unexpected upload field (expected 'firmware' and 'signature')");
+      uploadFailed = true;
+      return;
+    }
+    g_otaUploadActive = true;
+    if (isSigPart) {
+      // Stage the signature only. No flash work happens here: the OTA slot
+      // stays untouched until an image arrives with this signature in hand.
+      sigSeen = 0;
+      sigOverflow = false;
+      g_otaUpSigStaged = false;
+      g_otaUpSigLen = 0;
+      g_otaUpReason = "";
+      g_otaUpDetail[0] = 0;
+      otaPhase = OtaPhase::Staging;
+      logPrintf("OTA web: signature part started\n");
+      return;
+    }
     uploadWritten = 0;
     uploadSeen = 0;
     uploadFailed = false;
     uploadMagic[0] = uploadMagic[1] = 0;
-    if (otaSessionPoisoned || otaFlashSessionOpen) {
+    otaUpBytes = 0;
+    otaUpBytesTotal = 0;
+    // otaPullTaskRunning/otaPullDownloading are checked here too on purpose:
+    // otasign.cpp keeps ONE streaming hash context, shared by both install
+    // paths, so they must never overlap even before either opens the flash slot.
+    if (otaSessionPoisoned || otaFlashSessionOpen || otaPullTaskRunning ||
+        otaPullDownloading) {
       // The slot is already being written by a pull (or a reset pull left it
       // in an unknown state). A second writer would corrupt the image.
-      logPrintf("OTA web: upload refused - OTA slot busy\n");
+      otaUploadRefuse("slot_busy", "another update holds the OTA slot - wait for it to finish or reboot");
       uploadFailed = true;
       return;
     }
+    // A signature must have arrived first, in this same request. It is not
+    // reusable across requests anyway - it only ever authorises the image whose
+    // digest it covers - so refusing is also the clearest answer for a client
+    // that simply forgot it.
+    if (otaUploadSigRequired && !g_otaUpSigStaged) {
+      otaUploadRefuse("sig_missing",
+                      "no signature staged: send the .sig file as a 'signature' part before 'firmware'");
+      uploadFailed = true;
+      return;
+    }
+    if (otaUploadSigRequired && !otaSigningAvailable()) {
+      otaUploadRefuse("no_key", "this build has no signing key compiled in, so no image can be verified");
+      uploadFailed = true;
+      return;
+    }
+    String ver = server.arg("target_version");
+    if (ver.length() == 0 && otaUploadSigRequired) {
+      otaUploadRefuse("version_missing",
+                      "target_version is required: the version string the signature was made over");
+      uploadFailed = true;
+      return;
+    }
+    if (ver.length() >= sizeof(g_otaUpVer) || (ver.length() > 0 && !versionFieldOk(ver.c_str()))) {
+      otaUploadRefuse("version_bad", "target_version is too long or uses characters a version cannot contain");
+      uploadFailed = true;
+      return;
+    }
+    // One leading v/V is dropped, exactly as checkForFirmwareUpdate() drops it on
+    // the pull path: the signed payload is defined as the release tag less any
+    // leading v (scripts/ota_sign.py), so a client that sends the tag it read on
+    // GitHub ("v1.4.7") has to reach the verifier as "1.4.7" or a perfectly good
+    // signature fails. Nothing else is normalised - the rest of the string is
+    // inside the signed payload, so rewriting it would break the very binding the
+    // signature exists to prove.
+    g_otaUpVer[0] = 0;
+    if (ver.length() > 0) {
+      const char *vp = ver.c_str();
+      if (vp[0] == 'v' || vp[0] == 'V') vp++;
+      snprintf(g_otaUpVer, sizeof(g_otaUpVer), "%s", vp);
+      if (!g_otaUpVer[0]) {
+        otaUploadRefuse("version_bad", "target_version has no version left after its v prefix is dropped");
+        uploadFailed = true;
+        return;
+      }
+    }
+    // Downgrade guard. The signature proves which version this image really is,
+    // so refusing a lower one is a signature-backed decision and not a guess.
+    // Reflashing the identical version is allowed with force=1 (bench repair).
+    // Only checked when a version was claimed; a signed build always claims one
+    // by the time it gets here.
+    if (g_otaUpVer[0]) {
+      int vcmp = versionCmp(g_otaUpVer, effectiveVersion());
+      if (vcmp < 0) {
+        otaUploadRefuse("downgrade", "refusing %s: this unit reports %s - older images are not installed",
+                        g_otaUpVer, effectiveVersion());
+        uploadFailed = true;
+        return;
+      }
+      if (vcmp == 0 && server.arg("force") != "1") {
+        otaUploadRefuse("same_version", "%s is already installed - add force=1 to reflash the same image",
+                        g_otaUpVer);
+        uploadFailed = true;
+        return;
+      }
+    }
+    String total = server.arg("total_bytes");
+    if (total.length() > 0 && total.length() < 12) otaUpBytesTotal = total.toInt();
     otaUpdateSuccess = false;
     otaUpdateInProgress = true;
     pendingOtaScreen = true;
-    logPrintf("OTA web: start %s\n", upload.filename.c_str());
+    g_otaUpClaimedScreen = true;
+    otaPhase = OtaPhase::Receiving;
+    logPrintf("OTA web: start %s (%s, %ld bytes declared)\n", upload.filename.c_str(),
+              g_otaUpVer, (long)otaUpBytesTotal);
     if (!otaFlashOpen(UPDATE_SIZE_UNKNOWN)) {
       Update.printError(Serial);
+      otaUploadRefuse("slot_open_failed", "could not open the OTA slot for writing");
       uploadFailed = true;
+      return;
+    }
+    // Hash the image as it lands so the signature can be checked before
+    // Update.end(true) makes the slot bootable - a 1.9 MB image never has to
+    // sit in RAM (rule 14).
+    otaImageHashBegin();
+    if (!otaImageHashOpen()) {
+      otaUploadRefuse("hash_failed", "could not open a SHA-256 context, so this image cannot be verified");
+      otaFlashAbort();
+      uploadFailed = true;
+      return;
     }
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     if (uploadFailed) return;
+    if (isSigPart) {
+      if (upload.currentSize == 0) return;
+      if (sigSeen + upload.currentSize > sizeof(g_otaUpSig)) {
+        // Overflow is decided when the part ends; the rest of the body is only
+        // drained so the parser stays in step with the client.
+        sigOverflow = true;
+        return;
+      }
+      memcpy(g_otaUpSig + sigSeen, upload.buf, upload.currentSize);
+      sigSeen += upload.currentSize;
+      return;
+    }
     uploadSeen += upload.currentSize;
     // UPDATE_SIZE_UNKNOWN means nothing bounds this write, and Update.end(true)
     // marks whatever arrived as bootable - so a too-big or truncated upload
@@ -2381,8 +2650,8 @@ static void otaUploadHandler() {
     const esp_partition_t *slot = esp_ota_get_next_update_partition(NULL);
     size_t slotSize = slot ? slot->size : (size_t)ESP.getFreeSketchSpace();
     if (uploadSeen > slotSize) {
-      logPrintf("OTA web: upload bigger than the OTA slot (%zu bytes) - aborted\n",
-                uploadSeen);
+      otaUploadRefuse("too_big", "upload is bigger than the OTA slot (%zu bytes) - not activated",
+                      uploadSeen);
       otaFlashAbort();
       uploadFailed = true;
       return;
@@ -2393,13 +2662,23 @@ static void otaUploadHandler() {
     }
     if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
       Update.printError(Serial);
-      logPrintf("OTA web: write failed at %zu bytes - upload aborted\n",
-                uploadWritten);
+      otaUploadRefuse("write_failed", "flash write failed at %zu bytes - update aborted",
+                      uploadWritten);
       otaFlashAbort();
       uploadFailed = true;
       return;
     }
     uploadWritten += upload.currentSize;
+    // Hash exactly the bytes that landed in the slot, in order: this is the
+    // digest the signature has to cover. An empty chunk is skipped because the
+    // streaming helper takes a non-zero length.
+    if (upload.currentSize > 0 && !otaImageHashUpdate(upload.buf, upload.currentSize)) {
+      otaUploadRefuse("hash_failed", "image hash could not be updated at %zu bytes", uploadWritten);
+      otaFlashAbort();
+      uploadFailed = true;
+      return;
+    }
+    otaUpBytes = (long)uploadWritten;
     // upload.totalSize is cumulative bytes received so far during upload.
     // Scaling target progress up to max 240 during writing prevents
     // premature reboot (fillW >= 258) before Update.end(true) runs.
@@ -2408,7 +2687,25 @@ static void otaUploadHandler() {
     if (targetW > 240) targetW = 240;
     if (targetW > otaProgressTarget) otaProgressTarget = targetW;
   } else if (upload.status == UPLOAD_FILE_END) {
+    if (isSigPart) {
+      // A P-256 DER signature is 70-72 bytes; OTA_SIG_MAX_LEN caps what is
+      // kept. Anything outside 8..cap is not a plausible signature.
+      if (sigOverflow || sigSeen < 8 || sigSeen > OTA_SIG_MAX_LEN) {
+        otaUploadRefuse("sig_bad", "signature part is not a plausible signature (%zu bytes, 8..%u allowed)",
+                        sigSeen, (unsigned)OTA_SIG_MAX_LEN);
+      } else {
+        g_otaUpSigLen = sigSeen;
+        g_otaUpSigStaged = true;
+        logPrintf("OTA web: signature staged (%zu bytes)\n", sigSeen);
+      }
+      sigSeen = 0;
+      sigOverflow = false;
+      return;
+    }
     if (uploadFailed) {
+      if (!g_otaUpReason[0]) {
+        otaUploadRefuse("upload_aborted", "upload did not complete (%zu bytes accepted)", uploadWritten);
+      }
       logPrintf("OTA web: upload discarded (%zu bytes)\n", uploadWritten);
       otaUpdateInProgress = false;
       forceFullRedraw = true;
@@ -2420,17 +2717,55 @@ static void otaUploadHandler() {
     if (uploadWritten != uploadSeen || uploadWritten < 4096 ||
         uploadMagic[0] != ESP_IMAGE_HEADER_MAGIC ||
         uploadMagic[1] > ESP_IMAGE_MAX_SEGMENTS) {
-      logPrintf("OTA web: %zu bytes rejected (magic 0x%02X, segments %u) - not activated\n",
-                uploadWritten, uploadMagic[0], uploadMagic[1]);
+      otaUploadRefuse("image_rejected",
+                      "%zu bytes are not a usable image (magic 0x%02X, segments %u) - not activated",
+                      uploadWritten, uploadMagic[0], uploadMagic[1]);
       otaFlashAbort();
       otaUpdateInProgress = false;
       forceFullRedraw = true;
       return;
     }
+    // Signature check happens here, before end(true). end() is the call that
+    // makes the new slot bootable, so on this path nothing may reach it unless
+    // the image is complete, plausible AND signed by the key compiled into this
+    // unit - the rule the pull path has always enforced and the upload path
+    // never applied.
+    otaPhase = OtaPhase::Verifying;
+    bool accepted = false;
+    uint8_t digest[32];
+    int mbedErr = 0;
+    if (!otaUploadSigRequired) {
+      // Bench build (OTA_ALLOW_UNSIGNED): accept without checking, but still
+      // close the hash context so it cannot stay open across the reboot.
+      uint8_t unusedDigest[32];
+      otaImageHashFinish(unusedDigest);
+      logPrintf("OTA web: WARNING - signature check OFF (OTA_ALLOW_UNSIGNED bench build)\n");
+      accepted = true;
+    } else if (!otaImageHashFinish(digest)) {
+      otaUploadRefuse("hash_failed", "image hash could not be finalized");
+    } else if (otaVerifyImage(digest, g_otaUpVer, g_otaUpSig, g_otaUpSigLen, &mbedErr)) {
+      logPrintf("OTA web: signature VALID for v%s (%zu bytes)\n", g_otaUpVer, uploadWritten);
+      accepted = true;
+    } else {
+      otaUploadRefuse("sig_invalid",
+                      "signature does not match this image and version (mbedTLS -0x%x) - not flashed",
+                      (unsigned)(-mbedErr));
+    }
+    // A staged signature authorises one specific image; never reuse it.
+    g_otaUpSigStaged = false;
+    g_otaUpSigLen = 0;
+    if (!accepted) {
+      otaFlashAbort();
+      otaUpdateInProgress = false;
+      forceFullRedraw = true;
+      return;
+    }
+    otaPhase = OtaPhase::Writing;
     if (Update.end(true)) {
       otaFlashClose();
       logPrintf("OTA web: success %u bytes\n", upload.totalSize);
       otaUpdateSuccess = true;
+      otaPhase = OtaPhase::Done;
       otaProgressTarget = 258;
     } else {
       Update.printError(Serial);
@@ -2476,6 +2811,20 @@ static void otaCheckGetHandler() {
   doc["status"] = otaPullStatus;
   doc["status_updated"] = otaPullStatusUpdated;
   if (otaStatusMutex) xSemaphoreGive(otaStatusMutex);
+  // Update lifecycle, added so a client (phone app, WebUI) can mirror the
+  // dashboard instead of guessing from a reply that only arrives at the end.
+  // All additive: existing consumers keep reading status/current_version.
+  doc["state"] = otaPhaseName(otaPhase);
+  doc["percent"] = otaUploadPercent();  // -1 when total_bytes was not declared
+  doc["bytes"] = (long)otaUpBytes;
+  doc["bytes_total"] = (long)otaUpBytesTotal;
+  // An unsigned upload used to be flashed. It is refused now, and any client
+  // that cannot send a .sig needs to know that before it starts a long upload.
+  // Reports false only in an OTA_ALLOW_UNSIGNED bench build (see README).
+  doc["signature_required"] = otaUploadSigRequired;
+  doc["signing_key_present"] = otaSigningAvailable();
+  if (g_otaUpReason[0]) doc["error"] = g_otaUpReason;
+  if (g_otaUpVer[0]) doc["last_target_version"] = g_otaUpVer;
   String out;
   serializeJson(doc, out);
   server.send(200, "application/json", out);
