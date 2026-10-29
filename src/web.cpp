@@ -1005,6 +1005,11 @@ void weatherFetchTask(void *pvParameters) {
 }
 
 bool startWeatherFetch() {
+  // Quiet window: weather is an HTTPS client to a host nobody here controls,
+  // and a TLS handshake is exactly the multi-second CPU burst the window exists
+  // to keep away from the flash writes. Refuse to start one (not sticky - the
+  // next scheduled check runs normally once the window has closed).
+  if (otaQuietActive) return false;
   if (!weatherFetchMutex) return false;
   xSemaphoreTake(weatherFetchMutex, portMAX_DELAY);
   if (weatherTaskRunning) {
@@ -1167,6 +1172,115 @@ static void otaFlashAbort() {
   if (!otaFlashSessionOpen) return;  // already closed / never opened
   otaFlashSessionOpen = false;
   Update.abort();
+}
+
+// --- Firmware-update quiet window -------------------------------------------
+// The firmware's design turns on one window: the seconds while an image is
+// streaming into the OTA slot. Everything that competes for the flash bus, the
+// heap or core 0 is parked for the duration, the panel shows nothing but the
+// update screen, and the web server keeps answering only what the phone that is
+// pushing the image actually needs. Both directions run in the web task only
+// (the upload handler, the POST completion, the web loop), so the window state
+// needs no lock; otaQuietActive is the one shared flag, and the tasks that read
+// it park at their own loop tops instead of being suspended from here, because
+// suspending a task that holds g_stateMutex would take the display task with it
+// (rule 11). See Implementation plans/MANUAL_OTA_PHONE_PUSH_PLAN-2026-10-28.md 5.2.
+//
+// A client that dies mid-transfer produces no UPLOAD_FILE_END and no POST
+// completion, so the web loop closes the window itself once no byte has been
+// seen for this long. Two minutes is deliberately generous: a healthy 1.9 MB
+// LAN push finishes in well under a minute and its longest natural gap is the
+// few seconds of SHA-256 + ECDSA verify at the end.
+static const unsigned long OTA_QUIET_STALL_MS = 120000UL;
+static unsigned long otaQuietSinceMs = 0;
+static int otaQuietPrevMhz = 0;  // 0 = this window did not touch the clock
+
+void otaQuietEnter(const char *why) {
+  // Idempotent: a retry after a refusal must not stack a second window on the
+  // first, because only one window's clock/heap state is remembered to restore.
+  if (otaQuietActive) return;
+  otaQuietSinceMs = millis();
+  otaQuietLastByteMs = otaQuietSinceMs;
+
+  // 1. Hand the heap back before anything needs it. The speed sprite and the
+  // 120px digit font belong to the display task, so ask that task to free them
+  // and wait for it: freeing them from here would race the frame in flight.
+  // Same handshake the weather fetch and the pull path already use.
+  if (!otaMemReleased) {
+    otaMemReleaseRequested = true;
+    otaMemReleased = false;
+    unsigned long t0 = millis();
+    while (!otaMemReleased && (millis() - t0) < 3000)
+      vTaskDelay(pdMS_TO_TICKS(2));
+    // The release is one-shot; clear the request either way so a wedged display
+    // task cannot leave it set forever (the pull path clears it the same way).
+    otaMemReleaseRequested = false;
+    if (!otaMemReleased)
+      logPrintf("OTA quiet: UI buffers not released within 3000ms (heap=%lu) - continuing\n",
+                (unsigned long)ESP.getFreeHeap());
+  }
+
+  // 2. Put the panel into update mode and wait for the display task to confirm
+  // it drew the screen, so the first flash write happens behind a finished,
+  // static picture. Safe to leave up during the writes because the update
+  // screen neither reads flash nor allocates: display.loadVLWFont() is
+  // overridden to select the compiled-in font arrays (gfx.cpp), and the
+  // progress bar is fillRects. Bounded wait - a wedged display task must not be
+  // able to hold an upload hostage, and the screen is a courtesy, not a
+  // precondition of a safe install.
+  otaScreenDrawn = false;
+  pendingOtaScreen = true;
+  unsigned long drawT0 = millis();
+  while (!otaScreenDrawn && (millis() - drawT0) < 1500)
+    vTaskDelay(pdMS_TO_TICKS(2));
+  if (!otaScreenDrawn) logPrintf("OTA quiet: update screen not confirmed within 1500ms\n");
+
+  // 3. Dynamic frequency scaling may drop this chip to 80 MHz whenever it is
+  // idle, and that decision is free to land in the middle of a transfer. The
+  // flash driver and the WiFi stack are both clock-sensitive, so pin 240 MHz for
+  // the window and put the previous setting back on the way out - a user's
+  // MANUAL_CPU_FREQ is restored, not rewritten in NVS.
+  otaQuietPrevMhz = 0;
+  int mhz = getCpuFrequencyMhz();
+  if (mhz != 240) {
+    if (setCpuFrequencyMhz(240)) {
+      otaQuietPrevMhz = mhz;
+      logPrintf("OTA quiet: CPU pinned 240 MHz (was %d) for the window\n", mhz);
+    } else {
+      logPrintf("OTA quiet: setCpuFrequencyMhz(240) failed, staying at %d MHz\n", mhz);
+    }
+  }
+
+  // 4. Weather: ask an in-flight fetch to drop its result and refuse new ones.
+  // The fetch task is never deleted from here - that is how a stuck mbedTLS
+  // task used to leak its stack and TLS context into SAFE MODE.
+  if (weatherTaskRunning) weatherAbort = true;
+
+  // 5. Open the window last: every step above may block, and no task should be
+  // parked behind a wait that needs the very tasks being parked.
+  otaQuietActive = true;
+  logPrintf("OTA quiet: opened (%s) heap=%lu maxAlloc=%lu in %lums\n", why ? why : "-",
+            (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap(),
+            (unsigned long)(millis() - otaQuietSinceMs));
+}
+
+void otaQuietExit(const char *why) {
+  // No-op unless a window is open. Every refusal that happens before the window
+  // opens (bad signature, same version, slot busy...) lands here harmlessly.
+  if (!otaQuietActive) return;
+  otaQuietActive = false;
+  if (otaQuietPrevMhz) {
+    if (!setCpuFrequencyMhz((uint32_t)otaQuietPrevMhz))
+      logPrintf("OTA quiet: CPU left at 240 MHz, wanted %d MHz\n", otaQuietPrevMhz);
+    otaQuietPrevMhz = 0;
+  }
+  // Let the next window free the UI buffers again: processOtaMemRelease latches
+  // on `released`, while the sprites themselves are rebuilt by the display task
+  // on the first frame after forceFullRedraw.
+  otaMemReleased = false;
+  forceFullRedraw = true;
+  logPrintf("OTA quiet: closed (%s) after %lums heap=%lu\n", why ? why : "-",
+            (unsigned long)(millis() - otaQuietSinceMs), (unsigned long)ESP.getFreeHeap());
 }
 
 // TLS: check the server certificate against the CA bundle compiled into the
@@ -2459,6 +2573,10 @@ static void otaPostHandler() {
              g_otaUpReason[0] ? g_otaUpReason : "failed", otaPhaseName(otaPhase));
     server.send(500, "application/json", body);
     otaUpdateInProgress = false;
+    // Whatever went wrong, the install is over and the dashboard comes back:
+    // close the quiet window (a no-op when the request refused itself before it
+    // opened) so the endpoints this request parked start answering again.
+    otaQuietExit(g_otaUpReason[0] ? g_otaUpReason : "upload failed");
     forceFullRedraw = true;
   }
   // A staged signature belongs to the request that carried it. Clearing it here
@@ -2612,6 +2730,10 @@ static void otaUploadHandler() {
     otaPhase = OtaPhase::Receiving;
     logPrintf("OTA web: start %s (%s, %ld bytes declared)\n", upload.filename.c_str(),
               g_otaUpVer, (long)otaUpBytesTotal);
+    // Everything cheap has been checked and the client has been refused if it
+    // was going to be: from here the window is open, and the only exit is the
+    // POST completion (otaPostHandler) or the web loop's stall watchdog.
+    otaQuietEnter("lan upload");
     if (!otaFlashOpen(UPDATE_SIZE_UNKNOWN)) {
       Update.printError(Serial);
       otaUploadRefuse("slot_open_failed", "could not open the OTA slot for writing");
@@ -2679,6 +2801,9 @@ static void otaUploadHandler() {
       return;
     }
     otaUpBytes = (long)uploadWritten;
+    // Feed the window's stall watchdog: this is the proof that bytes are still
+    // arriving, and the only thing that keeps a live upload looking alive.
+    otaQuietLastByteMs = millis();
     // upload.totalSize is cumulative bytes received so far during upload.
     // Scaling target progress up to max 240 during writing prevents
     // premature reboot (fillW >= 258) before Update.end(true) runs.
@@ -2823,6 +2948,12 @@ static void otaCheckGetHandler() {
   // Reports false only in an OTA_ALLOW_UNSIGNED bench build (see README).
   doc["signature_required"] = otaUploadSigRequired;
   doc["signing_key_present"] = otaSigningAvailable();
+  // Quiet window: true while the dashboard is showing the update screen and
+  // every endpoint outside the allow-list answers 503. A phone uses this to tell
+  // "the unit is installing" from "the unit went quiet, retry later".
+  doc["quiet"] = otaQuietActive;
+  if (otaQuietActive)
+    doc["quiet_silent_ms"] = (unsigned long)(millis() - otaQuietLastByteMs);
   if (g_otaUpReason[0]) doc["error"] = g_otaUpReason;
   if (g_otaUpVer[0]) doc["last_target_version"] = g_otaUpVer;
   String out;
@@ -3172,6 +3303,36 @@ void webServerTask(void *pvParameters) {
 
   server.on("/api/health", HTTP_GET, healthGetHandler);
 
+  // Quiet-window gate. While a firmware update is in flight the panel is the
+  // only UI and the phone has exactly two jobs: push the image, and ask how far
+  // it got. Every other endpoint answers 503 instead of building a JSON document
+  // on a heap the update is using - which is the same starvation that made the
+  // pull path fail, only self-inflicted.
+  //
+  // A middleware rather than a check in each handler because there are thirty
+  // routes and three that must keep working, and because a route added next
+  // month is closed by default: the failure mode of a gate like this should be
+  // "someone could not open the sensors page during an update", never "a new
+  // endpoint silently allocated heap in the middle of a flash write".
+  //
+  // The allow-list is: /api/ota* (the install itself, its progress endpoint, and
+  // the pull trigger, whose handlers already answer 409/200-busy themselves),
+  // /api/health (so a client can tell "alive but busy" from "dead"), and "/" (so
+  // someone who opens the WebUI mid-update sees a page instead of an error).
+  // The upload data itself never passes through here: multipart bodies are
+  // parsed before the middleware chain runs, so this gate cannot stall a
+  // transfer that is already under way.
+  server.addMiddleware([](WebServer &srv, Middleware::Callback next) -> bool {
+    if (!otaQuietActive) return next();  // normal case: one branch, no allocation
+    const String uri = srv.uri();
+    if (srv.method() == HTTP_OPTIONS || uri == "/" || uri == "/api/health" ||
+        uri.startsWith("/api/ota"))
+      return next();
+    srv.send(503, "application/json",
+             "{\"error\":\"ota update in progress\",\"retry\":\"after the update finishes\"}");
+    return true;  // handled: do not route
+  });
+
   server.begin();
   logPrintf("Web server started: heap=%lu B, maxalloc=%lu B\n",
             (unsigned long)ESP.getFreeHeap(),
@@ -3211,6 +3372,26 @@ void webServerTask(void *pvParameters) {
       otaPullDownloading = false;
       pullStartedAt = 0;
       forceFullRedraw = true;
+    }
+
+    // Quiet-window stall watchdog. A phone that dies mid-transfer leaves no
+    // UPLOAD_FILE_END and no POST completion, so nothing else would close the
+    // window: the panel would sit on the update screen and every endpoint but
+    // three would answer 503 until someone pulled the power. Measured from the
+    // last accepted byte, not from the start of the window.
+    if (otaQuietActive && millis() - otaQuietLastByteMs > OTA_QUIET_STALL_MS) {
+      logPrintf("OTA quiet: no upload bytes for %lums - closing window\n",
+                (unsigned long)(millis() - otaQuietLastByteMs));
+      g_otaUpReason = "upload_stalled";
+      snprintf(g_otaUpDetail, sizeof(g_otaUpDetail),
+               "upload stopped sending bytes - update abandoned, dashboard restored");
+      otaFlashAbort();
+      otaUpdateInProgress = false;
+      g_otaUploadActive = false;
+      g_otaUpClaimedScreen = false;
+      pendingOtaScreen = false;  // in case it was never picked up
+      otaPhase = OtaPhase::Failed;
+      otaQuietExit("upload stalled");
     }
 
     // NTP settle check (issue #43): configTime() starts lwIP's SNTP client, and

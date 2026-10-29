@@ -1902,6 +1902,16 @@ void gpsTask(void *pvParameters) {
   // guard below is always true (max 255 < 256) and the compiler says so.
   static uint16_t gpsRawIdx = 0;
   for (;;) {
+    // Firmware-update quiet window: the GNSS feed waits here for the duration.
+    // This cooperative park is deliberate - vTaskSuspend() from the web task
+    // would freeze this task wherever it happened to be, including inside a
+    // g_stateMutex section, and the display task taking that lock would stall
+    // with it (rule 11). Nothing watches this task's liveness (no heartbeat, no
+    // watchdog, nothing restarts the module on a gap), so parking costs a
+    // speed/GPS readout that stays frozen behind the update screen, while the
+    // gain is a core no longer doing 10 Hz UART drains and NMEA parses next to
+    // the flash writes.
+    while (otaQuietActive) vTaskDelay(pdMS_TO_TICKS(200));
     // Cap GPS bytes parsed per tick. A module burst (baud mismatch, buffer
     // backlog, message dump) can otherwise keep the drain loop running for
     // SECONDS, freezing the whole sensor task (and every real-mode value with

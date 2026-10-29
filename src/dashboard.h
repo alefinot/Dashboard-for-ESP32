@@ -825,6 +825,26 @@ void startOtaPull(bool manual, bool skipThrottle = false);
 void processOtaMemRelease();
 extern volatile bool otaMemReleaseRequested;
 extern volatile bool otaMemReleased;
+
+// Firmware-update quiet window. While a LAN install is in flight the panel
+// shows only the update screen and everything that is not the panel, the upload
+// itself or the trip button is parked: GNSS and the CPU probes wait at their
+// loop tops (cooperatively - suspending a task from outside can freeze it
+// inside a g_stateMutex section), weather is aborted, the CPU is pinned to
+// 240 MHz and the web server answers 503 on every endpoint the phone does not
+// need. Entered/left from the web task only; `true` means the window is open.
+// See Implementation plans/MANUAL_OTA_PHONE_PUSH_PLAN-2026-10-28.md 5.2.
+extern volatile bool otaQuietActive;
+void otaQuietEnter(const char *why);
+void otaQuietExit(const char *why);
+// Set by the display task once the update screen is actually on the panel, so
+// the web task can open the flash slot behind a finished picture instead of
+// halfway through a screen draw (otaQuietEnter waits on it, bounded).
+extern volatile bool otaScreenDrawn;
+// Bytes of the current install seen recently, so the web loop can close a
+// window whose client died mid-transfer (a dropped TCP connection produces no
+// UPLOAD_FILE_END). Published on /api/ota/check as quiet_silent_ms.
+extern volatile unsigned long otaQuietLastByteMs;
 void processMemSaverRelease();
 extern volatile bool memSaverRequested;
 extern volatile bool memSaverActive;

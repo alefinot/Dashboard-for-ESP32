@@ -466,7 +466,7 @@ The management portal features a modern grouped card-based layout:
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `application/json` (same shape as `cal-dark`) |
 | `/api/ota` | `POST` | Firmware install over the LAN — **the signature is verified before the image is flashed** (see *Signed LAN install*) | `multipart/form-data`: `target_version`, `signature` (file part), `firmware` (file part); optional `total_bytes`, `force=1` | `application/json` |
 | `/api/ota/pull` | `POST` | Triggers cloud OTA pull (checks `OTA_PULL_URL`) | None | `text/plain` |
-| `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled`, `url`, `current_version`, `build_version`, `version_override`, `previous_version`, `status`, `status_updated`) **and install state**: `state` (tracks the LAN install; pull outcomes report through `status`), `percent`, `bytes`, `bytes_total`, `signature_required`, `signing_key_present`, `error`, `last_target_version` (the version an install verified against, after that `v` drop) | None | `application/json` |
+| `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled`, `url`, `current_version`, `build_version`, `version_override`, `previous_version`, `status`, `status_updated`) **and install state**: `state` (tracks the LAN install; pull outcomes report through `status`), `percent`, `bytes`, `bytes_total`, `signature_required`, `signing_key_present`, `quiet`, `quiet_silent_ms`, `error`, `last_target_version` (the version an install verified against, after that `v` drop). Answers normally even during a quiet window — it is on the allow-list | None | `application/json` |
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
 | `/api/perf` | `GET` | Live telemetry (CPU, Heap, task stack headroom, FPS, WiFi, partitions), plus the web task's own timing: `web_serve_ms_last` / `web_serve_ms_max` (what one `handleClient()` pass costs) and `web_slow_iters` (loop iterations over 100 ms). Also reports `mac`: the base eFuse MAC (uppercase, colon-separated) - the stable device identity the companion app binds its vehicle card to, unchanged by Wi-Fi mode or DHCP | None | `application/json` |
 | `/api/health` | `GET` | Health probe: heap, FPS, partition layout and the NVS entry budget (`nvs_bytes`, `nvs_entries_used` / `_available` / `_total`) | None | `application/json` |
@@ -875,11 +875,61 @@ A refusal aborts the OTA slot, never reboots, and answers `500` with a sentence 
 | `too_big` / `image_rejected` | Larger than the OTA partition, or not a usable ESP image |
 | `write_failed` / `hash_failed` | Flash write failed, or the image could not be hashed (never treated as a pass) |
 | `upload_aborted` | The image part ended without completing and nothing else recorded a cause |
+| `upload_stalled` | No byte of the image arrived for 120 s — the client died mid-transfer, so the unit closed the window and restored the dashboard by itself |
 | `no_key` / `no_upload` / `bad_field` | No public key compiled in, no `firmware` part, or an unexpected file part |
 
 `OTA_ALLOW_UNSIGNED` relaxes this path as well as the pull path (see the note
 under *Cloud OTA Pull & Firmware Signing*), so a bench build without the
 maintainer's key can still be installed over the LAN.
+
+#### Firmware-update quiet window
+
+While an image is streaming into the OTA slot the unit is doing the single most
+fragile thing it ever does: writing 1.9 MB of flash at the same moment that the
+heap it needs to do it is also the heap every JSON endpoint, TLS client and
+telemetry stream allocates from. Starving that write is not a slow update, it is
+a failed update — and the failure mode that made the cloud pull unreliable for a
+year. So during the window the dashboard stops competing for the flash bus, the
+heap and core 0:
+
+| What | What happens |
+|---|---|
+| Panel | Shows only the update screen. The screen is drawn **before** the first flash write and never redrawn; it reads no flash and allocates nothing, which is what makes it safe to leave up (the display driver's `loadVLWFont()` selects compiled-in font arrays, not LittleFS files) |
+| GNSS task | Waits at its loop top. Parked cooperatively, never `vTaskSuspend()`ed — suspending a task that happens to hold `g_stateMutex` would stall the display task with it (rule 11). Nothing watches this task's liveness, so the park cannot trip a watchdog; the cost is a speed/GPS readout frozen behind a screen that already hides it |
+| CPU probes | Sleep 250 ms instead of 1 ms per core, so the frequency governor and the idle path stop making decisions around the flash writes (`/api/perf` reads ~100 % busy for the window, which is the truth) |
+| Weather | An in-flight fetch is asked to drop its result and new fetches are refused — an HTTPS call to a host nobody here controls is exactly the multi-second TLS burst the window exists to keep away |
+| CPU clock | Pinned to 240 MHz (dynamic frequency scaling is allowed to drop the chip to 80 MHz whenever it looks idle, and that decision can land mid-write). The previous setting is restored on the way out; a user's `MANUAL_CPU_FREQ` is not rewritten in NVS |
+| Speed sprite + 120 px font | Freed by the display task before the window opens, same handshake the weather fetch and the pull path already use |
+| REST API | Everything outside the allow-list answers `503 {"error":"ota update in progress"}` |
+
+The allow-list is deliberately three entries: `/api/ota*` (the install, its
+progress endpoint, and the pull trigger — whose handlers already answer busy
+themselves), `/api/health` (so a client can tell *alive but busy* from *dead*),
+and `/` (so opening the WebUI mid-update shows a page rather than an error).
+Everything else — `/api/live`, `/api/config`, `/api/snapshot`, `/api/sensors`,
+`/api/perf`, `/api/serial` — is closed, because a route added next month is
+closed by default: the failure mode of a gate like this should be *someone could
+not open the sensors page during an update*, never *a new endpoint silently
+allocated heap in the middle of a flash
+write*.
+
+The gate is a `WebServer` middleware, and it cannot stall an upload that is
+already running: multipart bodies are parsed before the middleware chain is
+called, so the image bytes reach the flash handler whatever the gate decides.
+
+**The window always closes.** A phone that dies mid-transfer sends no
+`UPLOAD_FILE_END` and no completing `POST`, so nothing would unwind it: the panel
+would sit on the update screen and four-fifths of the API would answer 503 until
+someone pulled the power. The web loop therefore watches the gap since the last
+accepted byte and closes the window itself after **120 s** of silence — ten times
+the longest natural gap of a healthy push (the few seconds of SHA-256 plus ECDSA
+verification at the end), measured per byte rather than from the start of the
+window. Closing restores the dashboard (`forceFullRedraw`), restores the clock,
+reports `upload_stalled`, and lets the endpoints answer again.
+
+Two read-only fields on `/api/ota/check` let a client mirror this instead of
+guessing: `quiet` (the window is open) and `quiet_silent_ms` (bytes have been
+silent this long while it is open).
 
 #### Cloud OTA Pull & Firmware Signing
 
@@ -972,7 +1022,7 @@ The cloud pull has verified an ECDSA signature since 1.4, but the LAN upload nev
 - Downgrades are refused on the strength of the signature, and reflashing the *identical* version needs `force=1` — the bench-repair case, and now a checkbox in the Web UI instead of a recompile.
 - The two install paths exclude each other before either opens the flash slot: `otasign.cpp` holds **one** streaming SHA-256 context, so an upload arriving during a pull is refused rather than hashing over the top of it.
 - `otaImageHashOpen()` is new so a caller can ask whether hashing actually started. `otaImageHashBegin()` returns `void`, and "this image could not be hashed" must never be silently read as "this image was verified".
-- `GET /api/ota/check` gained read-only install state — `state` (`idle|staging|receiving|verifying|writing|done|error`; it tracks the LAN install, whose progress a pushing client mirrors, while cloud-pull outcomes keep reporting through `status`), `percent` (`-1` when the client sent no `total_bytes`, rather than a made-up figure), `bytes`, `bytes_total`, `signature_required`, `signing_key_present`, `error`, `last_target_version`. All additive; the app's existing reader of `current_version`/`status` is untouched.
+- `GET /api/ota/check` gained read-only install state — `state` (`idle|staging|receiving|verifying|writing|done|error`; it tracks the LAN install, whose progress a pushing client mirrors, while cloud-pull outcomes keep reporting through `status`), `percent` (`-1` when the client sent no `total_bytes`, rather than a made-up figure), `bytes`, `bytes_total`, `signature_required`, `signing_key_present`, `quiet` / `quiet_silent_ms` (the update quiet window is open, and how long it has seen no bytes), `error`, `last_target_version`. All additive; the app's existing reader of `current_version`/`status` is untouched.
 
 **Web UI (`src/webui.html`)**
 - The firmware card asks for `firmware.bin`, its `.sig` and the version, prefilled from a file name like `firmware-1.4.7.bin` and remembered between visits. The button names what is still missing — `Pick the .sig`, `Enter signed version`, `Install 1.4.7` — so an incomplete install is caught before 1.9 MB crosses the Wi-Fi rather than after.

@@ -22,6 +22,11 @@ volatile bool pendingSleep = false;
 volatile bool pendingReboot = false;
 volatile bool otaUpdateInProgress = false;
 volatile bool pendingOtaScreen = false;
+// Firmware-update quiet window (see dashboard.h / plan 5.2): owned by the web
+// task, read by the tasks that park themselves while it is open.
+volatile bool otaQuietActive = false;
+volatile unsigned long otaQuietLastByteMs = 0;
+volatile bool otaScreenDrawn = false;
 
 bool pendingInvertDisplay = false;
 int pendingBacklightValue = -1;
@@ -89,8 +94,13 @@ static volatile uint32_t cpuProbeTicks[2] = {0, 0};
 static void cpuProbeTask(void *pv) {
   int core = (int)(intptr_t)pv;
   for (;;) {
-    cpuProbeTicks[core] = cpuProbeTicks[core] + 1;
-    vTaskDelay(1);
+    // Quiet window: this task exists to measure idle time, and during a
+    // firmware update its 1 ms wake-up per core is pure scheduling noise around
+    // the flash writes. Parked it wakes 250x less often, which also makes the
+    // busy% readout read ~100% for the window - the honest answer, since the
+    // core really is saturated by the transfer and nothing else is competing.
+    if (!otaQuietActive) cpuProbeTicks[core] = cpuProbeTicks[core] + 1;
+    vTaskDelay(otaQuietActive ? pdMS_TO_TICKS(250) : 1);
   }
 }
 
@@ -671,6 +681,11 @@ void loop() {
     if (pendingOtaScreen) {
       pendingOtaScreen = false;
       showUpdatingScreen();
+      // Ack for the web task: the panel is now covered by a finished, static
+      // picture, so a flash write starting now happens behind the screen and
+      // not under it. Nothing else may draw between here and the ack - the
+      // update screen is the only thing a quiet window shows.
+      otaScreenDrawn = true;
     }
 
     if (!otaUpdateInProgress) {
