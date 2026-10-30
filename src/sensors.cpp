@@ -1,4 +1,5 @@
 #include "dashboard.h"
+#include "bootinfo.h"  // bootinfo_tag_reboot: why the panel's hold restarted the unit
 #include "noisebench.h"
 #include "esp_rom_sys.h"
 #include "driver/gpio.h"
@@ -1369,6 +1370,13 @@ void processFuelSensor() {
 // (one write per full km) is unchanged.
 static void saveOdometerNvs() {
   static unsigned long lastAttemptMs = 0;
+  // Quiet window: an NVS write suspends flash-resident code on both cores, and
+  // the value being persisted is a RAM-resident double that only advances its
+  // saved marker on success - so skipping an attempt costs nothing but a later
+  // retry, while writing here would put a second writer on the bus the OTA slot
+  // is using. Checked before lastAttemptMs on purpose: the tick that lands after
+  // the window closes is allowed to save immediately.
+  if (otaQuietActive) return;
   unsigned long nowMs = millis();
   if (lastAttemptMs != 0 && nowMs - lastAttemptMs < 30000UL)
     return;
@@ -2142,6 +2150,22 @@ void gpsTask(void *pvParameters) {
 // ISRs light). The press has to be held TRIP_RESET_HOLD_MS so knocking the dash
 // cannot wipe a trip, and it re-arms only after the button is released.
 void processTripResetButton() {
+  // A firmware update owns GPIO25 for its whole duration. This returns before
+  // both of this function's jobs - the physical hold and the Web UI's remote
+  // request - because the screen that is asking you not to turn off the device
+  // is not the screen to be quietly zeroing a trip behind. A remote reset that
+  // arrives in this window is dropped, not queued: a request that was aimed at
+  // the dashboard must not fire on the dashboard five minutes later, when the
+  // trip it referred to is history. The screen's own use of the same button is
+  // processOtaScreenButton(), polled from the display loop.
+  if (otaPanelTaken()) {
+    if (pendingTripReset) {
+      pendingTripReset = false;
+      logPrintf("Trip reset: dropped - firmware update owns the panel\n");
+    }
+    return;
+  }
+
   // Web UI / remote reset request: applied here, on the core that owns the
   // trip state, never from the web task itself.
   if (pendingTripReset) {
@@ -2175,6 +2199,55 @@ void processTripResetButton() {
     holdStartMs = 0;
     resetTripStats("button");
   }
+}
+
+// GPIO25 while a firmware-update screen owns the panel. One gesture, one
+// meaning: hold OTA_HOLD_RESTART_MS and the unit restarts. Nothing else is
+// reachable here - not the trip reset (that path returns early) and not a
+// second 1.5 s interpretation that could zero a trip on the way to a restart.
+//
+// It runs from the display loop instead of the sensor task because that is the
+// task that owns the screen lifecycle, and because the install holds the heap
+// and the flash bus this task would otherwise need - a 20 ms poll of one input
+// pin is the only thing it does here. The debounce is this function's own: the
+// trip path's statics are frozen mid-press while the panel is taken, and
+// re-sharing them would mean one state machine with two owners.
+void processOtaScreenButton() {
+  static unsigned long lastChangeMs = 0;
+  static unsigned long holdStartMs = 0;
+  static bool lastRaw = true;  // pull-up: unpressed reads HIGH
+  static bool pressed = false;
+
+  unsigned long nowMs = millis();
+  bool raw = (digitalRead(TRIP_RESET_PIN) == LOW);
+  if (raw != lastRaw) {
+    lastRaw = raw;
+    lastChangeMs = nowMs;
+  } else if (pressed != lastRaw &&
+             nowMs - lastChangeMs >= TRIP_RESET_DEBOUNCE_MS) {
+    pressed = lastRaw;
+    if (pressed)
+      holdStartMs = nowMs;  // a confirmed press starts the clock here
+    else
+      holdStartMs = 0;      // released: re-arms for the next press
+  }
+  if (!pressed || holdStartMs == 0) return;
+  if (nowMs - holdStartMs < (unsigned long)OTA_HOLD_RESTART_MS) return;
+  holdStartMs = 0;  // one gesture per press, whatever happens next
+
+  // The one thing that must not happen mid-write. A reset while bytes are going
+  // into the OTA slot is a half-written image in the inactive slot - recoverable
+  // (the bootloader falls back), but it is the exact failure this update flow
+  // exists to remove, so the button is ignored here and the screen says why. The
+  // hold works during the handshake, during verification, on the done frame and
+  // on the error frame: everywhere but between two flash writes.
+  if (otaFlashWriteActive()) {
+    logPrintf("OTA screen: restart hold ignored - writing flash, wait for it to finish\n");
+    return;
+  }
+  logPrintf("OTA screen: trip button held %d ms - restarting\n", OTA_HOLD_RESTART_MS);
+  bootinfo_tag_reboot("hold-restart-during-update");
+  ESP.restart();
 }
 
 void sensorTask(void *pvParameters) {

@@ -872,6 +872,156 @@ void showUpdatingScreen() {
   ledcWrite(BL_DISPLAY, fadeTarget);
 }
 
+// Word-wrap a sentence into fixed line slots for the update screens. The VLW
+// fonts are proportional, so the measurement has to be textWidth() and not a
+// character count: 40 characters of this detail string spans 260 px or 400 px
+// depending on the letters, and a 96-char sentence that overruns the panel is
+// exactly how an error message stops being usable. Returns the number of lines
+// filled; text that does not fit is cut with an ellipsis on the last one. The
+// 47-character slot is what bounds the memory footprint (three lines, no heap):
+// for a token made of nothing but wide glyphs a full slot can still end up wider
+// than maxW and the panel clips it, so callers pass sentences, not raw tokens.
+static int wrapOtaText(char lines[][48], int maxLines, int maxW, const char *src) {
+  if (!src) src = "";
+  const size_t total = strlen(src);
+  size_t i = 0;
+  int n = 0;
+  while (i < total && n < maxLines) {
+    while (src[i] == ' ' || src[i] == '\n')
+      i++;  // a line never starts on a space or on a blank line
+    char line[48];
+    size_t len = 0, lastWord = 0, lineStart = i;
+    while (i < total && src[i] != '\n') {
+      if (len >= sizeof(line) - 1) break;  // slot full: hard break mid-word
+      line[len] = src[i];
+      line[len + 1] = '\0';
+      if (src[i] == ' ') lastWord = len + 1;
+      if ((int)display.textWidth(line) > maxW) {
+        // This character does not fit. Cut at the last whole word when that
+        // leaves something on the line, otherwise keep the characters we have -
+        // a token longer than the panel still has to be shown somehow.
+        if (lastWord >= 1 && lastWord < len) {
+          i = lineStart + lastWord;
+          len = lastWord;
+        } else {
+          i = lineStart + len;
+        }
+        break;
+      }
+      len++;
+      i++;
+    }
+    while (len > 0 && line[len - 1] == ' ') len--;  // trim trailing space
+    if (len == 0) break;                            // nothing consumed: stop
+    line[len] = '\0';
+    snprintf(lines[n], 48, "%s", line);
+    n++;
+    if (i < total && src[i] == '\n') i++;
+  }
+  if (i < total && n > 0 && n <= maxLines) {
+    // Still text left over: spend the tail of the last line on an ellipsis so
+    // the screen admits it is showing less than the log does.
+    char *last = lines[n - 1];
+    size_t l = strlen(last);
+    if (l + 3 < 48) snprintf(last + l, 48 - l, "...");
+    else if (l >= 3) snprintf(last + l - 3, 4, "...");
+  }
+  return n;
+}
+
+// Centre one line by baseline. getTextBounds() reports x1 == 0 by contract (see
+// LGFX_ST7789_4::getTextBounds) and y1 == -baseline, so the pair of
+// `- x1` / `- y1` terms is the documented idiom in this file, not a correction.
+static void otaCenteredText(const char *s, int baselineY) {
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(s, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor(DISPLAY_WIDTH / 2 - (w / 2) - x1, baselineY - y1);
+  display.print(s);
+}
+
+// The two frames a firmware update ends on. Both are drawn with the compiled-in
+// VLW arrays only - loadVLWFont() selects generated header data, it never opens
+// a LittleFS file - and neither fades the backlight: a fade is two blocking
+// delays and a second, and the panel is already lit and already showing the
+// update screen, so the only thing to do is replace the picture.
+void showOtaDoneScreen() {
+  display.startWrite();
+  display.fillScreen(TFT_BLACK);
+  display.setTextColor(TFT_GREEN);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
+  otaCenteredText("UPDATE COMPLETE", 130);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+  display.setTextColor(TFT_WHITE);
+  otaCenteredText("REBOOTING", 185);
+  display.endWrite();
+}
+
+// A failed install has to be readable from the driver's seat, not only in the
+// phone's request log: "signature rejected" and "the Wi-Fi dropped at 92 %" need
+// the same three seconds of attention from someone who may be standing next to a
+// car. The reason sentence comes from the install handler (96 chars), the
+// diagnostics are read live, and the last line is the only recovery instruction
+// that works with no phone in range.
+void showOtaErrorScreen(const char *reason, const char *detail, long bytesDone,
+                        long bytesTotal) {
+  char lines[3][48];
+  char buf[96];
+
+  display.startWrite();
+  display.fillScreen(TFT_BLACK);
+
+  // Pick the body font before wrapping, not after: wrapOtaText() measures with
+  // textWidth(), and the font left loaded by whatever drew last is a different
+  // size - measuring the 16 px sentence with the dashboard's 52 px speed font
+  // would fit two words per line and wrap a one-line reason into three.
+  display.setTextColor(TFT_WHITE);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+  int nLines = wrapOtaText(lines, 3, DISPLAY_WIDTH - 60,
+                           (detail && detail[0]) ? detail : "update failed");
+  if (nLines == 0) {
+    // A detail string that wraps to nothing (spaces and newlines only) must not
+    // leave the screen without its one useful line.
+    snprintf(lines[0], 48, "update failed");
+    nLines = 1;
+  }
+
+  display.setTextColor(TFT_RED);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_28px.vlw");
+  otaCenteredText("UPDATE FAILED", 92);
+
+  display.setTextColor(TFT_WHITE);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+  int y = 152;
+  for (int i = 0; i < nLines; i++) {
+    otaCenteredText(lines[i], y);
+    y += 26;
+  }
+
+  display.setTextColor(TFT_GREEN);
+  // The smallest text on this screen. loadVLWFont() maps only the 16px/28px/
+  // DS_DIGIT paths to VLW arrays and resolves anything else - this one included -
+  // to the compiled-in Conthrax_SemiBold4pt7b bitmap, so the diagnostics cost no
+  // flash read and no LittleFS mount. Same path src/ui.cpp uses for small text.
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_10px.vlw");
+  if (bytesTotal > 0)
+    snprintf(buf, sizeof(buf), "bytes %ld/%ld  heap %lu/%lu",
+             bytesDone, bytesTotal, (unsigned long)ESP.getFreeHeap(),
+             (unsigned long)ESP.getMaxAllocHeap());
+  else
+    snprintf(buf, sizeof(buf), "bytes %ld  heap %lu/%lu", bytesDone,
+             (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap());
+  otaCenteredText(buf, 246);
+  snprintf(buf, sizeof(buf), "rssi %d dBm  reason %s", WiFi.RSSI(),
+           (reason && reason[0]) ? reason : "failed");
+  otaCenteredText(buf, 264);
+
+  display.setTextColor(TFT_CYAN);
+  display.loadVLWFont("/Fonts/Conthrax_SemiBold_16px.vlw");
+  otaCenteredText("HOLD TRIP BUTTON 3s TO RESTART", 300);
+  display.endWrite();
+}
+
 void updateOTAProgress(int progress, int total) {
   // The OTA-pull caller only runs with a known Content-Length, but the
   // ArduinoOTA progress callback hands whatever Update reports: a total of 0

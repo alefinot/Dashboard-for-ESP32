@@ -27,6 +27,75 @@ volatile bool pendingOtaScreen = false;
 volatile bool otaQuietActive = false;
 volatile unsigned long otaQuietLastByteMs = 0;
 volatile bool otaScreenDrawn = false;
+// Which firmware-update screen owns the panel (see OtaScreenStage in
+// dashboard.h). Only the display loop draws; the web task asks with the flags
+// below and never touches the panel, which is the same handoff the existing
+// pendingOtaScreen already uses.
+volatile uint8_t otaScreenStage = OTA_SCREEN_OFF;
+volatile bool pendingOtaDoneScreen = false;
+volatile bool pendingOtaErrorScreen = false;
+// How long the failure frame stays up before the dashboard comes back on its
+// own. Long enough to read a two-line reason from the driver's seat and walk
+// around the car to the phone; short enough that a unit that refused the image
+// for a typo is a dashboard again before the next drive.
+static const unsigned long OTA_ERROR_SCREEN_DWELL_MS = 15000UL;
+
+// The panel belongs to the update flow for as long as a transfer is live or a
+// screen is up. Everything that would draw the dashboard or reset the trip asks
+// this instead of a single flag, because there is a window between "the install
+// was accepted" and "the display task has drawn the screen" where the dashboard
+// must already have lost the panel.
+bool otaPanelTaken() {
+  return otaUpdateInProgress || otaScreenStage != (uint8_t)OTA_SCREEN_OFF;
+}
+
+void otaScreenShowUpdate() {
+  otaScreenStage = OTA_SCREEN_UPDATING;
+  pendingOtaDoneScreen = false;
+  pendingOtaErrorScreen = false;
+  otaScreenDrawn = false;
+  pendingOtaScreen = true;
+}
+
+void otaScreenShowDone() {
+  otaScreenStage = OTA_SCREEN_DONE;
+  pendingOtaScreen = false;
+  pendingOtaErrorScreen = false;
+  otaScreenDrawn = false;
+  pendingOtaDoneScreen = true;
+}
+
+void otaScreenShowError() {
+  otaScreenStage = OTA_SCREEN_FAILED;
+  pendingOtaScreen = false;
+  pendingOtaDoneScreen = false;
+  otaScreenDrawn = false;
+  pendingOtaErrorScreen = true;
+}
+
+void otaScreenRelease() {
+  otaScreenStage = OTA_SCREEN_OFF;
+  pendingOtaScreen = false;
+  pendingOtaDoneScreen = false;
+  pendingOtaErrorScreen = false;
+  forceFullRedraw = true;
+}
+
+// Panel ownership as a word, for /api/ota/check and for any client that has to
+// say what the dashboard is doing. The distinction that matters to a phone: when
+// this is not "off", GPIO25 is not the trip reset, it is the restart hold - so
+// the hold instruction belongs next to the state, not in a string a client
+// invents. "claimed" is the gap where an install holds the panel but no frame has
+// been drawn yet (an ArduinoOTA flash, for instance, which never asks for one).
+const char *otaScreenStageName() {
+  switch (otaScreenStage) {
+    case OTA_SCREEN_UPDATING: return "updating";
+    case OTA_SCREEN_DONE:     return "done";
+    case OTA_SCREEN_FAILED:   return "failed";
+    default:
+      return otaUpdateInProgress ? "claimed" : "off";
+  }
+}
 
 bool pendingInvertDisplay = false;
 int pendingBacklightValue = -1;
@@ -678,6 +747,15 @@ void loop() {
     // statement.
     lastDisplayUpdate = now;
 
+    // Requests from the web task, drawn by the task that owns the panel.
+    static unsigned long otaErrorShownMs = 0;
+    // GPIO25 belongs to the screen while the screen is up, and its only gesture
+    // is the restart hold (processOtaScreenButton owns its own debounce; the
+    // sensor task's trip path is deaf for the whole window). Polled before the
+    // frames below so a held button wins the iteration it is detected in: the
+    // restart it asks for never returns, and it must not lose a race with a
+    // dwell release or with a frame the web task asked for a moment earlier.
+    if (otaPanelTaken()) processOtaScreenButton();
     if (pendingOtaScreen) {
       pendingOtaScreen = false;
       showUpdatingScreen();
@@ -687,8 +765,42 @@ void loop() {
       // update screen is the only thing a quiet window shows.
       otaScreenDrawn = true;
     }
+    if (pendingOtaDoneScreen) {
+      pendingOtaDoneScreen = false;
+      showOtaDoneScreen();
+      otaScreenDrawn = true;
+    }
+    if (pendingOtaErrorScreen) {
+      pendingOtaErrorScreen = false;
+      long errBytes = 0, errTotal = 0;
+      otaInstallBytesSnapshot(&errBytes, &errTotal);
+      showOtaErrorScreen(otaInstallReason(), otaInstallDetail(), errBytes, errTotal);
+      otaScreenDrawn = true;
+      otaErrorShownMs = millis();
+      // The panel is part of the reporting path now, so its own lifecycle has to
+      // be in the log: "the unit refused the image" and "the unit stopped telling
+      // the driver it refused" are two different moments, and a field report that
+      // says the message never appeared needs to say which one happened.
+      logPrintf("OTA panel: failure frame drawn (reason=%s bytes=%ld/%ld)\n",
+                otaInstallReason(), errBytes, errTotal);
+    }
+    // The error screen is information, not a cell: after a dwell it gives the
+    // panel back, because the unit is still running fine - a refused image never
+    // touched the slot it boots from - and a dashboard that hides itself for the
+    // rest of the drive is a second problem invented to report the first. The
+    // hold-to-restart gesture is there for the case where this screen is showing
+    // because something did go wrong inside the unit.
+    if (otaScreenStage == (uint8_t)OTA_SCREEN_FAILED && otaErrorShownMs != 0 &&
+        millis() - otaErrorShownMs > OTA_ERROR_SCREEN_DWELL_MS) {
+      otaErrorShownMs = 0;
+      otaScreenRelease();
+      logPrintf("OTA panel: failure frame released after %lums, dashboard restored\n",
+                (unsigned long)OTA_ERROR_SCREEN_DWELL_MS);
+    }
+    // GPIO25 while the update flow owns the panel is polled above, before any
+    // frame is drawn.
 
-    if (!otaUpdateInProgress) {
+    if (!otaPanelTaken()) {
       // An OTA pull *check* must not freeze the dashboard: the big sprites are
       // dropped and rebuilt around the check (processOtaMemRelease /
       // ensureSpeedSprite) and the components fall back to direct-panel
@@ -697,7 +809,10 @@ void loop() {
       drawFpsOverlay();
       drawGpsDebugOverlay();
       checkNightMode(snap);
-    } else {
+    } else if (otaUpdateInProgress && otaScreenStage == (uint8_t)OTA_SCREEN_UPDATING) {
+      // Only the live transfer animates the bar. The done and error frames are
+      // complete pictures: drawing the leftover progress target across them
+      // would scribble a cyan line through the message that explains them.
       static unsigned long lastOtaAdvance = 0;
       static bool otaRebootShown = false;
       static float otaSmoothedW = 0.0f;
@@ -729,7 +844,14 @@ void loop() {
       }
       if (otaUpdateSuccess && fillW >= 258 && !otaRebootShown) {
         otaRebootShown = true;
-        delay(100);
+        // Same ending as the push path: the panel says what happened and stays
+        // that way long enough to read before the new firmware takes over. Here
+        // the frame is drawn directly rather than through the pendingOtaDoneScreen
+        // handoff because this *is* the display task - there is no other task to
+        // hand it to, and the restart follows in the next statement.
+        otaScreenStage = OTA_SCREEN_DONE;
+        showOtaDoneScreen();
+        delay(1200);
         bootinfo_tag_reboot("ota");
         ESP.restart();
       }

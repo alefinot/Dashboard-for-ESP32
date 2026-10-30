@@ -466,7 +466,7 @@ The management portal features a modern grouped card-based layout:
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `application/json` (same shape as `cal-dark`) |
 | `/api/ota` | `POST` | Firmware install over the LAN — **the signature is verified before the image is flashed** (see *Signed LAN install*) | `multipart/form-data`: `target_version`, `signature` (file part), `firmware` (file part); optional `total_bytes`, `force=1` | `application/json` |
 | `/api/ota/pull` | `POST` | Triggers cloud OTA pull (checks `OTA_PULL_URL`) | None | `text/plain` |
-| `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled`, `url`, `current_version`, `build_version`, `version_override`, `previous_version`, `status`, `status_updated`) **and install state**: `state` (tracks the LAN install; pull outcomes report through `status`), `percent`, `bytes`, `bytes_total`, `signature_required`, `signing_key_present`, `quiet`, `quiet_silent_ms`, `error`, `last_target_version` (the version an install verified against, after that `v` drop). Answers normally even during a quiet window — it is on the allow-list | None | `application/json` |
+| `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled`, `url`, `current_version`, `build_version`, `version_override`, `previous_version`, `status`, `status_updated`) **and install state**: `state` (tracks the LAN install; pull outcomes report through `status`), `percent`, `bytes`, `bytes_total`, `signature_required`, `signing_key_present`, `quiet`, `quiet_silent_ms`, `screen`, `hold_to_restart_ms`, `error`, `last_target_version` (the version an install verified against, after that `v` drop). Answers normally even during a quiet window — it is on the allow-list | None | `application/json` |
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
 | `/api/perf` | `GET` | Live telemetry (CPU, Heap, task stack headroom, FPS, WiFi, partitions), plus the web task's own timing: `web_serve_ms_last` / `web_serve_ms_max` (what one `handleClient()` pass costs) and `web_slow_iters` (loop iterations over 100 ms). Also reports `mac`: the base eFuse MAC (uppercase, colon-separated) - the stable device identity the companion app binds its vehicle card to, unchanged by Wi-Fi mode or DHCP | None | `application/json` |
 | `/api/health` | `GET` | Health probe: heap, FPS, partition layout and the NVS entry budget (`nvs_bytes`, `nvs_entries_used` / `_available` / `_total`) | None | `application/json` |
@@ -792,6 +792,9 @@ Layout (4 MB flash, ends at exactly `0x400000`):
 > [!WARNING]
 > A partition-table change is **not** delivered by an OTA update — OTA replaces the app slot, never the table. A unit that updates over the air keeps whatever table it was last flashed with, and the boot log line `NVS 'nvs' <bytes> bytes: …` is how you tell which one it is. Moving a board onto the new table needs a wired re-flash (`pio run -t erase` then `pio run -t upload`), and **the erase wipes NVS**: WiFi credentials, odometer and calibration have to be entered again.
 
+> [!NOTE]
+> **A wired flash writes `app0`; it does not decide which slot boots.** `otadata` picks the slot, and an OTA install has already pointed it at the other one. So `pio run -t upload` on a unit that last updated over the air can leave the *older* image running while the new one sits unused in `app0` — a session that saw an upload go green and `GET /api/ota/check` still answer without the fields the new build added hit exactly this, and it was a slot mismatch, not a build that failed to reach the board. Two checks tell you which build is running: `BOOTINFO: firmware v…` in the boot log, and `/api/perf` → `partitions`, where the running app slot is the one reporting `used` equal to its full size. To make the wired build the one that runs: push the same image over the LAN (an install flips the slot and reboots), or erase and re-flash with the table rewritten.
+
 #### Settings storage budget
 
 Web UI → Performance panel → **Memory & Storage** shows `Settings storage (NVS …): 420 of 2520 entries used, 1974 available`, served by `/api/health`. The figures are entry **slots**, not bytes, because slots are what NVS actually runs out of — a partition can report hundreds of free slots and still refuse a write, since its tidier needs one spare page to move live data into. `available` already subtracts that reserve, so it is the number to watch; it turns amber below 15 % of the total and red below 3 %, where saves start failing. ESP-IDF garbage-collects NVS automatically inside its own write path — there is no public compaction call in arduino-esp32 3.3.x — so this readout is deliberately observation only.
@@ -910,8 +913,18 @@ Everything else — `/api/live`, `/api/config`, `/api/snapshot`, `/api/sensors`,
 `/api/perf`, `/api/serial` — is closed, because a route added next month is
 closed by default: the failure mode of a gate like this should be *someone could
 not open the sensors page during an update*, never *a new endpoint silently
-allocated heap in the middle of a flash
-write*.
+allocated heap in the middle of a flash write*.
+
+**What a client actually sees mid-push (bench, 1.75 MB over Wi-Fi).** The `503` is
+the polite answer, and the polite answer is not always what arrives: while the
+multipart body is still streaming, the web task is inside that body and does not
+get back to `handleClient()` at all, so a concurrent request is neither refused
+nor served — it waits and then times out. Measured on the bench: `/api/ota/check`
+mid-transfer timed out on a 6 s budget twice in a row, then answered in **150 ms**
+once the window closed, and the whole push took **22–25 s** (~80 KB/s). A phone
+app has to treat a timeout during a transfer as "busy, still going" rather than
+"gone", and read state between the chunks rather than on top of them. The `503`
+itself is what the pull path produces, where the web task is free to answer.
 
 The gate is a `WebServer` middleware, and it cannot stall an upload that is
 already running: multipart bodies are parsed before the middleware chain is
@@ -924,12 +937,54 @@ someone pulled the power. The web loop therefore watches the gap since the last
 accepted byte and closes the window itself after **120 s** of silence — ten times
 the longest natural gap of a healthy push (the few seconds of SHA-256 plus ECDSA
 verification at the end), measured per byte rather than from the start of the
-window. Closing restores the dashboard (`forceFullRedraw`), restores the clock,
-reports `upload_stalled`, and lets the endpoints answer again.
+window. Closing restores the clock, reports `upload_stalled`, and lets the
+endpoints answer again; the panel gets the same sentence as a failure frame
+rather than quietly falling back to the dashboard, because the phone that was
+pushing the update is not always in the same room as the car.
 
-Two read-only fields on `/api/ota/check` let a client mirror this instead of
-guessing: `quiet` (the window is open) and `quiet_silent_ms` (bytes have been
-silent this long while it is open).
+Three read-only fields on `/api/ota/check` let a client mirror this instead of
+guessing: `quiet` (the window is open), `quiet_silent_ms` (bytes have been silent
+this long while it is open), and `screen` — which frame the panel is showing:
+`off`, `claimed` (an install holds the panel but no frame has been drawn yet),
+`updating`, `done`, `failed`.
+
+#### What the panel shows, and what the trip button does during an update
+
+The update screen is not another widget on the dashboard. From the moment an
+install is accepted until it succeeds, fails or is abandoned, the panel shows one
+of three frames and nothing else — the frame reader and the flash write want the
+same SPI bus, and a driver glancing over must never see a speed number where the
+progress bar was.
+
+| Frame | When | Says |
+|---|---|---|
+| **Updating** | the whole transfer | `UPDATING...` + `DO NOT TURN OFF THE DEVICE` + the streaming bar |
+| **Done** | the reply is out, before the reboot (~1.2 s) | `UPDATE COMPLETE / REBOOTING` |
+| **Failed** | any refusal or stall, for 15 s | `UPDATE FAILED`, the reason sentence, `bytes x/y`, heap, RSSI, the reason code, and the recovery line |
+
+**GPIO25 belongs to the update for its whole duration.** A press can no longer
+reset the trip while the panel is taken — the screen that tells you not to turn
+the device off is not the screen to be quietly zeroing a trip behind — and a
+remote trip reset arriving in that window is **dropped, not queued**, because a
+request aimed at the dashboard must not fire on the dashboard five minutes later
+when the trip it referred to is history. What the button *does* there is one
+gesture: hold it for **3 s** (`OTA_HOLD_RESTART_MS`, twice the trip-reset hold, so
+the knock-that-almost-wipes-a-trip cannot reach it) and the unit restarts. That is
+the only recovery available with no phone in range, and it is what the failure
+frame's last line tells the driver to do.
+
+The hold is **ignored while bytes are going into the flash slot** — a reset
+between two writes is a half-written image in the inactive slot, the exact failure
+this flow exists to remove. Everywhere else (handshake, verification, the done
+frame, an error frame) it works. `otaFlashWriteActive()` is the accessor that
+decides it; the interlock behind it stays private to `web.cpp`.
+
+A failure frame is information, not a cell: after 15 s it hands the panel back,
+because a refused image never touched the slot the unit boots from and a
+speedometer that hid itself for the rest of the drive would be a second problem
+invented to report the first. The two frames an install ends on use only the
+compiled-in font arrays and no backlight fades — the panel is already lit and
+already showing an update frame, so the only thing to do is replace the picture.
 
 #### Cloud OTA Pull & Firmware Signing
 
@@ -1022,7 +1077,21 @@ The cloud pull has verified an ECDSA signature since 1.4, but the LAN upload nev
 - Downgrades are refused on the strength of the signature, and reflashing the *identical* version needs `force=1` — the bench-repair case, and now a checkbox in the Web UI instead of a recompile.
 - The two install paths exclude each other before either opens the flash slot: `otasign.cpp` holds **one** streaming SHA-256 context, so an upload arriving during a pull is refused rather than hashing over the top of it.
 - `otaImageHashOpen()` is new so a caller can ask whether hashing actually started. `otaImageHashBegin()` returns `void`, and "this image could not be hashed" must never be silently read as "this image was verified".
-- `GET /api/ota/check` gained read-only install state — `state` (`idle|staging|receiving|verifying|writing|done|error`; it tracks the LAN install, whose progress a pushing client mirrors, while cloud-pull outcomes keep reporting through `status`), `percent` (`-1` when the client sent no `total_bytes`, rather than a made-up figure), `bytes`, `bytes_total`, `signature_required`, `signing_key_present`, `quiet` / `quiet_silent_ms` (the update quiet window is open, and how long it has seen no bytes), `error`, `last_target_version`. All additive; the app's existing reader of `current_version`/`status` is untouched.
+- `GET /api/ota/check` gained read-only install state — `state` (`idle|staging|receiving|verifying|writing|done|error`; it tracks the LAN install, whose progress a pushing client mirrors, while cloud-pull outcomes keep reporting through `status`), `percent` (`-1` when the client sent no `total_bytes`, rather than a made-up figure), `bytes`, `bytes_total`, `signature_required`, `signing_key_present`, `quiet` / `quiet_silent_ms`, `screen`, `hold_to_restart_ms`, `error`, `last_target_version`. All additive; the app's existing reader of `current_version`/`status` is untouched.
+
+**Firmware-update quiet window (`src/web.cpp`, `src/main.cpp`, `src/sensors.cpp`)**
+- An install now parks the unit around itself. On the way in: the clock stops counting sensor frames (so the watchdog and the frame-stall reporter stop describing a unit that is deliberately doing one thing), the UI sprites are freed by the display task, the GNSS task waits at its loop top instead of being suspended, the CPU probes park, an in-flight weather fetch is dropped, and the chip is pinned to 240 MHz so the frequency governor cannot downshift mid-write. Out of the window every one of those is undone. The REST API is gated by a `WebServer` middleware to an allow-list of three (`/api/ota*`, `/api/health`, `/`); everything else answers `503`. Rule 14 is what decided the list — a route added next month is closed until proven essential.
+- The window cannot be left open by a client that dies. A dropped TCP connection produces no `UPLOAD_FILE_END` and no completing `POST`, so the web loop watches the gap since the last *accepted byte* and unwinds the whole thing after **120 s**, reporting `upload_stalled`. Measured against a healthy push, whose longest natural gap is the few seconds of SHA-256 plus ECDSA verification at the end of 1.75 MB.
+- Odometer saves and the CPU-frequency governor are both switched off for the window: an NVS write suspends flash-resident code on both cores, and the OTA slot is the only writer that matters while it is open.
+
+**The update owns the panel and the trip button (`src/main.cpp`, `src/gfx.cpp`, `src/sensors.cpp`, `src/web.cpp`)**
+- `otaScreenStage` says who owns the panel (`off / claimed / updating / done / failed`), and everything that would draw the dashboard or reset the trip asks `otaPanelTaken()` instead of one flag — there is a real gap between "the install was accepted" and "the display task has drawn the screen", and the dashboard has to lose the panel inside it.
+- Two frames an install ends on, next to the existing `showUpdatingScreen()`: `UPDATE COMPLETE / REBOOTING` before the restart (the reboot used to land ~100 ms after the HTTP reply, which cut the progress bar off mid-screen and left the driver unable to tell "updated" from "switched off"), and `UPDATE FAILED` with the reason sentence, `bytes x/y`, heap, RSSI, the reason code and the recovery line. Both use only the compiled-in font arrays and neither fades the backlight — the panel is already lit and already showing an update frame.
+- **GPIO25 belongs to the update.** `processTripResetButton()` returns before both of its jobs while the panel is taken, so a press cannot zero a trip behind the screen that says not to turn the device off, and a remote reset that arrives in that window is **dropped, not queued**. Its one gesture there is `processOtaScreenButton()`: hold **3 s** (`OTA_HOLD_RESTART_MS`, twice the trip-reset hold) and the unit restarts — the only recovery with no phone in range. It is polled from the display loop (that is where the screen lifecycle lives), owns its own debounce, and is **ignored while `otaFlashWriteActive()`** — restarting between two flash writes is the exact failure this flow exists to remove. The interlock behind that stays file-static in `web.cpp`; the panel is only told the question's answer.
+- A failure frame releases itself after 15 s (`OTA panel: failure frame drawn / released` in the log). A refused image never touched the slot the unit boots from, so a dashboard that hid itself for the rest of the drive would be a second problem invented to report the first. The cloud pull now reports the same way: its five failure exits go through one `pullFailure()` helper that writes the status sentence it already logged into the panel's failure record, so the log, the Web UI and the dashboard cannot disagree about the same attempt.
+- `/api/ota/check` gained `quiet`, `quiet_silent_ms`, `screen` and `hold_to_restart_ms` — a client mirrors the panel instead of guessing at it, and knows what the trip button will do before it tells the driver to press it.
+
+**Verified on hardware since that paragraph was written** (bench: COM7 serial + `192.168.1.116`, 1.75 MB push of this build). A signed install went through and into the new slot: `OTA web: signature VALID for v1.4.6 (1753840 bytes)` → `OTA web: success` → `rst:0xc (SW_CPU_RESET)` with `lastRebootTag='ota'` and `boot#2`, and `/api/ota/check` answered normally after the boot with all the new fields. A signature made over the same image for a *different* version was refused at the end of the transfer — `sig_invalid` (mbedTLS `-0x4e00`) — the quiet window closed on the refusal (`OTA quiet: closed (sig_invalid) after 21254ms`), the panel drew the failure frame (`OTA panel: failure frame drawn (reason=sig_invalid bytes=1753840/1753840)`), `screen` read `failed` and then `off` 15 s later (`OTA panel: failure frame released after 15000ms, dashboard restored`). A remote trip reset fired inside that window was dropped (`Trip reset: dropped - firmware update owns the panel`) while `trp_km` kept accumulating; the same request with the panel free logged `Trip stats reset (webui)` and zeroed it. Two things this changed about how the unit is driven, learned the hard way: `pio run -t upload` writes `app0` while `otadata` may still select the slot an OTA push chose, so a green upload can leave the older build running (now documented with how to tell), and mid-transfer an HTTP client gets neither `503` nor an answer but a timeout — `GET /api/ota/check` timed out on a 6 s budget twice during a healthy push, then answered in 150 ms after the window closed. **Still not exercised on hardware:** the 3 s hold itself (needs a hand on GPIO25 — next bench session), the 120 s stall watchdog, the `same_version` / `downgrade` / `sig_missing` refusals, and the cloud pull path (`OTA_PULL_ENABLED` is false in this build).
 
 **Web UI (`src/webui.html`)**
 - The firmware card asks for `firmware.bin`, its `.sig` and the version, prefilled from a file name like `firmware-1.4.7.bin` and remembered between visits. The button names what is still missing — `Pick the .sig`, `Enter signed version`, `Install 1.4.7` — so an incomplete install is caught before 1.9 MB crosses the Wi-Fi rather than after.
@@ -1032,7 +1101,7 @@ The cloud pull has verified an ECDSA signature since 1.4, but the LAN upload nev
 
 **Verified** — the signature contract was tested against the real release key rather than assumed: signing this build as `1.4.7` produced a 70-byte DER signature that verifies; verifying the same file as `v1.4.7` **failed**; flipping one byte of the image **failed**. The middle result is the bug this pass caught — the signature is defined over the tag less its leading `v`, and the upload path as first written passed `target_version` straight through, so a client sending the tag it read on GitHub would have been told `sig_invalid` about a perfectly good release. The pull path has always dropped that `v`, so the install paths now agree (`src/web.cpp`, README).
 
-`pio run` green (`RAM 25.9 %` 85,012 B; `Flash 90.3 %` 1,716,807 B of the 1,900,544 B slot, ~180 KB headroom — `+280 B` RAM and `+5,556 B` flash against V1.4.6, split between refusal strings on a path that used to carry one message and a slightly larger gzipped Web UI). The bench variant too: `pio run` with `-DOTA_ALLOW_UNSIGNED` enabled compiled green (`84,820 B` / `1,714,251 B`) and `platformio.ini` was restored, then the shipping config was rebuilt so the build directory holds the signed-install image and not the bench one — an unsigned `firmware.bin` had been left in `.pio/` by that check and must not be what a release later signs. The Web UI script passes `node --check`, and the firmware was rebuilt with the new UI gzipped in (rule 9). Every `reason` code the firmware can emit was diffed against the README table, which is where the documentation gap for `upload_aborted` and `slot_open_failed` was found and closed. The endpoint contract is documented in the same commit as the code and both consumers (rule 17): the Web UI upload form was rebuilt, and the Android app reads only `current_version`/`status`, which are unchanged. **Not yet run on hardware:** the refusal cases (`sig_missing`, `sig_invalid`, `downgrade`, `same_version`) and a signed install end to end are bench items for the flashing session that follows — the ESP-side verifier itself has not been exercised, only the payload format it shares with `scripts/ota_sign.py`.
+`pio run` green (`RAM 25.9 %` 85,012 B; `Flash 90.3 %` 1,716,807 B of the 1,900,544 B slot, ~180 KB headroom — `+280 B` RAM and `+5,556 B` flash against V1.4.6, split between refusal strings on a path that used to carry one message and a slightly larger gzipped Web UI). The bench variant too: `pio run` with `-DOTA_ALLOW_UNSIGNED` enabled compiled green (`84,820 B` / `1,714,251 B`) and `platformio.ini` was restored, then the shipping config was rebuilt so the build directory holds the signed-install image and not the bench one — an unsigned `firmware.bin` had been left in `.pio/` by that check and must not be what a release later signs. The Web UI script passes `node --check`, and the firmware was rebuilt with the new UI gzipped in (rule 9). Every `reason` code the firmware can emit was diffed against the README table, which is where the documentation gap for `upload_aborted` and `slot_open_failed` was found and closed. The endpoint contract is documented in the same commit as the code and both consumers (rule 17): the Web UI upload form was rebuilt, and the Android app reads only `current_version`/`status`, which are unchanged. **Not yet run on hardware when this was written** — the refusal cases and a signed install end to end were bench items for the flashing session that follows; that session has now happened, and the paragraph below names what ran, what the bench measured, and what is still outstanding.
 
 ### V1.4.6 — The dashboard says who it is, and the app grew a garage (firmware + Android app)
 

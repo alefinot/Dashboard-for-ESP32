@@ -1106,6 +1106,13 @@ struct OtaHeapGuard {
   }
 };
 
+// Firmware-update quiet window as a scope, for the callers whose whole install
+// is one function (the cloud pull). See OtaHeapGuard above for the same idea.
+struct OtaQuietGuard {
+  explicit OtaQuietGuard(const char *why) { otaQuietEnter(why); }
+  ~OtaQuietGuard() { otaQuietExit("install function returned"); }
+};
+
 // Bounds a body read to the Content-Length reported by http.getSize(). The
 // connection is keep-alive, so the raw TLS stream never reaches EOF on its own;
 // this makes the end of the manifest explicit for the streaming JSON parser.
@@ -1148,6 +1155,13 @@ volatile bool otaFlashSessionOpen = false;
 // unit reboots.
 volatile bool otaSessionPoisoned = false;
 }
+
+// Read-only view of the interlock for the panel's hold-to-restart gesture
+// (processOtaScreenButton, sensors.cpp): while bytes are going into the slot the
+// gesture is ignored. Deliberately the session flag alone - a poisoned slot means
+// a write was interrupted earlier, which is a reason to restart, not a reason to
+// refuse to.
+bool otaFlashWriteActive() { return otaFlashSessionOpen; }
 
 // Update.begin / abort wrapped in the interlock, so the two OTA entry points can
 // never overlap and no caller can activate an image from a session it did not
@@ -1222,18 +1236,22 @@ void otaQuietEnter(const char *why) {
 
   // 2. Put the panel into update mode and wait for the display task to confirm
   // it drew the screen, so the first flash write happens behind a finished,
-  // static picture. Safe to leave up during the writes because the update
-  // screen neither reads flash nor allocates: display.loadVLWFont() is
-  // overridden to select the compiled-in font arrays (gfx.cpp), and the
-  // progress bar is fillRects. Bounded wait - a wedged display task must not be
-  // able to hold an upload hostage, and the screen is a courtesy, not a
-  // precondition of a safe install.
-  otaScreenDrawn = false;
-  pendingOtaScreen = true;
+  // static picture before the first flash write, which is what makes it safe to
+  // leave up: the fonts are compiled-in arrays (loadVLWFont selects generated
+  // header data, it never opens a LittleFS file) and the only drawing during the
+  // window is the progress bar's fillRect, which touches SPI and not flash.
+  // Bounded wait - a wedged display task must not be able to hold an upload
+  // hostage, and the screen is a courtesy, not a precondition of a safe install.
+  // The budget follows FADE_DURATION_MS because the screen is two blocking fades
+  // and that value is user-editable in NVS.
+  if (otaScreenStage != (uint8_t)OTA_SCREEN_UPDATING) otaScreenShowUpdate();
+  const unsigned long drawWaitMs = 2UL * (unsigned long)FADE_DURATION_MS + 800UL;
   unsigned long drawT0 = millis();
-  while (!otaScreenDrawn && (millis() - drawT0) < 1500)
+  while (!otaScreenDrawn && (millis() - drawT0) < drawWaitMs)
     vTaskDelay(pdMS_TO_TICKS(2));
-  if (!otaScreenDrawn) logPrintf("OTA quiet: update screen not confirmed within 1500ms\n");
+  if (!otaScreenDrawn)
+    logPrintf("OTA quiet: update screen not confirmed within %lums\n",
+              (unsigned long)drawWaitMs);
 
   // 3. Dynamic frequency scaling may drop this chip to 80 MHz whenever it is
   // idle, and that decision is free to land in the middle of a transfer. The
@@ -1585,13 +1603,35 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
   performFirmwareUpdate(fwUrl, newVer, fwSize);
 }
 
+// One helper for the pull path's failure exits. There are five of them, and a
+// frame that says "UPDATING..." forever is the one outcome none of them may
+// produce: the pull reports through its own status string, so the reason it
+// already told the log is written into the install's failure record and put on
+// the panel, which releases itself after its dwell. The quiet window is still
+// open at that point (the RAII guard closes it when this function returns), and
+// that is the right order: the endpoints come back once the panel is showing the
+// answer, not before.
+static void pullFailure(const char *reason, const char *detail) {
+  otaInstallSetFailure(reason, detail);
+  otaUpdateInProgress = false;
+  otaScreenShowError();
+}
+
 void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion, size_t fwSize) {
   logPrintf("OTA Pull: downloading %s\n", firmwareUrl);
   logPrintf("OTA Pull: heap free=%lu maxAlloc=%lu\n",
             (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMaxAllocHeap());
   otaUpdateInProgress = true;
   otaUpdateSuccess = false;
-  pendingOtaScreen = true;
+  otaScreenShowUpdate();
+  // Same quiet window the LAN install uses, for the same reason: from here to
+  // the end of the flash write this unit is writing an OTA slot, and the pull
+  // task is the only thing on the heap that has to succeed. The RAII wrapper is
+  // the whole contract - every return below, including the signature refusals
+  // that never reach a download, closes the window (otaQuietExit is a no-op when
+  // none is open). The upload path cannot use it: its window starts in the
+  // multipart handler and ends in the POST completion, two calls later.
+  OtaQuietGuard quietGuard("cloud pull");
 
   // --- signature gate (SECURITY plan 2) -----------------------------------
   // The image is only activated when a detached signature (<url>.sig) verifies
@@ -1610,18 +1650,16 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion, size
   if (otaSessionPoisoned) {
     logPrintf("OTA Pull: a previous OTA was reset mid-write - no further OTA until reboot\n");
     setOtaPullStatus("error: OTA locked until reboot");
-    otaUpdateInProgress = false;
-    pendingOtaScreen = false;
-    forceFullRedraw = true;
+    pullFailure("ota_locked",
+                "a previous update was interrupted mid-write - this unit will not touch the OTA slot again until it reboots");
     return;
   }
   if (requireSig) {
     if (!otaSigningAvailable()) {
       logPrintf("OTA Pull: no signing key compiled in - update refused\n");
       setOtaPullStatus("error: no signing key compiled in");
-      otaUpdateInProgress = false;
-      pendingOtaScreen = false;
-      forceFullRedraw = true;
+      pullFailure("no_key",
+                  "this build has no signing key compiled in, so no image can be verified");
       return;
     }
     sigLen = fetchSignatureAsset(firmwareUrl, sigBuf, sizeof(sigBuf));
@@ -1629,9 +1667,8 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion, size
       logPrintf("OTA Pull: no signature asset for %s - update refused\n",
                 firmwareUrl);
       setOtaPullStatus("error: signature not found - update refused");
-      otaUpdateInProgress = false;
-      pendingOtaScreen = false;
-      forceFullRedraw = true;
+      pullFailure("sig_missing",
+                  "the release has no .sig asset next to the image, so it cannot be verified");
       return;
     }
   }
@@ -1935,8 +1972,18 @@ void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion, size
   }
 
   if (!otaUpdateSuccess) {
-    otaUpdateInProgress = false;
-    forceFullRedraw = true;
+    // The pull's own reporter is its status string: every failure above has
+    // already filled it with a sentence for the Web UI. Reuse it as the panel's
+    // detail line, minus the "error: " prefix the status string carries for the
+    // browser's benefit, so the log, the Web UI and the dashboard say the same
+    // thing about the same attempt.
+    char detail[96] = "";
+    if (otaStatusMutex) xSemaphoreTake(otaStatusMutex, portMAX_DELAY);
+    snprintf(detail, sizeof(detail), "%s", otaPullStatus);
+    if (otaStatusMutex) xSemaphoreGive(otaStatusMutex);
+    if (!strncmp(detail, "error: ", 7))
+      memmove(detail, detail + 7, strlen(detail + 7) + 1);
+    pullFailure("pull_failed", detail);
   }
 }
 
@@ -2487,6 +2534,26 @@ static bool g_otaUpClaimedScreen = false;  // this request took over the panel
 static volatile long otaUpBytes = 0;     // image bytes accepted into the slot
 static volatile long otaUpBytesTotal = 0;  // declared size, 0 = unknown
 
+// The install's own failure record, read by the panel's error screen. These
+// belong to the upload handler (web task); the display task only ever reads them
+// once, while drawing, and one install at a time can be in flight, so there is
+// nothing to lock - a torn read here could at worst show last attempt's number.
+const char *otaInstallReason() {
+  return g_otaUpReason[0] ? g_otaUpReason : "failed";
+}
+const char *otaInstallDetail() {
+  return g_otaUpDetail[0] ? g_otaUpDetail : "update failed";
+}
+void otaInstallBytesSnapshot(long *bytesDone, long *bytesTotal) {
+  if (bytesDone) *bytesDone = otaUpBytes;
+  if (bytesTotal) *bytesTotal = otaUpBytesTotal;
+}
+void otaInstallSetFailure(const char *reason, const char *detail) {
+  g_otaUpReason = (reason && reason[0]) ? reason : "failed";
+  snprintf(g_otaUpDetail, sizeof(g_otaUpDetail), "%s",
+           (detail && detail[0]) ? detail : "update failed");
+}
+
 // Update lifecycle. Read by GET /api/ota/check so a client can mirror whatever
 // the dashboard is showing instead of guessing from the HTTP reply. It tracks the
 // LAN install; cloud-pull outcomes keep reporting through the `status` string, so
@@ -2554,7 +2621,25 @@ static void otaUploadRefuse(const char *code, const char *fmt, ...) {
 static void otaPostHandler() {
   if (otaUpdateSuccess) {
     server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Update OK\"}");
-    delay(100);
+    // The reply is out, the slot is bootable and nothing writes flash any more:
+    // the hold-to-restart gesture is safe again and the panel is free to say what
+    // happened. This is the moment the plan exists for - today the reboot lands
+    // about 100 ms after the reply, which cuts the progress bar off mid-screen
+    // and leaves the driver with no way to tell "updated" from "switched off".
+    otaQuietExit("update complete");
+    otaScreenShowDone();
+    // Give the display task a bounded moment to finish the frame it is in and
+    // draw this one (showOtaDoneScreen has no fades to wait out, so one frame is
+    // all there is), then hold the picture long enough to read from the driver's
+    // seat - counting the wait, so the whole detour is about a second and a bit
+    // rather than a stalling trick. If the display task cannot answer, reboot
+    // anyway: the install already worked, and a new firmware sitting unused in
+    // the slot while the old one keeps running is the worse failure.
+    unsigned long ackT0 = millis();
+    while (!otaScreenDrawn && (millis() - ackT0) < 600) vTaskDelay(pdMS_TO_TICKS(5));
+    unsigned long elapsed = millis() - ackT0;
+    const unsigned long doneVisibleMs = 1200;
+    if (elapsed < doneVisibleMs) vTaskDelay(pdMS_TO_TICKS(doneVisibleMs - elapsed));
     bootinfo_tag_reboot("ota");
     ESP.restart();
   } else {
@@ -2573,11 +2658,30 @@ static void otaPostHandler() {
              g_otaUpReason[0] ? g_otaUpReason : "failed", otaPhaseName(otaPhase));
     server.send(500, "application/json", body);
     otaUpdateInProgress = false;
-    // Whatever went wrong, the install is over and the dashboard comes back:
-    // close the quiet window (a no-op when the request refused itself before it
-    // opened) so the endpoints this request parked start answering again.
+    // Whatever went wrong, the install is over: close the quiet window (a no-op
+    // when the request refused itself before it opened) so the endpoints this
+    // request parked start answering again.
     otaQuietExit(g_otaUpReason[0] ? g_otaUpReason : "upload failed");
-    forceFullRedraw = true;
+    // Then put the reason on the panel - the sentence a driver needs is "the
+    // Wi-Fi dropped at 92 %", not a dashboard that hides it, and the phone may
+    // already be back in a pocket. Two cases where the panel is ours to speak
+    // for: this request took the panel over (leaving its frozen progress bar up
+    // there is the worst of both), or the request really was an install attempt
+    // that got refused, so the unit says so instead of silently carrying on as
+    // if nothing happened. What it is not: a malformed poke at the endpoint with
+    // no image in it at all, which is not news for anyone holding the steering
+    // wheel, and never a refusal of *our* request while a cloud pull holds the
+    // panel - that transfer is live, its own frame is the truth, and overwriting
+    // its progress with our refusal would hide the one fact that explains it.
+    const bool pullOwnsPanel = otaPullTaskRunning || otaPullDownloading;
+    const bool ourNews =
+        g_otaUpClaimedScreen ||
+        (g_otaUpReason[0] && strcmp(g_otaUpReason, "no_upload") != 0 &&
+         strcmp(g_otaUpReason, "bad_field") != 0);
+    if (ourNews && !pullOwnsPanel)
+      otaScreenShowError();
+    else
+      forceFullRedraw = true;
   }
   // A staged signature belongs to the request that carried it. Clearing it here
   // means a signature can never be picked up by a later POST: the only thing it
@@ -2585,14 +2689,9 @@ static void otaPostHandler() {
   g_otaUpSigStaged = false;
   g_otaUpSigLen = 0;
   g_otaUploadActive = false;
-  // Same convention as every pull failure path: an install that is not going to
-  // happen must not leave the dashboard parked on the update screen. Only this
-  // request's own claim is released, so an upload that refused itself because a
-  // pull holds the slot cannot steal that pull's screen.
-  if (g_otaUpClaimedScreen && !otaUpdateSuccess) {
-    pendingOtaScreen = false;
-    forceFullRedraw = true;
-  }
+  // The panel decision was made above: a claimed panel ends on the failure frame
+  // (which releases itself after its dwell), an unclaimed one was never touched.
+  // All that is left is to drop the claim so a later request can take the screen.
   g_otaUpClaimedScreen = false;
 }
 
@@ -2725,7 +2824,7 @@ static void otaUploadHandler() {
     if (total.length() > 0 && total.length() < 12) otaUpBytesTotal = total.toInt();
     otaUpdateSuccess = false;
     otaUpdateInProgress = true;
-    pendingOtaScreen = true;
+    otaScreenShowUpdate();
     g_otaUpClaimedScreen = true;
     otaPhase = OtaPhase::Receiving;
     logPrintf("OTA web: start %s (%s, %ld bytes declared)\n", upload.filename.c_str(),
@@ -2954,6 +3053,14 @@ static void otaCheckGetHandler() {
   doc["quiet"] = otaQuietActive;
   if (otaQuietActive)
     doc["quiet_silent_ms"] = (unsigned long)(millis() - otaQuietLastByteMs);
+  // How long to hold the trip button to force a reboot while the dashboard is
+  // parked on an update screen. Sent unconditionally so a client can print the
+  // right instruction instead of hardcoding 3 s.
+  doc["hold_to_restart_ms"] = (unsigned long)OTA_HOLD_RESTART_MS;
+  // Which frame the panel is showing. Pairs with hold_to_restart_ms: while this
+  // is not "off" the trip button cannot reset the trip, and a client should only
+  // tell the driver to hold it then.
+  doc["screen"] = otaScreenStageName();
   if (g_otaUpReason[0]) doc["error"] = g_otaUpReason;
   if (g_otaUpVer[0]) doc["last_target_version"] = g_otaUpVer;
   String out;
@@ -3204,7 +3311,7 @@ void webServerTask(void *pvParameters) {
   ArduinoOTA.onStart([]() {
     logPrintf("OTA started\n");
     otaUpdateInProgress = true;
-    pendingOtaScreen = true;
+    otaScreenShowUpdate();
   });
   ArduinoOTA.onEnd([]() {
     logPrintf("OTA finished\n");
@@ -3389,9 +3496,13 @@ void webServerTask(void *pvParameters) {
       otaUpdateInProgress = false;
       g_otaUploadActive = false;
       g_otaUpClaimedScreen = false;
-      pendingOtaScreen = false;  // in case it was never picked up
       otaPhase = OtaPhase::Failed;
       otaQuietExit("upload stalled");
+      // The two sentences above were written for the phone; the panel gets the
+      // same words. This path used to hand the dashboard back, which left the
+      // driver watching speed data while the phone on the passenger seat said the
+      // update had stopped - and the phone is not always in the same room.
+      otaScreenShowError();
     }
 
     // NTP settle check (issue #43): configTime() starts lwIP's SNTP client, and

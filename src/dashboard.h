@@ -110,6 +110,12 @@ constexpr int HALL_SENSOR_PIN = 33;
 #define TRIP_RESET_PIN 25
 // Contact bounce window before a press or release is believed.
 #define TRIP_RESET_DEBOUNCE_MS 50
+// Hold length that restarts the unit while an update screen owns the panel
+// (processOtaScreenButton). Deliberately twice TRIP_RESET_HOLD_MS and a separate
+// constant: on the update screen a press cannot reset the trip at all, so the
+// one thing a button may do there is recover the unit, and it must not be
+// reachable by the knock-that-almost-wipes-a-trip gesture.
+#define OTA_HOLD_RESTART_MS 3000
 // How long the on-screen trip-reset confirmation stays up.
 #define TRIP_RESET_NOTICE_MS 3000
 
@@ -604,6 +610,51 @@ extern volatile bool pendingOtaScreen;
 extern volatile int otaProgressFillW;
 extern volatile int otaProgressTarget;
 
+// Who owns the panel while a firmware update is running. The update screen is
+// not another widget on the dashboard: from the moment an install is accepted
+// until it succeeds, fails or is abandoned, the panel shows one of these and
+// nothing else - the frame that reads the VLW fonts and the flash write that
+// needs the same bus must never interleave, and a driver glancing at the dash
+// must never see a speed number where the progress bar is.
+//   Updating - "UPDATING..." plus the streaming progress bar
+//   Done     - "UPDATE COMPLETE / REBOOTING", the last frame before the restart
+//   Failed   - reason, diagnostics and the hold-to-restart instruction
+enum OtaScreenStage : uint8_t {
+  OTA_SCREEN_OFF = 0,
+  OTA_SCREEN_UPDATING,
+  OTA_SCREEN_DONE,
+  OTA_SCREEN_FAILED
+};
+extern volatile uint8_t otaScreenStage;
+extern volatile bool pendingOtaDoneScreen;
+extern volatile bool pendingOtaErrorScreen;
+// The one question everything else asks: may the dashboard draw, and may GPIO25
+// reset the trip? False only when no transfer is live and no screen is up. True
+// for the whole install, including the moment a transfer started before the
+// display task has taken the panel.
+bool otaPanelTaken();
+// Ask for a screen / give the panel back. All four only set flags the display
+// loop consumes; none of them touches the panel, so they are safe to call from
+// the web task. otaScreenRelease() also requests a full redraw.
+void otaScreenShowUpdate();
+void otaScreenShowDone();
+void otaScreenShowError();
+void otaScreenRelease();
+// The same ownership as a word for API replies: off | claimed | updating |
+// done | failed. Not "off" means GPIO25 is the restart hold, not the trip reset.
+const char *otaScreenStageName();
+// Install diagnostics for the error screen, owned by the upload handler in
+// web.cpp (the display task only prints them, never writes them).
+const char *otaInstallReason();
+const char *otaInstallDetail();
+void otaInstallBytesSnapshot(long *bytesDone, long *bytesTotal);
+// Record why an install failed, for the failure frame. Written by whichever path
+// is installing (the upload handler sets these as it refuses; the pull path
+// calls this from its failure exits), read once by the display task while it
+// draws. Two install paths, one failure record, so the panel cannot disagree
+// with the log about what just happened.
+void otaInstallSetFailure(const char *reason, const char *detail);
+
 extern bool pendingInvertDisplay;
 // Config-save handoff between the web task and the display loop (issue #10)
 extern volatile bool pendingApplyBusConfig;
@@ -776,6 +827,9 @@ void updateSplashProgress(int targetProgress);
 void releaseSleepPinHolds();
 void showGoodbyeScreen(bool isSleep);
 void showUpdatingScreen();
+void showOtaDoneScreen();
+void showOtaErrorScreen(const char *reason, const char *detail, long bytesDone,
+                        long bytesTotal);
 void updateOTAProgress(int progress, int total);
 void drawFpsOverlay();
 void drawGpsDebugOverlay();
@@ -809,6 +863,11 @@ void updateAverageSpeed();
 // debounced button scan that runs in the sensor task.
 void resetTripStats(const char *reason);
 void processTripResetButton();
+// GPIO25 while an update screen owns the panel: hold OTA_HOLD_RESTART_MS and the
+// unit restarts. Polled from the display loop rather than the sensor task, whose
+// button path is deliberately deaf for the whole update (and is not where the
+// screen lifecycle lives).
+void processOtaScreenButton();
 void updateAccelTimer();
 void initFuelSensor();
 void processFuelSensor();
@@ -832,7 +891,12 @@ extern volatile bool otaMemReleased;
 // loop tops (cooperatively - suspending a task from outside can freeze it
 // inside a g_stateMutex section), weather is aborted, the CPU is pinned to
 // 240 MHz and the web server answers 503 on every endpoint the phone does not
-// need. Entered/left from the web task only; `true` means the window is open.
+// need. Entered and left by whichever task is running the install - the web task
+// for a LAN push, the pull task for a cloud pull - and only one of the two can
+// hold the window at a time (they refuse each other's flash slot); `true` means
+// the window is open. If a window ever did overlap, the first one to finish would
+// close it early and cost the second the gating, never the install: the gating is
+// an optimisation, the flash writes are correct without it.
 // See Implementation plans/MANUAL_OTA_PHONE_PUSH_PLAN-2026-10-28.md 5.2.
 extern volatile bool otaQuietActive;
 void otaQuietEnter(const char *why);
@@ -845,6 +909,13 @@ extern volatile bool otaScreenDrawn;
 // window whose client died mid-transfer (a dropped TCP connection produces no
 // UPLOAD_FILE_END). Published on /api/ota/check as quiet_silent_ms.
 extern volatile unsigned long otaQuietLastByteMs;
+// Bytes are going into the OTA slot right now (web.cpp). The one condition that
+// makes the hold-to-restart gesture refuse to fire: a reset in the middle of a
+// flash write leaves a half-written slot, which is the failure this whole
+// redesign exists to remove. Asked as a question rather than read as a variable:
+// the interlock behind it is web.cpp's own business (the pull task and the upload
+// handler share the singleton Update object) and stays file-static there.
+bool otaFlashWriteActive();
 void processMemSaverRelease();
 extern volatile bool memSaverRequested;
 extern volatile bool memSaverActive;
