@@ -832,9 +832,9 @@ platformio run -t upload --upload-port 192.168.4.1
 1. Open a browser and navigate to `http://192.168.4.1` (or your assigned STA IP).
 2. Open the **System Actions** section.
 3. Choose `firmware.bin` from a release, confirm the version it says it is
-(prefilled from a file name like `firmware-1.4.7.bin`), and upload. If the release
-no signature is checked on any path (see *LAN install (`POST /api/ota`)*;
-without it the version, size and image-header gates still apply.
+(prefilled from a file name like `firmware-1.4.7.bin`), and upload. No signature
+is checked on any path (see *LAN install (`POST /api/ota`)*); the version, size
+and image-header gates are what decide the install.
 
 An upload is flashed only if it passes those gates — see *LAN install
 (`POST /api/ota`)* below for the request shape and the reasons a device refuses.
@@ -1140,13 +1140,13 @@ In Demo Mode:
 
 ## Changelog
 
-### Unreleased (next release) — **signing is out of every update path** (firmware + Web UI)
+### V1.5.1 — **signing is out of every update path** (firmware + Web UI)
 
 **This is a deliberate reduction in protection, requested by the maintainer on
 2026-10-30, not an oversight.** Until now the product verified images; the user
 asked for signatures to come out of the update paths, and they are gone from all
-of them. The version number has not been bumped yet — it goes up by +0.0.1 when
-the release is cut (`AGENTS.md` rule 3), and the heading is renamed then.
+of them. This is the +0.0.1 patch release the change deserved (`AGENTS.md`
+rule 3): `1.5.0` → `1.5.1`.
 
 **What was removed:**
 
@@ -1159,7 +1159,7 @@ the release is cut (`AGENTS.md` rule 3), and the heading is renamed then.
 
 **Unchanged on purpose:** the version policy (same-version needs `force=1`, downgrade always refused), size/`magic`/segment gates, the one-writer and poisoned-session locks, the quiet window, the panel-only-during-update behaviour, the trip-button recovery, and `scripts/ota_sign.py`, which stays in the repo as an out-of-band tool — releases are no longer required to carry a `.sig`, and anyone can still sign a file and check it by hand.
 
-**Verified on hardware (bench unit, COM7 / 192.168.1.116):** LAN push of the freshly built `firmware.bin` (1,754,704 bytes) without a signature — `Update OK` in 24.1 s; the same file pushed **with** a 70-byte garbage `signature` part — accepted, serial log `OTA web: 'signature' part ignored (70 bytes, nothing to verify it against)` then `OTA web: image accepted (1754704 bytes, sha256 32178d87b6044e57…)` and `success 1754704 bytes`; a push claiming `1.4.5` — `reason":"downgrade"` and `upload discarded (0 bytes)`; a push with an unexpected `blob` part — `bad_field`. `GET /api/ota/check` now returns neither signature field. Build size: flash 1,723,839 B (90.7%), down 2,504 B; RAM 84,732 B (25.9%).
+**Verified on hardware (bench unit, COM7 / 192.168.1.116):** LAN push of the freshly built `firmware.bin` (1,754,704 bytes) without a signature — `Update OK` in 24.1 s; the same file pushed **with** a 70-byte garbage `signature` part — accepted, serial log `OTA web: 'signature' part ignored (70 bytes, nothing to verify it against)` then `OTA web: image accepted (1754704 bytes, sha256 32178d87b6044e57…)` and `success 1754704 bytes`; a push claiming `1.4.5` — `reason":"downgrade"` and `upload discarded (0 bytes)`; a push with an unexpected `blob` part — `bad_field`. `GET /api/ota/check` now returns neither signature field. Build size as shipped: flash **1,723,823 B** (90.7 % of the app slot) — 2,520 B smaller than V1.5.0; RAM **84,732 B** (25.9 %). Release assets: `firmware.bin` (1,754,688 B) and `app-debug.apk` (11,680,488 B, `versionCode` 32) — **no `.sig` asset**, per `AGENTS.md` rule 27 as rewritten for this release.
 
 ---
 
