@@ -2423,6 +2423,13 @@ static char g_otaUpVer[24] = "";       // target_version, after the one v/V drop
 static const char *g_otaUpReason = "";  // machine-readable refusal code
 static char g_otaUpDetail[96] = "";    // human-readable detail, also the client's msg
 static bool g_otaUploadActive = false;  // a part of this request reached the handler
+// A part this request already refused (a file part the protocol does not
+// describe). Kept at file scope so the POST completion can clear it: the core
+// delivers UPLOAD_FILE_END for the refused part before the next part's START, so
+// a flag local to the upload handler would be cleared too early and the image
+// part would then run the version gates and overwrite the recorded reason
+// (bad_field became same_version on the bench, 2026-10-30).
+static bool g_otaUpPartRefused = false;
 static bool g_otaUpClaimedScreen = false;  // this request took over the panel
 static volatile long otaUpBytes = 0;     // image bytes accepted into the slot
 static volatile long otaUpBytesTotal = 0;  // declared size, 0 = unknown
@@ -2510,6 +2517,9 @@ static void otaUploadRefuse(const char *code, const char *fmt, ...) {
 }
 
 static void otaPostHandler() {
+  // One request, one verdict: whatever an earlier part refused this request with
+  // is cleared here so the next POST starts clean.
+  g_otaUpPartRefused = false;
   if (otaUpdateSuccess) {
     server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Update OK\"}");
     // The reply is out, the slot is bootable and nothing writes flash any more:
@@ -2607,12 +2617,20 @@ static void otaUploadHandler() {
       snprintf(g_otaUpDetail, sizeof(g_otaUpDetail),
                "unexpected upload field (expected 'firmware')");
       uploadFailed = true;
+      g_otaUpPartRefused = true;
       return;
     }
     g_otaUploadActive = true;
     if (isSigPart) {
       sigSeen = 0;
       logPrintf("OTA web: 'signature' part ignored (no signing on any path)\n");
+      return;
+    }
+    if (g_otaUpPartRefused) {
+      // Drain the rest of this body: no flash work, and the reason already on
+      // the record stands (the POST completion sends it).
+      logPrintf("OTA web: image part skipped - request already refused (%s)\n",
+                g_otaUpReason);
       return;
     }
     uploadWritten = 0;
@@ -3360,6 +3378,7 @@ void webServerTask(void *pvParameters) {
       otaFlashAbort();
       otaUpdateInProgress = false;
       g_otaUploadActive = false;
+      g_otaUpPartRefused = false;  // no POST completion on this path to clear it
       g_otaUpClaimedScreen = false;
       otaPhase = OtaPhase::Failed;
       otaQuietExit("upload stalled");
