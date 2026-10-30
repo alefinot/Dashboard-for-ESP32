@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Release signing tool for the Dashboard++ cloud OTA pull (SECURITY plan 2).
+"""Offline signature tool for Dashboard++ release files - not part of any update path.
 
-The firmware verifies every pulled image against a public key compiled into it
-(src/otasign.cpp, include/ota_pubkey.h). This script owns the other half: the
-private key, and the signature asset that ships next to the firmware binary.
+Since 2026-10-30 the firmware verifies nothing: the maintainer asked for
+signatures out of every update path, so the device-side verifier
+(`src/otasign.cpp`, now deleted), the compiled-in public key
+(`include/ota_pubkey.h`, now deleted) and the `.sig` release asset are gone. This
+script stays in the repository as a standalone tool for whoever wants to sign a
+release file, or check one they downloaded, outside the product. Nothing on a
+dashboard looks at the result - a `.sig` produced here is a note for a human, not
+something a device acts on.
 
-SCHEME (must stay byte-identical with src/otasign.cpp)
+SCHEME (unchanged; nothing on the device consumes it any more)
 
     payload   = sha256(firmware.bin) as 32 RAW bytes
               + 0x0A
@@ -25,17 +30,17 @@ Why ECDSA P-256 and not Ed25519: the mbedTLS build shipped with Arduino core
 symbols), and enabling it would mean rebuilding the framework. ECDSA P-256 +
 SHA-256 is compiled in and in the same 128-bit security class.
 
-Open source stays open: the public key is committed (include/ota_pubkey.h),
-anyone can fork, build and flash their own image over USB (the serial path and
-the Web UI upload path are unsigned by design), and anyone can generate their
-own keypair and swap the header. The private key only decides what THIS unit's
-cloud pull will accept.
+Open source stays open: anyone can fork, build and flash their own image over USB
+(the serial path and the Web UI upload path were always unsigned) or over the LAN,
+and anyone can generate their own keypair. Before 2026-10-30 the committed public
+header decided what a unit's cloud pull would accept; now it decides nothing.
 
 USAGE
+    python scripts/ota_sign.py sign 1.5.0 .pio/build/esp32dev/firmware.bin
+    python scripts/ota_sign.py verify 1.5.0 .pio/build/esp32dev/firmware.bin
     python scripts/ota_sign.py keygen            # once; never lose the key
-    python scripts/ota_sign.py pubkey            # refresh include/ota_pubkey.h
-    python scripts/ota_sign.py sign 1.3.9 .pio/build/esp32dev/firmware.bin
-    python scripts/ota_sign.py verify 1.3.9 .pio/build/esp32dev/firmware.bin
+    python scripts/ota_sign.py pubkey            # (re)writes include/ota_pubkey.h,
+                                                 # a header no firmware reads now
 """
 
 import hashlib

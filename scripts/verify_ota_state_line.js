@@ -107,9 +107,9 @@ const cases = [
     },
     {
         name: 'refusal: reason sentence, and the running firmware is untouched',
-        d: { state: 'error', screen: 'failed', quiet: false, error: 'sig_invalid',
-             last_target_version: '1.4.7', status: 'signature does not match', percent: 100 },
-        want: { cls: 'is-bad', text: 'last attempt refused: sig_invalid (v1.4.7)',
+        d: { state: 'error', screen: 'failed', quiet: false, error: 'downgrade',
+             last_target_version: '1.4.5', status: 'refusing 1.4.5: this unit reports 1.4.6 - older images are not installed', percent: 100 },
+        want: { cls: 'is-bad', text: 'last attempt refused: downgrade (v1.4.5)',
                 hintHas: ['still installed', 'did not reboot', 'panel on the unit'], active: false, delay: 5000 }
     },
     {
@@ -141,7 +141,7 @@ const cases = [
         push: { sent: 500000, total: 1750000, ver: '1.4.7' },
         d: null,
         want: { cls: 'is-busy', text: 'sending 488 KB of 1.67 MB (28%) - the unit cannot answer while the image streams, which is normal',
-                hintHas: ['writes and hashes the image as it arrives', 'checks a signature if one came with the push'], active: true, delay: 1000 }
+                hintHas: ['writes the image to flash as it arrives', 'takes a SHA-256 of what lands'], active: true, delay: 1000 }
     },
     {
         name: 'this page is pushing and the unit did answer',

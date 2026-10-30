@@ -4529,9 +4529,9 @@ function factoryReset() {
 }
 
 // Install from a file (POST /api/ota). The unit refuses an image that does not
-// say which version it is, and a signature that is sent is verified, so the file
-// and the version both have to be in place before the upload starts rather than
-// failing after 1.75 MB has crossed the Wi-Fi.
+// say which version it is, so the file and the version both have to be in place
+// before the upload starts rather than failing after 1.75 MB has crossed the
+// Wi-Fi.
 var _otaFile = null;
 
 function otaVerValue() {
@@ -4584,7 +4584,7 @@ function doOta() {
         btn.disabled = true; btn.textContent = 'Uploading...';
         // Part order is the protocol: the core hands multipart parts to the
         // firmware in the order they arrive and the image is flashed as it
-        // lands, so the version and the signature have to come first.
+        // lands, so the version fields have to come first.
         const fd = new FormData();
         fd.append('target_version', ver);
         fd.append('total_bytes', String(_otaFile.size));
@@ -4718,7 +4718,7 @@ function otaStateRender(d) {
             ? ' - the unit has ' + otaBytesMB(d.bytes) + ', state ' + d.state
             : ' - the unit cannot answer while the image streams, which is normal';
         otaStateSay('is-busy', txt,
-                    'the verdict comes after the last byte: the unit writes and hashes the image as it arrives, and checks a signature if one came with the push');
+                    'the verdict comes after the last byte: the unit writes the image to flash as it arrives and takes a SHA-256 of what lands, for the log');
         active = true;
     } else if (!d) {
         otaStateSay('is-idle', 'no answer from /api/ota/check',
