@@ -1192,6 +1192,23 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
 .cfg-controls.nowrap { flex-wrap: nowrap; }
 .cfg-controls.tail { width: auto; flex: 1; justify-content: flex-end; }
 
+/* A value that cannot be read inside an 85 px box. The manifest URL is 73
+   characters and the box was 85 px wide (scrollWidth 425 against clientWidth
+   84), so the one setting you might need to fix was the one you could not see.
+   The label keeps its place at the head of the row and the control takes the
+   whole line under it, left-aligned and mono, so the value is both readable and
+   editable. Only rows that ask for it get it - every other row still lines up
+   with the label-left / control-right grid the rest of the form uses. */
+.cfg-row.wide .cfg-controls { width: 100%; margin-left: 0; justify-content: flex-start; }
+.cfg-row.wide .cfg-controls input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    max-width: 660px;
+    text-align: left;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+}
+
 /* Color rows: fixed-width control block so all color swatches line up,
    regardless of whether a value input/spacer sits next to them */
 .cfg-color-controls {
@@ -2186,20 +2203,38 @@ const configMap = [
             { type: "section_header", label: "Hotspot Configuration" },
             { id: "AP_PASSWORD", label: "AP Password" },
             { type: "note", label: '<span id="ap-pwd-rule" class="cfg-help">8-63 characters, or empty for an open network.</span> <span id="ap-pwd-warn" class="cfg-warn" style="display:none;">Still using the shipped default password - anyone within range of the hotspot can reconfigure this dashboard.</span>' },
-            { type: "card_header", label: "Firmware Update", content: `<div class="cfg-toolbar">
-        <button id="otaBtn" onclick="doOta()" class="btn-secondary btn-sm"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="btn-icon"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Firmware OTA</button>
-        <input type="file" id="otaFile" accept=".bin" style="display:none" onchange="otaFileChosen(this)">
-        <button id="otaSigBtn" onclick="document.getElementById('otaSigFile').click()" class="btn-secondary btn-sm">Signature (.sig)</button>
-        <input type="file" id="otaSigFile" accept=".sig" style="display:none" onchange="otaSigChosen(this)">
-        <input type="text" id="otaVer" placeholder="signed version, e.g. 1.4.7" style="width:170px" oninput="otaVerChanged()">
-        <label class="cfg-help" style="display:inline-flex;align-items:center;gap:4px;"><input type="checkbox" id="otaForce"> allow same version</label>
-        <button id="otaChangeBtn" onclick="otaChangeFile()" class="btn-secondary btn-sm" style="display:none;">Change file</button>
-        <button id="otaPullBtn" onclick="doOtaPull()" class="btn-secondary btn-sm"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="btn-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Check Updates</button>
-    </div>` },
-            { type: "note", label: '<span id="ota-sig-note" class="cfg-help">Signed installs only. Pick <code>firmware.bin</code> from a GitHub release, then the matching <code>firmware.bin.sig</code>, then confirm the version that signature was made over. The dashboard checks the signature before it flashes anything, and refuses an image it cannot verify - the running firmware stays in place.</span>' },
-            { type: "note", label: '<span id="ota-state-line" class="cfg-state is-idle">Update state: idle.</span><span id="ota-state-hint" class="cfg-state-hint"></span>' },
-            { id: "OTA_PULL_URL", label: "Firmware Manifest URL (used by Check Updates)" },
-            { type: "note", label: '<span class="cfg-help">Two ways firmware gets in, both deliberate: <b>Firmware OTA</b> pushes a file you already have (that is what the phone app does over the LAN), and <b>Check Updates</b> asks the unit to fetch the manifest URL above itself - the fallback for when no phone with internet is around. Nothing ever does either on its own, and not pressing a button is a complete answer. A second <b>Check Updates</b> inside 60 s waits out that floor instead of hammering the unit.</span>' },
+            { type: "card_header", label: "Firmware Update", content: `
+        <div class="cfg-toolbar spread" style="margin-bottom:2px;">
+            <span class="cfg-state is-idle" id="ota-state-line">Update state: idle.</span>
+        </div>
+        <div class="cfg-state-hint" id="ota-state-hint" style="margin-bottom:8px;"></div>
+        <div class="cfg-row">
+            <label>Firmware File</label>
+            <div class="cfg-controls">
+                <span class="cfg-live" id="ota-file-name">none chosen</span>
+                <input type="file" id="otaFile" accept=".bin" style="display:none" onchange="otaFileChosen(this)">
+                <button id="otaPickBtn" onclick="otaPickFile()" class="btn-secondary btn-sm">Choose</button>
+            </div>
+        </div>
+        <div class="cfg-row">
+            <label>Version to Install</label>
+            <div class="cfg-controls">
+                <input type="text" id="otaVer" placeholder="1.4.7" oninput="otaVerChanged()">
+                <button id="otaBtn" onclick="doOta()" class="btn-secondary btn-sm" disabled>Install</button>
+            </div>
+        </div>
+        <div class="cfg-row">
+            <label>Allow Reflashing the Same Version</label>
+            <div class="cfg-controls"><input type="checkbox" id="otaForce" onchange="otaUpdateBtnLabel()"></div>
+        </div>
+        <div class="cfg-row">
+            <label>Check for a New Build</label>
+            <div class="cfg-controls">
+                <button id="otaPullBtn" onclick="doOtaPull()" class="btn-secondary btn-sm">Check Updates</button>
+            </div>
+        </div>` },
+            { type: "note", label: '<span class="cfg-help">Nothing updates by itself. <b>Install</b> pushes the file chosen above; <b>Check Updates</b> makes the unit fetch the manifest URL below. The line at the top of this card is what the unit reports about itself, not what this page assumes.</span>' },
+            { id: "OTA_PULL_URL", label: "Firmware Manifest URL (used by Check Updates)", wide: true },
             { id: "VERSION_OVERRIDE", label: "Version Label (override)" },
             { type: "status", id: "build_version", label: "Firmware Build (compiled in)" },
             { type: "status", id: "core_version", label: "ESP Core FW" }
@@ -2695,7 +2730,7 @@ function renderForm(d) {
                         if (isBool) {
                             groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls"><input type="checkbox" id="${item.id}" ${val ? 'checked' : ''}></div></div>`;
                         } else {
-                            groupHtml += `<div class="cfg-row"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}"${rangeAttr}>${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div>`;
+                            groupHtml += `<div class="cfg-row${item.wide ? ' wide' : ''}"${advAttr}><label>${trUnitTokens(item.label)}</label><div class="cfg-controls">${item.unit ? `<span class="unit">${unitLabel(item.unit)}</span>` : ''}<input type="${inputType}" id="${item.id}" value="${isPwd ? '••••••••' : val}" autocomplete="${isPwd ? 'off' : ''}"${rangeAttr}>${skipReset ? '<span class="reset-spacer"></span>' : resetBtn(item.id)}</div></div>`;
                         }
                     } else {
                         closeSubCard();
@@ -4494,33 +4529,34 @@ function factoryReset() {
     });
 }
 
-// Signed install (POST /api/ota). The firmware refuses an image it cannot
-// verify, so all three inputs - image, signature, signed version - are needed
-// before the upload starts instead of failing after a 1.9 MB transfer.
+// Install from a file (POST /api/ota). The unit refuses an image that does not
+// say which version it is, and a signature that is sent is verified, so the file
+// and the version both have to be in place before the upload starts rather than
+// failing after 1.75 MB has crossed the Wi-Fi.
 var _otaFile = null;
-var _otaSigFile = null;
 
 function otaVerValue() {
     const el = document.getElementById('otaVer');
     return el ? (el.value || '').trim() : '';
 }
 
-// Release binaries are named like firmware-1.4.7.bin; the signature covers that
-// same version string, so prefill what we can instead of making a phone driver
-// type it. It stays editable because the guess is only a guess.
+// Release binaries are named like firmware-1.4.7.bin, and that string is what
+// the unit compares against its own version, so prefill what can be prefilled
+// instead of making a phone driver type it. It stays editable: the guess is only
+// a guess.
 function otaGuessVersion(name) {
     const m = /(\d+\.\d+\.\d+(?:\.\d+)?)/.exec(name || '');
     return m ? m[1] : '';
 }
 
-// The button says what is still missing, so the flow is one tap at a time.
+// The button says what is still missing, so the flow is one step at a time and
+// the row is never in a state whose meaning is unclear.
 function otaUpdateBtnLabel() {
     const btn = document.getElementById('otaBtn');
     if (!btn) return;
+    if (!_otaFile) { btn.disabled = true; btn.textContent = 'Install'; return; }
+    if (!otaVerValue()) { btn.disabled = true; btn.textContent = 'Enter version'; return; }
     btn.disabled = false;
-    if (!_otaFile) { btn.textContent = 'Firmware OTA'; return; }
-    if (!_otaSigFile) { btn.textContent = 'Pick the .sig'; return; }
-    if (!otaVerValue()) { btn.textContent = 'Enter signed version'; return; }
     btn.textContent = 'Install ' + otaVerValue();
 }
 
@@ -4536,14 +4572,9 @@ function doOta() {
     // Persistent (in-DOM) inputs: clicking a detached createElement'd <input>
     // never opens the picker in mobile browsers.
     if (!_otaFile) { document.getElementById('otaFile').click(); return; }
-    if (!_otaSigFile) {
-        otaMsg('Pick the matching firmware.bin.sig from the same release. Unsigned images are refused.');
-        document.getElementById('otaSigFile').click();
-        return;
-    }
     const ver = otaVerValue();
     if (!ver) {
-        otaMsg('Enter the version the signature was made over (for example 1.4.7). The version is inside the signed data, so it has to match exactly.');
+        otaMsg('Enter the version this image says it is (for example 1.4.7). The unit compares it against the version it is running before it writes anything.');
         document.getElementById('otaVer').focus();
         return;
     }
@@ -4559,7 +4590,6 @@ function doOta() {
         fd.append('target_version', ver);
         fd.append('total_bytes', String(_otaFile.size));
         if (force) fd.append('force', '1');
-        fd.append('signature', _otaSigFile, _otaSigFile.name);
         fd.append('firmware', _otaFile, _otaFile.name);
         // XHR rather than fetch, for exactly one reason: fetch cannot report
         // upload progress at all, and while an image body is streaming the unit
@@ -4689,7 +4719,7 @@ function otaStateRender(d) {
             ? ' - the unit has ' + otaBytesMB(d.bytes) + ', state ' + d.state
             : ' - the unit cannot answer while the image streams, which is normal';
         otaStateSay('is-busy', txt,
-                    'the verdict comes after the last byte: the unit hashes the image as it writes, then checks the signature');
+                    'the verdict comes after the last byte: the unit writes and hashes the image as it arrives, and checks a signature if one came with the push');
         active = true;
     } else if (!d) {
         otaStateSay('is-idle', 'no answer from /api/ota/check',
@@ -4746,41 +4776,26 @@ function otaStateRender(d) {
     otaStateSchedule(active);
     return active;
 }
+function otaPickFile() {
+    document.getElementById('otaFile').click();
+}
+
 function otaFileChosen(el) {
     const f = el.files && el.files[0];
     if (!f) { el.value = ''; return; }
     _otaFile = f;
     el.value = '';  // reset so the same file can be re-picked
+    const nameEl = document.getElementById('ota-file-name');
+    if (nameEl) nameEl.innerText = f.name + ' (' + otaBytesMB(f.size) + ')';
     const vEl = document.getElementById('otaVer');
     if (vEl && !vEl.value) vEl.value = otaGuessVersion(f.name) || localStorage.getItem('otaLastVersion') || '';
     if (vEl && vEl.value) localStorage.setItem('otaLastVersion', vEl.value.trim());
-    document.getElementById('otaChangeBtn').style.display = 'inline-block';
-    otaUpdateBtnLabel();
-}
-function otaSigChosen(el) {
-    const f = el.files && el.files[0];
-    if (!f) { el.value = ''; return; }
-    _otaSigFile = f;
-    el.value = '';
-    const b = document.getElementById('otaSigBtn');
-    if (b) b.textContent = 'Signature ready';
     otaUpdateBtnLabel();
 }
 function otaVerChanged() {
     const v = otaVerValue();
     if (v) localStorage.setItem('otaLastVersion', v);
     otaUpdateBtnLabel();
-}
-function otaChangeFile() {
-    const btn = document.getElementById('otaBtn');
-    _otaFile = null;
-    _otaSigFile = null;
-    btn.disabled = false;
-    const sb = document.getElementById('otaSigBtn');
-    if (sb) sb.textContent = 'Signature (.sig)';
-    document.getElementById('otaChangeBtn').style.display = 'none';
-    otaUpdateBtnLabel();
-    document.getElementById('otaFile').click();
 }
 
 function doOtaPull() {

@@ -1011,12 +1011,34 @@ The **Firmware Update** card (Settings → *Firmware Update*) is the unit's own 
 of the same three facts, and it is deliberately explicit that firmware only moves
 when a person makes it move:
 
-- **Firmware OTA** — pushes a file you already have (`firmware.bin` + `firmware.bin.sig` + the signed version). That is the same request the phone app sends; the card is the fallback when the phone is not around.
-- **Check Updates** — asks the unit to fetch `OTA_PULL_URL` itself. The fallback when no phone with internet is around. It never runs on its own, and a second press inside 60 s waits that floor out instead of hammering the unit.
+- **Choose** then **Install** — pushes a file you already have: the `firmware.bin` from a release plus the version it says it is. Send the release's `firmware.bin.sig` too (through an app or `curl`, not this card) and the unit verifies it; without it the version, size and image-header gates still apply. That is the same request the phone app sends, and this card is the fallback when the phone is not around.
+- **Check Updates** — asks the unit to fetch `OTA_PULL_URL` itself. The fallback when no phone with internet is around.
 
-Under them, one line rewrites itself from `GET /api/ota/check` and colours itself:
-idle (grey), in flight (cyan), stalled (amber), refused (rose), installed (green).
-It is monospace because most of what it prints are numbers the device reported.
+At the top of the card, one line rewrites itself from `GET /api/ota/check` and
+colours itself: idle (grey), in flight (cyan), stalled (amber), refused (rose),
+installed (green). It is monospace because most of what it prints are numbers the
+device reported, and it sits first because it is the only part of the card that
+comes from the unit rather than from this page.
+
+The card's controls use the same rows as every other settings card — label at the
+left with `min-width: 170px`, control block pushed to the right edge of the card
+(`.cfg-controls`, `margin-left: auto`), booleans a bare checkbox on their own row.
+Verified against the rendered page on the tablet rather than by eye: every row in
+this card has `labelX 219` and `ctlRight 1061`, which is exactly what the reference
+card (*General*) reports (`Target Refresh Rate`, `Enable Sensor Demo Mode`, …).
+The old card had a single free-floating `.cfg-toolbar` with six controls of two
+different flows running across it at whatever width they took; that is what made it
+look detached from the rest of the form. Two consequences worth naming:
+
+- The manifest URL input was **85 px wide holding a 73-character value**
+  (`scrollWidth 425` against `clientWidth 84`) — the one setting you might need to
+  fix was the one you could not read. A row can now opt into `wide: true`, which
+  keeps the label in its usual place and puts the control on the line below at full
+  width, left-aligned and monospace: measured `660 px` box, `659 px` of content, so
+  the whole URL is visible and editable.
+- The card used to carry **three prose blocks (866 characters)** plus a signature
+  explainer. It now carries one (223 characters), because the state line above it
+  already says most of what the notes were trying to pre-empt.
 
 | Situation | What the line says | Why it is worded that way |
 |---|---|---|
@@ -1186,13 +1208,22 @@ error`, `screen: failed`) with the unit alive on 1.4.6 and `/api/live` answering
 - The pull endpoint now answers a readable `msg` when no manifest URL is configured, in the reply the requester is already looking at, instead of starting a task whose only trace would be a status string three polls later. The 60 s re-check floor stays (button spam, an app retrying on a timer) and still waits with a live countdown rather than refusing — it always ran on the pull task, so the web loop was never blocked by it.
 
 **Web UI (`src/webui.html`)**
-- The firmware card asks for `firmware.bin`, its `.sig` and the version, prefilled from a file name like `firmware-1.4.7.bin` and remembered between visits. The button names what is still missing — `Pick the .sig`, `Enter signed version`, `Install 1.4.7` — so an incomplete install is caught before 1.9 MB crosses the Wi-Fi rather than after.
+- The firmware card asks for the file and the version: **Choose** opens the picker, the chosen file's name and size appear on its own row, and the version is prefilled from a name like `firmware-1.4.7.bin` and remembered between visits. The button names what is still missing — `Install` (disabled, no file), `Enter version`, `Install 1.4.7` — so an incomplete install is caught before 1.75 MB crosses the Wi-Fi rather than after.
 - A refusal prints the device's own reason instead of only offering `Retry`, and the card explains what the signature is for.
 - The *Enable Automatic OTA Pull* toggle is gone from the Firmware Update card, and the card now says out loud what replaced it: nothing looks for an update by itself, these buttons are the only ways firmware gets in, and not pressing them is a perfectly good answer. The manifest URL field is labelled as what it is — “used by Check Updates”.
 - **A live update-state line** now sits under those buttons and mirrors what the unit itself knows — `state`, `screen`, `quiet` / `quiet_silent_ms`, `percent` / `bytes`, `error`, `hold_to_restart_ms`, and the pull's own status sentence — in five colours. It is written to survive the two things that used to make an update look mysterious from the browser: the unit being unreachable while the image streams (normal, and shown as progress rather than failure), and a window that a dead sender left open (amber, with the 120 s deadline in the sentence). The hold-to-restart hint is read from `hold_to_restart_ms` instead of typed into the page. Full wording table in *The update card in the Web UI* above.
 - The upload switched from `fetch` to `XMLHttpRequest` for one reason: `fetch` cannot report upload progress at all, and while an image body streams the unit cannot answer `/api/ota/check` either — the web task is inside that request. Bench measurement: a mid-transfer check times out on a 6 s budget, and answers in 150 ms after the transfer ends. So the pushing page counts its own bytes, and takes the device's numbers only once they arrive.
 - *Check Updates* lost its private 1.5 s poll loop; the state line above already polls the same endpoint, faster when something is happening and slower when nothing is. Two poll loops answering the same question differently is how a UI ends up showing “Checking…” next to “up-to-date”.
 - New `scripts/verify_ota_state_line.js` — 13 cases over that decision chain, sliced out of `src/webui.html` at run time (no duplicated logic to drift), and able to check the page a running unit serves: `node scripts/verify_ota_state_line.js http://192.168.1.116/`.
+- **The Firmware Update card was rebuilt on the form's own grid** (2026-10-30), because its controls had drifted away from the rest of the settings page: one free-floating `.cfg-toolbar` carrying six controls of two different flows at widths of their own choosing, plus three stacked prose blocks. It is now four ordinary `.cfg-row` rows — *Firmware File* (name + **Choose**), *Version to Install* (field + **Install**), *Allow Reflashing the Same Version* (a bare checkbox, like every other boolean here), *Check for a New Build* (**Check Updates**) — with the state line moved to the top of the card and one short note under it. `signature_required` now reads `false`, so the `.sig` picker, its hidden file input, the “Pick the .sig” step and its 293-character explainer are gone; a version is still required, because that is what the same-version and downgrade gates compare against.
+- New `wide: true` row option in the settings renderer, and it is applied to `OTA_PULL_URL`: the manifest URL box was 85 px around a 73-character value, so the only field you might need to correct was unreadable. Measured on the tablet's own WebView, through `adb` + the Chrome DevTools Protocol rather than by eye: every row of this card reports `labelX 219` / `ctlRight 1061`, identical to the reference card (*General*), and the URL control is a 660 px box holding 659 px of content.
+
+**Verified in a real browser this time** (the tablet: SM-T590 over wireless `adb`, the WebView's debug socket forwarded to CDP, pointed at the page the app is showing; unit at `192.168.1.116`):
+- The card answers a real file selection (`DOM.setFileInputFiles` into `#otaFile`): its row shows `firmware-1.4.6.bin`, the version field prefills `1.4.6` from the file name, **Install** becomes `Install 1.4.6` and enables, and the confirm dialog reads *“Upload firmware-1.4.6.bin as v1.4.6 and reboot the device? The screen shows only the update progress until it restarts. Reflashing the version already installed is allowed by that checkbox.”*
+- What did **not** complete is the upload itself. The file I injected came from `/sdcard/Download`, which the app process cannot read, so the `File` arrived with size 0 and nothing left the phone. The firmware handles a 0-byte `firmware` part safely — `"reason":"image_rejected"`, `"0 bytes are not a usable image (magic 0x00, segments 0) - not activated"` — and did not reboot (uptime 139 s → 141 s across it). A browser-driven install therefore still needs a file the app can actually read (a real Android picker grants that); it has not yet been run end to end from the WebView.
+- The earlier “logic harness only, never rendered” gap is closed for the state line: its **rendered** text was read off the live page — `is-idle` before, then `is-good` / `pull: up-to-date (v1.4.6)` after pressing the card's own **Check Updates**. Two traps for anyone automating this: inside a closed `<details>` Chromium reports `innerText === ""` for the whole subtree (`content-visibility: hidden`), and off-screen elements read empty too — use `textContent`, or open the accordion first.
+- Something the app slices have to design around: when the unit goes away (an OTA reboot did it mid-session), the app **tears its WebView down** — the CDP page target vanished and the screen showed *“NO DEVICE CONNECTED … This slot becomes its Web UI once the vehicle page has connected one.”* Anything the app shows during an update cannot assume its WebView is alive when the unit comes back.
+- A data point for **#70**: on this run the same unit's cloud pull **succeeded** while the WebView was polling (`status: up-to-date (v1.4.6)`), so that TLS/heap failure is intermittent rather than constant.
 
 **Breaking** — an unsigned upload that used to install is now refused, which is the point of the change. The pull path has refused to behave that way since 1.4, so this makes one rule for the product instead of two. `-DOTA_ALLOW_UNSIGNED` relaxes both paths for bench work as before; a release build compiles the requirement in and nothing sent over the network can lift it. **Superseded on 2026-10-30**: the LAN half of this rule was relaxed deliberately, so in a normal build `signature_required` reads `false` and the sentence above describes the pull path and an `OTA_REQUIRE_SIG` build only — see the paragraph at the top of this entry.
 

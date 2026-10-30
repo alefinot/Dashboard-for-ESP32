@@ -141,7 +141,7 @@ const cases = [
         push: { sent: 500000, total: 1750000, ver: '1.4.7' },
         d: null,
         want: { cls: 'is-busy', text: 'sending 488 KB of 1.67 MB (28%) - the unit cannot answer while the image streams, which is normal',
-                hintHas: ['hashes the image as it writes', 'signature'], active: true, delay: 1000 }
+                hintHas: ['writes and hashes the image as it arrives', 'checks a signature if one came with the push'], active: true, delay: 1000 }
     },
     {
         name: 'this page is pushing and the unit did answer',
