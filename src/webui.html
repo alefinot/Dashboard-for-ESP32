@@ -2224,8 +2224,8 @@ const configMap = [
             </div>
         </div>
         <div class="cfg-row">
-            <label>Allow Reflashing the Same Version</label>
-            <div class="cfg-controls"><input type="checkbox" id="otaForce" onchange="otaUpdateBtnLabel()"></div>
+            <label>Install an Older Version</label>
+            <div class="cfg-controls"><input type="checkbox" id="otaOlder" onchange="otaUpdateBtnLabel()"></div>
         </div>
         <div class="cfg-row">
             <label>Check for a New Build</label>
@@ -2234,7 +2234,7 @@ const configMap = [
             </div>
         </div>` },
             { id: "OTA_PULL_URL", label: "Firmware Manifest URL (used by Check Updates)", wide: true },
-            { id: "VERSION_OVERRIDE", label: "Version Label (override)" },
+            { id: "VERSION_OVERRIDE", label: "Version Label (display only)" },
             { type: "status", id: "build_version", label: "Firmware Build (compiled in)" },
             { type: "status", id: "core_version", label: "ESP Core FW" }
         ]
@@ -4577,8 +4577,8 @@ function doOta() {
         document.getElementById('otaVer').focus();
         return;
     }
-    const force = document.getElementById('otaForce').checked ? '1' : '';
-    const again = force ? ' Reflashing the version already installed is allowed by that checkbox.' : '';
+    const older = document.getElementById('otaOlder').checked ? '1' : '';
+    const again = older ? ' That box allows an image whose version is older than, or identical to, the version running.' : '';
     confirmDialog('Upload ' + _otaFile.name + ' as v' + ver + ' and reboot the device?' +
                   ' The screen shows only the update progress until it restarts.' + again, function() {
         btn.disabled = true; btn.textContent = 'Uploading...';
@@ -4588,7 +4588,7 @@ function doOta() {
         const fd = new FormData();
         fd.append('target_version', ver);
         fd.append('total_bytes', String(_otaFile.size));
-        if (force) fd.append('force', '1');
+        if (older) fd.append('allow_older', '1');
         fd.append('firmware', _otaFile, _otaFile.name);
         // XHR rather than fetch, for exactly one reason: fetch cannot report
         // upload progress at all, and while an image body is streaming the unit

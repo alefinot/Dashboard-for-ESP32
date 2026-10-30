@@ -464,9 +464,9 @@ The management portal features a modern grouped card-based layout:
 | `/api/noisematrix` | `POST` | Starts the four-run sensor noise bench (`idle`, `tft`, `bl10`, `bl90`); runs in the background for ~17 s, so poll the `GET`. Answers `409` while a job is running | None | `application/json` |
 | `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `application/json` (`{"status":"ok"\|"saved-ram-only","value":N}` — `saved-ram-only` means the value is applied but the NVS write failed) |
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `application/json` (same shape as `cal-dark`) |
-| `/api/ota` | `POST` | Firmware install over the LAN — version, size, image-header and one-writer gates always; no signature step on any path (see *LAN install (`POST /api/ota`)*) | `multipart/form-data`: `target_version`, `firmware` (file part); optional `total_bytes`, `force=1`. A `signature` part may still be sent: it is counted, ignored and logged | `application/json` |
+| `/api/ota` | `POST` | Firmware install over the LAN — version, size, image-header and one-writer gates always; no signature step on any path (see *LAN install (`POST /api/ota`)*) | `multipart/form-data`: `target_version`, `firmware` (file part); optional `total_bytes`, `allow_older=1` (accept an image whose claimed version is older or identical), `force=1` (legacy: identical version only). A `signature` part may still be sent: it is counted, ignored and logged | `application/json` |
 | `/api/ota/pull` | `POST` | **Owner-triggered cloud pull** — one check of `OTA_PULL_URL`, then install if the manifest offers a different image. There is no automatic check anywhere in the product, so this is the only way the unit ever fetches firmware by itself. Refuses with a `msg` when not connected to Wi-Fi or when no manifest URL is configured; reports `busy` while another install holds the slot | None | `application/json` |
-| `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled` — a manifest URL is configured, so the pull path is available on demand; `url`, `current_version`, `build_version`, `version_override`, `previous_version`, `status`, `status_updated`) **and install state**: `state` (tracks the LAN install; pull outcomes report through `status`), `percent`, `bytes`, `bytes_total`, `quiet`, `quiet_silent_ms`, `screen`, `hold_to_restart_ms`, `error`, `last_target_version` (the version an install verified against, after that `v` drop). Answers normally even during a quiet window — it is on the allow-list | None | `application/json` |
+| `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled` — a manifest URL is configured, so the pull path is available on demand; `url`, `current_version` (the compiled-in build identity, which is what every update gate compares against since issue #72 was fixed), `build_version`, `version_override` (display label only, when one is set), `previous_version`, `status`, `status_updated`) **and install state**: `state` (tracks the LAN install; pull outcomes report through `status`), `percent`, `bytes`, `bytes_total`, `quiet`, `quiet_silent_ms`, `screen`, `hold_to_restart_ms`, `error`, `last_target_version` (the version an install verified against, after that `v` drop). Answers normally even during a quiet window — it is on the allow-list | None | `application/json` |
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
 | `/api/perf` | `GET` | Live telemetry (CPU, Heap, task stack headroom, FPS, WiFi, partitions), plus the web task's own timing: `web_serve_ms_last` / `web_serve_ms_max` (what one `handleClient()` pass costs) and `web_slow_iters` (loop iterations over 100 ms). Also reports `mac`: the base eFuse MAC (uppercase, colon-separated) - the stable device identity the companion app binds its vehicle card to, unchanged by Wi-Fi mode or DHCP | None | `application/json` |
 | `/api/health` | `GET` | Health probe: heap, FPS, partition layout and the NVS entry budget (`nvs_bytes`, `nvs_entries_used` / `_available` / `_total`) | None | `application/json` |
@@ -624,7 +624,7 @@ ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely �
 - `WIFI_ATTEMPT_SECONDS` (default=12, range 5–60): How long one network gets per try — the window covers the driver’s scan plus association, 4-way handshake and DHCP. A dead network is dropped earlier as soon as the driver reports its `STA_DISCONNECTED` reason (`NO_AP_FOUND`, wrong password, auth timeout), so this window only decides how long a *silent* network (in range but not answering, or a stalled DHCP lease) is waited for before the next slot is tried.
 - **Not parameters any more:** `OTA_PULL_ENABLED` (the automatic-update switch) is gone — from the parameter table, the WebUI, and the backup template. It armed a check that ran once per boot while Wi-Fi was up; updates are manual now (the phone pushes them, or the owner presses **Check Updates**), so there is nothing left to enable or disable, and refusing to press a button is a complete answer. A backup that still carries the old `OTA_PULL_EN` key restores without it, exactly as the retired `WIFI_RETRY_M` / `WIFI_TXP` keys do, and `CFG_VER` is deliberately not bumped over it. `/api/ota/check` still reports a boolean `enabled`, now meaning “a manifest URL is configured, so the pull path is reachable”.
 - `OTA_PULL_URL` (default="https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest"): HTTPS URL of the update **manifest** — either JSON with `version` + `firmware_url`, or the GitHub `releases/latest` API URL (first `.bin` asset is used). No `.sig` sibling is fetched — there is no signature step on this path. With the automatic switch retired this is the whole configuration of the pull path: set it and the unit can pull when asked, clear it and `POST /api/ota/pull` refuses with a message telling the requester to push the file instead.
-- `VERSION_OVERRIDE` (default=""): Optional version **label**. When set, the unit reports this string instead of its compiled-in build version (`FW_VERSION` in `src/config.cpp`) — for display and as the reference version of the cloud OTA check, which is how you test an update pull against an arbitrary version. It never changes the firmware image, and nothing fetched from the network ever writes it (the previous behaviour of storing the manifest's version is why a unit could report a version it never ran). The real build version is always exposed read-only as `build_version` (`GET /api/config`) and shown in the WebUI (System → Firmware Update). NVS key `VER_OVR`.
+- `VERSION_OVERRIDE` (default=""): Optional version **label**, display only. It changes what the unit *prints* — the WebUI, the update card and `GET /api/config` — and nothing else. It has no effect on any update decision: the cloud pull's up-to-date test, the LAN install's same-version and downgrade gates, and `/api/ota/check`'s `current_version` all use the compiled-in `FW_VERSION` (issue #72, fixed after V1.5.1: the bench unit's stale "1.4.6" label was steering every gate, which would have let the pull path re-install the release it already ran forever). It never changes the firmware image, and nothing fetched from the network ever writes it (the old behaviour of storing the manifest's version is why a unit could report a version it never ran). NVS key `VER_OVR`.
 
 #### Ambient Light (Auto-Brightness)
 - `LIGHT_SENSOR_DARK_VAL`: Dark-reference ambient light value (calibrated via `/api/ambient/cal-dark`).
@@ -938,8 +938,8 @@ A refusal aborts the OTA slot, never reboots, and answers `500` with a sentence 
 | `reason` | Cause |
 |---|---|
 | `version_missing` / `version_bad` | `target_version` absent or not a version-shaped string |
-| `downgrade` | Claimed version is older than the one this unit reports; `force` does not lift this one |
-| `same_version` | Same version installed and `force` was not sent |
+| `downgrade` | Claimed version is older than the build this unit is running. Send `allow_older=1` to accept it anyway; `force=1` does not lift this one |
+| `same_version` | Same version installed and neither `allow_older=1` nor `force=1` was sent |
 | `slot_busy` | A cloud pull holds the OTA slot, or an earlier reset left it poisoned |
 | `slot_open_failed` | The OTA slot could not be opened for writing |
 | `too_big` / `image_rejected` | Larger than the OTA partition, or not a usable ESP image |
@@ -1130,7 +1130,7 @@ What a pull accepts, in order:
 | Guard | What happens when it fails |
 |---|---|
 | TLS certificate checked against the CA bundle compiled into the core | connection refused, mbedTLS reason logged (issue #71 tracks CDN chains this bundle cannot verify, which the UI reports as a connection failure) |
-| Manifest version differs from the version this unit reports | "already up-to-date", nothing downloaded (issue #72: `VERSION_OVERRIDE` is what that compare uses today, not `FW_VERSION`) |
+| Manifest version differs from the build this unit is running (`FW_VERSION`) | "already up-to-date", nothing downloaded. Since the #72 fix the — label `VERSION_OVERRIDE` — is never part of this compare, so a unit that already runs the release cannot keep seeing it as new |
 | Declared size fits the real OTA partition | the slot is never opened, reason logged |
 | Image arrives complete (`written >= totalSize`) | partial image discarded, no reboot; up to 5 attempts, resuming with an HTTP Range request |
 
@@ -1181,6 +1181,40 @@ In Demo Mode:
 ---
 
 ## Changelog
+
+### Unreleased (next release) — the version anchor is the build, a push can be allowed to go older, and wired flashing is fixed (firmware + Web UI)
+
+- **Issue #72 fixed: `VERSION_OVERRIDE` is a label, nothing more.** Every version
+  decision now reads `FW_VERSION` through `buildVersion()` (renamed from
+  `effectiveVersion()`): the cloud pull's "already up-to-date" test, the LAN
+  install's same-version and downgrade gates, and the `current_version` field of
+  `GET /api/ota/check`. Before this, a stale label steered all of them: the bench
+  unit labelled itself `1.4.6` while running 1.5.x, so an installed release looked
+  like an upgrade (a pull that would re-install the same image indefinitely) and a
+  genuinely newer image could be judged a downgrade. `/api/ota/check` keeps
+  reporting `version_override` when one is set, and `build_version` alongside it.
+- **`allow_older=1` on `POST /api/ota`.** One flag that permits an image whose
+  claimed version is older *or* identical. `force=1` is still honoured, for the
+  identical version only, so existing clients keep working. Refusals name the flag
+  in `msg` (`downgrade`, `same_version`) so a client can tell the person which box
+  to tick.
+- **The update card's checkbox changed to match:** *Allow Reflashing the Same
+  Version* is now *Install an Older Version* (`otaOlder`, sends `allow_older=1`),
+  because "reflashing the same version" was the smaller half of the same
+  permission. The Settings field is labelled *Version Label (display only)*.
+- **Wired (USB) flashing fixed at the root** — see *Compiling & Flashing via
+  USB*: `scripts/fix_upload_layout.py` writes `otadata` at this table's real offset
+  (`0x1D000`) instead of PlatformIO's fixed `0xe000`, which sits inside `nvs`. A
+  wired flash now boots what it wrote, and stops destroying two settings pages per
+  flash. The bench unit lost `WEATH_LOCALE`, `WIFI_S2..S4` and `WIFI_P1..P4` to that
+  bug over its life; a Web UI config backup (if one exists) restores what a backup
+  captured.
+
+Still open: **#71** (the pull path cannot TLS-download the CDN release asset),
+**#69** (no physical trip button on the bench board), **#70** (heap-starved TLS
+handshake reported as `connection refused`).
+
+---
 
 ### V1.5.1 — **signing is out of every update path** (firmware + Web UI)
 

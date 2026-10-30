@@ -286,13 +286,18 @@ char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ES
 // writable by the update manifest, a config restore or the Web API. It is the
 // one place the release version is written (AGENTS.md rule 3).
 //
-// VERSION_OVERRIDE is a user-set label for display and for testing update
-// pulls against an arbitrary version string. It is deliberately separate from
-// the build identity, and nothing fetched from the network ever writes it -
-// the previous single value (OTA_CURRENT_VERSION / NVS key "OTA_VER") was
-// rewritten from the release manifest after every pull, so the device ended up
-// *claiming* whatever the server said and could decide it was permanently
-// up-to-date (or hold a version brought back by a config backup).
+// VERSION_OVERRIDE is a user-set display label. It is deliberately separate from
+// the build identity, and nothing fetched from the network ever writes it - the
+// previous single value (OTA_CURRENT_VERSION / NVS key "OTA_VER") was rewritten
+// from the release manifest after every pull, so the device ended up *claiming*
+// whatever the server said and could decide it was permanently up-to-date (or
+// hold a version brought back by a config backup).
+//
+// Since issue #72 it is only a label: no version decision reads it. The bench
+// unit carried the label "1.4.6" while running 1.5.x, and every update gate was
+// comparing against that stale number - a release already installed looked like
+// an upgrade (an update loop waiting to happen on the pull path), and a genuinely
+// newer image could be judged a downgrade.
 const char FW_VERSION[] = "1.5.1";
 char VERSION_OVERRIDE[32] = "";
 
@@ -1032,11 +1037,13 @@ static void cfgApply(int mode, Preferences &pref, JsonDocument *doc) {
   }
 }
 
-// The version this unit reports: the user override when one is set, otherwise
-// the compiled-in build identity. Display paths and the update check both read
-// this, so a bench override still steers a pull test.
-const char *effectiveVersion() {
-  return (VERSION_OVERRIDE[0] != 0) ? VERSION_OVERRIDE : FW_VERSION;
+// The version this unit IS: the compiled-in build identity. Every version
+// decision reads this and nothing else - the cloud pull's "already up-to-date"
+// test, the LAN install's same-version and downgrade gates, and the
+// current_version that /api/ota/check reports. VERSION_OVERRIDE is a label shown
+// beside it, never a decision input (issue #72).
+const char *buildVersion() {
+  return FW_VERSION;
 }
 
 // Pulls the next numeric group out of a dotted version string, skipping 'v',

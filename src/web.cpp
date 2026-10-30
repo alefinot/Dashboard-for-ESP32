@@ -1522,7 +1522,11 @@ void checkForFirmwareUpdate() {
     }
 
     char curVer[32];
-    snprintf(curVer, sizeof(curVer), "%s", effectiveVersion());
+    // Compare against the build identity, never the VERSION_OVERRIDE label
+    // (issue #72): with the label in play a unit that already ran the release
+    // the manifest pointed at could still see it as a new version, which on the
+    // pull path is an update loop waiting to happen.
+    snprintf(curVer, sizeof(curVer), "%s", buildVersion());
     if (latestVersion.startsWith("v") || latestVersion.startsWith("V"))
       latestVersion = latestVersion.substring(1);
 
@@ -2671,19 +2675,32 @@ static void otaUploadHandler() {
     // Only checked when a version was claimed; a signed build always claims one
     // by the time it gets here.
     if (g_otaUpVer[0]) {
-      int vcmp = versionCmp(g_otaUpVer, effectiveVersion());
-      if (vcmp < 0) {
-        otaUploadRefuse("downgrade", "refusing %s: this unit reports %s - older images are not installed",
-                        g_otaUpVer, effectiveVersion());
+      // Version policy is decided against the build identity (issue #72), never
+      // against the VERSION_OVERRIDE label. `allow_older=1` is the caller's
+      // explicit permission to install an image that claims an older - or the
+      // identical - version; that is the update card's single checkbox.
+      // `force=1` is still honoured for clients that send it, and covers the
+      // identical version only.
+      int vcmp = versionCmp(g_otaUpVer, buildVersion());
+      const bool allowOlder = server.arg("allow_older") == "1";
+      const bool forceSame = server.arg("force") == "1";
+      if (vcmp < 0 && !allowOlder) {
+        otaUploadRefuse("downgrade",
+                        "refusing %s: this unit runs %s - send allow_older=1 to install it anyway",
+                        g_otaUpVer, buildVersion());
         uploadFailed = true;
         return;
       }
-      if (vcmp == 0 && server.arg("force") != "1") {
-        otaUploadRefuse("same_version", "%s is already installed - add force=1 to reflash the same image",
+      if (vcmp == 0 && !allowOlder && !forceSame) {
+        otaUploadRefuse("same_version",
+                        "%s is already installed - send allow_older=1 (or force=1) to reflash the same image",
                         g_otaUpVer);
         uploadFailed = true;
         return;
       }
+      if (vcmp <= 0)
+        logPrintf("OTA web: %s over %s installed by explicit permission\n",
+                  g_otaUpVer, buildVersion());
     }
     String total = server.arg("total_bytes");
     if (total.length() > 0 && total.length() < 12) otaUpBytesTotal = total.toInt();
@@ -2871,10 +2888,12 @@ static void otaCheckGetHandler() {
   // available on demand". Nothing pulls until someone asks (POST /api/ota/pull).
   doc["enabled"] = OTA_PULL_URL[0] != 0;
   doc["url"] = OTA_PULL_URL;
-  doc["current_version"] = effectiveVersion();
-  // Always-visible build truth next to the reported version, so an override
-  // (or a mismatch) is obvious from the WebUI and the phone app. Additive:
-  // existing consumers keep reading current_version.
+  doc["current_version"] = buildVersion();
+  // Always-visible build truth next to the reported version. Both are now the
+  // same value by construction - current_version is the identity every update
+  // gate uses (issue #72), and version_override, when set, is only the label a
+  // person typed for display. Additive: existing consumers keep reading
+  // current_version.
   doc["build_version"] = FW_VERSION;
   if (VERSION_OVERRIDE[0]) doc["version_override"] = VERSION_OVERRIDE;
   doc["previous_version"] = bootinfo_previous_version();

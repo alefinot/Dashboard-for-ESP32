@@ -394,11 +394,12 @@ extern int TZ_DST_RULE;  // which rule TZ_DST_ENABLED applies: see TZ_DST_RULE_*
 // cloud pull path, which now has exactly one trigger - POST /api/ota/pull.
 extern char OTA_PULL_URL[192];
 // Build identity (compile time) and the optional user override. See the
-// comment at their definition in config.cpp: the manifest can never change
-// what the device claims to be.
+// comment at their definition in config.cpp: the manifest can never change what
+// the device claims to be, and since issue #72 the override is a label only -
+// no version decision reads it.
 extern const char FW_VERSION[];
 extern char VERSION_OVERRIDE[32];
-const char *effectiveVersion();
+const char *buildVersion();
 int versionCmp(const char *a, const char *b);
 
 // ----------------------------------------------------------------------------
