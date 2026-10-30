@@ -1252,6 +1252,28 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
     font-weight: 700;
 }
 
+/* The firmware-update state line under the Firmware Update card rewrites itself
+   from GET /api/ota/check, and it carries its own colour: nothing running,
+   something in flight, something that failed, and a stall worth a second look.
+   Monospace because most of what it prints are numbers the device reported. */
+.cfg-state {
+    font-size: 11px;
+    line-height: 1.5;
+    font-family: 'JetBrains Mono', monospace;
+}
+.cfg-state.is-idle { color: var(--text-muted); }
+.cfg-state.is-busy { color: var(--accent-cyan); }
+.cfg-state.is-warn { color: var(--accent-amber); }
+.cfg-state.is-bad  { color: var(--accent-rose); }
+.cfg-state.is-good { color: var(--accent-emerald); }
+/* The quieter sentence under the state line: what to do about it. */
+.cfg-state-hint {
+    display: block;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-dim);
+}
+
 .cfg-live { font-size: 12px; color: var(--text-muted); }
 .cfg-live strong { color: #fff; font-family: 'JetBrains Mono', monospace; }
 
@@ -2174,8 +2196,10 @@ const configMap = [
         <button id="otaChangeBtn" onclick="otaChangeFile()" class="btn-secondary btn-sm" style="display:none;">Change file</button>
         <button id="otaPullBtn" onclick="doOtaPull()" class="btn-secondary btn-sm"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="btn-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Check Updates</button>
     </div>` },
-            { type: "note", label: '<span id="ota-sig-note" class="cfg-help">Signed installs only. Pick <code>firmware.bin</code> from a GitHub release, then the matching <code>firmware.bin.sig</code>, then confirm the version that signature was made over. The dashboard checks the signature before it flashes anything, and refuses an image it cannot verify - the running firmware stays in place. Nothing looks for an update by itself: these two buttons are the only ways firmware gets in, and not pressing them is a perfectly good answer.</span>' },
+            { type: "note", label: '<span id="ota-sig-note" class="cfg-help">Signed installs only. Pick <code>firmware.bin</code> from a GitHub release, then the matching <code>firmware.bin.sig</code>, then confirm the version that signature was made over. The dashboard checks the signature before it flashes anything, and refuses an image it cannot verify - the running firmware stays in place.</span>' },
+            { type: "note", label: '<span id="ota-state-line" class="cfg-state is-idle">Update state: idle.</span><span id="ota-state-hint" class="cfg-state-hint"></span>' },
             { id: "OTA_PULL_URL", label: "Firmware Manifest URL (used by Check Updates)" },
+            { type: "note", label: '<span class="cfg-help">Two ways firmware gets in, both deliberate: <b>Firmware OTA</b> pushes a file you already have (that is what the phone app does over the LAN), and <b>Check Updates</b> asks the unit to fetch the manifest URL above itself - the fallback for when no phone with internet is around. Nothing ever does either on its own, and not pressing a button is a complete answer. A second <b>Check Updates</b> inside 60 s waits out that floor instead of hammering the unit.</span>' },
             { id: "VERSION_OVERRIDE", label: "Version Label (override)" },
             { type: "status", id: "build_version", label: "Firmware Build (compiled in)" },
             { type: "status", id: "core_version", label: "ESP Core FW" }
@@ -2432,11 +2456,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // px "screen height" for CSS before anything is measured (100vh is 0 in the
     // app's WebView, see the note at --panel-max)
     syncVpVars();
-    fetch('/api/config').then(r => {
+        fetch('/api/config').then(r => {
         if (!r.ok) throw { status: r.status };
         return r.json();
     }).then(d => {
         renderForm(d);
+        // The firmware-update state line lives inside that form, so its poller
+        // starts here and not before - there is no element to fill until then.
+        otaStateStart();
     }).catch(e => {
         if (!sessionStorage.getItem('cfgRetried')) {
             // One automatic retry: the device may still be freeing its big UI
@@ -4534,25 +4561,190 @@ function doOta() {
         if (force) fd.append('force', '1');
         fd.append('signature', _otaSigFile, _otaSigFile.name);
         fd.append('firmware', _otaFile, _otaFile.name);
-        fetch('/api/ota', {method:'POST', body:fd}).then(r => r.json()).then(d => {
-            if (d.status === 'ok') {
+        // XHR rather than fetch, for exactly one reason: fetch cannot report
+        // upload progress at all, and while an image body is streaming the unit
+        // cannot answer /api/ota/check either - the web task is inside this very
+        // request. Measured on the bench: a check mid-transfer times out on a 6 s
+        // budget, and the same endpoint answers in 150 ms once the transfer ends.
+        // So the byte counter of THIS request is the only live progress a pushing
+        // page has, and the device's own numbers arrive after the fact.
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/ota', true);
+        _otaPush = { sent: 0, total: _otaFile.size, ver: ver };
+        xhr.upload.onprogress = function(ev) {
+            _otaPush.sent = ev.loaded;
+            if (ev.lengthComputable) btn.textContent = 'Sending ' + Math.floor(ev.loaded * 100 / ev.total) + '%';
+            otaStateRefresh();
+        };
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== 4) return;
+            let d = null;
+            try { d = JSON.parse(xhr.responseText); } catch (e) { d = null; }
+            _otaPush = null;
+            if (d && d.status === 'ok') {
                 btn.textContent = 'Done';
-                setTimeout(() => location.reload(), 10000);
-            } else {
+                otaStateSay('is-good', 'install accepted - the unit is rebooting into the new firmware',
+                            'the panel shows UPDATE COMPLETE first; this page reloads once the unit is back');
+                setTimeout(() => location.reload(), 12000);
+            } else if (d) {
                 // A refusal means the device is still running the firmware it
                 // had, so say why instead of only offering a retry.
                 btn.disabled = false;
                 btn.textContent = 'Retry';
                 otaMsg('Update refused' + (d.reason ? ' (' + d.reason + ')' : '') +
                        ': ' + (d.msg || 'no reason given'));
+            } else {
+                // No parseable reply - which is also what a successful install
+                // looks like, because the unit reboots with this response still
+                // on the wire. The state line below is what tells the two apart:
+                // it keeps polling, and a unit that just installed something
+                // comes back with a different build_version.
+                btn.textContent = 'Rebooting...';
+                setTimeout(() => location.reload(), 30000);
             }
-        }).catch(() => {
-            // No parseable reply: a successful flash reboots the device while
-            // this response is still on the wire, which looks like this.
-            btn.textContent = 'Rebooting...';
-            setTimeout(() => location.reload(), 30000);
-        });
+            otaStateRefresh();
+        };
+        xhr.send(fd);
     });
+}
+
+// --- the live update-state line -------------------------------------------------
+// One line under the Firmware Update card that mirrors what the unit itself knows:
+// `state` (the install's own phase), `screen` (which frame the panel is showing),
+// `quiet` / `quiet_silent_ms` (the update window, and how long it has seen no
+// bytes), `percent` / `bytes`, `error`, and `hold_to_restart_ms` (how long to hold
+// the trip button to force a reboot while an update frame owns the panel).
+// The polling policy follows the measurement above: while a push is in flight this
+// page polls every second and a failed poll is reported as "busy", never as
+// "lost"; an open but idle card asks every 5 s; a hidden or collapsed one every
+// 8 s. The endpoint is cheap, but the web loop is also serving the upload.
+var _otaPush = null;            // {sent, total, ver} while THIS page is pushing
+var _otaPollTimer = null;
+var _otaLastCheck = null;
+
+function otaStateEls() {
+    return { line: document.getElementById('ota-state-line'),
+             hint: document.getElementById('ota-state-hint') };
+}
+
+function otaStateSay(cls, text, hint) {
+    const els = otaStateEls();
+    if (!els.line) return;
+    els.line.className = 'cfg-state ' + cls;
+    els.line.innerText = text;
+    if (els.hint) els.hint.innerText = hint || '';
+}
+
+function otaBytesMB(bytes) {
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
+    if (bytes >= 1024) return Math.round(bytes / 1024) + ' KB';
+    return bytes + ' B';
+}
+
+function otaStateStart() {
+    if (_otaPollTimer) return;
+    _otaPollTimer = setTimeout(otaStateTick, 300);
+}
+
+// Repaint from the last known answer without disturbing the schedule - used by
+// the upload's progress events, which fire far more often than any poll.
+function otaStateRefresh() { otaStateRender(_otaLastCheck); }
+
+function otaStateSchedule(active) {
+    if (_otaPollTimer) clearTimeout(_otaPollTimer);
+    let delay = 5000;
+    if (_otaPush || active) delay = 1000;
+    else {
+        const els = otaStateEls();
+        if (document.hidden || !els.line || els.line.offsetParent === null) delay = 8000;
+    }
+    _otaPollTimer = setTimeout(otaStateTick, delay);
+}
+
+function otaStateTick() {
+    _otaPollTimer = null;
+    if (!document.getElementById('ota-state-line')) {
+        // The form has not been rendered (or was replaced); keep the chain alive
+        // at a slow rate rather than let it die out - renderForm re-runs after a
+        // factory reset, and the line must come back with it.
+        _otaPollTimer = setTimeout(otaStateTick, 4000);
+        return;
+    }
+    fetch('/api/ota/check', { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('http ' + r.status)))
+        .then(d => { _otaLastCheck = d; otaStateRender(d); })
+        .catch(() => { otaStateRender(null); });
+}
+
+// Render, and report whether that state counts as "something is happening", which
+// is what decides the next poll interval. `d === null` means the poll failed.
+function otaStateRender(d) {
+    const els = otaStateEls();
+    if (!els.line) return false;
+    let active = false;
+    if (_otaPush) {
+        const pct = _otaPush.total ? Math.floor(_otaPush.sent * 100 / _otaPush.total) : 0;
+        let txt = 'sending ' + otaBytesMB(_otaPush.sent) + ' of ' + otaBytesMB(_otaPush.total) + ' (' + pct + '%)';
+        txt += (d && d.bytes_total > 0)
+            ? ' - the unit has ' + otaBytesMB(d.bytes) + ', state ' + d.state
+            : ' - the unit cannot answer while the image streams, which is normal';
+        otaStateSay('is-busy', txt,
+                    'the verdict comes after the last byte: the unit hashes the image as it writes, then checks the signature');
+        active = true;
+    } else if (!d) {
+        otaStateSay('is-idle', 'no answer from /api/ota/check',
+                    'the unit may be busy, rebooting, or off this network - this line keeps retrying by itself');
+    } else if (d.error && (d.state === 'error' || d.screen === 'failed')) {
+        otaStateSay('is-bad', 'last attempt refused: ' + d.error +
+                    (d.last_target_version ? ' (v' + d.last_target_version + ')' : ''),
+                    'the firmware it was running is still installed and the unit did not reboot. The panel on the unit shows the same reason, and how to recover it.');
+    } else if (d.quiet) {
+        active = true;
+        const silent = d.quiet_silent_ms || 0;
+        let txt = 'installing: ' + d.state + (d.percent >= 0 ? ' ' + d.percent + '%' : '');
+        if (d.bytes_total > 0) txt += ' (' + otaBytesMB(d.bytes) + ' of ' + otaBytesMB(d.bytes_total) + ')';
+        let cls = 'is-busy';
+        let hint = 'the unit is showing its update screen and most endpoints are paused until this finishes';
+        if (silent > 30000) {
+            cls = 'is-warn';
+            hint = 'no bytes for ' + Math.round(silent / 1000) + ' s - the sender may have gone away. The unit closes the window and restores the dashboard on its own after 120 s.';
+        }
+        otaStateSay(cls, txt, hint);
+    } else if (d.screen && d.screen !== 'off') {
+        active = true;
+        const holdS = Math.round((d.hold_to_restart_ms || 3000) / 1000);
+        otaStateSay('is-busy', 'the unit is showing its ' + d.screen + ' frame',
+                    'hold the trip button ' + holdS + ' s to restart it - while an update frame owns the panel that button cannot reset the trip');
+    } else if (d.status && d.status !== 'idle') {
+        // The cloud pull's own reporter is a sentence - it predates the install
+        // state fields - so it gets shown here rather than left in a log or in
+        // the button's label. `waiting ...` is the 60 s re-check floor: a second
+        // press did not hammer the unit, it queued behind the first.
+        const st = d.status;
+        const settling = st.indexOf('checking') === 0 || st.indexOf('waiting') === 0 ||
+                         st.indexOf('updating') === 0 || st.indexOf('downloading') === 0;
+        active = settling;
+        if (st.indexOf('error') === 0) {
+            otaStateSay('is-bad', 'pull: ' + st, 'nothing was flashed - the firmware you have is the firmware it keeps');
+        } else if (st.indexOf('up-to-date') === 0) {
+            otaStateSay('is-good', 'pull: ' + st, 'the manifest answered; there is nothing newer to install');
+        } else {
+            otaStateSay(settling ? 'is-busy' : 'is-idle', 'pull: ' + st,
+                        settling ? 'a manifest check reaches GitHub over TLS - several seconds on a weak link; if an update is accepted the unit then takes over its own screen'
+                                 : '');
+        }
+        const pb = document.getElementById('otaPullBtn');
+        if (pb && !settling) { pb.disabled = false; pb.textContent = 'Check Updates'; }
+    } else if (d.state && d.state !== 'idle') {
+        active = true;
+        otaStateSay('is-busy', 'update state: ' + d.state, '');
+    } else {
+        let pullLine = d.enabled ? 'Check Updates is available' : 'no manifest URL set, so Check Updates will refuse';
+        otaStateSay('is-idle', 'idle - nothing is installing',
+                    'running ' + (d.current_version || '?') + ' (build ' + (d.build_version || '?') + ') - ' + pullLine);
+    }
+    otaStateSchedule(active);
+    return active;
 }
 function otaFileChosen(el) {
     const f = el.files && el.files[0];
@@ -4595,46 +4787,31 @@ function doOtaPull() {
     const btn = document.getElementById('otaPullBtn');
     const msgBox = document.getElementById('msg');
     btn.disabled = true; btn.textContent = 'Checking...';
-    msgBox.className = ''; msgBox.innerText = 'Checking for firmware updates...';
+    msgBox.className = ''; msgBox.innerText = 'Asking the unit to fetch its manifest URL...';
     fetch('/api/ota/pull', {method:'POST'}).then(r => r.json()).then(d => {
-        if (d.status === 'ok') {
-            const poll = setInterval(() => {
-                if (tabHidden) return;
-                fetch('/api/ota/check').then(r => r.json()).then(c => {
-                    if (c.status && c.status.startsWith('waiting')) {
-                        msgBox.className = '';
-                        msgBox.innerText = c.status;
-                        return;
-                    }
-                    if (c.status && c.status !== 'checking...') {
-                        clearInterval(poll);
-                        btn.disabled = false; btn.textContent = 'Check Updates';
-                        if (c.status.startsWith('error')) {
-                            msgBox.className = 'msg-error';
-                            msgBox.innerText = 'Update check failed: ' + c.status;
-                        } else if (c.status.startsWith('up-to-date')) {
-                            msgBox.className = 'msg-success';
-                            msgBox.innerText = 'Firmware is ' + c.status;
-                        } else if (c.status.startsWith('updating')) {
-                            msgBox.className = 'msg-success';
-                            msgBox.innerText = c.status + ' - check the display for progress. Device will reboot.';
-                        } else {
-                            msgBox.className = 'msg-success';
-                            msgBox.innerText = c.status;
-                        }
-                    }
-                }).catch(() => {});
-            }, 1500);
-            setTimeout(() => { clearInterval(poll); btn.disabled = false; btn.textContent = 'Check Updates'; }, 120000);
-        } else {
+        if (d.status !== 'ok') {
+            // No URL configured, Wi-Fi down, or another install holding the slot:
+            // the unit says which in this reply, so show its words.
             msgBox.className = 'msg-error';
             msgBox.innerText = d.msg || 'Update check failed.';
             btn.disabled = false; btn.textContent = 'Check Updates';
+            return;
         }
+        // The verdict is not in this reply. The check runs on the unit and takes
+        // seconds (a manifest handshake measured 7.5 s on the bench link), and the
+        // 60 s re-check floor can turn a second press into a wait. The update
+        // state line polls the same endpoint and says which of those it is, so
+        // this button no longer needs a poll loop of its own.
+        msgBox.className = ''; msgBox.innerText = 'Check requested - watch the update state line in the Firmware Update card.';
+        otaStateSay('is-busy', 'pull requested: checking the manifest URL',
+                    'reaching GitHub over TLS takes several seconds; a second press inside the 60 s floor waits that out rather than hammering the unit');
+        _otaLastCheck = null;   // drop the previous verdict so it is not shown as new
+        otaStateStart();
+        setTimeout(() => { btn.disabled = false; btn.textContent = 'Check Updates'; }, 8000);
     }).catch(() => {
         msgBox.className = 'msg-error';
-        msgBox.innerText = 'Communication error. Device may be rebooting for update.';
-        setTimeout(() => { btn.disabled = false; btn.textContent = 'Check Updates'; }, 10000);
+        msgBox.innerText = 'Communication error - the unit did not answer the pull request.';
+        btn.disabled = false; btn.textContent = 'Check Updates';
     });
 }
 

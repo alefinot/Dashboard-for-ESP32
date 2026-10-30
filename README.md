@@ -793,7 +793,7 @@ Layout (4 MB flash, ends at exactly `0x400000`):
 > A partition-table change is **not** delivered by an OTA update — OTA replaces the app slot, never the table. A unit that updates over the air keeps whatever table it was last flashed with, and the boot log line `NVS 'nvs' <bytes> bytes: …` is how you tell which one it is. Moving a board onto the new table needs a wired re-flash (`pio run -t erase` then `pio run -t upload`), and **the erase wipes NVS**: WiFi credentials, odometer and calibration have to be entered again.
 
 > [!NOTE]
-> **A wired flash writes `app0`; it does not decide which slot boots.** `otadata` picks the slot, and an OTA install has already pointed it at the other one. So `pio run -t upload` on a unit that last updated over the air can leave the *older* image running while the new one sits unused in `app0` — a session that saw an upload go green and `GET /api/ota/check` still answer without the fields the new build added hit exactly this, and it was a slot mismatch, not a build that failed to reach the board. Two checks tell you which build is running: `BOOTINFO: firmware v…` in the boot log, and `/api/perf` → `partitions`, where the running app slot is the one reporting `used` equal to its full size. To make the wired build the one that runs: push the same image over the LAN (an install flips the slot and reboots), or erase and re-flash with the table rewritten.
+> **A wired flash writes `app0`; it does not decide which slot boots.** `otadata` picks the slot, and an OTA install has already pointed it at the other one. So `pio run -t upload` on a unit that last updated over the air can leave the *older* image running while the new one sits unused in `app0` — a session that saw an upload go green and `GET /api/ota/check` still answer without the fields the new build added hit exactly this, and it was a slot mismatch, not a build that failed to reach the board. Two checks tell you which build is running: `BOOTINFO: firmware v…` in the boot log, and `/api/perf` → `partitions`, where the running app slot is the one reporting `used` equal to its full size. To make the wired build the one that runs: push the same image over the LAN (an install flips the slot and reboots), or erase and re-flash with the table rewritten. Separately, `esptool` sometimes answers `Failed to connect to ESP32: No serial data received` on the first try after a previous session held the port — the modem lines are parked in a state the board does not like. Opening the port once, pulsing `RTS` (a reset into run mode) and closing it puts the board back, and the next `pio run -t upload` connects normally.
 
 #### Settings storage budget
 
@@ -986,6 +986,40 @@ invented to report the first. The two frames an install ends on use only the
 compiled-in font arrays and no backlight fades — the panel is already lit and
 already showing an update frame, so the only thing to do is replace the picture.
 
+#### The update card in the Web UI: manual flow, live state line
+
+The **Firmware Update** card (Settings → *Firmware Update*) is the unit's own view
+of the same three facts, and it is deliberately explicit that firmware only moves
+when a person makes it move:
+
+- **Firmware OTA** — pushes a file you already have (`firmware.bin` + `firmware.bin.sig` + the signed version). That is the same request the phone app sends; the card is the fallback when the phone is not around.
+- **Check Updates** — asks the unit to fetch `OTA_PULL_URL` itself. The fallback when no phone with internet is around. It never runs on its own, and a second press inside 60 s waits that floor out instead of hammering the unit.
+
+Under them, one line rewrites itself from `GET /api/ota/check` and colours itself:
+idle (grey), in flight (cyan), stalled (amber), refused (rose), installed (green).
+It is monospace because most of what it prints are numbers the device reported.
+
+| Situation | What the line says | Why it is worded that way |
+|---|---|---|
+| Nothing running | `idle - nothing is installing` + the running and build versions | The two versions side by side is how you notice an update that installed but never booted (the `app0` / `otadata` gotcha above) |
+| This page is pushing | `sending 488 KB of 1.67 MB (28%) - the unit cannot answer while the image streams, which is normal` | Sent-byte progress comes from the page's own `XMLHttpRequest`, because `fetch` cannot report upload progress at all **and** the unit cannot answer a status request while its own request is being read. Reporting the device's `bytes` here would show nothing at all for 20 seconds |
+| A poll fails during a push | the same sending line, not an error | Mid-transfer unreachability is the healthy shape of a push, so treating it as “lost” would be a false alarm every single time |
+| No bytes for > 30 s while the window is open | amber: `no bytes for 40 s - the sender may have gone away. The unit closes the window and restores the dashboard on its own after 120 s` | Turns “is my phone still doing anything?” into a sentence with a deadline in it |
+| Refused | `last attempt refused: sig_invalid (v1.4.7)` + “the firmware it was running is still installed and the unit did not reboot” | The two things a driver needs to know after a refusal are whether it is safe and whether anything changed |
+| An update frame on the panel | `the unit is showing its failed frame` + `hold the trip button 3 s to restart it` | `hold_to_restart_ms` is read from the device instead of being written into the page, so the instruction cannot go stale when the constant changes |
+| A pull check is running / waiting | `pull: checking the manifest URL…`, `pull: waiting 48s before retry`, `pull: up-to-date (v1.4.6)` | The pull reports through a sentence, and a page that hides it behind a spinner teaches nobody anything |
+
+Polling adapts to what is happening: **1 s** while a push is in flight or the device
+reports an install, **5 s** while the card is open and idle, **8 s** when the card is
+collapsed or the tab is hidden. The endpoint is cheap, but the web loop is also the
+one serving the upload.
+
+`scripts/verify_ota_state_line.js` checks that decision chain — 13 cases, each one
+sliced out of `src/webui.html` at run time rather than duplicated here, and it can
+be pointed at a running unit (`node scripts/verify_ota_state_line.js
+http://192.168.1.116/`) so the check covers the page the device actually serves and
+not just the source it came from.
+
 #### Cloud OTA Pull & Firmware Signing
 
 The cloud pull (Web UI → **System** → *Firmware Update* → **Check Updates**) reads a
@@ -1096,7 +1130,14 @@ The cloud pull has verified an ECDSA signature since 1.4, but the LAN upload nev
 - `/api/ota/check` gained `quiet`, `quiet_silent_ms`, `screen` and `hold_to_restart_ms` — a client mirrors the panel instead of guessing at it, and knows what the trip button will do before it tells the driver to press it.
 
 **Verified on hardware since that paragraph was written** (bench: COM7 serial + `192.168.1.116`, 1.75 MB push of this build). A signed install went through and into the new slot: `OTA web: signature VALID for v1.4.6 (1753840 bytes)` → `OTA web: success` → `rst:0xc (SW_CPU_RESET)` with `lastRebootTag='ota'` and `boot#2`, and `/api/ota/check` answered normally after the boot with all the new fields. A signature made over the same image for a *different* version was refused at the end of the transfer — `sig_invalid` (mbedTLS `-0x4e00`) — the quiet window closed on the refusal (`OTA quiet: closed (sig_invalid) after 21254ms`), the panel drew the failure frame (`OTA panel: failure frame drawn (reason=sig_invalid bytes=1753840/1753840)`), `screen` read `failed` and then `off` 15 s later (`OTA panel: failure frame released after 15000ms, dashboard restored`). A remote trip reset fired inside that window was dropped (`Trip reset: dropped - firmware update owns the panel`) while `trp_km` kept accumulating; the same request with the panel free logged `Trip stats reset (webui)` and zeroed it. Two things this changed about how the unit is driven, learned the hard way: `pio run -t upload` writes `app0` while `otadata` may still select the slot an OTA push chose, so a green upload can leave the older build running (now documented with how to tell), and mid-transfer an HTTP client gets neither `503` nor an answer but a timeout — `GET /api/ota/check` timed out on a 6 s budget twice during a healthy push, then answered in 150 ms after the window closed. **Still not exercised on hardware:** the 3 s hold itself (needs a hand on GPIO25 — next bench session), the 120 s stall watchdog, the `same_version` / `downgrade` / `sig_missing` refusals, and the cloud pull path (this build has no automatic check any more, and the pull
-path itself was not exercised: it needs a reachable manifest URL).
+path itself was not exercised: it needs a reachable manifest URL). **Update:** the
+pull path has since been driven on the bench — `triggered from web UI` →
+`manifest GET 200 in 7489ms` → `latest=1.4.6 current=1.4.6` → `already up-to-date`,
+nothing flashed — and the second-press floor was seen doing its job
+(`throttled, auto-retry in 51s`, status `waiting 48s before retry`). The button rows
+are tracked as **#69** (GPIO25 has no button fitted on the bench board). What is
+still open: the physical hold rows, the 120 s stall watchdog, and the
+`same_version` / `downgrade` / `sig_missing` refusals.
 
 **Updates are manual now — the automatic check is deleted, not disabled (`src/web.cpp`, `src/config.cpp`, `src/dashboard.h`)**
 - The once-per-boot automatic check is gone, together with its `otaPullBootCheckDone` flag. `startOtaPull()` and `checkForFirmwareUpdate()` lost their `manual` / `skipThrottle` parameters, because the only thing those two flags ever encoded was *who fired this check* — and nobody fires it automatically any more. `POST /api/ota/pull` is now the single way in, documented as the owner-triggered fallback for when no phone with internet is around.
@@ -1109,6 +1150,10 @@ path itself was not exercised: it needs a reachable manifest URL).
 - The firmware card asks for `firmware.bin`, its `.sig` and the version, prefilled from a file name like `firmware-1.4.7.bin` and remembered between visits. The button names what is still missing — `Pick the .sig`, `Enter signed version`, `Install 1.4.7` — so an incomplete install is caught before 1.9 MB crosses the Wi-Fi rather than after.
 - A refusal prints the device's own reason instead of only offering `Retry`, and the card explains what the signature is for.
 - The *Enable Automatic OTA Pull* toggle is gone from the Firmware Update card, and the card now says out loud what replaced it: nothing looks for an update by itself, these buttons are the only ways firmware gets in, and not pressing them is a perfectly good answer. The manifest URL field is labelled as what it is — “used by Check Updates”.
+- **A live update-state line** now sits under those buttons and mirrors what the unit itself knows — `state`, `screen`, `quiet` / `quiet_silent_ms`, `percent` / `bytes`, `error`, `hold_to_restart_ms`, and the pull's own status sentence — in five colours. It is written to survive the two things that used to make an update look mysterious from the browser: the unit being unreachable while the image streams (normal, and shown as progress rather than failure), and a window that a dead sender left open (amber, with the 120 s deadline in the sentence). The hold-to-restart hint is read from `hold_to_restart_ms` instead of typed into the page. Full wording table in *The update card in the Web UI* above.
+- The upload switched from `fetch` to `XMLHttpRequest` for one reason: `fetch` cannot report upload progress at all, and while an image body streams the unit cannot answer `/api/ota/check` either — the web task is inside that request. Bench measurement: a mid-transfer check times out on a 6 s budget, and answers in 150 ms after the transfer ends. So the pushing page counts its own bytes, and takes the device's numbers only once they arrive.
+- *Check Updates* lost its private 1.5 s poll loop; the state line above already polls the same endpoint, faster when something is happening and slower when nothing is. Two poll loops answering the same question differently is how a UI ends up showing “Checking…” next to “up-to-date”.
+- New `scripts/verify_ota_state_line.js` — 13 cases over that decision chain, sliced out of `src/webui.html` at run time (no duplicated logic to drift), and able to check the page a running unit serves: `node scripts/verify_ota_state_line.js http://192.168.1.116/`.
 
 **Breaking** — an unsigned upload that used to install is now refused, which is the point of the change. The pull path has refused to behave that way since 1.4, so this makes one rule for the product instead of two. `-DOTA_ALLOW_UNSIGNED` relaxes both paths for bench work as before; a release build compiles the requirement in and nothing sent over the network can lift it.
 
