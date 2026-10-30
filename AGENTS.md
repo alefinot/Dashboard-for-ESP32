@@ -21,6 +21,8 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
 
 ## 5. Flashing the ESP32
 - Default flashing method: **PlatformIO over USB serial on COM7** (e.g. `pio run -t upload --upload-port COM7`), after `pio run` builds.
+- The upload layout is repaired by `scripts/fix_upload_layout.py` (a `post:` extra script in `platformio.ini`): it moves the otadata write to this table's real offset (`0x1D000`) and removes PlatformIO's fixed `0xe000` write, which sits **inside `nvs`** here and was destroying two settings pages per flash. Keep that script: without it a wired flash may not boot what it just wrote, and it silently loses NVS settings.
+- If esptool reports `Failed to start stub flasher. There was no response.`, retry once (at 115200 baud if needed); if it keeps failing, hold **BOOT** while tapping **RESET** to force download mode. Confirm the port with `esptool --port COM7 --baud 115200 read_mac`.
 - If COM7 is unreachable / not detected, **stop and ask the user how to continue** — do not auto-fallback to a guessed port or method.
 - When asking, list the available flashing methods:
   1. USB serial (PlatformIO `--upload-port <other COM port>`)

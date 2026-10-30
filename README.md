@@ -793,7 +793,49 @@ Layout (4 MB flash, ends at exactly `0x400000`):
 > A partition-table change is **not** delivered by an OTA update — OTA replaces the app slot, never the table. A unit that updates over the air keeps whatever table it was last flashed with, and the boot log line `NVS 'nvs' <bytes> bytes: …` is how you tell which one it is. Moving a board onto the new table needs a wired re-flash (`pio run -t erase` then `pio run -t upload`), and **the erase wipes NVS**: WiFi credentials, odometer and calibration have to be entered again.
 
 > [!NOTE]
-> **A wired flash writes `app0`; it does not decide which slot boots.** `otadata` picks the slot, and an OTA install has already pointed it at the other one. So `pio run -t upload` on a unit that last updated over the air can leave the *older* image running while the new one sits unused in `app0` — a session that saw an upload go green and `GET /api/ota/check` still answer without the fields the new build added hit exactly this, and it was a slot mismatch, not a build that failed to reach the board. Two checks tell you which build is running: `BOOTINFO: firmware v…` in the boot log, and `/api/perf` → `partitions`, where the running app slot is the one reporting `used` equal to its full size. To make the wired build the one that runs: push the same image over the LAN (an install flips the slot and reboots), or erase and re-flash with the table rewritten. Separately, `esptool` sometimes answers `Failed to connect to ESP32: No serial data received` on the first try after a previous session held the port — the modem lines are parked in a state the board does not like. Opening the port once, pulsing `RTS` (a reset into run mode) and closing it puts the board back, and the next `pio run -t upload` connects normally.
+> **A wired flash now always boots the image it wrote, and it no longer eats NVS
+> pages — `scripts/fix_upload_layout.py` makes both true** (added after V1.5.1).
+> Two things were wrong about the stock upload layout against this project's
+> custom `partitions.csv`:
+>
+> 1. PlatformIO writes the framework's `boot_app0.bin` (an "otadata: boot slot 0"
+>    image) at the **fixed** address `0xe000`. This table puts `otadata` at
+>    **`0x1D000`**, and `0xe000..0xefff` is **inside the 80 KB `nvs` partition** —
+>    so every wired flash overwrote two NVS pages with bytes that are not NVS. A
+>    page with a bad header magic reads as uninitialised, so what lived there was
+>    gone: on the bench unit that cost `WEATH_LOCALE`, `WIFI_S2..S4` and
+>    `WIFI_P1..P4` (`[E] Preferences.cpp: nvs_get_str len fail: … NOT_FOUND` in the
+>    boot log; the primary SSID and password sat in other pages and survived).
+> 2. The real `otadata` was never written, so the chip kept booting whichever slot
+>    an OTA install had last selected. A wired flash wrote `app0` and the unit
+>    booted `app1` — the upload went green and changed nothing observable.
+>
+> The `post:` extra script in `platformio.ini` rewrites the upload command: the
+> `0xe000` write is dropped and the same image goes to `0x1D000`. Every build says
+> so:
+>
+> ```text
+> [upload layout] otadata -> 0x1d000 (8192 bytes), app0 at 0x20000; 1 write(s) at a
+> wrong offset removed (0xe000 sits inside nvs on this table). A USB flash now
+> boots the image it just wrote.
+> ```
+>
+> Proved on the bench with two builds whose compiled-in version strings differ, so
+> the slot is unmistakable: under the old layout a wired flash of the `1.5.1` build
+> left a `9.9.9` image booting from `app1`; under the fixed layout the same
+> `pio run -t upload --upload-port COM7` ended with `/api/ota/check` reporting
+> `build_version: 1.5.1`, `previous_version: 9.9.9`, and no further NVS keys
+> missing.
+>
+> Which slot is running is still worth checking rather than assuming — the boot log
+> line `BOOTINFO: reset=… firmware v…`, and `/api/perf` → `partitions` (the running
+> app slot reports `used` equal to its full size).
+>
+> **Serial flakiness is separate from any of this.** `Failed to start stub flasher.
+> There was no response.` appears now and then at 460800 baud, usually right after
+> another program held the port. One retry clears it; `esptool --port COM7 --baud
+> 115200 read_mac` tells you the port is alive; if retries keep failing, hold
+> **BOOT** while tapping **RESET** to force download mode.
 
 #### Settings storage budget
 
