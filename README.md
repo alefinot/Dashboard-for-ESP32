@@ -854,7 +854,7 @@ matching what the client claimed, one writer on the slot at a time, and the imag
 hashed (SHA-256) while it streams — never buffered (rule 14).
 
 **The detached signature is optional on this path** (the maintainer's decision,
-2026-10-30, reversing the rule the Unreleased changelog entry describes): an image
+2026-10-30, reversing the rule the V1.5.0 changelog entry describes): an image
 that arrives **with** a `signature` part is verified by `otaVerifyImage()` — the
 pull path's own verifier — against `include/ota_pubkey.h` and refused if it does
 not match this exact image and version; an image that arrives **without** one is
@@ -1037,8 +1037,8 @@ look detached from the rest of the form. Two consequences worth naming:
   width, left-aligned and monospace: measured `660 px` box, `659 px` of content, so
   the whole URL is visible and editable.
 - The card used to carry **three prose blocks (866 characters)** plus a signature
-  explainer. It now carries one (223 characters), because the state line above it
-  already says most of what the notes were trying to pre-empt.
+  explainer. It now carries none at all, because the state line above it already
+  says what the notes were trying to pre-empt.
 
 | Situation | What the line says | Why it is worded that way |
 |---|---|---|
@@ -1147,7 +1147,15 @@ In Demo Mode:
 
 ## Changelog
 
-### Unreleased — install gates: version, size and image shape always; a signature is required on the pull path and optional on the LAN (firmware + Web UI)
+### V1.5.0 — updates are manual now: a person starts them, the phone pushes, the unit installs (firmware + Web UI)
+
+Everything merged since V1.4.6 ships here, and the shape of updating changed with it. **Nothing looks for an update by itself any more** — the once-per-boot automatic check is deleted, not parked behind a switch that could be turned back on by accident. There are two ways firmware moves and both are started by a person: a phone (or a PC) downloads a release and **pushes** it to the unit over the LAN (`POST /api/ota`), or the unit is asked to **fetch** the manifest URL it has been given (*Check Updates*). Around an install the unit now parks itself — dashboard endpoints gated to an allow-list of three, sprite and UI memory freed for the handshake-free write, GNSS and CPU probes waiting at their loop tops, the chip pinned to 240 MHz, a 120 s watchdog that unwinds the whole thing if a sender dies mid-transfer — the update owns the display and the trip button (hold **3 s** to force a restart, never honoured while bytes are being written to flash), and it ends on an `UPDATE COMPLETE` or `UPDATE FAILED` frame with the reason printed where the driver is looking. `GET /api/ota/check` grew the state fields (`state`, `percent`, `bytes`, `quiet`, `quiet_silent_ms`, `screen`, `hold_to_restart_ms`, `error`, `last_target_version`) so a client mirrors that panel instead of guessing from a reply that only arrives at the end. On the Web UI side the firmware card now has a live update-state line and sits on the settings form's own grid.
+
+**Signature policy as shipped:** the cloud pull still requires its `.sig` sibling — this release carries one, tag `v1.5.0` signed as `1.5.0` — and the LAN install treats a signature as optional, verifying one that is sent and logging the SHA-256 of an image it accepts without one. See *LAN install (`POST /api/ota`)* for the trade that decision accepts.
+
+**Open when this shipped:** **#69** — no trip-reset button is fitted on the bench board, so the physical 3 s hold-to-restart gesture has never been performed by a finger, only modelled in code and verified remotely. **#70** — the pull path's TLS handshake fails when it cannot get a large enough contiguous block of heap (33–35 KB where a working run had 39–45 KB), and Arduino `HTTPClient` reports every connect failure as `connection refused`, which points the reader at their Wi-Fi and their GitHub URL instead of at the heap.
+
+The detail blocks below are the working notes from that cycle, kept as written — including the paragraph about making the LAN signature *mandatory*, which was later reversed deliberately (see the block that follows it).
 
 The cloud pull has verified an ECDSA signature since 1.4, but the LAN upload never did: `POST /api/ota` flashed anything that began with `0xE9` and had a plausible segment count and byte count. Anything reachable on the network could therefore replace the firmware, and the two install paths made different promises. Since the intended way to update is now "the phone downloads the release and pushes it over the LAN", the upload path got the check the pull path already had.
 
@@ -1230,6 +1238,8 @@ error`, `screen: failed`) with the unit alive on 1.4.6 and `/api/live` answering
 **Verified** — the signature contract was tested against the real release key rather than assumed: signing this build as `1.4.7` produced a 70-byte DER signature that verifies; verifying the same file as `v1.4.7` **failed**; flipping one byte of the image **failed**. The middle result is the bug this pass caught — the signature is defined over the tag less its leading `v`, and the upload path as first written passed `target_version` straight through, so a client sending the tag it read on GitHub would have been told `sig_invalid` about a perfectly good release. The pull path has always dropped that `v`, so the install paths now agree (`src/web.cpp`, README).
 
 `pio run` green (`RAM 25.9 %` 85,012 B; `Flash 90.3 %` 1,716,807 B of the 1,900,544 B slot, ~180 KB headroom — `+280 B` RAM and `+5,556 B` flash against V1.4.6, split between refusal strings on a path that used to carry one message and a slightly larger gzipped Web UI). The bench variant too: `pio run` with `-DOTA_ALLOW_UNSIGNED` enabled compiled green (`84,820 B` / `1,714,251 B`) and `platformio.ini` was restored, then the shipping config was rebuilt so the build directory holds the signed-install image and not the bench one — an unsigned `firmware.bin` had been left in `.pio/` by that check and must not be what a release later signs. The Web UI script passes `node --check`, and the firmware was rebuilt with the new UI gzipped in (rule 9). Every `reason` code the firmware can emit was diffed against the README table, which is where the documentation gap for `upload_aborted` and `slot_open_failed` was found and closed. The endpoint contract is documented in the same commit as the code and both consumers (rule 17): the Web UI upload form was rebuilt, and the Android app reads only `current_version`/`status`, which are unchanged. **Not yet run on hardware when this was written** — the refusal cases and a signed install end to end were bench items for the flashing session that follows; that session has now happened, and the paragraph below names what ran, what the bench measured, and what is still outstanding.
+
+**Size and tooling at release** — `pio run` green: `RAM 26.0 %` (85,052 B of 327,680 B) and `Flash 90.8 %` (1,726,343 B of the 1,900,544 B OTA slot, ~174 KB headroom). Web UI 218,993 B gzipped to 58,324 B. `scripts/verify_ota_state_line.js` green (13/13), including against the page a running unit serves. Firmware `1.5.0` signed with `scripts/ota_sign.py` (payload `1.5.0`, matching the tag `v1.5.0` less its leading `v`); the release carries `firmware.bin`, `firmware.bin.sig` and the debug `app-debug.apk` (11,680,492 B, app `versionName 1.1.0` / `versionCode 31` — the app's own versioning is unchanged by this release, the code bump is rule 24 for a freshly shared APK).
 
 ### V1.4.6 — The dashboard says who it is, and the app grew a garage (firmware + Android app)
 
