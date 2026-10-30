@@ -389,7 +389,9 @@ extern int TZ_OFFSET_HOURS;
 extern bool TZ_DST_ENABLED;
 extern int TZ_DST_RULE;  // which rule TZ_DST_ENABLED applies: see TZ_DST_RULE_*
 
-extern bool OTA_PULL_ENABLED;
+// OTA_PULL_ENABLED is gone: it armed the once-per-boot automatic check, and there
+// is no automatic check. The manifest URL below is the whole configuration of the
+// cloud pull path, which now has exactly one trigger - POST /api/ota/pull.
 extern char OTA_PULL_URL[192];
 // Build identity (compile time) and the optional user override. See the
 // comment at their definition in config.cpp: the manifest can never change
@@ -878,9 +880,13 @@ void sensorTask(void *pvParameters);
 // Web API
 // ----------------------------------------------------------------------------
 void webServerTask(void *pvParameters);
-void checkForFirmwareUpdate(bool manual = false, bool skipThrottle = false);
+// The cloud pull. No arguments: it is no longer reachable from any automatic
+// path, so there is nothing left to distinguish an automatic run from a manual
+// one. startOtaPull() creates the pull task, checkForFirmwareUpdate() is what
+// that task runs.
+void checkForFirmwareUpdate();
 void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion, size_t fwSize);
-void startOtaPull(bool manual, bool skipThrottle = false);
+void startOtaPull();
 void processOtaMemRelease();
 extern volatile bool otaMemReleaseRequested;
 extern volatile bool otaMemReleased;

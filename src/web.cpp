@@ -631,13 +631,13 @@ static void logWifiScanSummary() {
   logPrintf("%s\n", line);
 }
 
-// OTA Pull state
-static bool otaPullBootCheckDone = false;  // automatic check runs once per boot
+// OTA Pull state. There is no automatic check any more, so there is no
+// once-per-boot flag either - the only way this path runs is the explicit
+// POST /api/ota/pull (see otaPullPostHandler).
 static char otaPullStatus[96] = "idle";
 static bool otaPullStatusUpdated = false;
 static SemaphoreHandle_t otaStatusMutex = NULL;
 static bool otaPullTaskRunning = false;
-static bool otaPullManualFlag = false;
 // Set while the OTA pull task is actively streaming a firmware download. The
 // web loop pauses HTTP serving for that window so the TLS download gets the
 // radio and the heap: serving the browser pollers starves lwIP pbufs (errno
@@ -1055,18 +1055,16 @@ void setOtaPullStatus(const char *status) {
 }
 
 void otaPullTask(void *pvParameters) {
-  uint32_t args = (uint32_t)(uintptr_t)pvParameters;
-  checkForFirmwareUpdate((args & 1) != 0, (args & 2) != 0);
+  (void)pvParameters;  // no arguments left: there is no automatic path to label
+  checkForFirmwareUpdate();
   otaPullTaskRunning = false;
   otaPullDownloading = false;   // safety: never leave the web loop paused
   vTaskDelete(NULL);
 }
 
-void startOtaPull(bool manual, bool skipThrottle) {
+void startOtaPull() {
   if (otaPullTaskRunning || otaUpdateInProgress) return;
-  otaPullManualFlag = manual;
   otaPullTaskRunning = true;
-  uint32_t args = (uint32_t)(manual ? 1 : 0) | (uint32_t)(skipThrottle ? 2 : 0);
   // tskIDLE_PRIORITY on purpose. The TLS handshake this task performs (mbedTLS
   // EC math in WiFiClientSecure::connect) is a multi-second CPU-bound burst
   // with no yield points inside it. At priority 1 on core 0 it starved IDLE0
@@ -1075,8 +1073,7 @@ void startOtaPull(bool manual, bool skipThrottle) {
   // At priority 0 FreeRTOS time-slices it against IDLE0, so the watchdog stays
   // fed and the handshake just takes longer (HTTP timeout bounds the wait).
   BaseType_t res = xTaskCreatePinnedToCore(otaPullTask, "OtaPullTask", 16384,
-                                           (void *)(uintptr_t)args,
-                                           tskIDLE_PRIORITY, NULL, 0);
+                                           NULL, tskIDLE_PRIORITY, NULL, 0);
   if (res != pdPASS) {
     logPrintf("OTA Pull: task creation failed\n");
     otaPullTaskRunning = false;
@@ -1378,8 +1375,11 @@ static size_t fetchSignatureAsset(const char *firmwareUrl, uint8_t *buf,
   return 0;
 }
 
-void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
-  if (!OTA_PULL_ENABLED && !manual) return;
+// The cloud pull. Deliberately reachable from one place only - the explicit
+// POST /api/ota/pull - because nothing in this product looks for an update by
+// itself any more. A manifest URL is the whole configuration: if one is set, the
+// owner can pull from it; if not, this refuses and says why.
+void checkForFirmwareUpdate() {
   if (WiFi.status() != WL_CONNECTED) {
     setOtaPullStatus("error: not connected to WiFi");
     return;
@@ -1388,13 +1388,15 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
     setOtaPullStatus("error: no OTA URL configured");
     return;
   }
-  // Throttling guards repeated checks (manual button spam); the once-per-boot
-  // automatic check skips it since it fires within a second of boot. A
-  // throttled check waits here and retries by itself, publishing a live
-  // countdown in the status string, instead of making the user re-click.
-  // lastOtaCheckMs == 0 means "never checked": the first check always runs.
-  if (!skipThrottle && lastOtaCheckMs != 0 &&
-      millis() - lastOtaCheckMs < OTA_RECHECK_MIN_MS) {
+  // The 60 s re-check floor guards repeated manual triggers (a button held down,
+  // a phone app retrying on a timer). It used to guard the once-per-boot
+  // automatic check too, which is why it waits and publishes a countdown instead
+  // of refusing: a throttled automatic check had nobody to re-click it. Now that
+  // every check is deliberate, waiting is still the kinder answer - the person
+  // who pressed twice gets the check they asked for, one minute later, without
+  // touching anything - and it costs nothing, because this loop runs on the pull
+  // task and not on the web task. lastOtaCheckMs == 0 means "never checked".
+  if (lastOtaCheckMs != 0 && millis() - lastOtaCheckMs < OTA_RECHECK_MIN_MS) {
     logPrintf("OTA Pull: throttled, auto-retry in %lus\n",
               (unsigned long)((OTA_RECHECK_MIN_MS -
                               (millis() - lastOtaCheckMs)) /
@@ -1402,7 +1404,7 @@ void checkForFirmwareUpdate(bool manual, bool skipThrottle) {
     while (millis() - lastOtaCheckMs < OTA_RECHECK_MIN_MS) {
       unsigned long remainMs = OTA_RECHECK_MIN_MS - (millis() - lastOtaCheckMs);
       setOtaPullStatus(("waiting " + String(remainMs / 1000 + 1) +
-                        "s before retry (auto)").c_str());
+                        "s before retry").c_str());
       vTaskDelay(pdMS_TO_TICKS(500));
     }
   }
@@ -3014,15 +3016,28 @@ static void otaPullPostHandler() {
     server.send(200, "application/json", "{\"status\":\"error\",\"msg\":\"Not connected to WiFi\"}");
     return;
   }
+  // The manifest URL is the whole configuration of this path. Refusing here, in
+  // the reply the requester reads, beats starting a task that will only report
+  // the same thing in a status string three API calls later.
+  if (OTA_PULL_URL[0] == 0) {
+    server.send(200, "application/json",
+                "{\"status\":\"error\",\"msg\":\"No firmware manifest URL configured - set the URL in Settings, or push the firmware file with POST /api/ota\"}");
+    return;
+  }
   setOtaPullStatus("checking...");
   server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"OTA pull started\"}");
   logPrintf("OTA Pull: triggered from web UI\n");
-  startOtaPull(true, false);
+  startOtaPull();
 }
 
 static void otaCheckGetHandler() {
   JsonDocument doc;
-  doc["enabled"] = OTA_PULL_ENABLED;
+  // Whether this unit *can* pull: a manifest URL is configured. It used to be an
+  // `OTA_PULL_ENABLED` switch that also armed the once-per-boot automatic check;
+  // the automatic check is gone and the switch went with it, and the field stays
+  // so existing consumers keep reading a boolean that means "the pull path is
+  // available on demand". Nothing pulls until someone asks (POST /api/ota/pull).
+  doc["enabled"] = OTA_PULL_URL[0] != 0;
   doc["url"] = OTA_PULL_URL;
   doc["current_version"] = effectiveVersion();
   // Always-visible build truth next to the reported version, so an override
@@ -3869,13 +3884,12 @@ void webServerTask(void *pvParameters) {
       staHasConnectedBefore = true;
     }
 
-    // Automatic update check: once per boot, fired right after the STA
-    // connection is established (replaces the old recurring interval timer).
-    if (!otaPullBootCheckDone && OTA_PULL_ENABLED && staConnected &&
-        !otaUpdateInProgress && !otaPullTaskRunning) {
-      otaPullBootCheckDone = true;
-      startOtaPull(false, true);
-    }
+    // No automatic update check. Nothing in this product fetches firmware by
+    // itself: the phone checks the release and pushes the image over the LAN, and
+    // the cloud pull path runs only when the owner triggers it from the Web UI.
+    // A unit that is never told to update never touches the network for an
+    // update - which is also what keeps a Wi-Fi join free of a multi-second TLS
+    // burst the watchdog used to trip over.
 
     static unsigned long lastWeatherCheck = 0;
     static unsigned long lastWeatherAttemptMs = 0;

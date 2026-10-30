@@ -1763,7 +1763,6 @@ const DEFAULTS = {
     TZ_OFFSET_HOURS: 1,
     TZ_DST_ENABLED: true,
     TZ_DST_RULE: 1,
-    OTA_PULL_ENABLED: false,
     OTA_PULL_URL: "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
     VERSION_OVERRIDE: "",
     fuelCalOhms: [10.0, 34.3, 58.6, 82.9, 107.1, 131.4, 155.7, 180.0]
@@ -2175,9 +2174,8 @@ const configMap = [
         <button id="otaChangeBtn" onclick="otaChangeFile()" class="btn-secondary btn-sm" style="display:none;">Change file</button>
         <button id="otaPullBtn" onclick="doOtaPull()" class="btn-secondary btn-sm"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="btn-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Check Updates</button>
     </div>` },
-            { type: "note", label: '<span id="ota-sig-note" class="cfg-help">Signed installs only. Pick <code>firmware.bin</code> from a GitHub release, then the matching <code>firmware.bin.sig</code>, then confirm the version that signature was made over. The dashboard checks the signature before it flashes anything, and refuses an image it cannot verify - the running firmware stays in place.</span>' },
-            { id: "OTA_PULL_ENABLED", label: "Enable Automatic OTA Pull" },
-            { id: "OTA_PULL_URL", label: "Firmware Manifest URL" },
+            { type: "note", label: '<span id="ota-sig-note" class="cfg-help">Signed installs only. Pick <code>firmware.bin</code> from a GitHub release, then the matching <code>firmware.bin.sig</code>, then confirm the version that signature was made over. The dashboard checks the signature before it flashes anything, and refuses an image it cannot verify - the running firmware stays in place. Nothing looks for an update by itself: these two buttons are the only ways firmware gets in, and not pressing them is a perfectly good answer.</span>' },
+            { id: "OTA_PULL_URL", label: "Firmware Manifest URL (used by Check Updates)" },
             { id: "VERSION_OVERRIDE", label: "Version Label (override)" },
             { type: "status", id: "build_version", label: "Firmware Build (compiled in)" },
             { type: "status", id: "core_version", label: "ESP Core FW" }

@@ -271,7 +271,12 @@ bool TZ_DST_ENABLED = true;
 // Default 1 keeps the behaviour of every unit shipped before #22.
 int TZ_DST_RULE = TZ_DST_RULE_EU;
 
-bool OTA_PULL_ENABLED = false;
+// OTA_PULL_ENABLED is retired. It enabled the once-per-boot automatic check, and
+// there is no automatic check to enable any more: the phone checks the release and
+// pushes the image over the LAN, and the cloud pull runs only when the owner
+// triggers it. The manifest URL below is therefore the whole configuration of that
+// path. A config backup taken before this still carries the key; it is simply not
+// read (the same way the old OTA_VER key was left behind).
 char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
 
 // ----------------------------------------------------------------------------
@@ -912,8 +917,6 @@ static const CfgParam CFG_TABLE[] = {
   { &TZ_DST_ENABLED, "TZ_DST_ENABLED", "TZ_DST", nullptr, 0, 0, 1, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
 
   { &TZ_DST_RULE, "TZ_DST_RULE", "TZ_RULE", nullptr, 0, 2, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
-
-  { &OTA_PULL_ENABLED, "OTA_PULL_ENABLED", "OTA_PULL_EN", nullptr, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, CK_BOOL },
 
   { &OTA_PULL_URL, "OTA_PULL_URL", "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(OTA_PULL_URL), CK_STR },
 
