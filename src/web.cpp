@@ -2491,21 +2491,23 @@ static void ambientCalBrightPostHandler() {
   server.send(200, "application/json", buf);
 }
 
-// --- Signed LAN install (POST /api/ota) -------------------------------------
+// --- LAN install (POST /api/ota) --------------------------------------------
 // The image arrives over the same unauthenticated LAN HTTP server this unit
-// serves, and until now the upload path flashed anything that merely looked
-// like an ESP image (magic byte + plausible segment count). Only the pull path
-// ever called otaVerifyImage(), so the signature the maintainer publishes next
-// to firmware.bin proved nothing on the path most people use. With the phone
-// now downloading from GitHub and pushing over the LAN, this path is the
-// security boundary, so it verifies that same signature before the slot is
-// made bootable.
+// serves. The gates that are not negotiable: declared size vs the real OTA slot,
+// the ESP image magic byte, a plausible segment count, the byte count the client
+// claims vs the bytes that actually landed, the same-version and downgrade rules,
+// and one writer at a time on the slot. The detached signature is OPTIONAL here
+// (maintainer's call, 2026-10-30): an image that arrives with a 'signature' part
+// is verified against include/ota_pubkey.h and refused if it does not match; an
+// image that arrives without one is accepted, and its SHA-256 is logged so the
+// person who pushed it can compare it against the release file afterwards.
 //
 // Protocol: multipart POST with
-//   target_version  text field, required - the version string the .sig was made
-//                   over (it is inside the signed payload); one leading v/V is
-//                   dropped first, the way the pull path drops it
-//   signature       file part, required  - the DER signature (firmware.bin.sig)
+//   target_version  text field, required - the version this image says it is;
+//                   one leading v/V is dropped first, the way the pull path
+//                   drops it, so a signed push is verified against the same
+//                   string scripts/ota_sign.py signed
+//   signature       file part, optional  - the DER signature (firmware.bin.sig)
 //   firmware        file part, required  - the image
 //   total_bytes     text field, optional - image size, for a real percentage
 //   force=1         text field, optional - reflash the identical version
@@ -2514,15 +2516,15 @@ static void ambientCalBrightPostHandler() {
 // a field placed after the image does not exist yet while the image is being
 // flashed. Binary data has to travel as a file part for the same reason - a
 // text part is read line by line, which would mangle DER.
-// OTA_ALLOW_UNSIGNED (bench builds only, the commented line in platformio.ini)
-// relaxes the LAN install exactly as it relaxes the pull path, so a contributor
-// without the maintainer's signing key can still flash a locally built image.
-// A release build compiles the requirement in, and nothing that arrives over
-// the network can ask for this.
-#ifdef OTA_ALLOW_UNSIGNED
-static const bool otaUploadSigRequired = false;
+// OTA_REQUIRE_SIG (commented line in platformio.ini) compiles the signature
+// requirement back in for anyone who wants this path as strict as the cloud pull
+// path is. OTA_ALLOW_UNSIGNED belongs to the pull path only - it was the bench
+// escape for the old required-signature behaviour here, and saying so stops the
+// two flags being confused.
+#ifdef OTA_REQUIRE_SIG
+static const bool otaUploadSigRequired = true;   // a .sig is mandatory on the LAN
 #else
-static const bool otaUploadSigRequired = true;
+static const bool otaUploadSigRequired = false;  // a .sig is honoured when sent
 #endif
 
 static uint8_t g_otaUpSig[OTA_SIG_MAX_LEN];
@@ -2757,25 +2759,33 @@ static void otaUploadHandler() {
       uploadFailed = true;
       return;
     }
-    // A signature must have arrived first, in this same request. It is not
-    // reusable across requests anyway - it only ever authorises the image whose
-    // digest it covers - so refusing is also the clearest answer for a client
-    // that simply forgot it.
+    // When a signature is demanded it must have arrived first, in this same
+    // request. It is not reusable across requests anyway - it only ever
+    // authorises the image whose digest it covers - so refusing is also the
+    // clearest answer for a client that simply forgot it.
     if (otaUploadSigRequired && !g_otaUpSigStaged) {
       otaUploadRefuse("sig_missing",
                       "no signature staged: send the .sig file as a 'signature' part before 'firmware'");
       uploadFailed = true;
       return;
     }
-    if (otaUploadSigRequired && !otaSigningAvailable()) {
-      otaUploadRefuse("no_key", "this build has no signing key compiled in, so no image can be verified");
+    // A signature can only be honoured by a build that carries the public key to
+    // check it with. Refusing when one was offered is the honest answer; the
+    // alternative is accepting it unverified, which is the exact lie the
+    // signature exists to prevent.
+    if (!otaSigningAvailable() && (g_otaUpSigStaged || otaUploadSigRequired)) {
+      otaUploadRefuse("no_key", "a signature was offered but this build has no public key to verify it with");
       uploadFailed = true;
       return;
     }
     String ver = server.arg("target_version");
-    if (ver.length() == 0 && otaUploadSigRequired) {
+    // Required whether or not a signature came with this image: it is what the
+    // same-version and downgrade rules below compare against, and what the
+    // update screen and the client's "installed vN" sentence print. Without it
+    // the version policy disappears silently, signature or no signature.
+    if (ver.length() == 0) {
       otaUploadRefuse("version_missing",
-                      "target_version is required: the version string the signature was made over");
+                      "target_version is required: the version this image says it is, e.g. 1.4.7");
       uploadFailed = true;
       return;
     }
@@ -2953,20 +2963,28 @@ static void otaUploadHandler() {
     }
     // Signature check happens here, before end(true). end() is the call that
     // makes the new slot bootable, so on this path nothing may reach it unless
-    // the image is complete, plausible AND signed by the key compiled into this
-    // unit - the rule the pull path has always enforced and the upload path
-    // never applied.
+    // the image is complete and plausible; a signature, if one was sent, also
+    // has to match this exact image and version.
     otaPhase = OtaPhase::Verifying;
     bool accepted = false;
     uint8_t digest[32];
     int mbedErr = 0;
-    if (!otaUploadSigRequired) {
-      // Bench build (OTA_ALLOW_UNSIGNED): accept without checking, but still
-      // close the hash context so it cannot stay open across the reboot.
-      uint8_t unusedDigest[32];
-      otaImageHashFinish(unusedDigest);
-      logPrintf("OTA web: WARNING - signature check OFF (OTA_ALLOW_UNSIGNED bench build)\n");
-      accepted = true;
+    if (!g_otaUpSigStaged) {
+      // No signature travelled with this image (in OTA_REQUIRE_SIG builds the
+      // request was already refused at UPLOAD_FILE_START, so this is only
+      // reachable with the optional policy). The hash is still finished: that
+      // closes the context instead of leaving it open across the reboot, and it
+      // puts the digest in the log so anyone can check what actually got
+      // installed against `sha256sum firmware.bin`.
+      if (!otaImageHashFinish(digest)) {
+        otaUploadRefuse("hash_failed", "image hash could not be finalized");
+      } else {
+        char hex[17];
+        for (int i = 0; i < 8; i++) snprintf(hex + i * 2, 3, "%02x", digest[i]);
+        logPrintf("OTA web: accepted WITHOUT signature (%zu bytes, sha256 %s...) "
+                  "- -DOTA_REQUIRE_SIG refuses these\n", uploadWritten, hex);
+        accepted = true;
+      }
     } else if (!otaImageHashFinish(digest)) {
       otaUploadRefuse("hash_failed", "image hash could not be finalized");
     } else if (otaVerifyImage(digest, g_otaUpVer, g_otaUpSig, g_otaUpSigLen, &mbedErr)) {
@@ -3057,9 +3075,11 @@ static void otaCheckGetHandler() {
   doc["percent"] = otaUploadPercent();  // -1 when total_bytes was not declared
   doc["bytes"] = (long)otaUpBytes;
   doc["bytes_total"] = (long)otaUpBytesTotal;
-  // An unsigned upload used to be flashed. It is refused now, and any client
-  // that cannot send a .sig needs to know that before it starts a long upload.
-  // Reports false only in an OTA_ALLOW_UNSIGNED bench build (see README).
+  // Whether this build refuses an upload that carries no 'signature' part. False
+  // in normal builds (a .sig is honoured when sent, not demanded); true only in
+  // an OTA_REQUIRE_SIG build. A client that cannot produce a .sig - the phone
+  // app pulling a release that happens to have no .sig asset, a PC with only the
+  // .bin - reads this before starting a long upload.
   doc["signature_required"] = otaUploadSigRequired;
   doc["signing_key_present"] = otaSigningAvailable();
   // Quiet window: true while the dashboard is showing the update screen and

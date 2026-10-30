@@ -464,7 +464,7 @@ The management portal features a modern grouped card-based layout:
 | `/api/noisematrix` | `POST` | Starts the four-run sensor noise bench (`idle`, `tft`, `bl10`, `bl90`); runs in the background for ~17 s, so poll the `GET`. Answers `409` while a job is running | None | `application/json` |
 | `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `application/json` (`{"status":"ok"\|"saved-ram-only","value":N}` — `saved-ram-only` means the value is applied but the NVS write failed) |
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `application/json` (same shape as `cal-dark`) |
-| `/api/ota` | `POST` | Firmware install over the LAN — **the signature is verified before the image is flashed** (see *Signed LAN install*) | `multipart/form-data`: `target_version`, `signature` (file part), `firmware` (file part); optional `total_bytes`, `force=1` | `application/json` |
+| `/api/ota` | `POST` | Firmware install over the LAN — version, size, image-header and one-writer gates always; a `signature` part, **if sent**, is verified before the image is flashed (see *LAN install (`POST /api/ota`)*) | `multipart/form-data`: `target_version`, `firmware` (file part); optional `signature` (file part, ordered before the image), `total_bytes`, `force=1` | `application/json` |
 | `/api/ota/pull` | `POST` | **Owner-triggered cloud pull** — one check of `OTA_PULL_URL`, then install if the manifest offers a different, signed image. There is no automatic check anywhere in the product, so this is the only way the unit ever fetches firmware by itself. Refuses with a `msg` when not connected to Wi-Fi or when no manifest URL is configured; reports `busy` while another install holds the slot | None | `application/json` |
 | `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled` — a manifest URL is configured, so the pull path is available on demand; `url`, `current_version`, `build_version`, `version_override`, `previous_version`, `status`, `status_updated`) **and install state**: `state` (tracks the LAN install; pull outcomes report through `status`), `percent`, `bytes`, `bytes_total`, `signature_required`, `signing_key_present`, `quiet`, `quiet_silent_ms`, `screen`, `hold_to_restart_ms`, `error`, `last_target_version` (the version an install verified against, after that `v` drop). Answers normally even during a quiet window — it is on the allow-list | None | `application/json` |
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
@@ -831,28 +831,44 @@ platformio run -t upload --upload-port 192.168.4.1
 #### Via Web Management Portal
 1. Open a browser and navigate to `http://192.168.4.1` (or your assigned STA IP).
 2. Open the **System Actions** section.
-3. Choose `firmware.bin` from a release, then the matching `firmware.bin.sig`, confirm the version that signature was made over (prefilled from a file name like `firmware-1.4.7.bin`), and upload.
+3. Choose `firmware.bin` from a release, confirm the version it says it is
+(prefilled from a file name like `firmware-1.4.7.bin`), and upload. If the release
+also carries `firmware.bin.sig` you can send it too and the unit will verify it;
+without it the version, size and image-header gates still apply.
 
-An upload is flashed only if the signature verifies for that exact image and
-version — see *Signed LAN install* below for the request shape and the reasons a
-device refuses. Size and image-header checks still apply on top of it: the
-upload is bounded by the real OTA partition, and an upload whose byte count is
-inconsistent or whose ESP image header does not look like firmware (magic `0xE9`,
-plausible segment count, at least 4 KB) is discarded instead of activated.
+An upload is flashed only if it passes those gates — see *LAN install
+(`POST /api/ota`)* below for the request shape and the reasons a device refuses.
+Size and image-header checks are not optional: the upload is bounded by the real
+OTA partition, and an upload whose byte count is inconsistent or whose ESP image
+header does not look like firmware (magic `0xE9`, plausible segment count, at
+least 4 KB) is discarded instead of activated.
 
-#### Signed LAN install (`POST /api/ota`)
+#### LAN install (`POST /api/ota`)
 
 The image arrives over the same unauthenticated LAN HTTP server the dashboard
-serves, so this endpoint is the security boundary for installing firmware, and it
-verifies the same ECDSA P-256 / SHA-256 signature the cloud pull has always
-required. The image is hashed while it streams into the OTA slot (no 1.9 MB
-buffer, rule 14) and `otaVerifyImage()` — the pull path's own verifier — must
-accept that digest before `Update.end(true)` marks the new slot bootable.
+serves, so what guards this endpoint matters. The gates that are compiled in and
+never negotiable: `target_version` present and version-shaped, the same-version
+and downgrade rules, the declared size against the real OTA partition, the ESP
+image magic byte and a plausible segment count, the bytes that actually landed
+matching what the client claimed, one writer on the slot at a time, and the image
+hashed (SHA-256) while it streams — never buffered (rule 14).
+
+**The detached signature is optional on this path** (the maintainer's decision,
+2026-10-30, reversing the rule the Unreleased changelog entry describes): an image
+that arrives **with** a `signature` part is verified by `otaVerifyImage()` — the
+pull path's own verifier — against `include/ota_pubkey.h` and refused if it does
+not match this exact image and version; an image that arrives **without** one is
+accepted, and its digest is logged (`OTA web: accepted WITHOUT signature (1757424
+bytes, sha256 2fc18cdc…)`) so a person can compare it against
+`sha256sum firmware.bin` afterwards. Compiling with `-DOTA_REQUIRE_SIG` makes a
+signature mandatory here again, which is the switch to reach for if the LAN ever
+stops being a trusted place to install from. The cloud pull path is unaffected and
+still requires its `.sig` sibling.
 
 | Part | Required | Meaning |
 |---|---|---|
-| `target_version` | yes | The version the `.sig` was made over. The signature covers the release tag **less any leading `v`/`V`** (that is how `scripts/ota_sign.py` builds the payload), and one leading `v`/`V` is dropped here exactly as the pull path drops it — so `1.4.7` and `v1.4.7` both verify. Nothing else is normalised, because the rest of the string is inside the signed payload |
-| `signature` | yes | `firmware.bin.sig` as its own file part, ordered **before** the image |
+| `target_version` | yes | The version this image says it is. It is what the same-version and downgrade gates compare against and what the update screen prints, so it is required whether or not a signature comes with the request. One leading `v`/`V` is dropped, exactly as the pull path drops it, so a signed push verifies against the same string `scripts/ota_sign.py` signed (the payload is the release tag less any leading `v`) — `1.4.7` and `v1.4.7` both work. Nothing else is normalised |
+| `signature` | **no** | `firmware.bin.sig` as its own file part, ordered **before** the image. When present it is honoured: verified against the compiled-in public key, and a mismatch refuses the install |
 | `firmware` | yes | The image (`firmware.bin`) |
 | `total_bytes` | no | Image size, so `percent` in `/api/ota/check` can be real instead of invented |
 | `force` | no | `1` allows reflashing the *identical* version already installed |
@@ -867,10 +883,10 @@ A refusal aborts the OTA slot, never reboots, and answers `500` with a sentence 
 
 | `reason` | Cause |
 |---|---|
-| `sig_missing` | No `signature` part arrived before the image |
-| `sig_invalid` | Signature does not match this image **and** this version (mbedTLS code in `msg`) |
+| `sig_missing` | Only in an `OTA_REQUIRE_SIG` build: no `signature` part arrived before the image. In a normal build it cannot happen |
+| `sig_invalid` | A signature was sent, so it is honoured — and it does not match this image **and** this version (mbedTLS code in `msg`) |
 | `sig_bad` | The signature part is not a plausible DER length (8–128 bytes) |
-| `version_missing` / `version_bad` | `target_version` absent or not a version-shaped string |
+| `version_missing` / `version_bad` | `target_version` absent or not a version-shaped string — required with or without a signature |
 | `downgrade` | Signed version is older than the one this unit reports |
 | `same_version` | Same version installed and `force` was not sent |
 | `slot_busy` | A cloud pull holds the OTA slot, or an earlier reset left it poisoned |
@@ -879,11 +895,14 @@ A refusal aborts the OTA slot, never reboots, and answers `500` with a sentence 
 | `write_failed` / `hash_failed` | Flash write failed, or the image could not be hashed (never treated as a pass) |
 | `upload_aborted` | The image part ended without completing and nothing else recorded a cause |
 | `upload_stalled` | No byte of the image arrived for 120 s — the client died mid-transfer, so the unit closed the window and restored the dashboard by itself |
-| `no_key` / `no_upload` / `bad_field` | No public key compiled in, no `firmware` part, or an unexpected file part |
+| `no_key` / `no_upload` / `bad_field` | A signature was offered (or demanded) but no public key is compiled in; no `firmware` part; an unexpected file part |
 
-`OTA_ALLOW_UNSIGNED` relaxes this path as well as the pull path (see the note
-under *Cloud OTA Pull & Firmware Signing*), so a bench build without the
-maintainer's key can still be installed over the LAN.
+Two build flags, deliberately separate: **`-DOTA_REQUIRE_SIG`** decides whether
+*this* endpoint demands a signature (default: it does not). **`-DOTA_ALLOW_UNSIGNED`**
+belongs to the **cloud pull** path only (see the note under *Cloud OTA Pull &
+Firmware Signing*) and does nothing here — it is the flag that used to relax this
+path back when a signature was mandatory, and keeping the two apart stops them
+being confused.
 
 #### Firmware-update quiet window
 
@@ -1077,10 +1096,13 @@ signed release can be built; leak it and anyone can ship firmware to every devic
 
 > [!NOTE]
 > **Bench builds only.** Adding `-DOTA_ALLOW_UNSIGNED` to `platformio.ini` builds
-> both install paths without the signature check (the Web UI logs a warning on
-> every pull, and `signature_required` reads `false` in `/api/ota/check`). Never
-> publish a release built with that flag. USB serial flashing and ArduinoOTA
-> (`espota`) stay unsigned by design — they are local developer paths.
+> the **cloud pull** path without its signature check (the Web UI logs a warning on
+> every pull). It no longer affects `POST /api/ota`, where a signature is optional
+> in normal builds — that path's own switch is `-DOTA_REQUIRE_SIG` (see *LAN install
+> (`POST /api/ota`)*). Never publish a release built with `-DOTA_ALLOW_UNSIGNED`: it
+> installs an unverified image fetched from a URL over the internet. USB serial
+> flashing and ArduinoOTA (`espota`) stay unsigned by design — they are local
+> developer paths.
 
 ---
 
@@ -1103,9 +1125,11 @@ In Demo Mode:
 
 ## Changelog
 
-### Unreleased — an image is flashed only if its signature checks out, on both paths (firmware + Web UI)
+### Unreleased — install gates: version, size and image shape always; a signature is required on the pull path and optional on the LAN (firmware + Web UI)
 
 The cloud pull has verified an ECDSA signature since 1.4, but the LAN upload never did: `POST /api/ota` flashed anything that began with `0xE9` and had a plausible segment count and byte count. Anything reachable on the network could therefore replace the firmware, and the two install paths made different promises. Since the intended way to update is now "the phone downloads the release and pushes it over the LAN", the upload path got the check the pull path already had.
+
+**Signature on the LAN path made optional again (2026-10-30, maintainer's decision)** — the paragraph above and the *Breaking* bullet below describe the rule as it was written then; the LAN half of it has since been relaxed on purpose, and this paragraph is the current state. `POST /api/ota` accepts an image that arrives with **no** `signature` part. What still guards it: `target_version` present and version-shaped, the same-version and downgrade rules, declared size against the real OTA partition, the ESP image magic byte and a plausible segment count, the bytes accepted matching the bytes claimed, one writer on the slot, and the image SHA-256'd as it streams. A `signature` part that *is* sent is still verified by the pull path's own `otaVerifyImage()` and a mismatch is still a refusal — sending one is now a choice rather than a requirement. An accepted unsigned image logs its digest (`OTA web: accepted WITHOUT signature (1757424 bytes, sha256 2fc18cdc1190ef31...) - -DOTA_REQUIRE_SIG refuses these`), which is what makes the acceptance checkable after the fact against `sha256sum firmware.bin`. `-DOTA_REQUIRE_SIG` compiles the requirement back in; `-DOTA_ALLOW_UNSIGNED` now belongs to the pull path alone. Releases keep getting signed (`scripts/ota_sign.py`, and the release-asset rule in `AGENTS.md` are unchanged) because the pull path still needs the `.sig`. What changed is the exposure: **anything reachable on the LAN can now flash this unit without the signing key**, which is precisely what the original change closed, accepted here knowingly because that is the bench and garage path the product actually uses.
 
 **Firmware (`src/web.cpp`, `src/otasign.cpp/.h`)**
 - `POST /api/ota` is a signed install. The request carries `target_version`, the signature as its own `signature` file part and the image as `firmware`; the image is SHA-256'd as it streams into the OTA slot and `otaVerifyImage()` — the pull path's own function, not a second implementation — has to accept that digest and that version before `Update.end(true)` runs. A refusal aborts the slot, so the running firmware stays in place and the unit does not reboot.
@@ -1137,7 +1161,22 @@ nothing flashed — and the second-press floor was seen doing its job
 (`throttled, auto-retry in 51s`, status `waiting 48s before retry`). The button rows
 are tracked as **#69** (GPIO25 has no button fitted on the bench board). What is
 still open: the physical hold rows, the 120 s stall watchdog, and the
-`same_version` / `downgrade` / `sig_missing` refusals.
+`same_version` / `downgrade` refusals (`sig_missing` only exists in an
+`OTA_REQUIRE_SIG` build now).
+
+**Verified on hardware for the signature policy reversal** (same bench, four pushes
+of this build, 1.75 MB each): a signed install still works
+(`OTA web: signature staged (72 bytes)` → `signature VALID for v1.4.6 (1757424
+bytes)` → `success` → `rst:0xc (SW_CPU_RESET)`, `boot#2`); the new build reports its
+own policy as `"signature_required":false` with `"signing_key_present":true`; an
+**unsigned** push of the same image is now accepted
+(`accepted WITHOUT signature (1757424 bytes, sha256 2fc18cdc1190ef31...)`) and the
+logged digest matches `sha256sum` of the file that was pushed, to the 16 hex
+characters printed; a `.sig` that did not cover the claimed version was still
+refused at the end of the transfer (`sig_invalid`, mbedTLS `-0x4e00`, `state:
+error`, `screen: failed`) with the unit alive on 1.4.6 and `/api/live` answering
+`200` again two seconds later; and a push with no `target_version` was refused
+(`version_missing`) without rebooting (uptime went 38 s → 49 s across it).
 
 **Updates are manual now — the automatic check is deleted, not disabled (`src/web.cpp`, `src/config.cpp`, `src/dashboard.h`)**
 - The once-per-boot automatic check is gone, together with its `otaPullBootCheckDone` flag. `startOtaPull()` and `checkForFirmwareUpdate()` lost their `manual` / `skipThrottle` parameters, because the only thing those two flags ever encoded was *who fired this check* — and nobody fires it automatically any more. `POST /api/ota/pull` is now the single way in, documented as the owner-triggered fallback for when no phone with internet is around.
@@ -1155,7 +1194,7 @@ still open: the physical hold rows, the 120 s stall watchdog, and the
 - *Check Updates* lost its private 1.5 s poll loop; the state line above already polls the same endpoint, faster when something is happening and slower when nothing is. Two poll loops answering the same question differently is how a UI ends up showing “Checking…” next to “up-to-date”.
 - New `scripts/verify_ota_state_line.js` — 13 cases over that decision chain, sliced out of `src/webui.html` at run time (no duplicated logic to drift), and able to check the page a running unit serves: `node scripts/verify_ota_state_line.js http://192.168.1.116/`.
 
-**Breaking** — an unsigned upload that used to install is now refused, which is the point of the change. The pull path has refused to behave that way since 1.4, so this makes one rule for the product instead of two. `-DOTA_ALLOW_UNSIGNED` relaxes both paths for bench work as before; a release build compiles the requirement in and nothing sent over the network can lift it.
+**Breaking** — an unsigned upload that used to install is now refused, which is the point of the change. The pull path has refused to behave that way since 1.4, so this makes one rule for the product instead of two. `-DOTA_ALLOW_UNSIGNED` relaxes both paths for bench work as before; a release build compiles the requirement in and nothing sent over the network can lift it. **Superseded on 2026-10-30**: the LAN half of this rule was relaxed deliberately, so in a normal build `signature_required` reads `false` and the sentence above describes the pull path and an `OTA_REQUIRE_SIG` build only — see the paragraph at the top of this entry.
 
 **Verified** — the signature contract was tested against the real release key rather than assumed: signing this build as `1.4.7` produced a 70-byte DER signature that verifies; verifying the same file as `v1.4.7` **failed**; flipping one byte of the image **failed**. The middle result is the bug this pass caught — the signature is defined over the tag less its leading `v`, and the upload path as first written passed `target_version` straight through, so a client sending the tag it read on GitHub would have been told `sig_invalid` about a perfectly good release. The pull path has always dropped that `v`, so the install paths now agree (`src/web.cpp`, README).
 
