@@ -89,8 +89,8 @@ const cases = [
         // began - shown verbatim rather than re-derived by the page.
         name: 'the unit refuses an over-sized image on its own status line',
         d: { state: 'idle', screen: 'off', quiet: false,
-             status: 'install: refusing an image over 2 MB - it will not fit in the OTA slot' },
-        want: { cls: 'is-idle', text: 'install: refusing an image over 2 MB - it will not fit in the OTA slot',
+             status: 'upload is bigger than the OTA slot (2201170 bytes) - not activated' },
+        want: { cls: 'is-idle', text: 'install: upload is bigger than the OTA slot (2201170 bytes) - not activated',
                 active: false, delay: 5000 }
     },
     {

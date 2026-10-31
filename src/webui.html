@@ -2221,10 +2221,6 @@ const configMap = [
                 <input type="text" id="otaVer" placeholder="1.5.2" oninput="otaVerChanged()" style="display:none">
                 <button id="otaBtn" onclick="doOta()" class="btn-secondary btn-sm" disabled>Install</button>
             </div>
-        </div>
-        <div class="cfg-row">
-            <label>Install an Older Version</label>
-            <div class="cfg-controls"><input type="checkbox" id="otaOlder" onchange="otaUpdateBtnLabel()"></div>
         </div>` },
             { type: "status", id: "build_version", label: "Firmware Build (compiled in)" },
             { type: "status", id: "core_version", label: "ESP Core FW" }
@@ -4588,6 +4584,17 @@ function otaScanVersion(file) {
 
 // The button says what is still missing, so the flow is one step at a time and
 // the row is never in a state whose meaning is unclear.
+// Compare two version strings the way the unit's own versionCmp() does: dotted
+// numbers, extra components treated as zero. Returns <0 / 0 / >0.
+function otaVerCmp(a, b) {
+    const pa = String(a || '').replace(/^[vV]/, '').split('.'), pb = String(b || '').split('.');
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const x = parseInt(pa[i] || '0', 10) || 0, y = parseInt(pb[i] || '0', 10) || 0;
+        if (x !== y) return x < y ? -1 : 1;
+    }
+    return 0;
+}
+
 function otaUpdateBtnLabel(scanning) {
     const btn = document.getElementById('otaBtn');
     if (!btn) return;
@@ -4616,8 +4623,15 @@ function doOta() {
         document.getElementById('otaVer').focus();
         return;
     }
-    const older = document.getElementById('otaOlder').checked ? '1' : '';
-    const again = older ? ' That box allows an image whose version is older than, or identical to, the version running.' : '';
+    // The unit accepts an older image without being asked, so this page owns the
+    // warning: it is the client that can see both versions side by side.
+    const running = (_otaLastCheck && _otaLastCheck.current_version) || '';
+    let again = '';
+    const same = running && otaVerCmp(ver, running) === 0;
+    if (same)
+        again = ' Note: v' + running + ' is what the unit is running right now - this reflashes the identical image.';
+    else if (running && otaVerCmp(ver, running) < 0)
+        again = ' WARNING: this image says it is v' + ver + ', which is OLDER than the v' + running + ' installed now.';
     confirmDialog('Upload ' + _otaFile.name + ' as v' + ver + ' and reboot the device?' +
                   ' The screen shows only the update progress until it restarts.' + again, function() {
         btn.disabled = true; btn.textContent = 'Uploading...';
@@ -4627,7 +4641,9 @@ function doOta() {
         const fd = new FormData();
         fd.append('target_version', ver);
         fd.append('total_bytes', String(_otaFile.size));
-        if (older) fd.append('allow_older', '1');
+        // The unit refuses its own build unless this is sent, so a deliberate
+        // reflash of the identical image has to say so (the dialog above warns).
+        if (same) fd.append('force', '1');
         fd.append('firmware', _otaFile, _otaFile.name);
         // XHR rather than fetch, for exactly one reason: fetch cannot report
         // upload progress at all, and while an image body is streaming the unit

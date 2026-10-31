@@ -463,7 +463,7 @@ The management portal features a modern grouped card-based layout:
 | `/api/noisematrix` | `POST` | Starts the four-run sensor noise bench (`idle`, `tft`, `bl10`, `bl90`); runs in the background for ~17 s, so poll the `GET`. Answers `409` while a job is running | None | `application/json` |
 | `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `application/json` (`{"status":"ok"\|"saved-ram-only","value":N}` — `saved-ram-only` means the value is applied but the NVS write failed) |
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `application/json` (same shape as `cal-dark`) |
-| `/api/ota` | `POST` | Firmware install over the LAN — version, size, image-header and one-writer gates always; no signature step on any path (see *LAN install (`POST /api/ota`)*) | `multipart/form-data`: `target_version`, `firmware` (file part); optional `total_bytes`, `allow_older=1` (accept an image whose claimed version is older or identical), `force=1` (legacy: identical version only). A `signature` part may still be sent: it is counted, ignored and logged | `application/json` |
+| `/api/ota` | `POST` | Firmware install over the LAN — version, size, image-header and one-writer gates always; no signature step on any path; an **older** image is accepted without a flag (see *LAN install (`POST /api/ota`)*) | `multipart/form-data`: `target_version`, `firmware` (file part); optional `total_bytes`, `force=1` (reflash the identical build). A `signature` part may still be sent: it is counted, ignored and logged | `application/json` |
 | `/api/ota/check` | `GET` | Reports **install state** for whoever is pushing the image: `state` (`idle|staging|receiving|verifying|writing|done|error`), `percent` (`-1` when no `total_bytes` was declared), `bytes`, `bytes_total`, `quiet`, `quiet_silent_ms`, `screen`, `hold_to_restart_ms`, `error`, `last_target_version`, plus the unit's identity — `current_version` (the compiled-in build, which is what every gate compares against), `build_version`, `image_tag` (the `DPPVER=` marker this build carries inside its own image file), `previous_version`, `status`, `status_updated`. The pull-era fields `enabled`, `url`, `ca_bundle` and `ca_mode` are gone: this unit fetches nothing by itself. Answers normally even during a quiet window — it is on the allow-list | None | `application/json` |
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
 | `/api/perf` | `GET` | Live telemetry (CPU, Heap, task stack headroom, FPS, WiFi, partitions), plus the web task's own timing: `web_serve_ms_last` / `web_serve_ms_max` (what one `handleClient()` pass costs) and `web_slow_iters` (loop iterations over 100 ms). Also reports `mac`: the base eFuse MAC (uppercase, colon-separated) - the stable device identity the companion app binds its vehicle card to, unchanged by Wi-Fi mode or DHCP | None | `application/json` |
@@ -891,7 +891,7 @@ removed from every update path on 2026-10-30 (see *Signature policy, and what wa
 removed* below, and `AGENTS.md` rule 3), so no public key is compiled into the
 firmware and no image is verified before it is made bootable. What still guards
 the endpoint, compiled in and not negotiable: `target_version` present and
-version-shaped, the same-version and downgrade rules, the declared size against
+version-shaped, the identical-version rule, the declared size against
 the real OTA partition, the ESP image magic byte and a plausible segment count,
 the bytes that actually landed matching what the client claimed, and one writer on
 the slot at a time. The image is hashed (SHA-256) while it streams — never
@@ -915,7 +915,7 @@ deleted.
 
 | Part | Required | Meaning |
 |---|---|---|
-| `target_version` | yes | The version this image says it is. It is what the same-version and downgrade gates compare against and what the update screen prints. One leading `v`/`V` is dropped — `1.4.7` and `v1.4.7` both work. Nothing else is normalised |
+| `target_version` | yes | The version this image says it is. It is what the identical-version gate compares against and what the update screen prints. One leading `v`/`V` is dropped — `1.4.7` and `v1.4.7` both work. Nothing else is normalised |
 | `firmware` | yes | The image (`firmware.bin`) |
 | `total_bytes` | no | Image size, so `percent` in `/api/ota/check` can be real instead of invented |
 | `force` | no | `1` allows reflashing the *identical* version already installed |
@@ -936,8 +936,7 @@ A refusal aborts the OTA slot, never reboots, and answers `500` with a sentence 
 | `reason` | Cause |
 |---|---|
 | `version_missing` / `version_bad` | `target_version` absent or not a version-shaped string |
-| `downgrade` | Claimed version is older than the build this unit is running. Send `allow_older=1` to accept it anyway; `force=1` does not lift this one |
-| `same_version` | Same version installed and neither `allow_older=1` nor `force=1` was sent |
+| `same_version` | The claim equals the build this unit is running and `force=1` was not sent. Reflashing the identical image is allowed on purpose, never by accident |
 | `slot_busy` | Another install holds the OTA slot, or an earlier interrupted write left it poisoned |
 | `slot_open_failed` | The OTA slot could not be opened for writing |
 | `too_big` / `image_rejected` | Larger than the OTA partition, or not a usable ESP image |
@@ -1126,8 +1125,10 @@ firmware gets in, and the thing that posts it is a client with internet:
    gates, for when a PC is on the dashboard's network.
 
 Both paths face the same guards, which live in the unit and cannot be talked around
-from the client: `target_version` present and version-shaped; the same-version and
-downgrade refusals (`allow_older=1` / `force=1` to override deliberately); declared
+from the client: `target_version` present and version-shaped; the identical-version
+refusal (`force=1` to reflash the build that is already running); an image claiming an
+**older** version is accepted without argument, because the warning belongs in the
+client that can show both versions side by side; declared
 size against the real OTA partition; the ESP magic byte and a plausible segment
 count; the accepted byte count matching what was claimed; one writer on the slot at
 a time; and the image SHA-256'd while it streams, the digest logged so it can be
@@ -1198,15 +1199,18 @@ In Demo Mode:
   like an upgrade (a pull that would re-install the same image indefinitely) and a
   genuinely newer image could be judged a downgrade. `/api/ota/check` keeps
   reporting `version_override` when one is set, and `build_version` alongside it.
-- **`allow_older=1` on `POST /api/ota`.** One flag that permits an image whose
-  claimed version is older *or* identical. `force=1` is still honoured, for the
-  identical version only, so existing clients keep working. Refusals name the flag
-  in `msg` (`downgrade`, `same_version`) so a client can tell the person which box
-  to tick.
-- **The update card's checkbox changed to match:** *Allow Reflashing the Same
-  Version* is now *Install an Older Version* (`otaOlder`, sends `allow_older=1`),
-  because "reflashing the same version" was the smaller half of the same
-  permission. The Settings field is labelled *Version Label (display only)*.
+- **`allow_older=1` existed for two commits and is gone** (2026-10-31): the unit now
+  accepts an image claiming an **older** version with no permission flag at all. The
+  flag and the update card's *Install an Older Version* checkbox were never in a
+  released build, so nothing written against them breaks. Rationale: the client — the
+  phone app, or the Web UI's confirm dialog — is the place that can show "this is
+  older than what is running" and make a person agree to it; a checkbox on the unit's
+  own page asks the wrong party. `force=1` still guards the one case that is never
+  useful by accident: reflashing the exact build already running, which answers
+  `same_version` without it. Every older install is logged by name
+  (`OTA web: installing an OLDER image (1.4.0) over 1.5.1 - accepted, the pushing
+  client is expected to have warned the user`), so a rollback is visible after the
+  fact from the serial log and from the boot record.
 - **Wired (USB) flashing fixed at the root** — see *Compiling & Flashing via
   USB*: `scripts/fix_upload_layout.py` writes `otadata` at this table's real offset
   (`0x1D000`) instead of PlatformIO's fixed `0xe000`, which sits inside `nvs`. A

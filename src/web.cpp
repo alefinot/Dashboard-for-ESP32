@@ -1713,17 +1713,20 @@ static void ambientCalBrightPostHandler() {
 // from every install path by the maintainer on 2026-10-30, so no public key is
 // compiled in and no image is verified (see the changelog and AGENTS.md rule 3).
 // What still decides whether an image becomes bootable: target_version present
-// and version-shaped, the same-version and downgrade rules, the declared size
-// against the real OTA slot, the ESP image magic byte, a plausible segment
-// count, the bytes that actually landed matching what the client claimed, and
-// one writer at a time on the slot.
+// and version-shaped, the identical-version rule (an older image is accepted
+// without permission - see the gate below), the declared size against the real
+// OTA slot, the ESP image magic byte, a plausible segment count, the bytes that
+// actually landed matching what the client claimed, and one writer at a time on
+// the slot.
 //
 // Protocol: multipart POST with
 //   target_version  text field, required - the version this image says it is;
 //                   one leading v/V is dropped
 //   firmware        file part, required  - the image
 //   total_bytes     text field, optional - image size, for a real percentage
-//   force=1         text field, optional - reflash the identical version
+//   force=1         text field, optional - reflash the identical version. There
+//                   is no flag for installing an older one: that is accepted as
+//                   it arrives, and the client is expected to warn the person.
 // The text fields must precede the image part: the core parses a multipart body
 // strictly in order and hands each part to this handler as it arrives, so a
 // field placed after the image does not exist yet while the image is being
@@ -1988,38 +1991,30 @@ static void otaUploadHandler() {
         return;
       }
     }
-    // Downgrade guard. The signature proves which version this image really is,
-    // so refusing a lower one is a signature-backed decision and not a guess.
-    // Reflashing the identical version is allowed with force=1 (bench repair).
-    // Only checked when a version was claimed; a signed build always claims one
-    // by the time it gets here.
+    // Version policy, decided against the build identity (issue #72) and never
+    // against a label. An OLDER image is accepted with no permission flag: the
+    // intended flow is a phone that lists the published releases, and rolling back
+    // to an earlier one is a normal thing for an owner to want. The warning belongs
+    // with the client that can see both versions - the app asks before it pushes,
+    // the Web UI's confirm dialog says so - because this unit has no way to know
+    // whether the person holding the phone already meant it. What is still refused
+    // is the pointless case: reflashing the exact build that is running, which needs
+    // force=1 so a bench re-flash stays deliberate.
     if (g_otaUpVer[0]) {
-      // Version policy is decided against the build identity (issue #72).
-      // `allow_older=1` is the caller's explicit permission to install an image
-      // that claims an older - or the identical - version; that is the update
-      // card's single checkbox.
-      // `force=1` is still honoured for clients that send it, and covers the
-      // identical version only.
       int vcmp = versionCmp(g_otaUpVer, buildVersion());
-      const bool allowOlder = server.arg("allow_older") == "1";
       const bool forceSame = server.arg("force") == "1";
-      if (vcmp < 0 && !allowOlder) {
-        otaUploadRefuse("downgrade",
-                        "refusing %s: this unit runs %s - send allow_older=1 to install it anyway",
-                        g_otaUpVer, buildVersion());
-        uploadFailed = true;
-        return;
-      }
-      if (vcmp == 0 && !allowOlder && !forceSame) {
+      if (vcmp == 0 && !forceSame) {
         otaUploadRefuse("same_version",
-                        "%s is already installed - send allow_older=1 (or force=1) to reflash the same image",
+                        "%s is already installed - send force=1 to reflash the same image",
                         g_otaUpVer);
         uploadFailed = true;
         return;
       }
-      if (vcmp <= 0)
-        logPrintf("OTA web: %s over %s installed by explicit permission\n",
+      if (vcmp < 0)
+        logPrintf("OTA web: installing an OLDER image (%s) over %s - accepted, the pushing client is expected to have warned the user\n",
                   g_otaUpVer, buildVersion());
+      else if (vcmp == 0)
+        logPrintf("OTA web: reflashing the identical build (%s) under force=1\n", g_otaUpVer);
     }
     String total = server.arg("total_bytes");
     if (total.length() > 0 && total.length() < 12) otaUpBytesTotal = total.toInt();
