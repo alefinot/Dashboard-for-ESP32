@@ -389,10 +389,8 @@ extern int TZ_OFFSET_HOURS;
 extern bool TZ_DST_ENABLED;
 extern int TZ_DST_RULE;  // which rule TZ_DST_ENABLED applies: see TZ_DST_RULE_*
 
-// OTA_PULL_ENABLED is gone: it armed the once-per-boot automatic check, and there
-// is no automatic check. The manifest URL below is the whole configuration of the
-// cloud pull path, which now has exactly one trigger - POST /api/ota/pull.
-extern char OTA_PULL_URL[192];
+// No manifest URL: the cloud OTA pull path was removed on 2026-10-31. Firmware
+// only ever arrives through POST /api/ota (the phone app, or the Web UI).
 // Build identity (compile time). See the comment at its definition in
 // config.cpp: the manifest, a config restore or the Web API can never change
 // what the device claims to be, and since issue #72 it is also the only value
@@ -652,10 +650,9 @@ const char *otaScreenStageName();
 const char *otaInstallReason();
 const char *otaInstallDetail();
 void otaInstallBytesSnapshot(long *bytesDone, long *bytesTotal);
-// Record why an install failed, for the failure frame. Written by whichever path
-// is installing (the upload handler sets these as it refuses; the pull path
-// calls this from its failure exits), read once by the display task while it
-// draws. Two install paths, one failure record, so the panel cannot disagree
+// Record why an install failed, for the failure frame. Written by the path that
+// is installing (the upload handler sets these as it refuses), read once by the
+// display task while it draws. One failure record, so the panel cannot disagree
 // with the log about what just happened.
 void otaInstallSetFailure(const char *reason, const char *detail);
 
@@ -882,29 +879,17 @@ void sensorTask(void *pvParameters);
 // Web API
 // ----------------------------------------------------------------------------
 void webServerTask(void *pvParameters);
-// The cloud pull. No arguments: it is no longer reachable from any automatic
-// path, so there is nothing left to distinguish an automatic run from a manual
-// one. startOtaPull() creates the pull task, checkForFirmwareUpdate() is what
-// that task runs.
-void checkForFirmwareUpdate();
-void performFirmwareUpdate(const char *firmwareUrl, const char *newVersion, size_t fwSize);
-void startOtaPull();
 void processOtaMemRelease();
 extern volatile bool otaMemReleaseRequested;
 extern volatile bool otaMemReleased;
 
-// Firmware-update quiet window. While a LAN install is in flight the panel
-// shows only the update screen and everything that is not the panel, the upload
-// itself or the trip button is parked: GNSS and the CPU probes wait at their
-// loop tops (cooperatively - suspending a task from outside can freeze it
-// inside a g_stateMutex section), weather is aborted, the CPU is pinned to
-// 240 MHz and the web server answers 503 on every endpoint the phone does not
-// need. Entered and left by whichever task is running the install - the web task
-// for a LAN push, the pull task for a cloud pull - and only one of the two can
-// hold the window at a time (they refuse each other's flash slot); `true` means
-// the window is open. If a window ever did overlap, the first one to finish would
-// close it early and cost the second the gating, never the install: the gating is
-// an optimisation, the flash writes are correct without it.
+// Firmware-update quiet window. While an install is in flight the panel shows
+// only the update screen and everything that is not the panel, the upload itself
+// or the trip button is parked: GNSS and the CPU probes wait at their loop tops
+// (cooperatively - suspending a task from outside can freeze it inside a
+// g_stateMutex section), weather is aborted, the CPU is pinned to 240 MHz and the
+// web server answers 503 on every endpoint the phone does not need. Entered and
+// left by the web task that runs the install. `true` means the window is open.
 // See Implementation plans/MANUAL_OTA_PHONE_PUSH_PLAN-2026-10-28.md 5.2.
 extern volatile bool otaQuietActive;
 void otaQuietEnter(const char *why);
@@ -921,8 +906,7 @@ extern volatile unsigned long otaQuietLastByteMs;
 // makes the hold-to-restart gesture refuse to fire: a reset in the middle of a
 // flash write leaves a half-written slot, which is the failure this whole
 // redesign exists to remove. Asked as a question rather than read as a variable:
-// the interlock behind it is web.cpp's own business (the pull task and the upload
-// handler share the singleton Update object) and stays file-static there.
+// the interlock behind it is web.cpp's own business and stays file-static there.
 bool otaFlashWriteActive();
 void processMemSaverRelease();
 extern volatile bool memSaverRequested;

@@ -8,7 +8,7 @@
 
 **Dashboard++** is an ultra-high-performance, production-grade automotive digital instrument cluster and telemetry solution designed for motorcycles, cars, and custom electric/combustion vehicles powered by the **ESP32 WROOM-32** dual-core microcontroller.
 
-Featuring a 4.0-inch ILI9488 TFT display (480×320 resolution) driven over a 60 MHz SPI bus using **LovyanGFX** with PROGMEM-mapped VLW fonts, Dashboard++ blends real-time multi-sensor fusion algorithms, sprite-based anti-aliased digit rendering, dirty-rendering optimizations, hysteresis-based dynamic CPU frequency scaling, persistent NVS configuration management, an Open-Meteo live weather widget, and a complete single-page Web application served over WiFi with REST API control, NVS backup/restore, and automatic cloud OTA pull.
+Featuring a 4.0-inch ILI9488 TFT display (480×320 resolution) driven over a 60 MHz SPI bus using **LovyanGFX** with PROGMEM-mapped VLW fonts, Dashboard++ blends real-time multi-sensor fusion algorithms, sprite-based anti-aliased digit rendering, dirty-rendering optimizations, hysteresis-based dynamic CPU frequency scaling, persistent NVS configuration management, an Open-Meteo live weather widget, and a complete single-page Web application served over WiFi with REST API control, NVS backup/restore, and firmware updates pushed to it over the LAN.
 
 ---
 
@@ -52,7 +52,7 @@ Dashboard++ replaces legacy analog or basic digital gauges with an automotive-gr
 - **Configurable 7-Segment Digital Fonts:** 120px (sprite) and 28px (direct) seven-segment fonts with background "ghost digit" rendering (888 backdrop effect) and fully user-configurable integer and decimal digit boundaries for all telemetry counters.
 - **Full Sensor Suite Integration:** Precise fuel level monitoring (20-point piecewise linear calibration table + EMA filtering), engine coolant thermistor telemetry (Steinhart-Hart equation), battery voltage divider monitoring, trip fuel economy tracking, **trip average speed**, and a **session max speed (Vmax)** readout display.
 - **FreeRTOS Dual-Core Multitasking:** Strict core isolation — the continuous ~1.1KB/s GNSS UART stream is quarantined in its own Core 0 task (bulk ring-buffer read, bounded per tick, sitting below the WiFi stack), while the vehicle sensor suite and UI rendering run on Core 1, so a GPS stream backlog can never stall the dashboard or freeze any real-time value.
-- **Embedded Web Management Portal:** Embedded single-page Web application accessible over SoftAP or local WiFi network featuring grouped card-based configuration UI with live search, real-time performance telemetry panel (FPS, CPU frequency/temp, RAM, flash storage), interactive sliders, color pickers, NVS backup/restore, web serial terminal stream, cloud OTA pull, and HTTP file upload OTA firmware updating.
+- **Embedded Web Management Portal:** Embedded single-page Web application accessible over SoftAP or local WiFi network featuring grouped card-based configuration UI with live search, real-time performance telemetry panel (FPS, CPU frequency/temp, RAM, flash storage), interactive sliders, color pickers, NVS backup/restore, web serial terminal stream, and OTA firmware updating by uploading a firmware file (from the Web UI file picker, or from the Android app, which is the intended path).
 - **Hysteresis-Based Dynamic CPU Scaling:** Three-state frequency governor (240/160/80 MHz) with hysteresis deadbands prevents oscillation, and thermal throttling automatically caps frequency at configurable warning/critical temperature thresholds.
 
 ---
@@ -432,8 +432,7 @@ The management portal features a modern grouped card-based layout:
 - **Real-time performance panel** displaying FPS, CPU frequency/temperature, RAM usage, flash storage utilization, and live serial output monitor
 - **Weather Widget group** with city, latitude/longitude, refresh interval, locale, and a day/night icon
 - **Ambient light calibration** (dark / bright reference points)
-- **Cloud OTA pull** controls (enable, URL) with live status polling
-- **OTA firmware upload** via file picker
+- **OTA firmware upload** via file picker (the Web UI path; the Android app pushes the same way and additionally lists the published releases so a person picks which one to install)
 - **NVS backup/restore** (export downloads `GET /api/config` as `dashboard_backup.json`, import posts it back to `POST /api/config`)
 
 ### REST API Endpoints
@@ -465,8 +464,7 @@ The management portal features a modern grouped card-based layout:
 | `/api/ambient/cal-dark` | `POST` | Sets dark-reference ambient light value (auto-brightness floor) | None | `application/json` (`{"status":"ok"\|"saved-ram-only","value":N}` — `saved-ram-only` means the value is applied but the NVS write failed) |
 | `/api/ambient/cal-bright` | `POST` | Sets bright-reference ambient light value (auto-brightness ceiling) | None | `application/json` (same shape as `cal-dark`) |
 | `/api/ota` | `POST` | Firmware install over the LAN — version, size, image-header and one-writer gates always; no signature step on any path (see *LAN install (`POST /api/ota`)*) | `multipart/form-data`: `target_version`, `firmware` (file part); optional `total_bytes`, `allow_older=1` (accept an image whose claimed version is older or identical), `force=1` (legacy: identical version only). A `signature` part may still be sent: it is counted, ignored and logged | `application/json` |
-| `/api/ota/pull` | `POST` | **Owner-triggered cloud pull** — one check of `OTA_PULL_URL`, then install if the manifest offers a different image. There is no automatic check anywhere in the product, so this is the only way the unit ever fetches firmware by itself. Refuses with a `msg` when not connected to Wi-Fi or when no manifest URL is configured; reports `busy` while another install holds the slot | None | `application/json` |
-| `/api/ota/check` | `GET` | Reports cloud OTA pull state (`enabled` — a manifest URL is configured, so the pull path is available on demand; `url`, `current_version` (the compiled-in build identity, which is what every update gate compares against since issue #72 was fixed), `build_version`, `version_override` (display label only, when one is set), `previous_version`, `status`, `status_updated`) **and install state**: `state` (tracks the LAN install; pull outcomes report through `status`), `percent`, `bytes`, `bytes_total`, `quiet`, `quiet_silent_ms`, `screen`, `hold_to_restart_ms`, `error`, `last_target_version` (the version an install verified against, after that `v` drop). Answers normally even during a quiet window — it is on the allow-list | None | `application/json` |
+| `/api/ota/check` | `GET` | Reports **install state** for whoever is pushing the image: `state` (`idle|staging|receiving|verifying|writing|done|error`), `percent` (`-1` when no `total_bytes` was declared), `bytes`, `bytes_total`, `quiet`, `quiet_silent_ms`, `screen`, `hold_to_restart_ms`, `error`, `last_target_version`, plus the unit's identity — `current_version` (the compiled-in build, which is what every gate compares against), `build_version`, `image_tag` (the `DPPVER=` marker this build carries inside its own image file), `previous_version`, `status`, `status_updated`. The pull-era fields `enabled`, `url`, `ca_bundle` and `ca_mode` are gone: this unit fetches nothing by itself. Answers normally even during a quiet window — it is on the allow-list | None | `application/json` |
 | `/api/serial` | `GET` | Streams internal 4 KB ring buffer logs | None | `text/plain` |
 | `/api/perf` | `GET` | Live telemetry (CPU, Heap, task stack headroom, FPS, WiFi, partitions), plus the web task's own timing: `web_serve_ms_last` / `web_serve_ms_max` (what one `handleClient()` pass costs) and `web_slow_iters` (loop iterations over 100 ms). Also reports `mac`: the base eFuse MAC (uppercase, colon-separated) - the stable device identity the companion app binds its vehicle card to, unchanged by Wi-Fi mode or DHCP | None | `application/json` |
 | `/api/health` | `GET` | Health probe: heap, FPS, partition layout and the NVS entry budget (`nvs_bytes`, `nvs_entries_used` / `_available` / `_total`) | None | `application/json` |
@@ -618,13 +616,12 @@ ESP-IDF's NVS layer has its own internal locking, so a torn write is unlikely �
 - `TZ_OFFSET_HOURS` (default=1): Zone offset in whole hours — **the standard (winter) offset**, range −14…14. With DST on, this is the offset the clock uses outside the DST period; the rule below adds the extra hour. New York is `-5`, Paris is `+1`, Athens is `+2`.
 - `TZ_DST_ENABLED` (default=true): Master switch for daylight saving. When off the clock keeps `TZ_OFFSET_HOURS` all year.
 - `TZ_DST_RULE` (default=1): Which calendar `TZ_DST_ENABLED` applies (issue #22). `0` = none, `1` = **EU/EEA** (last Sunday of March and October, both at 01:00 UTC), `2` = **US/Canada** (second Sunday of March, first Sunday of November, both at 02:00 local wall clock — converted to UTC through `TZ_OFFSET_HOURS`, so a GMT−6 zone springs forward at 08:00 UTC and a GMT−5 zone at 07:00 UTC). The rules are integer arithmetic on the UTC date (no zone database); `scripts/verify_dst_rules.py` checks them against the published 2024–2026 transition instants. Before this parameter the DST half was hard-wired to the EU calendar, so a US zone was wrong for roughly three weeks a year.
-#### WiFi & Cloud OTA
+#### WiFi
 - `AP_PASSWORD` (default="12345678"): Password of the `Dashboard_Config` SoftAP (the configuration portal). Set in the WebUI (System & General → Wifi → Device Config AP). Must be **empty** (open network, not recommended) or **8–63 characters**: the Wi-Fi stack rejects 1–7 character passphrases, so a shorter value is refused at load/save time and the shipped default is restored instead (logged as `Config: AP_PASSWORD too short`). The WebUI warns while the default password is still in use.
 - **Not parameters any more:** the search policy is fixed to *search forever* and TX power is fixed at `WIFI_POWER_19_5dBm` (19.5 dBm — the maximum the classic ESP32 accepts). `WIFI_RETRY_MODE`, `WIFI_RETRY_SECONDS` and `WIFI_TX_POWER_DBM` are gone from the parameter table, the WebUI and the backup template; a backup that still carries the old `WIFI_RETRY_M` / `WIFI_RETRY_S` / `WIFI_TXP` keys restores without them.
 - `WIFI_ATTEMPT_SECONDS` (default=12, range 5–60): How long one network gets per try — the window covers the driver’s scan plus association, 4-way handshake and DHCP. A dead network is dropped earlier as soon as the driver reports its `STA_DISCONNECTED` reason (`NO_AP_FOUND`, wrong password, auth timeout), so this window only decides how long a *silent* network (in range but not answering, or a stalled DHCP lease) is waited for before the next slot is tried.
-- **Not parameters any more:** `OTA_PULL_ENABLED` (the automatic-update switch) is gone — from the parameter table, the WebUI, and the backup template. It armed a check that ran once per boot while Wi-Fi was up; updates are manual now (the phone pushes them, or the owner presses **Check Updates**), so there is nothing left to enable or disable, and refusing to press a button is a complete answer. A backup that still carries the old `OTA_PULL_EN` key restores without it, exactly as the retired `WIFI_RETRY_M` / `WIFI_TXP` keys do, and `CFG_VER` is deliberately not bumped over it. `/api/ota/check` still reports a boolean `enabled`, now meaning “a manifest URL is configured, so the pull path is reachable”.
-- `OTA_PULL_URL` (default="https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest"): HTTPS URL of the update **manifest** — either JSON with `version` + `firmware_url`, or the GitHub `releases/latest` API URL (first `.bin` asset is used). No `.sig` sibling is fetched — there is no signature step on this path. With the automatic switch retired this is the whole configuration of the pull path: set it and the unit can pull when asked, clear it and `POST /api/ota/pull` refuses with a message telling the requester to push the file instead.
-- `VERSION_OVERRIDE` (default=""): Optional version **label**, display only. It changes what the unit *prints* — the WebUI, the update card and `GET /api/config` — and nothing else. It has no effect on any update decision: the cloud pull's up-to-date test, the LAN install's same-version and downgrade gates, and `/api/ota/check`'s `current_version` all use the compiled-in `FW_VERSION` (issue #72, fixed after V1.5.1: the bench unit's stale "1.4.6" label was steering every gate, which would have let the pull path re-install the release it already ran forever). It never changes the firmware image, and nothing fetched from the network ever writes it (the old behaviour of storing the manifest's version is why a unit could report a version it never ran). NVS key `VER_OVR`.
+- **Not parameters any more:** `OTA_PULL_ENABLED` **and** `OTA_PULL_URL` are gone — from the parameter table, the WebUI and the backup template. They configured the path by which the unit fetched firmware from GitHub by itself, and that path was **deleted on 2026-10-31**: firmware now only ever arrives through `POST /api/ota`, pushed by the Android app or by the Web UI file picker. A backup that still carries the old `OTA_PULL_EN` / `OTA_PULL_URL` keys restores without them, exactly as the retired `WIFI_RETRY_M` / `WIFI_TXP` keys do, and `CFG_VER` is deliberately not bumped over them — bumping it would wipe every other setting on units that already exist.
+- **Not a parameter any more:** `VERSION_OVERRIDE` (NVS key `VER_OVR`) was removed outright in this unreleased build. It was a hand-typed display label sitting next to the real build identity, and the moment the firmware moved on it contradicted that identity; issue #72 is the story of what it did to the update gates. The key is simply never read again — same treatment as the fuel table's legacy `TCH_n` keys — and `CFG_VER` is not bumped over it. The unit's version is `FW_VERSION`, compiled in, and `GET /api/ota/check` reports it as `current_version` and `build_version`.
 
 #### Ambient Light (Auto-Brightness)
 - `LIGHT_SENSOR_DARK_VAL`: Dark-reference ambient light value (calibrated via `/api/ambient/cal-dark`).
@@ -761,7 +758,7 @@ Dashboard++ for ESP32/
     ├── gfx.cpp            # LovyanGFX display device class, PROGMEM VLW font loader, AA primitives, icons
     ├── sensors.cpp        # Core 0 GPS task (bulk UART drain, TinyGPS++/UBX parser, speed fusion, odo, time-sync) + Core 1 sensor task (Hall ISR, ADC sensors, snapshot)
     ├── ui.cpp             # Dirty-rendering dashboard visual layout engine
-    ├── web.cpp            # SoftAP/STA WiFi manager, REST API handlers, cloud OTA pull, embedded Web UI
+    ├── web.cpp            # SoftAP/STA WiFi manager, REST API handlers, LAN firmware install, embedded Web UI
     └── webui.html         # Single-page Web UI source (gzipped at build time by scripts/gzip_webui.py)
 ```
 
@@ -912,12 +909,13 @@ images; on 2026-10-30 the maintainer asked for signing to come out of every upda
 path, and that is what ships. The refusal codes `sig_missing`, `sig_invalid`,
 `sig_bad`, `no_key` and `hash_failed` are gone, as are the two build flags that
 used to control the behaviour (—`-DOTA_REQUIRE_SIG` for this endpoint,
-—`-DOTA_ALLOW_UNSIGNED` for the cloud pull); both lines are deleted from
-`platformio.ini` with no replacement, and `include/ota_pubkey.h` is deleted.
+—`-DOTA_ALLOW_UNSIGNED` for the pull path that has since been deleted); both lines
+are gone from `platformio.ini` with no replacement, and `include/ota_pubkey.h` is
+deleted.
 
 | Part | Required | Meaning |
 |---|---|---|
-| `target_version` | yes | The version this image says it is. It is what the same-version and downgrade gates compare against and what the update screen prints. One leading `v`/`V` is dropped, exactly as the pull path drops it — `1.4.7` and `v1.4.7` both work. Nothing else is normalised |
+| `target_version` | yes | The version this image says it is. It is what the same-version and downgrade gates compare against and what the update screen prints. One leading `v`/`V` is dropped — `1.4.7` and `v1.4.7` both work. Nothing else is normalised |
 | `firmware` | yes | The image (`firmware.bin`) |
 | `total_bytes` | no | Image size, so `percent` in `/api/ota/check` can be real instead of invented |
 | `force` | no | `1` allows reflashing the *identical* version already installed |
@@ -940,7 +938,7 @@ A refusal aborts the OTA slot, never reboots, and answers `500` with a sentence 
 | `version_missing` / `version_bad` | `target_version` absent or not a version-shaped string |
 | `downgrade` | Claimed version is older than the build this unit is running. Send `allow_older=1` to accept it anyway; `force=1` does not lift this one |
 | `same_version` | Same version installed and neither `allow_older=1` nor `force=1` was sent |
-| `slot_busy` | A cloud pull holds the OTA slot, or an earlier reset left it poisoned |
+| `slot_busy` | Another install holds the OTA slot, or an earlier interrupted write left it poisoned |
 | `slot_open_failed` | The OTA slot could not be opened for writing |
 | `too_big` / `image_rejected` | Larger than the OTA partition, or not a usable ESP image |
 | `write_failed` | Flash write failed |
@@ -966,13 +964,13 @@ heap and core 0:
 | CPU probes | Sleep 250 ms instead of 1 ms per core, so the frequency governor and the idle path stop making decisions around the flash writes (`/api/perf` reads ~100 % busy for the window, which is the truth) |
 | Weather | An in-flight fetch is asked to drop its result and new fetches are refused — an HTTPS call to a host nobody here controls is exactly the multi-second TLS burst the window exists to keep away |
 | CPU clock | Pinned to 240 MHz (dynamic frequency scaling is allowed to drop the chip to 80 MHz whenever it looks idle, and that decision can land mid-write). The previous setting is restored on the way out; a user's `MANUAL_CPU_FREQ` is not rewritten in NVS |
-| Speed sprite + 120 px font | Freed by the display task before the window opens, same handshake the weather fetch and the pull path already use |
+| Speed sprite + 120 px font | Freed by the display task before the window opens, same handshake the weather fetch uses |
 | REST API | Everything outside the allow-list answers `503 {"error":"ota update in progress"}` |
 
-The allow-list is deliberately three entries: `/api/ota*` (the install, its
-progress endpoint, and the pull trigger — whose handlers already answer busy
-themselves), `/api/health` (so a client can tell *alive but busy* from *dead*),
-and `/` (so opening the WebUI mid-update shows a page rather than an error).
+The allow-list is deliberately three entries: `/api/ota*` (the install and its
+progress endpoint — whose handlers already answer busy themselves), `/api/health`
+(so a client can tell *alive but busy* from *dead*), and `/` (so opening the WebUI
+mid-update shows a page rather than an error).
 Everything else — `/api/live`, `/api/config`, `/api/snapshot`, `/api/sensors`,
 `/api/perf`, `/api/serial` — is closed, because a route added next month is
 closed by default: the failure mode of a gate like this should be *someone could
@@ -988,7 +986,8 @@ mid-transfer timed out on a 6 s budget twice in a row, then answered in **150 ms
 once the window closed, and the whole push took **22–25 s** (~80 KB/s). A phone
 app has to treat a timeout during a transfer as "busy, still going" rather than
 "gone", and read state between the chunks rather than on top of them. The `503`
-itself is what the pull path produces, where the web task is free to answer.
+itself is what arrives when the web task *is* free to answer — before the body
+starts streaming, or after it ends.
 
 The gate is a `WebServer` middleware, and it cannot stall an upload that is
 already running: multipart bodies are parsed before the middleware chain is
@@ -1057,7 +1056,7 @@ of the same three facts, and it is deliberately explicit that firmware only move
 when a person makes it move:
 
 - **Choose** then **Install** — pushes a file you already have: the `firmware.bin` from a release plus the version it says it is. Nothing verifies the file: the version, size and image-header gates are what decide the install, and the unit logs the image's SHA-256 so you can check afterwards what actually got written. That is the same request the phone app sends, and this card is the fallback when the phone is not around.
-- **Check Updates** — asks the unit to fetch `OTA_PULL_URL` itself. The fallback when no phone with internet is around.
+- There is **no third button**. The unit used to have a **Check Updates** control that fetched a manifest URL from GitHub by itself; it is gone, along with the pull task, the manifest parsing, the outbound HTTPS client and the `OTA_PULL_URL` field. If firmware is going to change, something with internet brings it here.
 
 At the top of the card, one line rewrites itself from `GET /api/ota/check` and
 colours itself: idle (grey), in flight (cyan), stalled (amber), refused (rose),
@@ -1093,7 +1092,7 @@ look detached from the rest of the form. Two consequences worth naming:
 | No bytes for > 30 s while the window is open | amber: `no bytes for 40 s - the sender may have gone away. The unit closes the window and restores the dashboard on its own after 120 s` | Turns “is my phone still doing anything?” into a sentence with a deadline in it |
 | Refused | `last attempt refused: sig_invalid (v1.4.7)` + “the firmware it was running is still installed and the unit did not reboot” | The two things a driver needs to know after a refusal are whether it is safe and whether anything changed |
 | An update frame on the panel | `the unit is showing its failed frame` + `hold the trip button 3 s to restart it` | `hold_to_restart_ms` is read from the device instead of being written into the page, so the instruction cannot go stale when the constant changes |
-| A pull check is running / waiting | `pull: checking the manifest URL…`, `pull: waiting 48s before retry`, `pull: up-to-date (v1.4.6)` | The pull reports through a sentence, and a page that hides it behind a spinner teaches nobody anything |
+| The unit said no before the transfer began | `install: refusing an image over 2 MB - it will not fit in the OTA slot` | The unit's own sentence about why it refused, shown rather than guessed at by the page |
 
 Polling adapts to what is happening: **1 s** while a push is in flight or the device
 reports an install, **5 s** while the card is open and idle, **8 s** when the card is
@@ -1106,43 +1105,49 @@ be pointed at a running unit (`node scripts/verify_ota_state_line.js
 http://192.168.1.116/`) so the check covers the page the device actually serves and
 not just the source it came from.
 
-#### Cloud OTA Pull
+#### How firmware reaches the unit: nothing fetches it
 
-The cloud pull (Web UI → **System** → *Firmware Update* → **Check Updates**) reads a
-small JSON manifest from `OTA_PULL_URL`, then downloads and flashes the image it
-points at. Nothing triggers it on its own — no boot check, no interval timer, no
-background task; it runs when a person presses the button. The primary update path
-is a phone or a PC pushing the file over the LAN (`POST /api/ota`, above); this one
-is the fallback for when no phone with internet is around:
+The unit **has no self-update path at all** as of this build. There is no manifest
+URL, no outbound HTTPS client for firmware, no background task, no boot check, and
+no build flag that brings any of it back. `POST /api/ota` is the one way new
+firmware gets in, and the thing that posts it is a client with internet:
 
-```json
-{ "version": "1.4.1",
-  "firmware_url": "https://github.com/alefinot/Dashboard-for-ESP32/releases/download/v1.4.1/firmware.bin" }
-```
+1. **The Android app (intended path; this is the half still being built for this
+   release).** It reads the release list from GitHub *on the phone*, shows every
+   published build with its version, date, notes and assets, and lets a person pick
+   one. The phone downloads that release's `firmware.bin` to
+   app cache, checks it against what the release claims (size, and the `DPPVER=x.y.z`
+   marker the firmware stamps inside its own image), prints the SHA-256, then pushes
+   it to the dashboard over the LAN with `multipart/form-data` (`target_version`,
+   `total_bytes`, `firmware`) and watches `GET /api/ota/check` until the unit
+   reboots. After the reboot it re-reads the identity so the screen says what is
+   actually running.
+2. **The Web UI file picker** (Settings -> *Firmware Update*) - same endpoint, same
+   gates, for when a PC is on the dashboard's network.
 
-`OTA_PULL_URL` may also point straight at the GitHub API
-(`https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest`), in
-which case the first `.bin` asset of that release is used — keep **one** `.bin`
-asset per release so the wrong file can never be picked.
+Both paths face the same guards, which live in the unit and cannot be talked around
+from the client: `target_version` present and version-shaped; the same-version and
+downgrade refusals (`allow_older=1` / `force=1` to override deliberately); declared
+size against the real OTA partition; the ESP magic byte and a plausible segment
+count; the accepted byte count matching what was claimed; one writer on the slot at
+a time; and the image SHA-256'd while it streams, the digest logged so it can be
+compared against `sha256sum firmware.bin`.
 
-What a pull accepts, in order:
+The image a release carries **describes itself**: `src/config.cpp` embeds the
+literal `DPPVER=` followed by `FW_VERSION`, so a `.bin` file on disk or in a release
+says which version it is. `scripts/fix_upload_layout.py` prints what it finds after
+every build (`[image tag] firmware.bin declares itself 1.5.1 (marker at 0x28f8c)`),
+the unit reports it at `GET /api/ota/check` as `image_tag`, and the app checks the
+downloaded file for it before offering to install - because the release tag and the
+file contents can disagree, and that disagreement is exactly the class of mistake
+that gets a unit reflashed to something nobody meant.
 
-| Guard | What happens when it fails |
-|---|---|
-| TLS certificate checked against the CA bundle compiled into the core | connection refused, mbedTLS reason logged (issue #71 tracks CDN chains this bundle cannot verify, which the UI reports as a connection failure) |
-| Manifest version differs from the build this unit is running (`FW_VERSION`) | "already up-to-date", nothing downloaded. Since the #72 fix the — label `VERSION_OVERRIDE` — is never part of this compare, so a unit that already runs the release cannot keep seeing it as new |
-| Declared size fits the real OTA partition | the slot is never opened, reason logged |
-| Image arrives complete (`written >= totalSize`) | partial image discarded, no reboot; up to 5 attempts, resuming with an HTTP Range request |
-
-`Update.end(true)` — the call that makes the new slot bootable — runs **only after**
-the last byte has landed. There is no signature step: the `.sig` sibling asset is
-no longer fetched, no public key is compiled in, and byte-range resume is enabled
-again (it used to be switched off so that every byte reached the signature hash).
-The image is still hashed while it streams and the digest is logged (`OTA Pull:
-image complete, sha256 32178d87… (1754704 bytes)`) so it can be compared against
-the release file by hand; a hash failure costs the log its digest and does not
-abandon the download.
-
+Deleting the pull path also closes **#71** and **#70** by construction rather than by
+fix: the TLS failures that made it unreliable (the CDN chain the compiled-in CA
+bundle could not verify, and handshakes failing when the heap could not find a
+contiguous block) lived only in that path. The only outbound network code left in
+the firmware is the weather widget, which uses plain HTTP against Open-Meteo in the
+shipped configuration.
 **Out-of-band signing (optional, not part of any update path)**
 
 `scripts/ota_sign.py` stays in the repository as a standalone tool. It can still
@@ -1182,7 +1187,7 @@ In Demo Mode:
 
 ## Changelog
 
-### Unreleased (next release) — the version anchor is the build, a push can be allowed to go older, and wired flashing is fixed (firmware + Web UI)
+### Unreleased (next release) — the unit can no longer update itself, and the version label is gone (firmware + Web UI + Android app)
 
 - **Issue #72 fixed: `VERSION_OVERRIDE` is a label, nothing more.** Every version
   decision now reads `FW_VERSION` through `buildVersion()` (renamed from
@@ -1210,9 +1215,50 @@ In Demo Mode:
   bug over its life; a Web UI config backup (if one exists) restores what a backup
   captured.
 
-Still open: **#71** (the pull path cannot TLS-download the CDN release asset),
-**#69** (no physical trip button on the bench board), **#70** (heap-starved TLS
-handshake reported as `connection refused`).
+- **The cloud OTA pull path is deleted outright**, on the maintainer's instruction
+  (2026-10-31): firmware now reaches the unit **only** through `POST /api/ota`,
+  pushed by the Android app or the Web UI file picker. Gone: `otaPullTask`,
+  `startOtaPull`, `checkForFirmwareUpdate`, `performFirmwareUpdate`, `pullFailure`,
+  `parseFirmwareManifest`, `extractFirstBinUrl`, `matchesFirmwareHost`,
+  `followsFirmwareHost`, `otaPullPostHandler`, the `otaPullBootCheckDone` flag, the
+  whole pull state block (`otaPullDownloading` / `otaPullStatus` / `otaPullError` /
+  `otaPullTargetVersion` / `otaPullAttempts` / `otaPullNextAtMs` / …), the `OTA_*`
+  tuning constants, the **`POST /api/ota/pull` endpoint** (it now answers 404), the
+  pull branch of the web loop's serving gate, and the pull half of
+  `/api/ota/check`. The ESP-side update code in `src/web.cpp` shrank by roughly a
+  thousand lines and the binary lost about **95 KB of flash** (91.2 % → 86.0 % of the
+  app partition), because nothing in the firmware opens an outbound TLS connection
+  any more.
+- **`OTA_PULL_URL` is retired** as a parameter: gone from the parameter table, the
+  WebUI and the backup template. The NVS key is never read again and `CFG_VER` is
+  deliberately **not** bumped over it — the same treatment as `OTA_PULL_EN` and the
+  retired Wi-Fi keys — because bumping it would wipe every other setting on units that
+  already exist.
+- **`VERSION_OVERRIDE` is removed outright** (not merely ignored): the variable, its
+  config-table entry, its Settings row, and every read of it. The NVS key `VER_OVR`
+  may still sit on a flashed unit and is simply never read; `CFG_VER` stays 5. Issue
+  #72's follow-up: a hand-typed label next to the compiled-in identity is how the
+  update gates got steered wrong in the first place.
+- **Every firmware image now describes itself.** `src/config.cpp` embeds
+  `kImageVersionTag` — the literal `DPPVER=` followed by the version string — so a
+  `.bin` on disk carries its own version. `scripts/fix_upload_layout.py` prints it
+  after every build, `GET /api/ota/check` reports it as `image_tag`, and the Android
+  app checks a downloaded file for it before offering to install it.
+- **`/api/ota/check` loses the pull-era fields** `enabled`, `url`, `ca_bundle`,
+  `ca_mode` and `version_override`, and keeps/gains the identity trio
+  `current_version`, `build_version`, `image_tag`. Checked against both consumers:
+  the WebUI never read `enabled`/`url`, and the Android app only reads
+  `current_version` and `status`, so no consumer broke.
+- **Weather is unaffected:** the shipped Open-Meteo endpoints are plain HTTP
+  (`http://api.open-meteo.com/...`), which is why deleting the pull path's TLS
+  clients changed nothing there. The defensive `https://` branch in the weather and
+  geocoding fetchers stays (inert, costs nothing) so the code does not read as if
+  HTTPS were forgotten — but re-enabling it would need a CA story, which is now
+  entirely absent from the firmware.
+- **Still open:** **#69** (no physical trip button on the bench board, so the 3 s hold
+  has never been done by a finger). **#71** and **#70** are closed by this removal
+  rather than repaired — both were TLS/heap failures that existed only on the path
+  that is now deleted.
 
 ---
 

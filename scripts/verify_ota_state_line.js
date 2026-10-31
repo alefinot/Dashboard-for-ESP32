@@ -53,15 +53,14 @@ const block = src.slice(iStart, iEnd);
 console.log('sliced ' + block.length + ' bytes of the state-line block from ' +
             (process.argv[2] || 'src/webui.html'));
 
-// A page with exactly two elements in it, plus the pull button the render
-// re-enables. offsetParent is what the real code uses to tell "the card is
-// collapsed or the page is hidden" from "visible", so the stub can drive it.
+// A page with exactly the two elements the line writes into. offsetParent is what
+// the real code uses to tell "the card is collapsed or the page is hidden" from
+// "visible", so the stub can drive it.
 function makeHarness(opts) {
     opts = opts || {};
     const els = {
         'ota-state-line': { className: '', innerText: '', offsetParent: opts.visible === false ? null : {} },
-        'ota-state-hint': { className: '', innerText: '', offsetParent: opts.visible === false ? null : {} },
-        'otaPullBtn': { disabled: true, textContent: 'Checking...' }
+        'ota-state-hint': { className: '', innerText: '', offsetParent: opts.visible === false ? null : {} }
     };
     const timers = [];
     const doc = {
@@ -80,16 +79,19 @@ function makeHarness(opts) {
 const cases = [
     {
         name: 'idle unit, nothing running',
-        d: { state: 'idle', screen: 'off', quiet: false, status: 'idle', enabled: true,
-             current_version: '1.4.6', build_version: '1.4.6' },
+        d: { state: 'idle', screen: 'off', quiet: false, status: 'idle',
+             current_version: '1.4.6', build_version: '1.4.6', image_tag: 'DPPVER=1.4.6' },
         want: { cls: 'is-idle', text: 'idle - nothing is installing',
-                hintHas: ['running 1.4.6', 'build 1.4.6', 'Check Updates is available'], active: false, delay: 5000 }
+                hintHas: ['running 1.4.6', 'build 1.4.6', 'fetches nothing by itself'], active: false, delay: 5000 }
     },
     {
-        name: 'idle unit, no manifest URL configured',
-        d: { state: 'idle', screen: 'off', quiet: false, status: 'idle', enabled: false,
-             current_version: '1.4.6', build_version: '1.4.6' },
-        want: { cls: 'is-idle', hintHas: ['no manifest URL'], active: false, delay: 5000 }
+        // The unit's own sentence for a refusal it decided before the transfer
+        // began - shown verbatim rather than re-derived by the page.
+        name: 'the unit refuses an over-sized image on its own status line',
+        d: { state: 'idle', screen: 'off', quiet: false,
+             status: 'install: refusing an image over 2 MB - it will not fit in the OTA slot' },
+        want: { cls: 'is-idle', text: 'install: refusing an image over 2 MB - it will not fit in the OTA slot',
+                active: false, delay: 5000 }
     },
     {
         name: 'install in flight (quiet window open, bytes known)',
@@ -117,24 +119,6 @@ const cases = [
         d: { state: 'idle', screen: 'done', quiet: false, hold_to_restart_ms: 3000, status: 'idle' },
         want: { cls: 'is-busy', text: 'the unit is showing its done frame',
                 hintHas: ['hold the trip button 3 s', 'cannot reset the trip'], active: true, delay: 1000 }
-    },
-    {
-        name: 'cloud pull waiting out the 60 s re-check floor',
-        d: { state: 'idle', screen: 'off', quiet: false, status: 'waiting 48s before retry' },
-        want: { cls: 'is-busy', text: 'pull: waiting 48s before retry',
-                hintHas: ['manifest check reaches GitHub over TLS'], active: true, delay: 1000 }
-    },
-    {
-        name: 'cloud pull answered up-to-date (and re-enables the button)',
-        d: { state: 'idle', screen: 'off', quiet: false, status: 'up-to-date (v1.4.6)' },
-        want: { cls: 'is-good', text: 'pull: up-to-date (v1.4.6)', active: false, delay: 5000,
-                pullBtn: { disabled: false, textContent: 'Check Updates' } }
-    },
-    {
-        name: 'cloud pull refused (no manifest URL) as a status sentence',
-        d: { state: 'idle', screen: 'off', quiet: false, status: 'error: no OTA URL configured' },
-        want: { cls: 'is-bad', text: 'pull: error: no OTA URL configured',
-                hintHas: ['nothing was flashed'], active: false, delay: 5000 }
     },
     {
         name: 'this page is pushing, unit unreachable mid-transfer (must NOT read as lost)',

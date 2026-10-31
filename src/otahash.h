@@ -13,12 +13,12 @@
 //
 //     OTA web: image accepted (1757296 bytes, sha256 3f2a1b...)
 //
-// against `sha256sum firmware.bin`, or the same for a pulled image.
+// against `sha256sum firmware.bin`.
 //
-// There is exactly one context and it is static, shared by the cloud pull and
-// the web upload path, so the two paths must never stream an image at the same
-// time; both of them check otaFlashSessionOpen / otaPullTaskRunning / 
-// otaPullDownloading before opening a slot, which is what keeps that true.
+// There is exactly one context and it is static, so two installs must never
+// stream an image at the same time; the upload handler checks
+// otaFlashSessionOpen / otaSessionPoisoned before opening a slot, which is what
+// keeps that true.
 //
 // Begin() opens the context and returns void; Open() lets a caller ask whether
 // the digest will actually be available, so a path that wants a digest can say

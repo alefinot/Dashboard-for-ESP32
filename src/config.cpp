@@ -271,13 +271,12 @@ bool TZ_DST_ENABLED = true;
 // Default 1 keeps the behaviour of every unit shipped before #22.
 int TZ_DST_RULE = TZ_DST_RULE_EU;
 
-// OTA_PULL_ENABLED is retired. It enabled the once-per-boot automatic check, and
-// there is no automatic check to enable any more: the phone checks the release and
-// pushes the image over the LAN, and the cloud pull runs only when the owner
-// triggers it. The manifest URL below is therefore the whole configuration of that
-// path. A config backup taken before this still carries the key; it is simply not
-// read (the same way the old OTA_VER key was left behind).
-char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest";
+// The cloud OTA pull is gone (2026-10-31): the unit no longer fetches firmware
+// from anywhere, so there is no manifest URL to configure. OTA_PULL_URL and its
+// NVS key are therefore not read any more - the key is simply left behind in
+// existing backups and NVS images, exactly as VERSION_OVERRIDE's "VER_OVR" and the
+// fuel table's legacy keys were. Firmware arrives only when something pushes a
+// file to POST /api/ota: the phone app, or the Web UI's upload control.
 
 // ----------------------------------------------------------------------------
 // Firmware identity
@@ -941,8 +940,6 @@ static const CfgParam CFG_TABLE[] = {
 
   { &TZ_DST_RULE, "TZ_DST_RULE", "TZ_RULE", nullptr, 0, 2, 1, 0.0f, 0.0f, 0.0f, 0, CK_INT },
 
-  { &OTA_PULL_URL, "OTA_PULL_URL", "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(OTA_PULL_URL), CK_STR },
-
   { &WIFI_PASSWORD, "WIFI_PASSWORD", "WIFI_PWD", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD), CK_SECRET },
 
   { &WIFI_PASSWORD_1, "WIFI_PASSWORD_1", "WIFI_P1", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_1), CK_SECRET },
@@ -1054,9 +1051,8 @@ static void cfgApply(int mode, Preferences &pref, JsonDocument *doc) {
 }
 
 // The version this unit IS: the compiled-in build identity. Every version
-// decision reads this and nothing else - the cloud pull's "already up-to-date"
-// test, the LAN install's same-version and downgrade gates, and the
-// current_version that /api/ota/check reports (issue #72).
+// decision reads this and nothing else - the install's same-version and
+// downgrade gates, and the current_version that /api/ota/check reports (issue #72).
 const char *buildVersion() {
   return FW_VERSION;
 }

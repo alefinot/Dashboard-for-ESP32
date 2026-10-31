@@ -1802,7 +1802,6 @@ const DEFAULTS = {
     TZ_OFFSET_HOURS: 1,
     TZ_DST_ENABLED: true,
     TZ_DST_RULE: 1,
-    OTA_PULL_URL: "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
     fuelCalOhms: [10.0, 34.3, 58.6, 82.9, 107.1, 131.4, 155.7, 180.0]
 };
 
@@ -2226,14 +2225,7 @@ const configMap = [
         <div class="cfg-row">
             <label>Install an Older Version</label>
             <div class="cfg-controls"><input type="checkbox" id="otaOlder" onchange="otaUpdateBtnLabel()"></div>
-        </div>
-        <div class="cfg-row">
-            <label>Check for a New Build</label>
-            <div class="cfg-controls">
-                <button id="otaPullBtn" onclick="doOtaPull()" class="btn-secondary btn-sm">Check Updates</button>
-            </div>
         </div>` },
-            { id: "OTA_PULL_URL", label: "Firmware Manifest URL (used by Check Updates)", wide: true },
             { type: "status", id: "build_version", label: "Firmware Build (compiled in)" },
             { type: "status", id: "core_version", label: "ESP Core FW" }
         ]
@@ -4792,32 +4784,20 @@ function otaStateRender(d) {
         otaStateSay('is-busy', 'the unit is showing its ' + d.screen + ' frame',
                     'hold the trip button ' + holdS + ' s to restart it - while an update frame owns the panel that button cannot reset the trip');
     } else if (d.status && d.status !== 'idle') {
-        // The cloud pull's own reporter is a sentence - it predates the install
-        // state fields - so it gets shown here rather than left in a log or in
-        // the button's label. `waiting ...` is the 60 s re-check floor: a second
-        // press did not hammer the unit, it queued behind the first.
+        // The install's own reporter is a sentence - it predates the install state
+        // fields - so it gets shown here rather than left in a log or in a label.
         const st = d.status;
-        const settling = st.indexOf('checking') === 0 || st.indexOf('waiting') === 0 ||
-                         st.indexOf('updating') === 0 || st.indexOf('downloading') === 0;
-        active = settling;
         if (st.indexOf('error') === 0) {
-            otaStateSay('is-bad', 'pull: ' + st, 'nothing was flashed - the firmware you have is the firmware it keeps');
-        } else if (st.indexOf('up-to-date') === 0) {
-            otaStateSay('is-good', 'pull: ' + st, 'the manifest answered; there is nothing newer to install');
+            otaStateSay('is-bad', 'install: ' + st, 'nothing was flashed - the firmware you have is the firmware it keeps');
         } else {
-            otaStateSay(settling ? 'is-busy' : 'is-idle', 'pull: ' + st,
-                        settling ? 'a manifest check reaches GitHub over TLS - several seconds on a weak link; if an update is accepted the unit then takes over its own screen'
-                                 : '');
+            otaStateSay('is-idle', 'install: ' + st, '');
         }
-        const pb = document.getElementById('otaPullBtn');
-        if (pb && !settling) { pb.disabled = false; pb.textContent = 'Check Updates'; }
     } else if (d.state && d.state !== 'idle') {
         active = true;
         otaStateSay('is-busy', 'update state: ' + d.state, '');
     } else {
-        let pullLine = d.enabled ? 'Check Updates is available' : 'no manifest URL set, so Check Updates will refuse';
         otaStateSay('is-idle', 'idle - nothing is installing',
-                    'running ' + (d.current_version || '?') + ' (build ' + (d.build_version || '?') + ') - ' + pullLine);
+                    'running ' + (d.current_version || '?') + ' (build ' + (d.build_version || '?') + ') - the unit fetches nothing by itself: push a file with the phone app, or pick one below');
     }
     otaStateSchedule(active);
     return active;
@@ -4861,38 +4841,6 @@ function otaVerChanged() {
     // Only reachable when the text box is showing, which happens just for a file
     // that states no version of its own.
     otaUpdateBtnLabel();
-}
-
-function doOtaPull() {
-    const btn = document.getElementById('otaPullBtn');
-    const msgBox = document.getElementById('msg');
-    btn.disabled = true; btn.textContent = 'Checking...';
-    msgBox.className = ''; msgBox.innerText = 'Asking the unit to fetch its manifest URL...';
-    fetch('/api/ota/pull', {method:'POST'}).then(r => r.json()).then(d => {
-        if (d.status !== 'ok') {
-            // No URL configured, Wi-Fi down, or another install holding the slot:
-            // the unit says which in this reply, so show its words.
-            msgBox.className = 'msg-error';
-            msgBox.innerText = d.msg || 'Update check failed.';
-            btn.disabled = false; btn.textContent = 'Check Updates';
-            return;
-        }
-        // The verdict is not in this reply. The check runs on the unit and takes
-        // seconds (a manifest handshake measured 7.5 s on the bench link), and the
-        // 60 s re-check floor can turn a second press into a wait. The update
-        // state line polls the same endpoint and says which of those it is, so
-        // this button no longer needs a poll loop of its own.
-        msgBox.className = ''; msgBox.innerText = 'Check requested - watch the update state line in the Firmware Update card.';
-        otaStateSay('is-busy', 'pull requested: checking the manifest URL',
-                    'reaching GitHub over TLS takes several seconds; a second press inside the 60 s floor waits that out rather than hammering the unit');
-        _otaLastCheck = null;   // drop the previous verdict so it is not shown as new
-        otaStateStart();
-        setTimeout(() => { btn.disabled = false; btn.textContent = 'Check Updates'; }, 8000);
-    }).catch(() => {
-        msgBox.className = 'msg-error';
-        msgBox.innerText = 'Communication error - the unit did not answer the pull request.';
-        btn.disabled = false; btn.textContent = 'Check Updates';
-    });
 }
 
 let perfTimer = null;

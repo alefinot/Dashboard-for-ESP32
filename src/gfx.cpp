@@ -828,7 +828,7 @@ volatile int otaProgressTarget = 0;
 
 void showUpdatingScreen() {
   // Start the bar empty, but keep any target already set by the OTA task
-  // (pull flow sets otaProgressTarget = 258 once the flash completes; the
+  // (the upload flow sets otaProgressTarget = 258 once the flash completes; the
   // animation in loop() uses it to fill the bar and trigger the reboot).
   otaProgressFillW = 0;
 
@@ -1023,9 +1023,8 @@ void showOtaErrorScreen(const char *reason, const char *detail, long bytesDone,
 }
 
 void updateOTAProgress(int progress, int total) {
-  // The OTA-pull caller only runs with a known Content-Length, but the
-  // ArduinoOTA progress callback hands whatever Update reports: a total of 0
-  // made this an integer divide-by-zero, which is a hardware exception on the
+  // An install with an undeclared size still reaches this callback with whatever
+  // Update reports: a total of 0 made this an integer divide-by-zero, which is a hardware exception on the
   // ESP32 - the board reset in the middle of an update instead of showing a
   // progress bar (issue #38). Unknown size: leave the bar where it is.
   if (total <= 0) return;

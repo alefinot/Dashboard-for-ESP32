@@ -28,7 +28,10 @@ When you are unsure about anything — ambiguous requirements, conflicting optio
   1. USB serial (PlatformIO `--upload-port <other COM port>`)
   2. WiFi OTA via PlatformIO: `pio run -t upload --upload-port <ESP_IP>` (device must be on the `Dashboard_Config` SoftAP or a known LAN IP)
   3. Web Portal OTA upload (browser → `http://192.168.4.1` → System Actions → upload `firmware.bin`)
-  4. Cloud OTA pull (device pulls `OTA_PULL_URL` firmware)
+  4. Android app firmware update (the app lists the published GitHub releases, downloads
+     the chosen one to phone storage, verifies it, then pushes it to the unit over
+     `POST /api/ota`) — the intended end-user path. There is **no** cloud pull on the
+     unit: it never fetches firmware by itself, and there is no self-update code left.
 
 ## 6. Implementation Plans — Never in Git
 - All implementation plans must be written/exported into the `Implementation plans/` folder at the repo root.

@@ -801,10 +801,10 @@ void loop() {
     // frame is drawn.
 
     if (!otaPanelTaken()) {
-      // An OTA pull *check* must not freeze the dashboard: the big sprites are
-      // dropped and rebuilt around the check (processOtaMemRelease /
-      // ensureSpeedSprite) and the components fall back to direct-panel
-      // drawing for its duration, so the screen keeps animating.
+      // A firmware install must not freeze the dashboard: the big sprites are
+      // dropped and rebuilt around it (processOtaMemRelease / ensureSpeedSprite)
+      // and the components fall back to direct-panel drawing for its duration, so
+      // the screen keeps animating.
       updateBigDisplay(snap);
       drawFpsOverlay();
       drawGpsDebugOverlay();
