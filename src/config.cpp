@@ -293,13 +293,31 @@ char OTA_PULL_URL[192] = "https://api.github.com/repos/alefinot/Dashboard-for-ES
 // whatever the server said and could decide it was permanently up-to-date (or
 // hold a version brought back by a config backup).
 //
-// Since issue #72 it is only a label: no version decision reads it. The bench
-// unit carried the label "1.4.6" while running 1.5.x, and every update gate was
-// comparing against that stale number - a release already installed looked like
-// an upgrade (an update loop waiting to happen on the pull path), and a genuinely
-// newer image could be judged a downgrade.
-const char FW_VERSION[] = "1.5.1";
-char VERSION_OVERRIDE[32] = "";
+// Since issue #72 the old VERSION_OVERRIDE setting could only ever be a label,
+// and on 2026-10-30 it was removed outright: a version label the user sets by
+// hand, which sits next to the real build identity and contradicts it the moment
+// the firmware moves on, is not something anyone needs. The NVS key ("VER_OVR")
+// is simply never read again - same treatment as the fuel table's legacy keys -
+// so CFG_VER is NOT bumped (that would wipe every other setting on existing
+// units), and an old backup file that still carries the key is ignored.
+// One place the release version is written (AGENTS.md rule 3). The macro is what
+// the literals are built from - including the image marker below - and the array
+// is what the code compares and prints.
+#define FW_VERSION_STR "1.5.1"
+const char FW_VERSION[] = FW_VERSION_STR;
+
+// Self-describing marker for the firmware image. Anything holding a .bin - the
+// Web UI page, the Android app, a PC script - can find the ASCII text
+// "DPPVER=" followed by the version inside the file, so it knows what version
+// that image *is* without a human typing it. That is why the update card stopped
+// asking (2026-10-30): the version of the file you just picked is read out of
+// the file. Compiled in as one literal so it appears verbatim in the image;
+// imageVersionTag() keeps it referenced (and GET /api/ota/check echoes it, which
+// is how you confirm from a PC that the build in your hands carries it). The
+// post-build script scripts/fix_upload_layout.py prints the marker it finds in
+// the built .bin, so a build that somehow lost it is visible at build time.
+__attribute__((used)) static const char kImageVersionTag[] = "DPPVER=" FW_VERSION_STR;
+const char *imageVersionTag() { return kImageVersionTag; }
 
 int FUEL_TOUCH_POINTS = 8;
 
@@ -925,8 +943,6 @@ static const CfgParam CFG_TABLE[] = {
 
   { &OTA_PULL_URL, "OTA_PULL_URL", "OTA_PULL_URL", "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(OTA_PULL_URL), CK_STR },
 
-  { &VERSION_OVERRIDE, "VERSION_OVERRIDE", "VER_OVR", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(VERSION_OVERRIDE), CK_STR },
-
   { &WIFI_PASSWORD, "WIFI_PASSWORD", "WIFI_PWD", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD), CK_SECRET },
 
   { &WIFI_PASSWORD_1, "WIFI_PASSWORD_1", "WIFI_P1", "", 0, 0, 0, 0.0f, 0.0f, 0.0f, (uint16_t)sizeof(WIFI_PASSWORD_1), CK_SECRET },
@@ -1040,8 +1056,7 @@ static void cfgApply(int mode, Preferences &pref, JsonDocument *doc) {
 // The version this unit IS: the compiled-in build identity. Every version
 // decision reads this and nothing else - the cloud pull's "already up-to-date"
 // test, the LAN install's same-version and downgrade gates, and the
-// current_version that /api/ota/check reports. VERSION_OVERRIDE is a label shown
-// beside it, never a decision input (issue #72).
+// current_version that /api/ota/check reports (issue #72).
 const char *buildVersion() {
   return FW_VERSION;
 }

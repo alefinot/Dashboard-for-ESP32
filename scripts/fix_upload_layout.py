@@ -110,4 +110,40 @@ def fix_upload_layout(env):
           f"image it just wrote.")
 
 
+def report_image_tag(source, target, env):
+    """Print the DPPVER marker found in the built image.
+
+    Registered as a post-action on firmware.bin itself, not run at script load:
+    PlatformIO's pre:/post: extra_scripts run around the *build script*, not
+    around compilation, so calling this at the end of the file printed the
+    previous build's marker (observed 2026-10-31 - it said 1.5.1 while the image
+    being written said 1.5.2).
+
+    That marker (kImageVersionTag in src/config.cpp) is what lets a client read an
+    image's version out of the .bin instead of being told it - the Web UI update
+    card fills itself in from the chosen file because of it. If a build ever loses
+    the marker (a linker-flag change, a refactor of FW_VERSION), this is where it
+    shows up: clients fall back to guessing from the file name, and the update card
+    has to show its version box again.
+    """
+    bin_path = os.path.join(str(env.subst("$BUILD_DIR")), "firmware.bin")
+    if not os.path.isfile(bin_path):
+        return
+    with open(bin_path, "rb") as fh:
+        data = fh.read()
+    at = data.find(b"DPPVER=")
+    if at < 0:
+        print("[image tag] WARNING: no DPPVER= marker in firmware.bin - a client "
+              "cannot read this image's version from the file "
+              "(see kImageVersionTag in src/config.cpp)")
+        return
+    rest = data[at + 7:]
+    end = 0
+    while end < len(rest) and (rest[end:end + 1].isalnum() or rest[end:end + 1] in b".-"):
+        end += 1
+    print(f"[image tag] firmware.bin declares itself "
+          f"{rest[:end].decode('ascii', 'replace')} (marker at {hex(at)})")
+
+
 fix_upload_layout(env)
+env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", report_image_tag)

@@ -1803,7 +1803,6 @@ const DEFAULTS = {
     TZ_DST_ENABLED: true,
     TZ_DST_RULE: 1,
     OTA_PULL_URL: "https://api.github.com/repos/alefinot/Dashboard-for-ESP32/releases/latest",
-    VERSION_OVERRIDE: "",
     fuelCalOhms: [10.0, 34.3, 58.6, 82.9, 107.1, 131.4, 155.7, 180.0]
 };
 
@@ -2216,10 +2215,11 @@ const configMap = [
                 <button id="otaPickBtn" onclick="otaPickFile()" class="btn-secondary btn-sm">Choose</button>
             </div>
         </div>
+        <div class="cfg-help" id="ota-ver-line" style="margin-bottom:6px;"></div>
         <div class="cfg-row">
-            <label>Version to Install</label>
+            <label>Install</label>
             <div class="cfg-controls">
-                <input type="text" id="otaVer" placeholder="1.4.7" oninput="otaVerChanged()">
+                <input type="text" id="otaVer" placeholder="1.5.2" oninput="otaVerChanged()" style="display:none">
                 <button id="otaBtn" onclick="doOta()" class="btn-secondary btn-sm" disabled>Install</button>
             </div>
         </div>
@@ -2234,7 +2234,6 @@ const configMap = [
             </div>
         </div>` },
             { id: "OTA_PULL_URL", label: "Firmware Manifest URL (used by Check Updates)", wide: true },
-            { id: "VERSION_OVERRIDE", label: "Version Label (display only)" },
             { type: "status", id: "build_version", label: "Firmware Build (compiled in)" },
             { type: "status", id: "core_version", label: "ESP Core FW" }
         ]
@@ -4540,19 +4539,67 @@ function otaVerValue() {
 }
 
 // Release binaries are named like firmware-1.4.7.bin, and that string is what
-// the unit compares against its own version, so prefill what can be prefilled
-// instead of making a phone driver type it. It stays editable: the guess is only
-// a guess.
+// the unit compares against its own version, so it is used as the fallback when
+// the image itself does not carry a version (see otaScanVersion).
 function otaGuessVersion(name) {
     const m = /(\d+\.\d+\.\d+(?:\.\d+)?)/.exec(name || '');
     return m ? m[1] : '';
 }
 
+// The version of the chosen file is read out of the file: every image built from
+// 2026-10-30 on carries the ASCII marker "DPPVER=<version>" inside it (see
+// config.cpp), so nobody has to type a version number - and the value the unit
+// is told is one the file itself stated. The scan runs in 512 KB slices with a
+// 48-byte re-read at each seam: a 1.75 MB file must not be pulled into memory at
+// once on a phone browser, and the seam has to be wide enough to hold the marker
+// plus a whole version string, so a marker sitting on the seam is seen in full by
+// the next slice instead of being cut in half.
+function otaScanVersion(file) {
+    const SLICE = 524288, SEAM = 48;
+    const TOK = [68, 80, 80, 86, 69, 82, 61];  // "DPPVER="
+    let off = 0;
+    function readSlice() {
+        const end = Math.min(off + SLICE + SEAM, file.size);
+        return file.slice(off, end).arrayBuffer().then(function (buf) {
+            const u8 = new Uint8Array(buf);
+            const last = (end >= file.size);
+            // Bytes before SEAM in a non-first slice were already scanned as the
+            // tail of the previous slice.
+            for (let i = (off ? SEAM : 0); i < u8.length; i++) {
+                if (u8[i] !== TOK[0]) continue;
+                let ok = true;
+                for (let k = 1; k < TOK.length; k++) {
+                    if (i + k >= u8.length) { ok = false; break; }
+                    if (u8[i + k] !== TOK[k]) { ok = false; break; }
+                }
+                if (!ok) continue;
+                let v = '';
+                for (let j = i + TOK.length; j < u8.length; j++) {
+                    const c = u8[j];
+                    if ((c >= 48 && c <= 57) || c === 46 || c === 45 ||
+                        (c >= 65 && c <= 90) || (c >= 97 && c <= 122)) v += String.fromCharCode(c);
+                    else break;
+                }
+                // A version that runs to the end of a non-final slice may have been
+                // cut by the seam; skip it here and let the next slice re-read the
+                // marker with its full version string behind it.
+                if (v && (!v.length || last || i + TOK.length + v.length < u8.length)) return v;
+            }
+            const next = end - SEAM;
+            if (last || next <= off) return '';
+            off = next;
+            return readSlice();
+        });
+    }
+    return readSlice();
+}
+
 // The button says what is still missing, so the flow is one step at a time and
 // the row is never in a state whose meaning is unclear.
-function otaUpdateBtnLabel() {
+function otaUpdateBtnLabel(scanning) {
     const btn = document.getElementById('otaBtn');
     if (!btn) return;
+    if (scanning) { btn.disabled = true; btn.textContent = 'Reading file...'; return; }
     if (!_otaFile) { btn.disabled = true; btn.textContent = 'Install'; return; }
     if (!otaVerValue()) { btn.disabled = true; btn.textContent = 'Enter version'; return; }
     btn.disabled = false;
@@ -4573,7 +4620,7 @@ function doOta() {
     if (!_otaFile) { document.getElementById('otaFile').click(); return; }
     const ver = otaVerValue();
     if (!ver) {
-        otaMsg('Enter the version this image says it is (for example 1.4.7). The unit compares it against the version it is running before it writes anything.');
+        otaMsg('This file does not say which version it is, so the box under the file row is open: type it (for example 1.5.2). The unit compares it against the version it is running before it writes anything.');
         document.getElementById('otaVer').focus();
         return;
     }
@@ -4787,13 +4834,32 @@ function otaFileChosen(el) {
     const nameEl = document.getElementById('ota-file-name');
     if (nameEl) nameEl.innerText = f.name + ' (' + otaBytesMB(f.size) + ')';
     const vEl = document.getElementById('otaVer');
-    if (vEl && !vEl.value) vEl.value = otaGuessVersion(f.name) || localStorage.getItem('otaLastVersion') || '';
-    if (vEl && vEl.value) localStorage.setItem('otaLastVersion', vEl.value.trim());
-    otaUpdateBtnLabel();
+    const line = document.getElementById('ota-ver-line');
+    // Start clean every time a file is picked: a version remembered from the last
+    // push is exactly how the wrong claim ends up on the wrong image.
+    if (vEl) { vEl.value = ''; vEl.style.display = 'none'; }
+    if (line) line.innerText = 'Reading the version out of the file...';
+    otaUpdateBtnLabel(true);
+    otaScanVersion(f).then(function (v) {
+        if (_otaFile !== f) return;  // another file was picked while this scan ran
+        let src = 'file';
+        if (!v) { v = otaGuessVersion(f.name); src = 'file name'; }
+        if (vEl) vEl.value = v;
+        if (v) {
+            // Known without typing: the box stays hidden, and the button carries
+            // the version so the person can see what will be claimed.
+            if (line) line.innerText = 'This image says it is version ' + v + ' (read from the ' + src + ').';
+            if (vEl) vEl.style.display = 'none';
+        } else {
+            if (line) line.innerText = 'This file does not say which version it is - a Dashboard++ firmware states its version inside itself, so this file is probably not one. Type the version to enable Install.';
+            if (vEl) { vEl.style.display = ''; vEl.focus(); }
+        }
+        otaUpdateBtnLabel();
+    });
 }
 function otaVerChanged() {
-    const v = otaVerValue();
-    if (v) localStorage.setItem('otaLastVersion', v);
+    // Only reachable when the text box is showing, which happens just for a file
+    // that states no version of its own.
     otaUpdateBtnLabel();
 }
 
