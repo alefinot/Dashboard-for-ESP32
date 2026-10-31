@@ -79,6 +79,10 @@ void bootinfo_init() {
       session.nvs.getString("prevVer", s_prevVersion, sizeof(s_prevVersion));
     }
     s_prevVersion[sizeof(s_prevVersion) - 1] = 0;
+    // Sanitise on the way in as well: a unit whose record predates this code holds
+    // Arduino's descriptor placeholder there, and there is no version change this
+    // boot to clear it - so the API would keep reporting "9.9.9" forever.
+    if (strcmp(s_prevVersion, "9.9.9") == 0) s_prevVersion[0] = 0;
     strncpy(s_lastRebootTag, tag, sizeof(s_lastRebootTag) - 1);
     s_lastRebootTag[sizeof(s_lastRebootTag) - 1] = 0;
 
@@ -89,9 +93,19 @@ void bootinfo_init() {
   // manifest, so the history cannot be rewritten by whatever the device was
   // told to believe. One NVS write, and only when the version actually
   // changes.
+    // A legacy key can still hold what the Arduino app descriptor used to write
+    // here - "9.9.9", Arduino's placeholder version - which is not a build anyone
+    // runs and must not be carried forward as "the firmware before this one". Drop
+    // it to unknown; from now on this key only ever holds FW_VERSION values, so the
+    // next version change records a real predecessor.
+    const bool legacyRecord = ran[0] == 0 || strcmp(ran, "9.9.9") == 0;
     if (strcmp(ran, FW_VERSION) != 0) {
-      strncpy(s_prevVersion, ran, sizeof(s_prevVersion) - 1);
-      s_prevVersion[sizeof(s_prevVersion) - 1] = 0;
+      if (legacyRecord) {
+        s_prevVersion[0] = 0;
+      } else {
+        strncpy(s_prevVersion, ran, sizeof(s_prevVersion) - 1);
+        s_prevVersion[sizeof(s_prevVersion) - 1] = 0;
+      }
       NvsSession write("bootinfo", false);
       if (write.opened()) {
         nvsWriteFailed("ranVer", write.nvs.putString("ranVer", FW_VERSION));

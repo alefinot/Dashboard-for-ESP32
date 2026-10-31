@@ -1259,6 +1259,22 @@ In Demo Mode:
   geocoding fetchers stays (inert, costs nothing) so the code does not read as if
   HTTPS were forgotten — but re-enabling it would need a CA story, which is now
   entirely absent from the firmware.
+- **Two update-screen bugs fixed.** (a) The bar on the panel never reached its end
+  while the image was fully uploaded: the web upload handler scaled it by
+  `240 * written / (written + 300000)` — a guess that ignored the real size — so a
+  1.66 MB push stalled at ~78 % and only jumped after the flash finished. It now maps
+  the bytes actually written onto the width the client declared (`total_bytes`), so the
+  bar is full at the same moment the last byte lands. 254 px stays the streaming
+  ceiling on purpose: 258 is the reboot point in the display loop, and only the fill
+  set after `Update.end(true)` may paint those last 4 px, which is what keeps a
+  truncated image from being activated. With no `total_bytes` declared the bar holds
+  position rather than inventing a percentage, matching `percent: -1` in
+  `/api/ota/check`. (b) `previous_version` reported **`9.9.9`**: the boot record read
+  the app-descriptor placeholder into NVS before the version record moved onto
+  `FW_VERSION`, and nothing ever cleared it, because the clearing only runs when the
+  version *changes*. The legacy value is now sanitised on read and never carried
+  forward, and the bench unit reads `previous_version: ""` instead of a firmware nobody
+  ran; the next real version change records a true predecessor.
 - **Still open:** **#69** (no physical trip button on the bench board, so the 3 s hold
   has never been done by a finger). **#71** and **#70** are closed by this removal
   rather than repaired — both were TLS/heap failures that existed only on the path

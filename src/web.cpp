@@ -2091,13 +2091,27 @@ static void otaUploadHandler() {
     // Feed the window's stall watchdog: this is the proof that bytes are still
     // arriving, and the only thing that keeps a live upload looking alive.
     otaQuietLastByteMs = millis();
-    // upload.totalSize is cumulative bytes received so far during upload.
-    // Scaling target progress up to max 240 during writing prevents
-    // premature reboot (fillW >= 258) before Update.end(true) runs.
+    // Honest scale for the bar: the size the client declared maps the whole width,
+    // so the bar reaches its far end at the same moment the last byte lands
+    // (Update.progress() is cumulative bytes written into the slot). The old
+    // formula (240 * written / (written + 300000)) was a guess that never used the
+    // real total, so a 1.66 MB image stalled at ~78 % of the bar and only jumped
+    // afterwards - the screen looked like an update that stopped early.
+    // 254 px is the ceiling while streaming, deliberately: 258 is the reboot point
+    // in loop(), and only `otaProgressTarget = 258` after Update.end(true) can
+    // paint those last 4 px. Rebooting inside the last fraction used to activate a
+    // truncated image.
     size_t written = Update.progress();
-    int targetW = (240L * (long)written) / (long)(written + 300000);
-    if (targetW > 240) targetW = 240;
-    if (targetW > otaProgressTarget) otaProgressTarget = targetW;
+    long scaleTotal = (long)otaUpBytesTotal;  // what the client declared
+    if (scaleTotal > 0 && written > 0) {
+      long targetW = (254L * (long)written) / scaleTotal;
+      if (targetW > 254) targetW = 254;
+      if (targetW > otaProgressTarget) otaProgressTarget = (int)targetW;
+    }
+    // No declared size: the bar stays where it is instead of inventing a
+    // percentage - the same rule as `percent: -1` in /api/ota/check. (There is no
+    // usable fallback: `upload.totalSize` in this callback counts bytes received so
+    // far, so dividing by it would pin the bar at full on the first chunk.)
   } else if (upload.status == UPLOAD_FILE_END) {
     if (isSigPart) {
       logPrintf("OTA web: 'signature' part ignored (%zu bytes, nothing to verify it against)\n", sigSeen);
